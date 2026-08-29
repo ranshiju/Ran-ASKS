@@ -34,6 +34,8 @@ def main() -> None:
         assert (destination / "academic/raw/.gitkeep").is_file()
         assert (destination / "academic/frontier/.gitkeep").is_file()
         assert not (destination / "academic/raw/example.pdf").exists()
+        assert not any(destination.rglob(".DS_Store"))
+        assert not (destination / ".scripts/speech_entity_index.json").exists()
         assert (destination / "operations/engineering/open-source-assets/README.md").is_file()
         graph_text = (destination / "operations/engineering/graph.yaml").read_text(encoding="utf-8")
         assert "frontier_store:" in graph_text
