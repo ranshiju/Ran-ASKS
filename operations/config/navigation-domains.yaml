@@ -1,0 +1,22 @@
+# 各域 Navigation 与 graph 导航契约；主题词只保留稳定且可反向召回的概念。
+admin:
+  navigation: [主题, 事项, 查询表达, 人物, 部门, 时间, 状态, 关联文档]
+  predicates: [涉及, 讨论, 形成决策, 依据, 替代, 汇报, 发布者, 负责人, 承办部门, 推动, 申请事项, 适用对象]
+  topic_limit: 15
+  relation_limit: 8
+academic:
+  navigation: [对象, 研究主题, 方法, 材料, 缩写, 作者, 研究方向, 关联论文]
+  predicates: [作者, 引用, 提出方法, 对比方法, 主要研究, 基于, 应用于, 指导]
+  topic_limit: 15
+  relation_limit: 8
+teaching:
+  navigation: [课程/主题, 教学阶段, 适用对象, 先修知识, 知识点, 教学问题, 关联材料]
+  predicates: [讲授, 适用于, 先修知识, 包含知识点, 使用教材, 关联课程]
+  topic_limit: 15
+  relation_limit: 8
+business:
+  navigation: [项目/合同, 合作方, 负责人, 阶段, 状态, 行业, 查询表达, 关联文件]
+  predicates: [合作方, 负责人, 依据, 负责, 产生任务, 竞争对手, 关联项目]
+  topic_limit: 10
+  relation_limit: 6
+  sensitive_review: true

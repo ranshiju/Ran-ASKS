@@ -1,0 +1,383 @@
+directions:
+- name: 强关联电子系统
+  code: cond-mat.str-el
+  scope: 研究强相互作用电子与量子多体系统中的关联效应、量子相、纠缠结构及其理论和数值描述问题。
+  seeds:
+  - DMRG
+  - 密度矩阵重整化群
+  - density matrix renormalization group
+  - matrix product state
+  - Hubbard模型
+  - Hubbard model
+  - t-J模型
+  - Heisenberg模型
+  - Mott绝缘体
+  - Mott insulator
+  - 自旋液体
+  - spin liquid
+  - 量子多体
+  - quantum many-body
+  - entanglement entropy
+  - topological order
+  - kagome晶格
+- name: 统计力学
+  code: cond-mat.stat-mech
+  scope: 研究多体系统的统计规律、相变与临界现象、非平衡过程及其热力学和随机动力学描述问题。
+  seeds:
+  - 相变
+  - phase transition
+  - 临界现象
+  - critical phenomena
+  - 临界指数
+  - 重整化群
+  - renormalization group
+  - 伊辛模型
+  - Ising model
+  - 热力学
+  - 配分函数
+  - partition function
+  - finite temperature
+  - 统计物理
+- name: 介观与输运
+  code: cond-mat.mes-hall
+  scope: 研究介观尺度凝聚态系统中的量子输运、霍尔效应、纳米结构及其电子动力学问题。
+  seeds:
+  - 介观物理
+  - mesoscopic physics
+  - 量子霍尔效应
+  - quantum Hall effect
+  - 量子输运
+  - quantum transport
+  - 纳米线
+  - nanowire
+  - 量子点
+  - quantum dot
+  - Landauer公式
+  - 整数量子霍尔
+  - 分数量子霍尔
+  - 输运系数
+  - 量子点接触
+- name: 量子气体
+  code: cond-mat.quant-gas
+  scope: 研究冷原子和量子气体中的多体态、凝聚、低维效应、光学晶格及量子模拟问题。
+  seeds:
+  - 冷原子
+  - cold atom
+  - 玻色爱因斯坦凝聚
+  - Bose-Einstein condensate
+  - BEC
+  - 光学晶格
+  - optical lattice
+  - Lieb-Liniger模型
+  - Lieb-Liniger model
+  - 一维玻色子
+  - Tonks-Girardeau气体
+  - ultracold atom
+  - 量子气体模拟
+- name: 超导
+  code: cond-mat.supr-con
+  scope: 研究超导材料与配对机制、超导相和激发、非常规超导及其理论和实验表征问题。
+  seeds:
+  - 超导机理
+  - 超导体
+  - superconductor
+  - 库珀对
+  - Cooper pair
+  - BCS理论
+  - BCS theory
+  - 高温超导
+  - 超导能隙
+  - 配对机制
+  - 铜基超导
+  - 铁基超导
+- name: 凝聚态材料
+  code: cond-mat.mtrl-sci
+  scope: 研究凝聚态材料的结构、电子性质、计算设计及第一性原理和材料表征问题。
+  seeds:
+  - 材料科学
+  - materials science
+  - 计算材料
+  - 第一性原理
+  - ab initio
+  - 密度泛函理论
+  - density functional theory
+  - DFT
+  - 材料设计
+  - 晶体结构
+  - 能带结构
+- name: 软物质
+  code: cond-mat.soft
+  scope: 研究高分子、胶体、凝胶、复杂流体和自组装体系的结构、动力学与统计物理问题。
+  seeds:
+  - soft matter
+  - 复杂流体
+  - complex fluid
+  - 高分子
+  - polymer
+  - 聚合物
+  - 胶体
+  - colloid
+  - 凝胶
+  - gel
+  - 自组装
+  - self-assembly
+  - 玻璃化转变
+  - glass transition
+- name: 量子信息
+  code: quant-ph
+  scope: 研究量子信息处理中的纠缠、计算、通信、模拟、纠错、测量及量子资源问题。
+  seeds:
+  - quantum computing
+  - quantum information
+  - 量子纠缠
+  - quantum entanglement
+  - quantum simulation
+  - 量子电路
+  - quantum circuit
+  - 量子比特
+  - qubit
+  - 量子门
+  - quantum gate
+  - Bell不等式
+  - 量子退相干
+  - decoherence
+  - 量子纠错
+  - quantum error correction
+  - 量子算法
+  - quantum algorithm
+- name: 量子场论
+  code: hep-th
+  scope: 研究量子场的基本结构、规范理论、重整化、共形场论、弦论及相关理论方法问题。
+  seeds:
+  - quantum field theory
+  - QFT
+  - 路径积分
+  - path integral
+  - 规范理论
+  - gauge theory
+  - 重整化
+  - renormalization
+  - 弦论
+  - string theory
+  - 微扰论
+  - 费曼图
+  - Feynman diagram
+  - 量子电动力学
+  - QED
+  - 量子色动力学
+  - QCD
+  - 共形场论
+  - conformal field theory
+- name: 高能唯象
+  code: hep-ph
+  scope: 研究粒子物理模型的可观测预言、标准模型及其扩展、碰撞与味物理和中微子现象问题。
+  seeds:
+  - 粒子物理唯象
+  - 标准模型
+  - Standard Model
+  - 希格斯玻色子
+  - Higgs boson
+  - 夸克
+  - quark
+  - 轻子
+  - lepton
+  - 超对称
+  - supersymmetry
+  - 粲物理
+  - B物理
+  - 中微子振荡
+  - neutrino oscillation
+- name: 格点规范
+  code: hep-lat
+  scope: 研究利用离散时空格点方法计算规范场论、量子色动力学及强子性质的问题。
+  seeds:
+  - 格点QCD
+  - lattice QCD
+  - 格点规范理论
+  - lattice gauge theory
+  - 格点场论
+  - lattice field theory
+  - Monte Carlo模拟
+  - Wilson费米子
+  - Wilson fermion
+  - staggered费米子
+  - 格点量子色动力学
+  - 强子谱
+  - hadron spectroscopy
+- name: 数学物理
+  code: math-ph
+  scope: 研究物理理论的数学结构、可积系统、严格解、随机矩阵及相关解析方法问题。
+  seeds:
+  - 数学物理方法
+  - mathematical physics
+  - 可积系统
+  - integrable system
+  - 严格解
+  - exact solution
+  - 随机矩阵
+  - random matrix
+  - Bethe ansatz
+  - 杨-Baxter方程
+  - Yang-Baxter equation
+  - 孤子
+  - soliton
+  - 反散射
+  - inverse scattering
+  - 可积性
+  - integrability
+- name: 引力与宇宙学
+  code: gr-qc
+  scope: 研究引力理论、广义相对论、黑洞、宇宙演化、引力波及时空基本结构问题。
+  seeds:
+  - 广义相对论
+  - general relativity
+  - 量子引力
+  - quantum gravity
+  - 黑洞
+  - black hole
+  - 宇宙学
+  - cosmology
+  - 暗物质
+  - dark matter
+  - 暗能量
+  - dark energy
+  - 引力波
+  - gravitational wave
+  - 弯曲时空
+  - 爱因斯坦方程
+  - 宇宙微波背景
+  - CMB
+- name: 机器学习
+  code: cs.LG
+  scope: 研究从数据学习预测或生成规律的模型、优化方法、泛化机制和机器学习系统问题。
+  seeds:
+  - machine learning
+  - 深度学习
+  - deep learning
+  - 神经网络
+  - neural network
+  - 监督学习
+  - supervised learning
+  - 分类
+  - classification
+  - 表示学习
+  - representation learning
+  - 卷积神经网络
+  - CNN
+  - 循环神经网络
+  - RNN
+  - 梯度下降
+  - gradient descent
+  - 反向传播
+  - backpropagation
+  - 特征提取
+  - feature extraction
+- name: 自然语言处理
+  code: cs.CL
+  scope: 研究计算系统对自然语言的理解、生成、表示、推理、翻译和评测问题。
+  seeds:
+  - natural language processing
+  - NLP
+  - 语言模型
+  - language model
+  - 文本生成
+  - text generation
+  - Transformer
+  - 注意力机制
+  - attention mechanism
+  - 序列到序列
+  - sequence to sequence
+  - 机器翻译
+  - 词向量
+  - word embedding
+  - 预训练模型
+  - 大语言模型
+  - large language model
+  - LLM
+  - 分布语义
+  - distributional semantics
+  - 组合语义
+  - compositional semantics
+  - 范畴语义
+  - categorical semantics
+  - 形式语义
+  - formal semantics
+  - 句法分析
+  - syntactic parsing
+  - 词义消歧
+  - word sense disambiguation
+  - 语义角色标注
+  - semantic role labeling
+  - 共指消解
+  - coreference resolution
+  - 组合范畴语法
+  - combinatory categorial grammar
+  - CCG
+  - 蒙塔古语法
+  - Montague grammar
+  - 预群语法
+  - pregroup grammar
+- name: 人工智能
+  code: cs.AI
+  scope: 研究智能体的推理、规划、知识表示、决策、搜索及通用智能系统问题。
+  seeds:
+  - artificial intelligence
+  - 智能体
+  - agent
+  - 推理
+  - reasoning
+  - 规划
+  - planning
+  - 强化学习
+  - reinforcement learning
+  - 知识表示
+  - knowledge representation
+  - 自动规划
+  - 多智能体
+  - multi-agent
+  - 智能决策
+  - 知识图谱
+  - knowledge graph
+  - 知识图谱构建
+  - knowledge graph construction
+- name: 信息检索
+  code: cs.IR
+  scope: 研究文档与知识的索引、召回、排序、检索增强、搜索交互及检索评测问题。
+  seeds:
+  - information retrieval
+  - 搜索
+  - search
+  - retrieval-augmented generation
+  - RAG
+  - 知识检索
+  - 向量检索
+  - vector retrieval
+  - 语义搜索
+  - semantic search
+  - 文档检索
+  - document retrieval
+  - 搜索引擎
+  - 排序学习
+  - learning to rank
+- name: 统计机器学习
+  code: stat.ML
+  scope: 研究机器学习的统计理论、概率模型、估计推断、泛化分析及统计计算方法问题。
+  seeds:
+  - 统计学习
+  - statistical learning
+  - 学习理论
+  - learning theory
+  - 回归
+  - regression
+  - 贝叶斯推断
+  - Bayesian inference
+  - 概率模型
+  - 经验风险最小化
+  - 泛化误差
+  - generalization error
+  - VC维
+  - VC dimension
+  - 核方法
+  - kernel method
+  - 高斯过程
+  - Gaussian process

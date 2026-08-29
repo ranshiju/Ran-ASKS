@@ -1,0 +1,53 @@
+# Embedding resolve 配置（ADR-003）
+# 阈值由 .scripts/calibrate_embedding_thresholds.py 标定后填入；标定前用保守默认。
+# 三档：高(单候选auto-alias) / 重叠区(建相似边两节点并存) / 低(新建节点)
+
+# 标定元数据
+calibrated: true
+calibrated_at: 2026-08-07
+positive_samples: 57
+negative_samples: 150
+validation_precision: 0.818
+validation_recall: 0.727
+
+# 阈值（cosine similarity）
+thresholds:
+  auto: 0.85        # >此值且单候选 → auto-alias；高于负例p95=0.828防误合并
+  floor: 0.72       # <此值 → 新建节点；低于正例p5=0.627安全放过
+
+# 双视图 identity gate：先有代码化名称信号，再同时通过 label/semantic 两路。
+# 任一 embedding 分数都不能单独触发 merge；未过门只返回 ambiguous candidate。
+identity_gate:
+  label: 0.92
+  semantic: 0.90
+  combined: 0.91
+  margin: 0.04
+  candidate_floor: 0.72
+
+semantic_search:
+  floor: 0.45        # 仅相关性召回，不代表节点同一性
+
+# 模型
+model: GLM-Embedding-3
+dim: 2048
+
+# 「相似」边
+similar:
+  predicate: 相似
+  structural: true          # 加入 STRUCTURAL_PREDICATES
+  confidence: 推断
+  symmetric: true           # 单向插入 A→B，双向查询
+  dedup: true               # 同对只插一条（subject<object 序）
+
+# 适用范围（排除项）
+exclude:
+  - person            # 人名走 is_person_reference 独立路径，不参与 embedding resolve
+  - proposition       # 命题非概念端点（已由 build_name_index 排除 suffix_idx）
+
+# SYNC sweep
+sync:
+  enabled: true
+  mode: pairwise      # 全图 keyword pairwise
+  incremental: true   # 仅对无相似边且未直接关联的节点对计算
+
+  max_degree: 5       # 每节点最多保留 K 条相似边(按 score 降序裁剪),防 BFS 过度扩散

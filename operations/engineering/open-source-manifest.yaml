@@ -1,0 +1,63 @@
+version: 1
+purpose: "公开发布白名单：只允许此清单声明的工程文件进入开源副本。"
+include:
+  - VERSION
+  - AGENTS.md
+  - .env.example
+  - .gitignore
+  - preprocess.py
+  - .scripts/**
+  - agents/**
+  - dsh/**
+  - operations/**
+  - academic/SCHEMA.md
+  - admin/SCHEMA.md
+  - teaching/SCHEMA.md
+  - business/SCHEMA.md
+  - cross-domain/SCHEMA.md
+  - operations/engineering/engineering-handbook.md
+  - operations/engineering/code-guidance.md
+exclude:
+  - .scripts/__pycache__/**
+  - .scripts/embed_cache/**
+  - .scripts/e1_experiment.py
+  - .scripts/test_e1_experiment.py
+  - .scripts/citation-templates/unmatched.log
+  - .scripts/query_sessions/*.json
+  - operations/archive/**
+  - "**/__pycache__/**"
+  - "**/*.pyc"
+  - "**/*.db"
+public_assets:
+  README.md: operations/engineering/open-source-assets/README.md
+  config.yaml: operations/engineering/open-source-assets/config.yaml
+  .gitignore: operations/engineering/open-source-assets/.gitignore
+  DATA_POLICY.md: operations/engineering/open-source-assets/DATA_POLICY.md
+  CONTRIBUTING.md: operations/engineering/open-source-assets/CONTRIBUTING.md
+  SECURITY.md: operations/engineering/open-source-assets/SECURITY.md
+  LICENSE: operations/engineering/open-source-assets/LICENSE
+  operations/engineering/engineering-handbook.md: operations/engineering/open-source-assets/engineering-handbook.md
+  operations/engineering/code-guidance.md: operations/engineering/open-source-assets/code-guidance.md
+template_dirs:
+  - academic/raw
+  - academic/wiki
+  - academic/outputs
+  - academic/frontier
+  - admin/raw
+  - admin/wiki
+  - admin/outputs
+  - teaching/raw
+  - teaching/wiki
+  - teaching/outputs
+  - business/raw
+  - business/wiki
+  - business/outputs
+  - cross-domain/raw
+  - cross-domain/topics
+  - cross-domain/outputs
+  - inbox
+  - memory
+  - temp
+  - slide-library/inbox
+  - slide-library/templates
+  - slide-library/compositions

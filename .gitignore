@@ -1,0 +1,62 @@
+# Synology Drive 临时文件
+@eaDir/
+# 输出文件
+outputs/*.pdf
+outputs/*.pptx
+*.tmp
+# 系统文件
+.DS_Store
+Thumbs.db
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# 敏感信息(API keys)
+.env
+.env.local
+
+# rebuild_triples.py --diff 临时派生文件
+*.rebuilt.md
+
+# 查询编排层运行时会话状态(测试产生,非持久)
+.scripts/query_sessions/*.json
+!.scripts/query_sessions/.gitkeep
+
+# Docling 虚拟环境(extractor.py 的 docling 引擎用,不入库)
+.venv-docling/
+
+# 图主数据化(v4,2026-07-25):graph.db 是边的唯一源,进 git
+cross-domain/graph.db-wal
+cross-domain/graph.db-shm
+cross-domain/.graph-state.json
+# 会议语音纠错人物索引：由 graph.db 人物/别名/人物关系指纹自动刷新
+.scripts/speech_entity_index.json
+.scripts/speech_entity_index.tmp
+# embeddings.db 是准永久缓存(向量),不进 git
+cross-domain/embeddings.db
+cross-domain/embeddings.db-wal
+cross-domain/embeddings.db-shm
+
+# embedding 缓存临时备份
+*.bak.*
+
+# Knowledge content and local runtime artifacts
+# This public template keeps only explicit synthetic examples.
+**/raw/**
+!**/raw/.gitkeep
+**/wiki/**
+!**/wiki/.gitkeep
+**/outputs/**
+!**/outputs/.gitkeep
+cross-domain/topics/**
+!cross-domain/topics/.gitkeep
+**/graph.db
+**/graph.db-*
+inbox/**
+!inbox/.gitkeep
+memory/**
+!memory/.gitkeep
+temp/**
+!temp/.gitkeep

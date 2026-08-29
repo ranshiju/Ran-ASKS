@@ -1,0 +1,2150 @@
+version: 1
+purpose: WikiRan 工程元图：用于任务上下文和建设影响面，不存业务知识关系。
+nodes:
+  agents:
+    path: AGENTS.md
+    kind: constitution
+    role: redlines-and-task-classification
+  conventions:
+    path: operations/shared-conventions.md
+    kind: spec
+    role: build-conventions
+  ingest:
+    path: operations/INGEST.md
+    kind: spec
+    role: ingest-workflow
+  query:
+    path: operations/QUERY.md
+    kind: spec
+    role: query-workflow
+  hub:
+    path: operations/HUB.md
+    kind: spec
+    role: hub-rules
+  lint:
+    path: operations/LINT.md
+    kind: spec
+    role: health-rules
+  sync:
+    path: operations/SYNC.md
+    kind: spec
+    role: sync-rules
+  write:
+    path: operations/WRITE.md
+    kind: spec
+    role: on-demand-writing-capability-spec
+  physics_manuscript_editing:
+    path: operations/research/physics-manuscript-editing.md
+    kind: spec
+    role: academic-writing-overlay
+  experiences:
+    path: operations/EXPERIENCES.md
+    kind: spec
+    role: lightweight-capability-experience-contract
+  research:
+    path: operations/RESEARCH.md
+    kind: spec
+    role: persistent-research-work-state
+  frontier_spec:
+    path: operations/FRONTIER.md
+    kind: spec
+    role: evidence-anchored-research-frontier-overlay-contract
+  scan:
+    path: operations/SCAN.md
+    kind: spec
+    role: intake-scan-workflow
+  inbox:
+    path: operations/INBOX.md
+    kind: spec
+    role: inbox-workflow
+  inbox_finalize:
+    path: .scripts/inbox_finalize.py
+    kind: implementation
+    role: manifest-guarded-inbox-finalizer
+  inbox_ingest:
+    path: .scripts/inbox_ingest.py
+    kind: implementation
+    role: resumable-inbox-pdf-transaction
+  ingest_meeting:
+    path: .scripts/ingest_meeting.py
+    kind: implementation
+    role: code-driven-meeting-minutes-ingest-orchestrator-cross-domain-subproject
+  schemas:
+    path: <domain>/SCHEMA.md
+    kind: spec-family
+    role: domain-contract
+  route:
+    path: .scripts/route.py
+    kind: router
+    role: task-context-dispatch-with-explicit-build-locator-discipline
+  playbook_dispatch:
+    path: .scripts/playbook_dispatch.py
+    kind: router
+    role: playbook-keyword-dispatch
+  extractor:
+    path: .scripts/extractor.py
+    kind: implementation
+    role: raw-adjacent-pdf-extractor
+  llm_structured:
+    path: .scripts/llm_structured.py
+    kind: implementation
+    role: budgeted-structured-api-client-with-specialist-fallback-and-terminal-empty-output-recovery
+  llm_model_catalog:
+    path: operations/config/llm-models.yaml
+    kind: config
+    role: non-enforcing-provider-model-selection-catalog
+  visual_qa:
+    path: .scripts/visual_qa.py
+    kind: implementation
+    role: resumable-deterministic-and-vision-llm-qa-for-images-pdf-pages-and-slide-pages
+  visual_qa_ops:
+    path: operations/VISUAL_QA.md
+    kind: spec
+    role: visual-artifact-qa-usage-privacy-and-receipt-contract
+  visual_qa_test:
+    path: .scripts/test_visual_qa.py
+    kind: test
+    role: visual-artifact-rendering-remote-guard-and-receipt-resume-regression
+  visual_to_editable_ppt:
+    path: .scripts/visual_to_editable_ppt.py
+    kind: implementation
+    role: resumable-vector-hybrid-and-raster-visual-reconstruction-to-native-editable-pptx
+  visual_to_editable_ppt_ops:
+    path: operations/VISUAL_TO_EDITABLE_PPT.md
+    kind: spec
+    role: visual-reconstruction-usage-output-privacy-resume-and-fallback-contract
+  visual_to_editable_ppt_test:
+    path: .scripts/test_visual_to_editable_ppt.py
+    kind: test
+    role: visual-reconstruction-vector-raster-resume-editability-and-input-immutability-regression
+  api_ingest:
+    path: .scripts/api_ingest.py
+    kind: implementation
+    role: program-evidence-card-api-ingest-orchestrator
+  build_people_pages:
+    path: .scripts/build_people_pages.py
+    kind: implementation
+    role: deterministic-minimal-people-page-builder-and-graph-node-path-migration
+  wiki_skeleton:
+    path: .scripts/wiki_skeleton.py
+    kind: implementation
+    role: deterministic-wiki-page-skeleton-with-paper-direction-and-role-neutral-people-profile
+  graph_lib:
+    path: .scripts/graph_lib.py
+    kind: implementation
+    role: graph-schema-stable-node-id-description-multi-alias-and-shared-operations
+  graph_ingest:
+    path: .scripts/graph_ingest.py
+    kind: implementation
+    role: graph-delta-driven-wiki-centered-sparse-proposition-fusion-and-bounded-derived-hub-membership-refresh
+  graph_delta:
+    path: .scripts/graph_delta.py
+    kind: implementation
+    role: in-memory-document-subgraph-mention-vs-canonical-attach-plan-query-probes-and-savepoint-fusion
+  graph_delta_test:
+    path: .scripts/test_graph_delta.py
+    kind: test
+    role: document-subgraph-query-utility-and-atomic-fusion-regression
+  node_semantics:
+    path: .scripts/node_semantics.py
+    kind: implementation
+    role: read-only-node-identity-resolution-with-unique-decomposed-name-gate-and-semantic-recall
+  node_semantics_test:
+    path: .scripts/test_node_semantics.py
+    kind: test
+    role: dual-view-node-resolution-semantic-search-and-graceful-degradation-regression
+  graph_ingest_temporal_test:
+    path: .scripts/test_graph_ingest_temporal.py
+    kind: test
+    role: graph-ingest-temporal-fact-regression
+  sync_keyword_aliases:
+    path: .scripts/sync_keyword_aliases.py
+    kind: implementation
+    role: keyword-alias-sync
+  resolve_abbreviations:
+    path: .scripts/resolve_abbreviations.py
+    kind: implementation
+    role: proposition-abbreviation-resolution-knowledge-base-only
+  query_graph:
+    path: .scripts/query_graph.py
+    kind: implementation
+    role: graph-read-interface
+  query_graph_temporal_test:
+    path: .scripts/test_query_graph_temporal.py
+    kind: test
+    role: query-graph-temporal-fact-regression
+  query_orchestrate:
+    path: .scripts/query_orchestrate.py
+    kind: implementation
+    role: constrained-query-session
+  query_actions:
+    path: .scripts/query_actions.py
+    kind: implementation
+    role: query-action-executor-with-node-resolution-semantic-search-and-precise-evidence-reading
+  experience_recall:
+    path: .scripts/experience_recall.py
+    kind: implementation
+    role: deterministic-lightweight-capability-experience-recall
+  wg:
+    path: .scripts/wg.py
+    kind: implementation
+    role: cross-capability-unified-entry
+  frontier:
+    path: .scripts/frontier.py
+    kind: implementation
+    role: single-question-page-frontier-with-evidence-bound-kb-answer-and-trajectory-manager
+  frontier_test:
+    path: .scripts/test_frontier.py
+    kind: test
+    role: frontier-admission-index-and-fact-isolation-regression
+  frontier_store:
+    path: academic/frontier/
+    kind: derived-store
+    role: markdown-primary-frontier-with-rebuildable-sqlite-navigation-index
+  dsh_harness:
+    path: dsh/harness.py
+    kind: implementation
+    role: dsh-cockpit-hook-system-and-tool-registry
+  dsh_tools:
+    path: dsh/tools.py
+    kind: implementation
+    role: query-actions-including-read-only-node-and-hub-semantics-wrapped-as-guarded-dsh-tools
+  dsh_agent_loop:
+    path: dsh/agent_loop.py
+    kind: implementation
+    role: dsh-turn-step-driver-loop-with-api-timeout-retry
+  dsh_guards:
+    path: dsh/guards/
+    kind: implementation
+    role: dsh-pluggable-guard-packages
+  dsh_ingest_tools:
+    path: dsh/ingest_tools.py
+    kind: implementation
+    role: dsh-ingest-capability-seam-with-structured-error-classification
+  dsh_ingest_guard:
+    path: dsh/guards/ingest_guard.py
+    kind: guard
+    role: dsh-raw-redline-and-ingest-arg-allowlist-guard
+  dsh_ingest_test:
+    path: dsh/test_dsh_ingest_tools.py
+    kind: test
+    role: dsh-ingest-capability-seam-regression
+  dsh_dispatch:
+    path: dsh/dispatch.py
+    kind: implementation
+    role: dsh-intent-workflow-selector-with-visual-dependent-edit-routing
+  dsh_visual_tools:
+    path: dsh/visual_tools.py
+    kind: implementation
+    role: dsh-read-only-visual-check-tool-seam
+  dsh_visual_agent_loop:
+    path: dsh/visual_agent_loop.py
+    kind: implementation
+    role: visual-qa-agent-loop-for-explicit-and-visual-dependent-edit-intents-without-query-citation-guard
+  dsh_visual_test:
+    path: dsh/test_visual_tools.py
+    kind: test
+    role: dsh-visual-tool-and-intent-routing-regression
+  dsh_visual_reconstruction_tools:
+    path: dsh/visual_reconstruction_tools.py
+    kind: implementation
+    role: dsh-explicit-write-visual-to-editable-ppt-tool-seam
+  dsh_visual_reconstruction_agent_loop:
+    path: dsh/visual_reconstruction_agent_loop.py
+    kind: implementation
+    role: explicit-visual-reconstruction-agent-loop-without-query-citation-guard
+  dsh_visual_reconstruction_test:
+    path: dsh/test_visual_reconstruction_tools.py
+    kind: test
+    role: dsh-visual-reconstruction-tool-safety-and-intent-routing-regression
+  dsh_test:
+    path: dsh/test_dsh_harness.py
+    kind: test
+    role: dsh-cockpit-full-regression
+  wg_test:
+    path: .scripts/test_wg.py
+    kind: test
+    role: wg-unified-entry-regression
+  llm_events_test:
+    path: .scripts/test_llm_events.py
+    kind: test
+    role: llm-call-event-log-regression
+  query_orchestrate_test:
+    path: .scripts/test_query_orchestrate.py
+    kind: test
+    role: query-session-stage-guard-regression
+  query_api_loop_test:
+    path: .scripts/test_query_api_loop.py
+    kind: test
+    role: api-query-loop-citation-contract-regression
+  experience_recall_test:
+    path: .scripts/test_experience_recall.py
+    kind: test
+    role: capability-experience-recall-regression
+  ingest_pipeline:
+    path: .scripts/ingest_pipeline.py
+    kind: implementation
+    role: shared-ingest-driver-spec-driven
+  ingest_check:
+    path: .scripts/ingest_check.py
+    kind: validator
+    role: local-structural-source-and-raw-wiki-graph-consistency-validator
+  ingest_build:
+    path: .scripts/ingest_build.py
+    kind: derived-builder
+    role: catalog-and-index-derived-output
+  derivation_state:
+    path: .scripts/derivation_state.py
+    kind: implementation
+    role: provenance-and-fingerprint-helper
+  ingest_plan:
+    path: .scripts/ingest_plan.py
+    kind: planner
+    role: non-destructive-incremental-plan
+  long_document_plan:
+    path: .scripts/long_document_plan.py
+    kind: planner
+    role: read-only-long-document-granularity-plan
+  direction_matcher:
+    path: .scripts/direction_matcher.py
+    kind: implementation
+    role: legacy-seed-and-hub-keyword-compatibility-not-used-by-new-paper-routing
+  cluster_keywords:
+    path: .scripts/cluster_keywords.py
+    kind: implementation
+    role: legacy-catch-all-keyword-clustering-not-used-by-new-hub-workflow
+  hub_split:
+    path: .scripts/hub_split.py
+    kind: implementation
+    role: legacy-hub-keyword-split-merge-compatibility-and-scope-plan-adapter
+  hub_semantics:
+    path: .scripts/hub_semantics.py
+    kind: implementation
+    role: type-aware-ordinary-node-hub-membership-dynamics-agent-canonical-lifecycle-ingest-end-auto-create-and-explicit-page-root-seam
+  hub_semantics_test:
+    path: .scripts/test_hub_semantics.py
+    kind: test
+    role: hub-profile-membership-dynamics-create-split-merge-and-people-profile-regression
+  graph_metrics:
+    path: .scripts/graph_metrics.py
+    kind: diagnostic
+    role: graph-health-and-signals
+  graph_dump:
+    path: .scripts/graph_dump.py
+    kind: diagnostic
+    role: graph-audit-snapshot
+  graph_visualize:
+    path: .scripts/graph_visualize.py
+    kind: diagnostic
+    role: graph-visualization
+  open_source_manifest:
+    path: operations/engineering/open-source-manifest.yaml
+    kind: policy
+    role: public-release-allowlist
+  open_source_release:
+    path: .scripts/open_source_release.py
+    kind: implementation
+    role: manifest-governed-public-release-builder
+  calibrate_thresholds:
+    path: .scripts/calibrate_embedding_thresholds.py
+    kind: diagnostic
+    role: embedding-resolve-threshold-calibration
+  graph_db:
+    path: cross-domain/graph.db
+    kind: data
+    role: current-edge-and-alias-source-of-truth
+    optional: true
+  graph_schema:
+    path: operations/config/graph-schema.yaml
+    kind: config
+    role: graph-db-structural-constraint-source
+  graph_validate:
+    path: .scripts/graph_validate.py
+    kind: validator
+    role: read-only-graph-db-constraint-validator
+  graph_validate_test:
+    path: .scripts/test_graph_validate.py
+    kind: test
+    role: graph-constraint-validator-regression
+  graph_repair:
+    path: .scripts/graph_repair.py
+    kind: implementation
+    role: deterministic-graph-db-normalization-and-legacy-raw-link-migration
+  graph_repair_test:
+    path: .scripts/test_graph_repair.py
+    kind: test
+    role: graph-db-repair-regression
+  handbook:
+    path: operations/engineering/engineering-handbook.md
+    kind: documentation
+    role: engineering-overview
+  guidance:
+    path: operations/engineering/code-guidance.md
+    kind: documentation
+    role: script-call-guidance
+  adr_001:
+    path: operations/engineering/adr/001-engineering-meta-graph-and-golden-pipeline.md
+    kind: adr
+    role: engineering-meta-graph-decision
+  adr_002:
+    path: operations/engineering/adr/002-program-evidence-cards-for-api-ingest.md
+    kind: adr
+    role: api-ingest-evidence-card-decision
+  adr_003:
+    path: operations/engineering/adr/003-embedding-driven-emergent-resolution.md
+    kind: adr
+    role: embedding-emergent-resolution-decision
+  adr_004:
+    path: operations/engineering/adr/004-tool-registration-derivation.md
+    kind: adr
+    role: tool-registration-derivation-decision
+  adr_005:
+    path: operations/engineering/adr/005-graph-contract-provenance-temporal-borrowings.md
+    kind: adr
+    role: semantica-borrowing-graph-governance-decision
+  adr_006:
+    path: operations/engineering/adr/006-frontier-overlay.md
+    kind: adr
+    role: fact-isolated-research-frontier-overlay-decision
+  prompt_test:
+    path: .scripts/test_prompt_audit.py
+    kind: test
+    role: route-and-build-locator-discipline-regression
+  ingest_check_test:
+    path: .scripts/test_ingest_check.py
+    kind: test
+    role: ingest-check-regression
+  ingest_pipeline_test:
+    path: .scripts/test_ingest_pipeline.py
+    kind: test
+    role: isolated-ingest-golden-pipeline
+  api_ingest_test:
+    path: .scripts/test_api_ingest.py
+    kind: test
+    role: evidence-bound-api-ingest-regression
+  extractor_test:
+    path: .scripts/test_extractor.py
+    kind: test
+    role: pdf-input-and-engine-fallback-regression
+  inbox_finalize_test:
+    path: .scripts/test_inbox_finalize.py
+    kind: test
+    role: manifest-transaction-inbox-regression
+  inbox_ingest_test:
+    path: .scripts/test_inbox_ingest.py
+    kind: test
+    role: inbox-transaction-orchestration-regression
+  derivation_state_test:
+    path: .scripts/test_derivation_state.py
+    kind: test
+    role: derivation-and-incremental-regression
+  long_document_plan_test:
+    path: .scripts/test_long_document_plan.py
+    kind: test
+    role: long-document-granularity-regression
+  open_source_release_test:
+    path: .scripts/test_open_source_release.py
+    kind: test
+    role: public-release-isolation-regression
+  triples_legacy:
+    path: .scripts/rebuild_triples.py
+    kind: legacy
+    role: markdown-triples-compatibility
+  ingest_paper:
+    path: .scripts/ingest_paper.py
+    kind: implementation
+    role: weak-llm-efficient-academic-pdf-ingest-with-bibliographic-review-gate-short-semantic-slots-deterministic-evidence-and-zero-llm-proposition-compilation
+  ingest_paper_test:
+    path: .scripts/test_ingest_paper.py
+    kind: test
+    role: code-driven-ingest-paper-regression
+  predicate_governance:
+    path: .scripts/predicate_governance.py
+    kind: implementation
+    role: automated-candidate-predicate-governance
+  predicate_governance_test:
+    path: .scripts/test_predicate_governance.py
+    kind: test
+    role: candidate-predicate-governance-regression
+  ingest_document:
+    path: .scripts/ingest_document.py
+    kind: implementation
+    role: code-driven-general-document-ingest-orchestrator
+  re_ingest:
+    path: .scripts/re_ingest.py
+    kind: implementation
+    role: pipeline-version-aware-reingest-orchestrator-with-page-origin-lineage-cleanup
+  research_memory:
+    path: .scripts/research_memory.py
+    kind: implementation
+    role: project-scoped-research-memory-store-with-auto-extraction
+  research_project:
+    path: .scripts/research_project.py
+    kind: validator
+    role: research-project-template-and-structure-validator
+  trash_util:
+    path: .scripts/trash_util.py
+    kind: implementation
+    role: recycle-bin-deletion-helper-shared-by-ingest-scripts
+  ingest_common:
+    path: .scripts/ingest_common.py
+    kind: implementation
+    role: shared-ingest-context-registry-thread-local-progress-and-health-mechanisms-for-paper-meeting-document
+  ingest_inbox:
+    path: .scripts/ingest_inbox.py
+    kind: implementation
+    role: unified-inbox-intake-with-compact-stdout-degraded-status-propagation-and-full-report-persistence
+  ingest_document_test:
+    path: .scripts/test_ingest_document.py
+    kind: test
+    role: code-driven-ingest-document-regression
+  ingest_admin:
+    path: .scripts/ingest_admin.py
+    kind: implementation
+    role: admin-ingest-thin-wrapper-of-ingest-document
+  ingest_admin_test:
+    path: .scripts/test_ingest_admin.py
+    kind: test
+    role: admin-ingest-wrapper-regression
+  engineering_graph:
+    path: .scripts/engineering_graph.py
+    kind: implementation
+    role: engineering-meta-graph-validator-impact-planner-and-recommended-locator-emitter
+  speech_entity_resolver:
+    path: .scripts/speech_entity_resolver.py
+    kind: implementation
+    role: meeting-voice-entity-resolver
+  extract_citations:
+    path: .scripts/extract_citations.py
+    kind: implementation
+    role: citation-extraction-from-paper-md
+  extract_abbreviations:
+    path: .scripts/extract_abbreviations.py
+    kind: implementation
+    role: abbreviation-pair-extraction-from-raw
+  inbox_plan:
+    path: .scripts/inbox_plan.py
+    kind: implementation
+    role: inbox-intake-plan-generator
+  inbox_state:
+    path: .scripts/inbox_state.py
+    kind: implementation
+    role: inbox-transaction-state-persistence
+  source_locator:
+    path: .scripts/source_locator.py
+    kind: implementation
+    role: raw-locator-parse-validate-excerpt-and-companion-contract
+  wiki_locator:
+    path: .scripts/wiki_locator.py
+    kind: implementation
+    role: heading-slug-section-reader-and-raw-footnote-bridge
+  engineering_locator:
+    path: .scripts/engineering_locator.py
+    kind: implementation
+    role: build-agent-default-precise-reader-with-prefix-filtered-discovery
+  engineering_locator_test:
+    path: .scripts/test_engineering_locator.py
+    kind: test
+    role: engineering-locator-format-filter-budget-boundary-and-candidate-regression
+  build_locator_tools:
+    path: dsh/build_tools.py
+    kind: implementation
+    role: build-only-dsh-capability-seam-wrapping-engineering-impact-and-locator-tools
+  build_locator_guard:
+    path: dsh/guards/build_locator_guard.py
+    kind: implementation
+    role: build-read-policy-guard-requiring-impact-before-precise-engineering-reads
+  build_locator_guard_test:
+    path: dsh/test_build_tools.py
+    kind: test
+    role: build-capability-seam-and-locator-guard-regression
+  mineru_api:
+    path: .scripts/mineru_api.py
+    kind: implementation
+    role: mineru-pdf-extraction-api-client
+  scan_authors:
+    path: .scripts/scan_authors.py
+    kind: implementation
+    role: author-frontmatter-vs-raw-scanner
+  check_wikilinks:
+    path: .scripts/check_wikilinks.py
+    kind: implementation
+    role: dangling-wikilink-detector
+  check_trace_rules:
+    path: .scripts/check_trace_rules.py
+    kind: implementation
+    role: trace-rule-compliance-checker
+  lint_specs:
+    path: .scripts/lint_specs.py
+    kind: implementation
+    role: prompt-spec-health-auditor
+  person_entity_audit:
+    path: .scripts/person_entity_audit.py
+    kind: implementation
+    role: orphan-person-entity-audit
+  audit_source_locators:
+    path: .scripts/audit_source_locators.py
+    kind: implementation
+    role: optional-edge-locator-statistics-with-opt-in-strict-diagnostic
+  graph_ingest_status:
+    path: .scripts/graph_ingest_status.py
+    kind: implementation
+    role: ungraphed-wiki-page-status-marker
+  read_paper:
+    path: .scripts/read_paper.py
+    kind: implementation
+    role: paper-md-directed-excerpt-reader-with-hierarchical-method-expansion
+  read_paper_test:
+    path: .scripts/test_read_paper.py
+    kind: test
+    role: read-paper-directed-excerpt-regression
+  ingest_inbox_dispatch_test:
+    path: .scripts/test_ingest_inbox_dispatch.py
+    kind: test
+    role: ingest-inbox-dsh-tool-dispatch-regression
+  relativize_internal_symlinks:
+    path: .scripts/relativize_internal_symlinks.py
+    kind: implementation
+    role: absolute-to-relative-symlink-repair
+  test_direction_matcher:
+    path: .scripts/test_direction_matcher.py
+    kind: test
+    role: direction-matcher-document-support-regression
+  test_inbox_plan:
+    path: .scripts/test_inbox_plan.py
+    kind: test
+    role: inbox-routing-plan-regression
+  test_playbook_dispatch:
+    path: .scripts/test_playbook_dispatch.py
+    kind: test
+    role: playbook-dispatch-regression
+  test_wiki_skeleton:
+    path: .scripts/test_wiki_skeleton.py
+    kind: test
+    role: temporary-paper-and-role-neutral-people-profile-skeleton-contract-regression
+  test_relativize_internal_symlinks:
+    path: .scripts/test_relativize_internal_symlinks.py
+    kind: test
+    role: symlink-relativize-regression
+edges:
+- - agents
+  - routes
+  - route
+- - agents
+  - routes
+  - ingest_meeting
+- - agents
+  - routes
+  - playbook_dispatch
+- - conventions
+  - specifies
+  - route
+- - ingest
+  - specifies
+  - graph_ingest
+- - ingest
+  - specifies
+  - extractor
+- - inbox
+  - specifies
+  - inbox_finalize
+- - inbox
+  - specifies
+  - inbox_ingest
+- - inbox_finalize
+  - tested_by
+  - inbox_finalize_test
+- - inbox_ingest
+  - tested_by
+  - inbox_ingest_test
+- - extractor
+  - tested_by
+  - extractor_test
+- - experience_recall
+  - tested_by
+  - experience_recall_test
+- - experiences
+  - specifies
+  - experience_recall
+- - query
+  - uses
+  - experience_recall
+- - ingest
+  - uses
+  - experience_recall
+- - write
+  - uses
+  - experience_recall
+- - conventions
+  - uses
+  - experience_recall
+- - ingest
+  - specifies
+  - llm_structured
+- - ingest
+  - specifies
+  - api_ingest
+- - api_ingest
+  - uses
+  - llm_structured
+- - llm_structured
+  - tested_by
+  - api_ingest_test
+- - llm_structured
+  - references
+  - llm_model_catalog
+- - visual_qa
+  - references
+  - llm_model_catalog
+- - visual_qa_ops
+  - specifies
+  - visual_qa
+- - visual_qa
+  - tested_by
+  - visual_qa_test
+- - visual_to_editable_ppt
+  - references
+  - llm_model_catalog
+- - visual_to_editable_ppt
+  - uses
+  - visual_qa
+- - visual_to_editable_ppt_ops
+  - specifies
+  - visual_to_editable_ppt
+- - visual_to_editable_ppt
+  - tested_by
+  - visual_to_editable_ppt_test
+- - api_ingest
+  - requires
+  - extractor
+- - api_ingest
+  - requires
+  - wiki_skeleton
+- - api_ingest
+  - hands_off_to
+  - graph_ingest
+- - ingest
+  - specifies
+  - wiki_skeleton
+- - ingest
+  - specifies
+  - ingest_check
+- - ingest
+  - specifies
+  - ingest_build
+- - ingest
+  - specifies
+  - ingest_plan
+- - ingest
+  - uses
+  - derivation_state
+- - ingest
+  - specifies
+  - cluster_keywords
+- - ingest
+  - requires
+  - schemas
+- - hub
+  - specifies
+  - direction_matcher
+- - hub
+  - specifies
+  - cluster_keywords
+- - hub
+  - specifies
+  - hub_split
+- - hub
+  - specifies
+  - hub_semantics
+- - hub
+  - requires
+  - graph_ingest
+- - query
+  - specifies
+  - query_orchestrate
+- - query
+  - specifies
+  - query_actions
+- - query
+  - specifies
+  - query_graph
+- - lint
+  - specifies
+  - graph_metrics
+- - sync
+  - requires
+  - graph_metrics
+- - graph_ingest
+  - writes
+  - graph_db
+- - graph_ingest
+  - uses
+  - graph_delta
+- - graph_ingest
+  - uses
+  - hub_semantics
+- - graph_delta
+  - uses
+  - graph_lib
+- - graph_delta
+  - reads
+  - graph_db
+- - graph_delta
+  - tested_by
+  - graph_delta_test
+- - graph_delta
+  - uses
+  - node_semantics
+- - node_semantics
+  - uses
+  - graph_lib
+- - node_semantics
+  - reads
+  - graph_db
+- - node_semantics
+  - tested_by
+  - node_semantics_test
+- - hub_semantics
+  - uses
+  - wiki_locator
+- - hub_semantics
+  - uses
+  - graph_lib
+- - hub_semantics
+  - reads
+  - graph_db
+- - hub_semantics
+  - tested_by
+  - hub_semantics_test
+- - query_actions
+  - uses
+  - node_semantics
+- - dsh_tools
+  - uses
+  - query_actions
+- - dsh_tools
+  - uses
+  - hub_semantics
+- - graph_ingest
+  - tested_by
+  - graph_ingest_temporal_test
+- - graph_lib
+  - defines
+  - graph_db
+- - graph_schema
+  - specifies
+  - graph_validate
+- - graph_validate
+  - reads
+  - graph_db
+- - graph_validate
+  - uses
+  - graph_lib
+- - graph_validate
+  - tested_by
+  - graph_validate_test
+- - graph_repair
+  - uses
+  - graph_lib
+- - graph_repair
+  - writes
+  - graph_db
+- - graph_repair
+  - tested_by
+  - graph_repair_test
+- - query_graph
+  - reads
+  - graph_db
+- - query_graph
+  - uses
+  - graph_lib
+- - query_graph
+  - tested_by
+  - query_graph_temporal_test
+- - query_orchestrate
+  - uses
+  - query_actions
+- - dsh_tools
+  - uses
+  - query_actions
+- - dsh_tools
+  - uses
+  - wg
+- - dsh_ingest_tools
+  - uses
+  - ingest_inbox
+- - ingest_inbox
+  - uses
+  - dsh_agent_loop
+- - ingest_inbox
+  - uses
+  - ingest_common
+- - ingest_inbox
+  - uses
+  - build_people_pages
+- - dsh_ingest_tools
+  - uses
+  - ingest_paper
+- - dsh_ingest_tools
+  - uses
+  - ingest_meeting
+- - dsh_ingest_tools
+  - uses
+  - ingest_document
+- - dsh_ingest_tools
+  - uses
+  - re_ingest
+- - dsh_agent_loop
+  - uses
+  - dsh_ingest_tools
+- - dsh_agent_loop
+  - uses
+  - dsh_ingest_guard
+- - dsh_ingest_tools
+  - tested_by
+  - dsh_ingest_test
+- - dsh_dispatch
+  - uses
+  - dsh_agent_loop
+- - dsh_dispatch
+  - uses
+  - dsh_visual_agent_loop
+- - dsh_visual_tools
+  - uses
+  - visual_qa
+- - dsh_visual_agent_loop
+  - uses
+  - dsh_visual_tools
+- - dsh_visual_agent_loop
+  - uses
+  - dsh_harness
+- - dsh_visual_tools
+  - tested_by
+  - dsh_visual_test
+- - dsh_dispatch
+  - uses
+  - dsh_visual_reconstruction_agent_loop
+- - dsh_visual_reconstruction_tools
+  - uses
+  - visual_to_editable_ppt
+- - dsh_visual_reconstruction_agent_loop
+  - uses
+  - dsh_visual_reconstruction_tools
+- - dsh_visual_reconstruction_agent_loop
+  - uses
+  - dsh_harness
+- - dsh_visual_reconstruction_tools
+  - tested_by
+  - dsh_visual_reconstruction_test
+- - dsh_agent_loop
+  - uses
+  - dsh_harness
+- - dsh_agent_loop
+  - uses
+  - dsh_tools
+- - dsh_agent_loop
+  - uses
+  - dsh_guards
+- - route
+  - tested_by
+  - prompt_test
+- - ingest_check
+  - tested_by
+  - ingest_check_test
+- - graph_ingest
+  - tested_by
+  - ingest_pipeline_test
+- - api_ingest
+  - tested_by
+  - api_ingest_test
+- - ingest_plan
+  - uses
+  - derivation_state
+- - ingest_plan
+  - tested_by
+  - derivation_state_test
+- - ingest
+  - specifies
+  - long_document_plan
+- - long_document_plan
+  - tested_by
+  - long_document_plan_test
+- - open_source_release
+  - reads
+  - open_source_manifest
+- - open_source_release
+  - tested_by
+  - open_source_release_test
+- - handbook
+  - documents
+  - graph_db
+- - adr_001
+  - documents
+  - graph_ingest
+- - adr_002
+  - documents
+  - api_ingest
+- - adr_003
+  - documents
+  - graph_lib
+- - adr_003
+  - documents
+  - graph_ingest
+- - adr_003
+  - documents
+  - graph_metrics
+- - adr_003
+  - documents
+  - ingest
+- - adr_003
+  - documents
+  - sync
+- - adr_004
+  - documents
+  - query_orchestrate
+- - adr_004
+  - documents
+  - query_actions
+- - adr_004
+  - documents
+  - dsh_tools
+- - adr_005
+  - documents
+  - graph_lib
+- - adr_005
+  - documents
+  - ingest_check
+- - adr_005
+  - documents
+  - predicate_governance
+- - adr_005
+  - documents
+  - query_graph
+- - adr_005
+  - documents
+  - graph_db
+- - guidance
+  - documents
+  - graph_ingest
+- - guidance
+  - documents
+  - query_graph
+- - triples_legacy
+  - superseded_by
+  - graph_ingest
+- - ingest
+  - specifies
+  - ingest_paper
+- - inbox
+  - specifies
+  - ingest_paper
+- - ingest_paper
+  - requires
+  - extractor
+- - ingest_paper
+  - requires
+  - wiki_skeleton
+- - ingest_paper
+  - uses
+  - inbox_finalize
+- - ingest_paper
+  - uses
+  - graph_ingest
+- - ingest_paper
+  - uses
+  - ingest_check
+- - ingest_paper
+  - uses
+  - ingest_build
+- - ingest_paper
+  - uses
+  - llm_structured
+- - ingest_paper
+  - uses
+  - predicate_governance
+- - ingest_paper
+  - uses
+  - ingest_common
+- - ingest_paper
+  - uses
+  - read_paper
+- - predicate_governance
+  - tested_by
+  - predicate_governance_test
+- - ingest_paper
+  - tested_by
+  - ingest_paper_test
+- - ingest_paper
+  - uses
+  - graph_lib
+- - ingest_paper
+  - hands_off_to
+  - graph_ingest
+- - guidance
+  - documents
+  - ingest_paper
+- - handbook
+  - documents
+  - ingest_paper
+- - ingest
+  - specifies
+  - ingest_document
+- - inbox
+  - specifies
+  - ingest_document
+- - ingest_document
+  - uses
+  - inbox_finalize
+- - ingest_document
+  - uses
+  - llm_structured
+- - ingest_document
+  - uses
+  - graph_lib
+- - ingest_document
+  - uses
+  - ingest_check
+- - ingest_document
+  - uses
+  - ingest_build
+- - ingest_document
+  - hands_off_to
+  - graph_ingest
+- - ingest_document
+  - uses
+  - ingest_common
+- - ingest_document
+  - uses
+  - source_locator
+- - ingest_document
+  - tested_by
+  - ingest_document_test
+- - ingest_admin
+  - wraps
+  - ingest_document
+- - ingest_admin
+  - tested_by
+  - ingest_admin_test
+- - guidance
+  - documents
+  - ingest_document
+- - handbook
+  - documents
+  - ingest_document
+- - ingest_meeting
+  - uses
+  - ingest_common
+- - conventions
+  - specifies
+  - engineering_graph
+- - ingest
+  - specifies
+  - speech_entity_resolver
+- - ingest
+  - specifies
+  - extract_citations
+- - ingest
+  - specifies
+  - extract_abbreviations
+- - inbox
+  - specifies
+  - inbox_plan
+- - inbox
+  - specifies
+  - inbox_state
+- - ingest
+  - specifies
+  - source_locator
+- - query_actions
+  - uses
+  - source_locator
+- - wg
+  - uses
+  - source_locator
+- - source_locator
+  - tested_by
+  - wg_test
+- - wiki_locator
+  - uses
+  - source_locator
+- - ingest
+  - specifies
+  - wiki_locator
+- - query
+  - specifies
+  - wiki_locator
+- - query_actions
+  - uses
+  - wiki_locator
+- - query_orchestrate
+  - uses
+  - wiki_locator
+- - wg
+  - uses
+  - wiki_locator
+- - graph_ingest
+  - uses
+  - wiki_locator
+- - ingest_paper
+  - uses
+  - wiki_locator
+- - ingest_document
+  - uses
+  - wiki_locator
+- - wiki_locator
+  - tested_by
+  - wg_test
+- - engineering_locator
+  - uses
+  - source_locator
+- - engineering_locator
+  - uses
+  - wiki_locator
+- - engineering_locator
+  - tested_by
+  - engineering_locator_test
+- - build_locator_tools
+  - uses
+  - engineering_locator
+- - build_locator_tools
+  - uses
+  - engineering_graph
+- - build_locator_tools
+  - requires
+  - build_locator_guard
+- - build_locator_tools
+  - tested_by
+  - build_locator_guard_test
+- - agents
+  - specifies
+  - build_locator_tools
+- - route
+  - uses
+  - engineering_locator
+- - agents
+  - specifies
+  - engineering_locator
+- - extractor
+  - specifies
+  - mineru_api
+- - ingest_check
+  - specifies
+  - scan_authors
+- - lint
+  - specifies
+  - check_wikilinks
+- - query
+  - specifies
+  - check_trace_rules
+- - lint
+  - specifies
+  - lint_specs
+- - lint
+  - specifies
+  - person_entity_audit
+- - sync
+  - specifies
+  - audit_source_locators
+- - sync
+  - specifies
+  - graph_ingest_status
+- - query
+  - specifies
+  - read_paper
+- - read_paper
+  - tested_by
+  - read_paper_test
+- - ingest_inbox
+  - tested_by
+  - ingest_inbox_dispatch_test
+- - sync
+  - specifies
+  - relativize_internal_symlinks
+- - direction_matcher
+  - tested_by
+  - test_direction_matcher
+- - inbox_plan
+  - tested_by
+  - test_inbox_plan
+- - playbook_dispatch
+  - tested_by
+  - test_playbook_dispatch
+- - wiki_skeleton
+  - tested_by
+  - test_wiki_skeleton
+- - relativize_internal_symlinks
+  - tested_by
+  - test_relativize_internal_symlinks
+- - research
+  - specifies
+  - research_memory
+- - research
+  - specifies
+  - research_project
+- - research
+  - specifies
+  - frontier_spec
+- - frontier_spec
+  - specifies
+  - frontier
+- - frontier
+  - uses
+  - query_actions
+- - frontier
+  - uses
+  - llm_structured
+- - frontier
+  - writes
+  - frontier_store
+- - frontier
+  - tested_by
+  - frontier_test
+- - wg
+  - uses
+  - frontier
+- - ingest_paper
+  - uses
+  - frontier
+- - adr_006
+  - documents
+  - frontier_spec
+- - adr_006
+  - documents
+  - frontier
+capabilities:
+  ingest:
+    entry: route
+    required:
+    - agents
+    - ingest
+    - schemas
+    - graph_ingest
+    - ingest_check
+    optional:
+    - llm_structured
+    - api_ingest
+    - experiences
+    - experience_recall
+    - direction_matcher
+    - cluster_keywords
+    - ingest_build
+    - ingest_plan
+    - long_document_plan
+    - derivation_state
+    forbidden:
+    - triples_legacy
+    guardrails:
+    - 按 stage 执行：先编码落盘，再巩固建图，最后校验/日志；不得跳 stage。
+    - 关系和 keyword 先有 raw/wiki 证据；graph.db 是当前边主数据，禁用 Markdown triples 主路径。
+    - 每个改动页必须 ingest_check；ERROR 清零，WARN 向用户提示。
+    - INGEST_BACKEND=api 时 ingest_paper.py 内部通过 call_text() 调用 API LLM 撰写 wiki 与语义槽；api_ingest.py 仅用于证据卡受限场景，非 inbox 论文主入口。hybrid 模式已删除，INGEST_BACKEND 只接受 agent|api。
+  query:
+    entry: route
+    required:
+    - agents
+    - query
+    - query_graph
+    - query_orchestrate
+    optional:
+    - query_actions
+    - node_semantics
+    - graph_dump
+    - experiences
+    - experience_recall
+    forbidden: []
+    guardrails:
+    - 图、Hub、Navigation 只定位；事实性结论从相关 Wiki section 的脚注下钻 Raw；edge locator 有则可用、没有也合法。
+    - 先读 Navigation，再按需读 Content/raw；同一 action key 不重复执行。
+    - 续查必须有具体缺口和候选；无候选时限定性回答，不无限回环。
+    - route 的 query 先派发 start；候选定位后才取 evidence，有具体缺口才取 continue，交付前取 answer。
+    - start 阶段无固定检索策略时应先记录轻量检索策略；API 首轮 discover/read 必须提交 drafted 或 skipped 策略。
+  hub:
+    entry: route
+    required:
+    - agents
+    - hub
+    - graph_ingest
+    - hub_semantics
+    optional:
+    - graph_metrics
+    forbidden: []
+    guardrails:
+    - Hub 是 keyword、proposition、People page 等普通节点形成的可重叠动态群落；arXiv 方向只提供初始化 Scope，不是成员或身份定义。
+    - People page 以可定位人物画像参与；研究者写研究对象/问题/方法，行政人员写职责/服务范围，学生写学习或研究阶段/关注方向，其他角色写与导航相关的实际活动范围。
+    - 代码负责类型感知 profile、semantic+structural affinity、membership、原型、new/split/merge candidate 与 query probe；未归类或歧义是正常状态。
+    - 普通 membership 是可重建导航状态，可由程序自动更新；只有主 Agent 可确认 title、Scope、parent 及 create/split/merge canonical 语义。
+    - 节点数量变化只触发动力学检查；分裂与合并须有分布变化、迟滞和 query utility 证据，单一 embedding 分数不得触发生命周期写入。
+  build:
+    entry: route
+    required:
+    - agents
+    - conventions
+    - route
+    - guidance
+    - engineering_locator
+    optional:
+    - handbook
+    - experiences
+    - experience_recall
+    - graph_lib
+    - graph_ingest
+    - query_graph
+    - ingest_check
+    - prompt_test
+    - graph_validate
+    - graph_repair
+    forbidden:
+    - triples_legacy
+    guardrails:
+    - 先运行 impact 查最小影响面；impact 先输出可确定的 graph.yaml node/contract/capability 与 code-guidance 精确 locator，再为实现/测试输出按需 filtered-list 入口，不枚举大型 YAML 全表。
+    - 建设 Agent 先直接 read impact 推荐精确 locator；不足时用 list --prefix 缩小发现范围，再用返回的 Markdown/YAML/Python/行范围 locator 精确 read。rg 只用于定位候选文件或符号。仅 locator 明确不支持、报错或所需上下文本身跨多个块时才定向扩大读取，并说明原因。
+    - 变更后运行相应回归/校验；工程文档（code-guidance/graph.yaml/HUB.md/INGEST.md 等）受影响时由 agent 自主判断并同步更新，保持文档与代码一致。
+  lint:
+    entry: route
+    required:
+    - agents
+    - lint
+    - graph_metrics
+    - ingest_check
+    optional:
+    - graph_dump
+    - graph_validate
+    forbidden: []
+    guardrails:
+    - Lint 负责发现和报告，不因发现问题自动扩面修复。
+  sync:
+    entry: route
+    required:
+    - agents
+    - sync
+    - graph_metrics
+    optional:
+    - graph_dump
+    forbidden: []
+    guardrails:
+    - 按增量、补漏、一致性三层对账；不一致必须报告，不静默猜测。
+  write:
+    entry: route
+    required:
+    - agents
+    - write
+    optional:
+    - physics_manuscript_editing
+    - experiences
+    - experience_recall
+    forbidden: []
+    guardrails:
+    - 对外主张先取可追溯证据；不把未核验知识库内容写成事实。
+    - write 是按需落笔能力；academic profile 在 research 状态内组合共享约定与学科 overlay，不切换研究上下文。
+  research:
+    entry: route
+    required:
+    - agents
+    - research
+    optional:
+    - write
+    - physics_manuscript_editing
+    - research_memory
+    - research_project
+    - frontier_spec
+    - frontier
+    forbidden: []
+    guardrails:
+    - 研究内容不入库（独立于 ingest）；记忆绑定到 projects/<name>/.research-memory/。
+    - 进入研究项目先 recall 恢复上下文；研究过程自动保存记忆（decision/insight/literature_judgment/research_direction）。
+    - research 是持续工作状态；只有实际起草、改写或润色时调用 academic write 能力，查询、实验与状态汇报不加载写作能力。
+    - 产出限于研究笔记和论文文稿；不自动摄入知识库。
+  frontier:
+    entry: route
+    required:
+    - agents
+    - frontier_spec
+    - frontier
+    optional:
+    - wg
+    - query_actions
+    - llm_structured
+    forbidden: []
+    guardrails:
+    - Frontier 是独立研究前沿 overlay；只单向引用 Raw/Wiki/Graph，不修改事实层。
+    - 每个捕获问题写入或精确复用单一 Question Page；库内回答只用紧凑 Graph→Wiki→Raw 证据包，支持结论必须引用包内 Raw locator。
+    - Question fact_links 只固化问题来源与 supported_claim 实际引用，不固化一次召回的低相关候选。
+    - 用户问题先查库、查重和评估 kb_state；模型不可用或回答失败时保留 captured/pending，active 必须人审，scientific_state 不自动更新。
+    - Graph 稀疏导航；相似关系与 AI 推导默认 candidate，不自动建正式边。
+  scan:
+    entry: route
+    required:
+    - agents
+    - scan
+    optional: []
+    forbidden: []
+    guardrails:
+    - 扫描只分类和报告候选；未获执行授权不移动或摄入文件。
+  inbox:
+    entry: route
+    required:
+    - agents
+    - inbox
+    - inbox_finalize
+    - inbox_ingest
+    - ingest_paper
+    - ingest_document
+    optional: []
+    forbidden: []
+    guardrails:
+    - 全文只读一次：先入临时区提取文本，单遍完成归类/命名/wiki 编译；不为分类和 wiki 分别读全文。
+    - sources 前置决策：撰写时直接填最终 raw 路径，落位即正确；不留占位、不后置替换；临时区路径不得入正式 sources。
+    - 落位只接受 manifest 声明的实体文件；目标冲突失败，提交和 cleanup 仅作用于当前临时项。
+    - 全论文批量只允许 prepare 有界并发；graph commit 保持串行且继续受 graph_ready 屏障约束。
+    - 非阻断语义降级必须进入逐文件状态与持久化报告，不得仅以 completed 掩盖。
+    verify:
+    - python3 .scripts/test_inbox_finalize.py
+    - python3 .scripts/test_prompt_audit.py
+    - python3 .scripts/engineering_graph.py validate
+contracts:
+- id: route-capability-coverage
+  nodes:
+  - route
+  invariant: route.py 的每个 task 都有同名 capability，能力包入口均为 route。
+  checks:
+  - route_task_coverage
+- id: graph-write-boundary
+  nodes:
+  - graph_ingest
+  - graph_lib
+  - graph_db
+  - triples_legacy
+  invariant: graph.db 是当前边主数据；graph_ingest 是增量写边入口，rebuild_triples 仅兼容派生。
+  checks:
+  - graph_entrypoints
+- id: ingest-closure
+  nodes:
+  - ingest
+  - schemas
+  - graph_ingest
+  - ingest_check
+  - ingest_build
+  invariant: 摄入须按编码、巩固、收尾闭环；规则变更必须有局部校验与派生同步入口。
+  checks:
+  - ingest_capability_contract
+- id: raw-redline
+  nodes:
+  - agents
+  - ingest
+  - inbox
+  invariant: raw 是事实层；摄入先归档，再生成派生 wiki/图，不把 raw 作为脚本改写目标。
+  checks:
+  - raw_redline_text
+verification:
+  route:
+  - python3 .scripts/engineering_graph.py validate
+  - python3 .scripts/test_prompt_audit.py
+  research_project:
+  - python3 .scripts/research_project.py validate VEEF
+  - python3 .scripts/engineering_graph.py validate
+  graph_ingest:
+  - python3 .scripts/test_ingest_pipeline.py
+  - python3 .scripts/test_ingest_check.py
+  - python3 .scripts/test_graph_ingest_temporal.py
+  api_ingest:
+  - python3 .scripts/test_api_ingest.py
+  - python3 .scripts/test_ingest_pipeline.py
+  ingest_check:
+  - python3 .scripts/test_ingest_check.py
+  - python3 .scripts/test_ingest_pipeline.py
+  graph_lib:
+  - python3 .scripts/test_ingest_pipeline.py
+  node_semantics:
+  - python3 .scripts/test_node_semantics.py
+  - python3 .scripts/test_graph_delta.py
+  graph_validate:
+  - python3 .scripts/test_graph_validate.py
+  - python3 .scripts/graph_validate.py
+  graph_repair:
+  - python3 .scripts/test_graph_repair.py
+  - python3 .scripts/graph_repair.py --dry-run
+  query_graph:
+  - python3 .scripts/test_query_graph_temporal.py
+  ingest:
+  - python3 .scripts/test_ingest_check.py
+  - python3 .scripts/test_ingest_pipeline.py
+  - python3 .scripts/test_prompt_audit.py
+  ingest_inbox:
+  - python3 .scripts/test_ingest_inbox_dispatch.py
+  - python3 dsh/test_dsh_ingest_tools.py
+  - python3 .scripts/engineering_graph.py validate
+  schemas:
+  - python3 .scripts/test_ingest_check.py
+  long_document_plan:
+  - python3 .scripts/test_long_document_plan.py
+  prompt_test:
+  - python3 .scripts/test_prompt_audit.py
+  ingest_document:
+  - python3 .scripts/test_ingest_document.py
+  - python3 .scripts/test_ingest_admin.py
+  - python3 .scripts/engineering_graph.py validate
+  source_locator:
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_ingest_document.py
+  - python3 .scripts/engineering_graph.py validate
+  wiki_locator:
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_ingest_pipeline.py
+  - python3 .scripts/test_ingest_document.py
+  - python3 .scripts/test_ingest_paper.py
+  - python3 .scripts/engineering_graph.py validate
+  engineering_locator:
+  - python3 .scripts/test_engineering_locator.py
+  - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/test_node_semantics.py
+  - python3 .scripts/engineering_graph.py validate
+  build_locator_tools:
+  - python3 dsh/test_build_tools.py
+  - python3 .scripts/test_engineering_locator.py
+  - python3 .scripts/engineering_graph.py validate
+  wg:
+  - python3 .scripts/test_wg.py
+  frontier:
+  - python3 .scripts/test_frontier.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/engineering_graph.py validate
+  ingest_pipeline:
+  - python3 .scripts/test_ingest_document.py
+  - python3 .scripts/test_ingest_admin.py
+  - python3 .scripts/test_ingest_pipeline.py
+  open_source_release:
+  - python3 .scripts/test_open_source_release.py
+  visual_qa:
+  - python3 .scripts/test_visual_qa.py
+  - python3 dsh/test_visual_tools.py
+  - python3 .scripts/engineering_graph.py validate
+  visual_to_editable_ppt:
+  - python3 .scripts/test_visual_to_editable_ppt.py
+  - python3 dsh/test_visual_reconstruction_tools.py
+  - python3 .scripts/test_visual_qa.py
+  - python3 .scripts/engineering_graph.py validate
+script_contracts:
+  ingest_inbox:
+    preconditions:
+    - 底层摄入 stdout 可同时包含进度文本、图报告嵌套 JSON 与最终工作流 JSON
+    writes:
+    - temp/inbox-dsh/*.jsonl
+    - cross-domain/ingest-reports/*.json
+    forbidden:
+    - --run 时把底层完整 stdout、逐节点 Hub 候选或完整 graph_report 再打印给 Agent；这些诊断只进入持久化报告/DSH log
+    - 持久化报告缺失 graph_report 等底层已返回诊断，或紧凑 stdout 不返回 report_path
+    - 将 Hub/page 等领域对象的 active/current/retired 状态误判为摄入工作流状态
+    - 在存在多个 JSON 对象时选择最终工作流结果之前的嵌套 status 对象
+    - receipt 已 committed 且最终工作流为 completed 时汇总为 failed
+    verify:
+    - python3 .scripts/test_ingest_inbox_dispatch.py
+    - python3 dsh/test_dsh_ingest_tools.py
+  engineering_graph:
+    preconditions:
+    - 建设目标节点或 capability 已确定，graph.yaml 有相应工程元数据
+    writes: []
+    forbidden:
+    - 已知 graph.yaml node/contract/capability pointer 时仍要求 Agent 先枚举整个 YAML locator 列表
+    - 根据工程节点名猜测具体 Python symbol；代码只提供 filtered-list 入口，由 Agent 按施工意图选择
+    verify:
+    - python3 .scripts/test_prompt_audit.py
+    - python3 .scripts/engineering_graph.py validate
+  route:
+    preconditions:
+    - 已判定 task；ingest 必须提供 subproject 与单个 stage；会议纪要须传 source-kind=meeting；query 按当前阶段传 query-stage
+    - 持续工作上下文使用 --task；状态内按需规范使用 --capability；可执行函数由 DSH ToolRegistry 或 wg.py 调用
+    writes: []
+    forbidden:
+    - 绕过路由凭记忆选规范
+    - 把 capability 调用当作 task/state 切换，或把提示规范能力伪装成已执行工具
+    - build 路由不输出工程 locator 使用纪律，导致 Agent 把注册等同于实际使用
+    - build 路由默认全文输出 shared-conventions，而不是只派发建设同步、文档维护和设计原则片段
+    - query 后续阶段重复注入 start 固定上下文（工程上下文、执行纪律、任务边界、经验触发）
+    verify:
+    - python3 .scripts/engineering_graph.py validate
+  engineering_locator:
+    preconditions:
+    - 建设任务 Agent 已定位仓库内的文本型工程文档、配置、代码或测试；Raw/Wiki 仍使用各自专用 locator
+    writes: []
+    forbidden:
+    - 读取 raw/、wiki/、graph.db、二进制文件或仓库外路径
+    - locator 失效或片段超预算时静默回退全文或返回半截片段
+    - 为所有工程文件建持久索引、companion 或缺失 locator 审计
+    - 仅注册工具但让 build 路由和 impact 输出继续默认引导 cat/sed/全文读取
+    - list 已提供 prefix 时仍枚举、计数或截断未命中前缀的 locator
+    verify:
+    - python3 .scripts/test_engineering_locator.py
+    - python3 .scripts/test_prompt_audit.py
+  build_locator_tools:
+    preconditions:
+    - 仅建设任务使用；不进入 query_actions 或查询型 DSH 工具面
+    - 工具面只暴露 impact、精确 read、filtered list，不暴露裸 cat/sed 或工程全文读取
+    - engineering_locator read/list 仍由底层工具执行预算、路径和格式校验
+    writes:
+    - 会话内 build locator guard 状态与 session log
+    forbidden:
+    - 在未完成 engineering_graph impact 前放行 locator read/list
+    - list 无 prefix 时仍执行或放行
+    - 将 locator 工具注册为通用 query DSH capability
+    - 读取 raw/、wiki/、graph.db、二进制文件或仓库外路径
+    verify:
+    - python3 dsh/test_build_tools.py
+    - python3 .scripts/test_engineering_locator.py
+    - python3 .scripts/engineering_graph.py validate
+  graph_validate:
+    preconditions:
+    - graph.db 已存在；operations/config/graph-schema.yaml 可解析
+    writes: []
+    forbidden:
+    - 修改 graph.db、页面或 raw
+    - 把缺失 edge locator 或 edge_evidence 作为约束违反
+    verify:
+    - python3 .scripts/test_graph_validate.py
+  graph_repair:
+    preconditions:
+    - 已备份或确认可按 dry-run 计划修改 graph.db
+    writes:
+    - cross-domain/graph.db
+    forbidden:
+    - 修改 raw、wiki 页面
+    - 未指定 --apply 时静默写入
+    - 为缺失 locator 自动猜测 Raw 行号、回填 edge_evidence 或降级 confidence
+    verify:
+    - python3 .scripts/test_graph_repair.py
+    - python3 .scripts/graph_repair.py --raw-links-only --dry-run
+  open_source_release:
+    preconditions:
+    - 根目录 VERSION 已按 MAJOR.MINOR.PATCH 更新；白名单 manifest 已覆盖本期公开文件
+    - 公开 capability 的 required 节点均存在于 allowlisted 目标树；active projects/.project 路径只保留在私有工程图
+    writes:
+    - 指定目标公开树（绝不能写入 REPO 自身）
+    - 目标树中的 operations/engineering/graph.yaml 确定性投影，仅保留公开路径闭包
+    forbidden:
+    - 手工向生成公开树补入业务文件
+    - 将 active projects/.project 节点、依赖边、验证命令或脚本契约复制到公开工程图
+    - VERSION 缺失、非 semver，或 README release badge 与 VERSION 不一致时仍验证通过
+    - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
+    verify:
+    - python3 .scripts/test_open_source_release.py
+  wiki_skeleton:
+    preconditions:
+    - 目标 wiki 路径与 type 已确认；论文页已有 paper.md；会议页已有 raw 原文（历史页可回退 corrected.md）
+    writes:
+    - stdout 页面骨架（由调用者落盘）
+    - People 骨架含可定位
+    forbidden:
+    - 将机械作者提取视为无需 raw 核验的事实
+    - 作者块为逐行“姓名 + 机构 + 邮箱”时只扫描前两位作者，或把行内机构缩写误识别为作者
+    - 为 academic 会议生成不符合 Schema 的 status 或缺标准 section 的页面
+    verify:
+    - python3 .scripts/test_ingest_pipeline.py
+    - python3 .scripts/test_wiki_skeleton.py
+  api_ingest:
+    preconditions:
+    - INGEST_BACKEND=api；paper.md 已由 extractor 生成；目标页面仍为 wiki_skeleton 新建占位骨架
+    writes:
+    - 程序生成的证据卡与临时/指定 JSON 草稿
+    - 失败时 cross-domain/api-ingest-pending.jsonl 与 agent_fallback 交接包
+    - 仅完整草稿（含程序复验的 Agent 兜底稿）的占位 wiki 页与受控 semantic 槽
+    forbidden:
+    - 直接写 raw
+    - 允许模型手写 raw locator 或 evidence quote
+    - 接受未由程序证据卡附回原文引文的语义项
+    - 新建 Hub/谓词/通讯作者
+    - 将不完整草稿入图
+    - 让 Agent 重读全文 raw 或绕过证据/Schema 校验
+    verify:
+    - python3 .scripts/test_api_ingest.py
+    - python3 .scripts/ingest_check.py --graph <page>
+  ingest_plan:
+    preconditions:
+    - raw 根目录已确认；仅用于生成计划，不作为正式摄入替代
+    writes:
+    - 仅在显式 --write-state 时写入 cross-domain/ingest-state.json
+    forbidden:
+    - 修改 raw、wiki 或 graph.db
+    - 调用 LLM
+    - 未经确认写入指纹状态
+    verify:
+    - python3 .scripts/test_derivation_state.py
+  long_document_plan:
+    preconditions:
+    - raw 已归档且为 Markdown/TXT；仅用于评估颗粒度，不替代语义确认
+    writes: []
+    forbidden:
+    - 修改 raw/wiki/graph.db
+    - 按长度或词频自动拆页/写关键词
+    - 递归生成超过一层的章节树
+    verify:
+    - python3 .scripts/test_long_document_plan.py
+  graph_ingest:
+    preconditions:
+    - wiki 页已落盘；语义槽已依据 raw 审核（历史 corrected.md 仅作兼容参考）
+    writes:
+    - cross-domain/graph.db
+    - Wiki 页面节点、同 stem 原件与 locator companion 合并后的 Raw 文档包节点，以及各文件路径 aliases
+    - 从 Wiki sources 机械派生的 Wiki→来源→Raw 直连边
+    - 语义导航边的可选 edges.source locator 与 edge_origins 页面贡献 lineage；不向 edge_evidence 复制 Wiki Raw 脚注
+    - Hub Scope 路由形成的论文 Wiki→研究方向边；仅 arXiv 根方向可按配置创建 Hub，旧 Hub seeds/关键词仅只读兼容
+    - 内存 GraphDelta 的子图健康报告、主图 attach plan 与 query-oriented probes 随命令 JSON 返回；不新增永久子图库
+    - 完整 proposition 节点，以及 proposition→包含→concept 的稀疏程序派生边；候选仅来自本页已确认概念和主图唯一精确 title/alias
+    forbidden:
+    - 常规使用 init
+    - 以 rebuild_triples 写当前关系
+    - 将会议关键词直接连 Hub 或让会议触发论文研究方向匹配
+    - 由语义槽方向对象直接新建非 arXiv 根 Hub；未匹配既有 Hub 的方向对象必须降级为关键词
+    - 标题相似度 ≤ 0.95 时判定重复（须 > 0.95 才作为候选进入 metadata 确认）
+    - 将中英文一侧相同但另一侧冲突或候选不唯一的 keyword 自动归并（含 embedding 回退）
+    - 跳过引文残片校验（citation_fragment 不建节点不连边）或忽略自由边裸缩写 warning
+    - 合并/删 hub 后不清 graph.db 残留节点（ghost hub 由 cleanup_ghost_hubs 每次摄入兜底）
+    - 在 patch_semantic_lines 中以 (主体,谓词) 单值覆盖多条同键修复（须用 deque 保序消费）
+    - derived_directions 报告中以 unmatched_keywords 命名（已改为 direction_unmatched + hub_fallback_keywords + truly_orphan_keywords 三段区分）
+    - 核心返回值用裸位置元组（add_knowledge_edges / assign_keyword_hubs / assign_keyword_hubs_meeting_admin 须返回 IngestResult / HubAssignResult / HubAssignMeetingResult NamedTuple，加字段不破坏调用处）
+    - 将缺少文档文本支持的方向 fallback 写成“主要研究”或“涉及”事实边；fallback 只能作为导航候选进入报告/Hub 兜底
+    - 让 LLM 生成 locator、作者、venue 或日期；这些字段必须从 Raw/wiki frontmatter/source metadata 确定性派生
+    - 将 Wiki section source 当最终事实证据；事实核验必须继续沿该节脚注下钻 Raw locator
+    - 因知识边缺少 locator 或 edge_evidence 而拒绝写入；二者都不是强制完整性字段
+    - 以密度、平均度、全连通、聚类系数或 locator 覆盖率作为子图/主图质量门
+    - embedding 分数单独触发节点合并；只有唯一候选同时通过 label/semantic identity gate 才可复用，否则列为 ambiguous/abstained
+    - 漏把第一作者标为 person，或节点 identity 复用后不补确定性 person/proposition subtype
+    - 把 Raw/LLM surface mention 因字符串恰等于既有 nodes.path 而直接当作 canonical ID；只有程序显式标记的 canonical endpoint 可无条件按 path 复用
+    - 将同名异义的 ambiguous mention 偷偷复用、创建同名碰撞节点或写入对应知识边；上下文不足时必须软 abstain 并跳过该边
+    - 绕过 GraphDelta 硬结构检查直接融合语义边，或因软 query probe 未满分阻断摄入
+    - 为保证连通性把命题内部概念自动提升为论文级研究关键词；仅报告 navigation_connectivity_candidates
+    - 从 proposition 片段创建新 concept 节点，或因精确名/alias 未命中、命中歧义而告警；这些情况必须静默跳过
+    - 将 edge_origins 当事实证据，或 re-ingest 时无视共享边的其他 origin 直接删除
+    - 将结构性包含/相似边标成可追溯事实（程序派生边必须为推断）
+    - 对 frontmatter 确定性生成的发表于 venue（ICLR/NeurIPS 等规范简称）产生 bare_abbreviation warning
+    - 将研究方向连到非 hub、同名多 hub 的歧义节点或 title/H1 不自洽的 hub
+    - 新摄入继续写 Hub seeds、Hub 关键词段、未归类关键词队列或由关键词 embedding 决定论文方向；这些只允许旧数据只读兼容
+    verify:
+    - python3 .scripts/engineering_graph.py impact graph_ingest --verify
+    - python3 .scripts/test_ingest_pipeline.py
+    - python3 .scripts/test_graph_ingest_temporal.py
+    - python3 .scripts/test_graph_delta.py
+  graph_delta:
+    preconditions:
+    - Wiki page、Raw 文档包候选与受限 triples 已由摄入管线提供；GraphDelta 仅是内存事务对象
+    writes: []
+    forbidden:
+    - 新建永久子图数据库、证据数据库或 claim card
+    - 调用 LLM 判断节点身份，或把单一 embedding 分数当作 merge 依据
+    - 完整双语名未先尝试“分解名称精确命中唯一 title/alias”便新建节点，或中文/英文完整名称组件命中多个 node_id 时自动复用；缩写只可在完整名称均未命中时兜底
+    - 用传统图密度/全连通指标阻断融合
+    - 多候选名称自动 merge
+    - 将未标记的 surface mention 当作 canonical node_id；exact path 也必须与同名 title/alias 候选一起消歧
+    verify:
+    - python3 .scripts/test_graph_delta.py
+  node_semantics:
+    preconditions:
+    - graph.db 已初始化；nodes.path 是稳定 node_id；description 可空；aliases 是确定性名称入口
+    writes:
+    - cross-domain/embeddings.db 文本向量缓存（不修改 graph.db）
+    forbidden:
+    - 直接创建、合并、删除节点或写 alias/边
+    - 将完整双语名的中文/英文完整名称分别命中不同节点时仍判为同一身份；缩写不得推翻唯一完整名称，只可在完整名称均未命中时兜底
+    - 向 LLM 暴露裸向量并让其自行选择阈值
+    - 将 semantic_search 相关候选升级为同一节点
+    - embedding 不可用时阻断 ingest/query；必须降级到 path/title/alias 或 lexical search
+    verify:
+    - python3 .scripts/test_node_semantics.py
+    - python3 .scripts/test_graph_delta.py
+  hub_semantics:
+    preconditions:
+    - Hub canonical 语义来自 Hub 页唯一的
+    - keyword 使用 title+description，proposition 使用 canonical statement，People page 只在存在可定位
+    - 默认 Hub 页面根为仓库根；隔离实验只能由受控 caller 显式配置 page root，并同时提供隔离 graph 与 embedding cache
+    writes:
+    - 程序可幂等更新 graph.db 的派生 `聚类于` membership 边及 score；不修改普通节点或事实边
+    - 仅显式 agent-confirmed lifecycle apply 写 Hub Wiki、nodes.description、parent/retired/alias 结构
+    - 显式配置 page root 时，Hub Wiki 只写该 root 下的镜像路径；不得回落生产 Wiki
+    - 摄入末期自动触发：候选簇 cohesion≥0.6 且 members≥4 时，触发 agent（强模型）生成 title/Scope/parent，validate_scope 通过后 create_hub(agent_confirmed=True) 落盘并 apply membership；不达标候选静默进 backlog，不报用户
+    - 血亲机制：membership 子Hub偏好（父Hub/子Hub同时命中时子Hub加分）；Hub 成员数≥上限时触发层次化分裂（先重分配到已有子Hub，仍超限则 analyze_split）；分裂子Hub centroid cosine≥0.85 视为无效分裂；merge 候选排除三代血亲（子方向边追溯，不含姻亲）
+    forbidden:
+    - 以 seeds、Hub 关键词列表、单一类型质心、节点数量或单一 embedding 分数定义、创建、分裂或合并 Hub
+    - 让 API LLM 决定 membership、聚类、merge/split 结构或直接激活 canonical Scope；hub 定义由 agent（强模型）处理，不经 API LLM
+    - 普通新增成员时自动重写 Hub Scope
+    - 让无 People page 的轻量 person entity 直接参与 Hub，或用姓名 embedding 代表人物语义
+    - 因节点未归类、归类歧义、旧 Hub 尚无 Scope或出现动力学候选而产生摄入 ERROR/WARN
+    - hub 自动创建候选向用户报告；达标候选由 agent 自动处理，不达标候选静默进 backlog
+    - 将实验 Hub 页面或 embedding 写入生产 academic/wiki 或 cross-domain/embeddings.db
+    - 恢复姻亲边；retired Hub 不参与 merge 候选，间接血缘传递链已断，子方向三代追溯足够
+    verify:
+    - python3 .scripts/test_hub_semantics.py
+    - python3 .scripts/test_ingest_paper.py
+    - python3 .scripts/test_ingest_pipeline.py
+  sync_keyword_aliases:
+    preconditions:
+    - graph.db 已初始化且有 entity 节点
+    writes:
+    - cross-domain/graph.db aliases 表（幂等 INSERT，跳过已存在）
+    forbidden:
+    - 合并不同概念的同缩写节点（须缩写+去标点名双匹配）
+    - 删除节点（只写 alias，不 merge/delete）
+    verify:
+    - python3 .scripts/sync_keyword_aliases.py（dry-run 预览碎片组数）
+    - python3 .scripts/sync_keyword_aliases.py --apply（写入 aliases 表）
+  ingest_check:
+    preconditions:
+    - 页面已写入；页面 sources 可解析时允许只读相邻 source.yaml 进行确定性书目一致性检查；使用 --graph 前已完成图写入
+    writes: []
+    forbidden:
+    - 将 WARN 静默留给未来 Lint
+    - 对 paper-summary 忽略 source.yaml 中 published year/DOI venue 与 wiki frontmatter 的确定性冲突
+    - 使用 --graph 时忽略作者集合、venue、占位符元数据、方向 Hub 唯一性、Raw 文档包节点或 Wiki→来源→Raw 直连缺失
+    - 因本页知识边未填写 locator 或 edge_evidence 而报错/告警；只检查已填写 locator 的可解析性
+    verify:
+    - python3 .scripts/test_ingest_check.py
+  ingest_build:
+    preconditions:
+    - 页面和图局部校验已通过；已按 INGEST 确认派生范围
+    writes:
+    - 目录、索引或状态等派生物
+    forbidden:
+    - 猜测参数后对全库重建
+    verify:
+    - 从 operations/INGEST.md 复制本轮指定收尾命令
+  extractor:
+    preconditions:
+    - PDF 已归档为 raw 实体副本
+    writes:
+    - 同目录 paper.md 及提取派生物
+    forbidden:
+    - 改写或删除来源 PDF 作为常规路径
+    - 另写 PyMuPDF 兜底
+    verify:
+    - python3 .scripts/test_extractor.py
+    - 检查 paper.md 并继续骨架/摄入流程
+  query_graph:
+    preconditions:
+    - 已确定查询目标；事实性结论另行从相邻 Wiki section 的 Raw 脚注回到 Raw，边 locator 仅作可选捷径
+    writes: []
+    forbidden:
+    - 把图边、Hub 或 Navigation 直接当事实答案
+    - 绕过 query_orchestrate 的预算和动作约束执行广泛检索
+    verify:
+    - python3 .scripts/test_prompt_audit.py
+    - python3 .scripts/test_query_graph_temporal.py
+  llm_structured:
+    preconditions:
+    - 调用方已提供 Schema 约束、模型配置和可审计输入
+    - 推理档位仅在 fast/standard/deep/xdeep 枚举内；provider reasoning 参数仅在显式配置时透传
+    - 长文本调用用 call_text（镜像 call_json 但跳过 JSON 解析，agent_handoff 行为一致）
+    - ingest_proposition 仅作兼容 operation 保留 call_json Schema + fast 档；默认论文 3.6c 不再调用
+    - ingest_bibliographic_review 使用 call_json Schema + fast 档，仅做候选裁决与版本含义识别；不得绕过调用方的候选边界
+    - fast 档允许调用方为短结构化任务显式申请一次重试；空输出且 finish_reason=length 时下一尝试必须禁用 reasoning 并扩大输出预算
+    writes:
+    - 仅输出调用方指定的结构化响应或草稿文件
+    - temp/llm-events/YYYY-MM-DD.jsonl（调用事件轨迹，只存 hash+length，不存明文 prompt/output）
+    forbidden:
+    - 绕过调用方的证据边界直接写 raw/wiki/graph.db
+    - 在配置缺失时静默降级模型或格式
+    - 用推理档位提高调用方的 max_tokens 或重试预算
+    - 假定所有 OpenAI-compatible 服务端支持同一 reasoning 字段
+    - 在已经没有后续尝试时仍返回“下轮扩容/下轮禁用思考参数”的误导性错误
+    verify:
+    - python3 .scripts/test_api_ingest.py
+    - python3 .scripts/test_prompt_audit.py
+    - python3 .scripts/test_ingest_paper.py
+    - python3 .scripts/test_llm_events.py
+    - python3 .scripts/test_query_api_loop.py
+  ingest_paper:
+    preconditions:
+    - inbox 学术 PDF；INGEST_BACKEND=api 时全自动，agent 时 3.2 书目预审与 3.3 wiki 撰写输出 agent_required 交接
+    - paper.md 生成后、persist_bibliographic_metadata 前执行 ingest_bibliographic_review 轻量预审；输入仅 PDF metadata、标题邻域与发表证据行
+    - 书目预审只裁决 PDF metadata 与 paper.md 机械提取的程序候选；机构/实验室/大学等 affiliation 只能进入 authors.rejected
+    - 书目 fields 必须有精确定位 evidence；无法裁决时对应 status=ambiguous 且 review_status=manual_required，禁止继续落位
+    - 预审锁定 state.bibliographic_meta 后，paper-id、skeleton、wiki frontmatter 与 graph 机械作者边只消费该结果，不再从 paper.md 二次解析
+    - API wiki 撰写以摘要、定理、结论确定性抽取的证据包锚定；定理/等式/性能结论保留对象、条件和比较基准
+    - 预审前读取 PDF metadata 与第一页发表页脚；同一证据行含 received/published 时 published year 优先；有近端 year/venue/DOI 证据时必须回填 skeleton/wiki
+    - APS DOI 采用确定性 journal/volume/article 映射补齐 venue，不允许从摘要或参考文献猜测本篇 venue
+    - conflicts 可保存结构化对象或描述性字符串审计项；title/venue 的错误 evidence 只在 paper.md 前 160 行存在唯一精确命中时机械重定位，窗口最多连续 4 行且 normalization 留痕，多处命中仍硬阻断
+    - 缺失或断行的 SLOTS wrapper 仅在去除包装后正文全部为完整三元组时容错，随后仍须通过完整 semantic parser/validator
+    writes:
+    - temp/inbox-extract/<txn>/ paper.md/manifest.json/语义槽与 wiki 草稿
+    - temp 事务 source.yaml.bibliographic（随 raw 原子落位）
+    - 最终 raw/wiki 经 inbox_finalize 原子落位
+    - cross-domain/graph.db 经 graph_ingest
+    - wiki/log.md 与 wiki/index.md 与派生目录
+    - raw 关系边(版本/补充材料/翻译,3.1 检测+3.7 建)
+    forbidden:
+    - agent 全程监控正常摄入（默认 quiet，仅读最终 JSON）
+    - 对非 inbox 来源或非学术 PDF 使用
+    - bibliographic_review_required 或 type 非 paper 时继续 persist/finalize/graph 提交
+    - 绕过书目预审而让 skeleton/wiki/graph 各自从 paper.md 再次解析 authors
+    - 书目预审自由生成候选之外的书目值，或把 affiliation 写入 authors.value
+    - 绕过 3.4/3.6/3.8 校验闭环
+    - 硬错误不回 3.3 而静默继续
+    - 把 warning 当失败回 3.3 全量重写（应走 3.6b 局部修复）
+    - 用 paper.md 正文首个引用年份覆盖已有 PDF metadata/第一页发表年份
+    - 首页明确写有 Published as a conference paper at <venue> <year> 时只提取年份而丢失 venue
+    - 让 LLM 覆盖程序已确定性填入的 date/venue
+    - 要求弱 LLM 生成 evidence JSON、source locator 或确定性书目边；语义模型只输出短三元组
+    - 默认调用 proposition 专用 LLM 把完整命题拆成原子三元组；3.6c 只登记稀疏程序编译状态，不增加 LLM 负担
+    - 不确定的 raw 关系不交 agent 确认而静默建边
+    - 从"关联/构造/表示"推断"基于"等方向边，或把研究对象、模型维度、实验设置和适用场景标为局限性
+    - 从 proposition 句内碎片创建 concept 节点；完整命题始终保留，概念链接交 graph_ingest 的唯一精确 title/alias 稀疏匹配
+    verify:
+    - python3 .scripts/test_ingest_paper.py
+    - python3 .scripts/engineering_graph.py validate
+  ingest_document:
+    preconditions:
+    - inbox 通用文档（.docx/.doc/.pptx/.txt/.pdf）；--subproject 指定域(admin/teaching/business)
+    writes:
+    - temp/inbox-extract/<txn>/ doc.md/manifest.json/语义槽与 wiki 草稿
+    - 最终 raw/wiki 经 inbox_finalize 原子落位
+    - cross-domain/graph.db 经 graph_ingest
+    - <subproject>/wiki/log.md 与 index.md 与派生目录
+    forbidden:
+    - agent 全程监控正常摄入（默认 quiet，仅读最终 JSON）
+    - 对学术论文 PDF 使用（走 ingest_paper.py）
+    - 绕过 3.4/3.6/3.8 校验闭环
+    - 硬错误不回 3.3 而静默继续
+    - 把 warning 当失败回 3.3 全量重写（应走 3.6b 局部修复）
+    verify:
+    - python3 .scripts/test_ingest_document.py
+    - python3 .scripts/test_ingest_admin.py
+    - python3 .scripts/engineering_graph.py validate
+  query_orchestrate:
+    preconditions: []
+    writes:
+    - .scripts/query_sessions/<sid>.json（会话持久化,含 stage/mode/read_sources）
+    forbidden: []
+    verify:
+    - python3 .scripts/test_query_orchestrate.py
+    - python3 .scripts/test_query_api_loop.py
+  frontier:
+    preconditions:
+    - 学术问题、论文明确开放问题、研究思路或验证记录已进入 Frontier 触发范围
+    - 用户问题须先完成知识库召回、重复候选检查与 kb_state 评估；模型不可用时保留 captured/pending
+    writes:
+    - academic/frontier/questions/*.md、trajectories/*.md（legacy intake/threads 仅迁移读取兼容）
+    - academic/frontier/frontier.db（可由 Markdown 全量重建的检索/稀疏导航索引）
+    forbidden:
+    - 修改 raw/wiki/cross-domain/graph.db 或向事实图写 Frontier 节点/边
+    - 将“知识库未找到答案”表述为“科学界尚未解决”
+    - AI 候选未经审查直接成为 active Question
+    - supported_claim 引用证据包外 locator，或因库内回答自动修改 scientific_state
+    - 为关键词连通性或 embedding 相似性自动写正式 Frontier 边
+    - 每篇论文无条件发散问题；论文触发只提取作者明示的开放问题、局限与 future work，且不阻断 ingest
+    - 完全回答或重复的问题无残余缺口时设为 active Question
+    verify:
+    - python3 .scripts/test_frontier.py
+    - python3 .scripts/test_wg.py
+    - python3 .scripts/engineering_graph.py validate
+  dsh_harness:
+    preconditions:
+    - dsh/ 是可选的 agent cockpit，不侵入 WikiGraph 核心
+    - agent 模式返回 handoff，API 模式驱动 turn/step 循环
+    writes:
+    - dsh/ 运行时状态在内存（SessionLog/ToolRegistry/guard chain）
+    - 不写 raw/wiki/graph.db；查询类工具经 _qa_call 直接调 query_actions，CLI 类工具经 _wg_call 调 wg.py
+    - read_raw 只接受章节、行范围或页码等精确 locator；裸路径与
+    - read_section 只返回一个 heading section 及该节 raw_citations，不读取整页
+    forbidden:
+    - 绕过 raw/ 红线直接修改知识库文件
+    - 让 DSH session log 替代 raw/ 或 graph.db 作为事实源
+    verify:
+    - python3 dsh/test_dsh_harness.py
+  dsh_ingest_tools:
+    preconditions:
+    - DSH 摄入工具只经子进程调用 ingest_inbox/ingest_paper/ingest_meeting/ingest_document/re_ingest
+    - 保持底层脚本 quiet JSON、独立事务与返回码分支；DSH 不重写摄入状态机
+    writes:
+    - 不直接写 raw/wiki/graph.db
+    - session log 记录 tool/call 与 tool/result；不作为事实源
+    forbidden:
+    - 绕过 --dry-run/--run 分支直接执行摄入
+    - 在 DSH 层删除 inbox 源文件或修改事务 JSON
+    - 把 DSH session log 当作 raw 证据或图边来源
+    verify:
+    - python3 dsh/test_dsh_ingest_tools.py
+    - python3 .scripts/engineering_graph.py validate
+  dsh_ingest_guard:
+    preconditions:
+    - 挂载在 ingest 工具 execute 瀑布前
+    writes:
+    - 无
+    forbidden:
+    - 放行 raw 路径写入、非法摄入参数或绕过 --run 的 dry-run 语义
+    verify:
+    - python3 dsh/test_dsh_ingest_tools.py
+  visual_qa:
+    preconditions:
+    - 输入是现有图片、PDF、PPT 或 PPTX；PPT/PPTX 只检查静态渲染页，不覆盖动画、视频或切换效果
+    - Agent 只在用户显式要求视觉检查，或修改请求依赖布局、位置、颜色、遮挡、比例、页面流等可见状态且需先检查才能可靠理解指令时调用；常规文字修改、编译与每轮交付不自动触发
+    - 视觉模型默认取 llm-models.yaml 登记的 GLM-4.6V，失败时可回退 GLM-4.5V；无可用 API 时必须明确返回 not_checked/partial，不得伪装为通过
+    - 运行时自动读取仓库根 `.env` 并展开同文件 `${NAME}` 引用，进程环境同名变量优先；VISUAL_QA_API_BASE/KEY 可引用主 LLM endpoint/key
+    - raw、inbox、私有源材料与 paper-profile 论文/稿件 PDF 默认只做本地确定性检查；只有调用方显式 allow_remote 才允许上传页面图像到远程视觉 API
+    writes:
+    - temp/visual-qa/<artifact-sha>/<profile>/<check-key>/ 下 manifest、逐页 receipt、渲染缓存与 summary
+    forbidden:
+    - 修改输入图片、PDF、PPT/PPTX、raw/wiki/graph.db 或科学数据与结论
+    - 将启发式警告或视觉模型判断当作原始事实证据
+    - API 失败、非法 JSON 或未检查页面时给出全局 pass
+    - 将 API key、Authorization header、明文 prompt/context 或 data URL 写入 manifest、逐页 receipt、summary 或 DSH SessionLog
+    - 重跑时覆盖已完成且输入、模型、prompt、schema、render 配置哈希一致的逐页 receipt
+    verify:
+    - python3 .scripts/test_visual_qa.py
+    - python3 dsh/test_visual_tools.py
+    - python3 .scripts/engineering_graph.py validate
+  dsh_visual_tools:
+    preconditions:
+    - visual_check 仅注册在独立 VisualAgentLoop；不加入 query_actions，也不挂接事实查询 CitationGuard
+    writes:
+    - 仅通过 visual_qa 写 temp/visual-qa receipt；DSH SessionLog 只记录工具调用与紧凑结果
+    forbidden:
+    - 因普通 PDF 摄入或事实查询意图触发视觉检查
+    - 自动修改视觉产物、源文档或知识库
+    verify:
+    - python3 dsh/test_visual_tools.py
+    - python3 .scripts/engineering_graph.py validate
+  visual_to_editable_ppt:
+    preconditions:
+    - 输入是现有图片或 PDF；矢量 PDF 优先直接提取文字与路径，位图/扫描页才进入 OCR 与图形检测，不得无条件栅格化
+    - 默认 balanced 模式以视觉忠实为先；只有高置信度可见元素转为原生文本框、线段、矩形、椭圆或自由曲线，复杂区域允许保留可追踪的局部位图 fallback
+    - 远程视觉模型默认取 llm-models.yaml 登记的 GLM-4.6V，失败时回退 GLM-4.5V；敏感路径与 paper-profile 内容只有显式 allow_remote 才可上传
+    writes:
+    - 仅写显式 output_path 与 temp/visual-to-ppt/<artifact-sha>/<run-key>/ 下 manifest、逐页中间对象、receipt、渲染缓存、差异报告和最终装配 checkpoint
+    - 输出 PPTX 使用独立原生对象；fallback 位图必须在对象 manifest 中记录范围、原因和置信度，不得伪报完全可编辑
+    forbidden:
+    - 修改输入图片/PDF、raw/wiki/graph.db 或科学数据与结论
+    - 未经 overwrite 显式授权覆盖既有输出；把远程模型返回的路径、命令、XML 或对象 ID 直接当作可信执行输入
+    - API/OCR 失败或存在 fallback 时报告百分之百可编辑；将 API key、Authorization header、明文 data URL 写入 receipt 或 DSH SessionLog
+    - 因普通视觉检查、PDF 摄入、事实查询或论文阅读意图自动触发转换
+    verify:
+    - python3 .scripts/test_visual_to_editable_ppt.py
+    - python3 dsh/test_visual_reconstruction_tools.py
+    - python3 .scripts/test_visual_qa.py
+    - python3 .scripts/engineering_graph.py validate
+  dsh_visual_reconstruction_tools:
+    preconditions:
+    - visual_to_editable_ppt 只注册在 VisualReconstructionAgentLoop，并要求显式源路径；不得加入 query_actions、VisualAgentLoop 或事实查询 CitationGuard
+    - 输出路径省略时只能落在 projects/visual-reconstruction/outputs/，既有文件默认拒绝覆盖
+    writes:
+    - 仅通过 visual_to_editable_ppt 核心能力写 output_path 与 temp/visual-to-ppt checkpoint；DSH SessionLog 只记录紧凑调用参数和结果摘要
+    forbidden:
+    - 从普通 visual_check 意图、摄入意图或 query/research 意图触发；自动修改源文件或知识库
+    - 绕过路径、远程上传、overwrite 或断点续做参数的核心校验
+    verify:
+    - python3 dsh/test_visual_reconstruction_tools.py
+    - python3 .scripts/engineering_graph.py validate
+untracked:
+- baseline_bm25
+- baseline_hierarchical
+- baseline_krwiki
+- baseline_nav
+- baseline_vector
+- embed_helper
+- embed_init
+- migrate_section
+- migrate_source_locators
+- answer_judge
+- count_tokens
+- recompute_tokens
+- metrics
+- verify_dims
+- query_ablation
+- fix_source_type
+- normalize_core_triples_source
+- model_adaptation_test

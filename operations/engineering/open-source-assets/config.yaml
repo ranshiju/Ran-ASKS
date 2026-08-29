@@ -1,0 +1,20 @@
+# WikiGraph configuration
+# Configure optional external roots locally; never commit personal paths.
+version: '1.0'
+project_name: WikiGraph
+
+synology_roots:
+  # - /path/to/SynologyDrive
+
+extraction:
+  auto_extract: true
+  mineru:
+    enabled: true
+    api_base_url: https://mineru.net/api/v4
+    token_env: MINERU_API_TOKEN
+    model_version: vlm
+    timeout_sec: 1800
+    poll_interval_sec: 5
+    request_timeout_sec: 60
+    keep_archive: false
+  docling_venv: ".venv-docling"

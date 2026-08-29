@@ -1,0 +1,15 @@
+# 候选谓词自动治理配置。正式化不自动建立反向关系或研究方向 tier。
+aliases:
+  应用到: 应用于
+  用于: 应用于
+  建立于: 基于
+  # 2026-08-09 低频谓词归一化：泛化系动词/同义变体归并到规范谓词
+  为: 等于
+  从向量推广到: 推广
+  可推广到: 推广
+  受限于: 局限性
+  缺少: 缺乏
+observation_min_pages: 3
+observation_min_sources: 2
+formal_min_pages: 10
+consistent_subject_ratio: 0.8
