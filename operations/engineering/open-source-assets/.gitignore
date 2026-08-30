@@ -60,3 +60,7 @@ memory/**
 !memory/.gitkeep
 temp/**
 !temp/.gitkeep
+
+# Explicitly approved, frozen paper artifacts are release content.
+!paper-artifacts/
+!paper-artifacts/**

@@ -1803,6 +1803,7 @@ script_contracts:
     - 将 active projects/.project 节点、依赖边、验证命令或脚本契约复制到公开工程图
     - VERSION 缺失、非 semver，或 README release badge 与 VERSION 不一致时仍验证通过
     - 只更新英文 README 的版本标记，造成中英文版本信息漂移
+    - 目标 `.gitignore` 隐藏白名单文件，导致生成树通过但 Git 提交缺件
     - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
     verify:
     - python3 .scripts/test_open_source_release.py

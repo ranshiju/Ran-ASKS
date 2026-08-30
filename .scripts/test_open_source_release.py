@@ -21,6 +21,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         destination = Path(temporary) / "release"
         run("build", str(destination))
+        subprocess.run(["git", "init", "-q"], cwd=destination, check=True)
         verified = run("verify", str(destination))
         assert "Public release verified" in verified.stdout
         assert (destination / "README.md").is_file()
@@ -80,6 +81,13 @@ def main() -> None:
             cwd=destination, text=True, capture_output=True,
         )
         assert graph_check.returncode == 0, graph_check.stdout + graph_check.stderr
+
+        gitignore = destination / ".gitignore"
+        original_gitignore = gitignore.read_text(encoding="utf-8")
+        gitignore.write_text(original_gitignore + "\npaper-artifacts/**\n", encoding="utf-8")
+        ignored = run("verify", str(destination), expected=1)
+        assert "release file ignored by destination .gitignore" in ignored.stderr
+        gitignore.write_text(original_gitignore, encoding="utf-8")
 
         (destination / "academic/raw/leak.txt").write_text("private", encoding="utf-8")
         failed = run("verify", str(destination), expected=1)

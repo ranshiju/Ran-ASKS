@@ -8,6 +8,7 @@ import fnmatch
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -213,6 +214,27 @@ def actual_files(destination: Path) -> set[str]:
     }
 
 
+def git_ignored_files(destination: Path, paths: set[str]) -> list[str]:
+    probe = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=destination,
+        text=True,
+        capture_output=True,
+    )
+    if probe.returncode != 0:
+        return []
+    checked = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--stdin"],
+        cwd=destination,
+        input="\n".join(sorted(paths)) + "\n",
+        text=True,
+        capture_output=True,
+    )
+    if checked.returncode not in (0, 1):
+        raise ValueError(f"git ignore audit failed: {checked.stderr.strip()}")
+    return [line for line in checked.stdout.splitlines() if line]
+
+
 def verify(destination: Path) -> int:
     manifest = load_manifest()
     destination = destination.resolve()
@@ -244,6 +266,11 @@ def verify(destination: Path) -> int:
         failures.append(f"missing expected file: {path}")
     for path in sorted(actual - expected):
         failures.append(f"unexpected file: {path}")
+    try:
+        for path in git_ignored_files(destination, actual):
+            failures.append(f"release file ignored by destination .gitignore: {path}")
+    except ValueError as error:
+        failures.append(str(error))
     public_graph_path = destination / PUBLIC_GRAPH_PATH
     if public_graph_path.is_file():
         try:

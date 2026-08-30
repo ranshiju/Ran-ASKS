@@ -27,7 +27,9 @@ The public release is an engineering template, never a copy of the personal know
 2. Build a clean tree; the command only copies manifest-approved files.
 3. Verify the tree before staging or publishing.
 4. Verify every included paper artifact with `.scripts/paper_artifact.py verify`.
-5. Review the staged diff and run the normal engineering regressions.
+5. In a Git worktree, verify that no manifest-approved release file is excluded
+   by the destination `.gitignore`.
+6. Review the staged diff and run the normal engineering regressions.
 
 ```bash
 python3 .scripts/open_source_release.py build /path/to/WikiGraph_clean --clean --force
@@ -41,6 +43,10 @@ The generated `operations/engineering/graph.yaml` is a deterministic public proj
 ## Maintenance rule
 
 Do not hand-edit the generated public worktree except for Git metadata. Make engineering changes in the source repository, then rebuild the release. If a private detail appears in a public document, split it at the source and add a regression assertion when the pattern is mechanically detectable.
+
+The generic Raw/Wiki ignore rules must not hide a manifest-approved frozen
+artifact. `paper-artifacts/**` is an explicit tracking exception, and release
+verification rejects ignored files whenever the destination is a Git worktree.
 
 A paper artifact becomes immutable when its first public Git tag and Release
 are created. Later ASKS development continues on `main`; corrections to the

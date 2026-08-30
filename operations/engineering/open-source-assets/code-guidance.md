@@ -911,7 +911,7 @@ python3 .scripts/visual_to_editable_ppt.py <figure.png|document.pdf> \
 - **先读**：`operations/engineering/open-source-release.md` 与 `operations/engineering/open-source-manifest.yaml`。
 - **调用**：`python3 .scripts/open_source_release.py build <目标目录> --clean --force`；随后 `python3 .scripts/open_source_release.py verify <目标目录>`。
 - **边界**：只复制 manifest 批准文件和公开资产；不读取或复制业务知识内容。DSH 作为公开执行层随 `dsh/**` 发布；active `projects/` 与 `.project/` 节点从公开工程图移除。目标非空时必须同时显式给出 `--clean --force`；脚本保留目标的 `.git` 元数据。
-- **验证**：`python3 .scripts/test_open_source_release.py`；发布前再运行 `verify`，并在生成树内运行 `python3 .scripts/engineering_graph.py validate` 与相关工程回归。
+- **验证**：`python3 .scripts/test_open_source_release.py`；发布前再运行 `verify`，并在生成树内运行 `python3 .scripts/engineering_graph.py validate` 与相关工程回归。目标是 Git 工作树时，`verify` 还会拒绝任何被目标 `.gitignore` 隐藏的白名单文件，确保生成树与实际可提交树一致。
 
 ## 7. 论文数据产物：`.scripts/paper_artifact.py`
 
