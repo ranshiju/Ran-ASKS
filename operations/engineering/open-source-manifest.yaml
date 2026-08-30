@@ -33,6 +33,7 @@ exclude:
   - "**/*.db"
 public_assets:
   README.md: operations/engineering/open-source-assets/README.md
+  docs/assets/scientific-knowledge-compilation.png: operations/engineering/open-source-assets/docs/assets/scientific-knowledge-compilation.png
   config.yaml: operations/engineering/open-source-assets/config.yaml
   .gitignore: operations/engineering/open-source-assets/.gitignore
   DATA_POLICY.md: operations/engineering/open-source-assets/DATA_POLICY.md
