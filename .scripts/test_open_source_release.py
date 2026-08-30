@@ -24,9 +24,13 @@ def main() -> None:
         verified = run("verify", str(destination))
         assert "Public release verified" in verified.stdout
         assert (destination / "README.md").is_file()
+        assert (destination / "THIRD_PARTY_NOTICES.md").is_file()
         assert (destination / "VERSION").is_file()
         assert (destination / "VERSION").read_text(encoding="utf-8").strip() == expected_version
         assert f"> Current release: v{expected_version}" in (destination / "README.md").read_text(encoding="utf-8")
+        assert "[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)" in (
+            destination / "README.md"
+        ).read_text(encoding="utf-8")
         assert (destination / ".scripts/route.py").is_file()
         assert (destination / "operations/QUERY.md").is_file()
         assert (destination / "agents/writer/AGENT.md").is_file()

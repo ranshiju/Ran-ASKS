@@ -1,6 +1,8 @@
 # 开源项目参考记录
 
 > 本文件记录 WikiGraph 项目参考、借鉴或直接使用的开源项目。每次新增参考时须追加条目，不得遗漏。
+> 面向公开仓库的英文摘要与许可证边界见
+> `operations/engineering/open-source-assets/THIRD_PARTY_NOTICES.md`。
 
 ## 记录规范
 

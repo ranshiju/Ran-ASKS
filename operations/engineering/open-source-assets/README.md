@@ -162,6 +162,26 @@ commit, especially when a file under `raw/` or `wiki/` has been force-added.
 
 See [DATA_POLICY.md](DATA_POLICY.md) for the publication boundary.
 
+## Acknowledgements and upstream projects
+
+Ran-ASKS distinguishes software it calls from projects that influenced its
+architecture. The table describes the relationship and the concrete scope;
+architectural influence does not imply that the upstream runtime or source code
+is bundled here.
+
+| Project | Relationship | Scope in Ran-ASKS |
+| --- | --- | --- |
+| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | Architectural influence | DSH ToolRegistry, hooks, session log, guard-chain, and plugin concepts, reimplemented in Python |
+| [Semantica](https://github.com/semantica-agi/semantica) | Adapted patterns | Declarative constraints, provenance, and temporal validity within the Ran-ASKS graph boundary |
+| [MinerU](https://github.com/opendatalab/MinerU) | Preferred external backend | Structured PDF extraction for paper ingestion |
+| [Docling](https://github.com/docling-project/docling) | Optional local backend | Explicitly selected local document extraction |
+| [PyMuPDF](https://github.com/pymupdf/PyMuPDF) | Runtime dependency | PDF access, rendering, metadata, and vector inspection |
+| [python-pptx](https://github.com/scanny/python-pptx) | Runtime dependency | Native editable PowerPoint object generation |
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the complete
+relationship, scope, and upstream-license record, including dependencies not
+listed in this short table and projects considered but not integrated.
+
 ## Citation
 
 The paper citation and BibTeX entry will be added when the arXiv record is
