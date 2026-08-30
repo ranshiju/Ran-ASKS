@@ -907,7 +907,7 @@ python3 .scripts/visual_to_editable_ppt.py <figure.png|document.pdf> \
 
 ## 6. 开源发布：`.scripts/open_source_release.py`
 
-- **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。
+- **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。中英文 README 均由公开资产生成，发布时同步写入版本标记并验证双向语言入口。
 - **先读**：`operations/engineering/open-source-release.md` 与 `operations/engineering/open-source-manifest.yaml`。
 - **调用**：`python3 .scripts/open_source_release.py build <目标目录> --clean --force`；随后 `python3 .scripts/open_source_release.py verify <目标目录>`。
 - **边界**：只复制 manifest 批准文件和公开资产；不读取或复制业务知识内容。DSH 作为公开执行层随 `dsh/**` 发布；active `projects/` 与 `.project/` 节点从公开工程图移除。目标非空时必须同时显式给出 `--clean --force`；脚本保留目标的 `.git` 元数据。

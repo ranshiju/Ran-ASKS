@@ -24,10 +24,20 @@ def main() -> None:
         verified = run("verify", str(destination))
         assert "Public release verified" in verified.stdout
         assert (destination / "README.md").is_file()
+        assert (destination / "README.zh-CN.md").is_file()
         assert (destination / "THIRD_PARTY_NOTICES.md").is_file()
         assert (destination / "VERSION").is_file()
         assert (destination / "VERSION").read_text(encoding="utf-8").strip() == expected_version
         assert f"> Current release: v{expected_version}" in (destination / "README.md").read_text(encoding="utf-8")
+        assert f"> 当前发布版本: v{expected_version}" in (
+            destination / "README.zh-CN.md"
+        ).read_text(encoding="utf-8")
+        assert "[简体中文](README.zh-CN.md)" in (
+            destination / "README.md"
+        ).read_text(encoding="utf-8")
+        assert "[English](README.md)" in (
+            destination / "README.zh-CN.md"
+        ).read_text(encoding="utf-8")
         assert "[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)" in (
             destination / "README.md"
         ).read_text(encoding="utf-8")

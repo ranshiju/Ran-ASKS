@@ -32,6 +32,7 @@ exclude:
   - "**/*.db"
 public_assets:
   README.md: operations/engineering/open-source-assets/README.md
+  README.zh-CN.md: operations/engineering/open-source-assets/README.zh-CN.md
   THIRD_PARTY_NOTICES.md: operations/engineering/open-source-assets/THIRD_PARTY_NOTICES.md
   docs/assets/scientific-knowledge-compilation.png: operations/engineering/open-source-assets/docs/assets/scientific-knowledge-compilation.png
   config.yaml: operations/engineering/open-source-assets/config.yaml

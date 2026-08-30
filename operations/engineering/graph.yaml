@@ -1793,6 +1793,7 @@ script_contracts:
   open_source_release:
     preconditions:
     - 根目录 VERSION 已按 MAJOR.MINOR.PATCH 更新；白名单 manifest 已覆盖本期公开文件
+    - 中英文 README 公开资产均存在，包含双向语言入口
     - 公开 capability 的 required 节点均存在于 allowlisted 目标树；active projects/.project 路径只保留在私有工程图
     writes:
     - 指定目标公开树（绝不能写入 REPO 自身）
@@ -1801,6 +1802,7 @@ script_contracts:
     - 手工向生成公开树补入业务文件
     - 将 active projects/.project 节点、依赖边、验证命令或脚本契约复制到公开工程图
     - VERSION 缺失、非 semver，或 README release badge 与 VERSION 不一致时仍验证通过
+    - 只更新英文 README 的版本标记，造成中英文版本信息漂移
     - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
     verify:
     - python3 .scripts/test_open_source_release.py

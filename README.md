@@ -1,6 +1,8 @@
 # Ran-ASKS
 > Current release: v0.2.0
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **ASKS (Agent-Driven Scientific Knowledge System)** is a persistent,
 source-traceable knowledge system for sustained scientific work. Ran-ASKS is
 its source-available engineering implementation.
