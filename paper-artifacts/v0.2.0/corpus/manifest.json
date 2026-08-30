@@ -1,0 +1,1599 @@
+{
+  "entries": [
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "2500145ee87847503637dee9e37e045c728abaaee6878c09afeb74710566bb11",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.82.134434",
+      "entry_id": "2010-distorted-kagome",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2010",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D001",
+      "sequence_index": 1,
+      "title": "Phase transitions and thermodynamics of the two-dimensional Ising model on a distorted kagome lattice",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2010-distorted-kagome"
+    },
+    {
+      "adjudication_note": "Directory year 2010 is the received/preprint year; formal publication year is 2011",
+      "canonical_pdf_sha256": "64ed539cb68c57f91251b40bd3a8924d9c639a57a1c66a9216aab9abd182fff4",
+      "decision": "include",
+      "doi": "10.1103/PhysRevLett.106.127202",
+      "entry_id": "2010-ltrg",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "PDF header: published 22 March 2011; PRL 106, 127202 (2011)",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-year"
+      ],
+      "publication_year": "2011",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D002",
+      "sequence_index": 2,
+      "title": "Linearized Tensor Renormalization Group Algorithm for the Calculation of Thermodynamic Properties of Quantum Lattice Models",
+      "venue_signals": [],
+      "work_id": "2010-ltrg"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "25e3a4e3e4cde43a91e025d9bc757234effab273613061fbb7a63a2f2c63ad44",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.86.134429",
+      "entry_id": "2012-odtns",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2012",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D004",
+      "sequence_index": 4,
+      "title": "Optimized decimation of tensor networks with super-orthogonalization for two-dimensional quantum lattice models",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2012-odtns"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "41db914368eff13298328dea46e5941cad7fba2bb95b508058cb60b5d4e1d743",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.85.134425",
+      "entry_id": "2012-spin-1-chain-闫",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2012",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D003",
+      "sequence_index": 3,
+      "title": "Phase diagrams, distinct conformal anomalies, and thermodynamics of spin-1 bond-alternating Heisenberg antiferromagnetic chain in magnetic fields",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2012-spin-1-chain-闫"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "635f4c8c76482982876a872dcd07b1385bb443265d56ca1608b8bcdfd5ed480c",
+      "decision": "include",
+      "doi": "10.1103/PhysRevE.87.032151",
+      "entry_id": "2013-kt-phase",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2013",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D007",
+      "sequence_index": 7,
+      "title": "Kosterlitz-Thouless phase transition and re-entrance in an anisotropic three-state Potts model on the generalized kagome lattice",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2013-kt-phase"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "6f5fc22cf2e88e758f38ba0df09ab92dd2f281b4e9d18d583ad400752d937e33",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.88.064407",
+      "entry_id": "2013-ncd-physrevb88064407",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2013",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D006",
+      "sequence_index": 6,
+      "title": "Theory of network contractor dynamics for exploring thermodynamic properties of two-dimensional quantum lattice models",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2013-ncd-physrevb88064407"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "c7e7b6272349716722c769bd4673b95f1272baf7a9613e5c604313ce35114703",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.89.054426",
+      "entry_id": "2014-husimi",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2014",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D008",
+      "sequence_index": 8,
+      "title": "Featureless quantum spin liquid, 1-magnetization plateau state, and exotic thermodynamic properties of the spin-1 frustrated Heisenberg antiferromagnet on an infinite Husimi lattice",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2014-husimi"
+    },
+    {
+      "adjudication_note": "PDF contains EPL 104 (2013) 57009 and DOI 10.1209/0295-5075/104/57009; directory year 2014 is not the publication year",
+      "canonical_pdf_sha256": "8193e299f27c1d4a8d3067fdf4a3111d2adb80ca0b5b6a12cb728b46d2424568",
+      "decision": "include",
+      "doi": "",
+      "entry_id": "2014-zhaoyanghoneycombladder",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "PDF header: published online 23 December 2013; EPL 104 (2013) 57009",
+      "publication_evidence": [
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2013",
+      "related_to": "",
+      "review_reasons": [
+        "formal-publication-evidence-not-detected"
+      ],
+      "role": "publication_candidate",
+      "run_id": "D005",
+      "sequence_index": 5,
+      "title": "Honeycomb Heisenberg spin ladder: Unusual ground state and thermodynamic properties",
+      "venue_signals": [],
+      "work_id": "2014-zhaoyanghoneycombladder"
+    },
+    {
+      "adjudication_note": "DOI suffix records the 2015 manuscript identifier; formal publication year is 2016",
+      "canonical_pdf_sha256": "718620fcf9350d2d70b26c189be39dc693521e0f698d4e3c9a15d59ca6ba0514",
+      "decision": "include",
+      "doi": "10.1140/epjb/e2015-60745-5",
+      "entry_id": "2015-sierpinskie2015-60745-5",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "PDF header: Published online 1 February 2016; Eur. Phys. J. B (2016) 89:27",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-published-year"
+      ],
+      "publication_year": "2016",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D010",
+      "sequence_index": 10,
+      "title": "Phase diagram and exotic spin-spin correlations of anisotropic Ising model on the Sierpi´nski gasket",
+      "venue_signals": [
+        "published-statement"
+      ],
+      "work_id": "2015-sierpinskie2015-60745-5"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "1d3914ff225fc375ed764217a83710cd3ea4ac3ea4fbb31e436dc88ce8478d0c",
+      "decision": "include",
+      "doi": "10.1103/PhysRevE.93.053310",
+      "entry_id": "2016-aop-physreve93053310",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2016",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D009",
+      "sequence_index": 9,
+      "title": "Ab initio optimization principle for the ground states of translationally invariant strongly correlated quantum lattice models",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2016-aop-physreve93053310"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "df303ced5bf91f94d53f4f2dbfe6f002cfbd063d7cee20e8d39dda46d824870a",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.95.155114",
+      "entry_id": "2017-criticality-tn-2d",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2017",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D013",
+      "sequence_index": 13,
+      "title": "Criticality in two-dimensional quantum systems: Tensor network approach",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2017-criticality-tn-2d"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "7007d8858fcd4c8ddc04499450bc0e57d25fcd224399db0a726202627518d387",
+      "decision": "include",
+      "doi": "10.1103/PhysRevX.7.031057",
+      "entry_id": "2017-cruezphysrevx7031057",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2017",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D015",
+      "sequence_index": 15,
+      "title": "Exploring Interacting Topological Insulators with Ultracold Atoms: The Synthetic Creutz-Hubbard Model",
+      "venue_signals": [
+        "published-statement",
+        "physical-review"
+      ],
+      "work_id": "2017-cruezphysrevx7031057"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "68e4390dd7bb1596ad37ce278c155b6e0139e6bf49203c304ee4bfa2fa5387d4",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.96.155120",
+      "entry_id": "2017-fewbody-qes-ground-states",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2017",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D014",
+      "sequence_index": 14,
+      "title": "Few-body systems capture many-body physics: Tensor network approach",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2017-fewbody-qes-ground-states"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "ea4abc5aeb45dd5ceef371576790cd305a08b54a37bb987c25948d372a79dbf4",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.95.075140",
+      "entry_id": "2017-octa-kagome",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2017",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D012",
+      "sequence_index": 12,
+      "title": "Fermionic algebraic quantum spin liquid in an octa-kagome frustrated antiferromagnet",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2017-octa-kagome"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "9f84392f86cbd1e9a1c1fcd28cb83ddeebda106b195bab21cf68cca1e9ffdaa8",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.95.064110",
+      "entry_id": "2017-ptdmrgphysrevb95064110",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2017",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D011",
+      "sequence_index": 11,
+      "title": "Efficient perturbation theory to improve the density matrix renormalization group",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2017-ptdmrgphysrevb95064110"
+    },
+    {
+      "adjudication_note": "PDF contains journal title, volume/issue and article-number publication header; directory year 2018 reflects manuscript timing",
+      "canonical_pdf_sha256": "2ac7e6dab3190212e43237f33626b0c79ba65a6f72e23da21c83e47fce793769",
+      "decision": "include",
+      "doi": "",
+      "entry_id": "2018-091彭程",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "PDF journal header and issue metadata identify the 2019 publication; PDF creation timestamp is also 2019",
+      "publication_evidence": [
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2019",
+      "related_to": "",
+      "review_reasons": [
+        "formal-publication-evidence-not-detected"
+      ],
+      "role": "publication_candidate",
+      "run_id": "D020",
+      "sequence_index": 20,
+      "title": "时间矩阵乘积态理论及其应用",
+      "venue_signals": [],
+      "work_id": "2018-091彭程"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "72073a4cbb8872a3debb2a50804c1b33644fe0ec95f36dce6761241ee4698e76",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.98.085111",
+      "entry_id": "2018-csw-physrevb98085111",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2018",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D018",
+      "sequence_index": 18,
+      "title": "Controlling the phase diagram of finite spin-$\\frac{1}{2}$ chains by tuning the boundary interactions",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2018-csw-physrevb98085111"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "88c6651b7477e2c363d2780ef52d9e75dc874b44faddfa13bbcbf9affdda3d71",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.97.075146",
+      "entry_id": "2018-emergent-spin-1-trimerized-valence-bond-crystal",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2018",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D017",
+      "sequence_index": 17,
+      "title": "Emergent spin-1 trimerized valence bond crystal in the spin- <sup>1</sup> Heisenberg model on the star lattice",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2018-emergent-spin-1-trimerized-valence-bond-crystal"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "ac6b264f133d022acddf836a923a86540b0dd2a67684a139f4315fa47cbaa20f",
+      "decision": "include",
+      "doi": "10.1016/j.scib.2018.11.007",
+      "entry_id": "2018-kagome-chenxi",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2018",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D016",
+      "sequence_index": 16,
+      "title": "Thermodynamics of spin-1/2 Kagomé Heisenberg antiferromagnet: algebraic paramagnetic liquid and finite-temperature phase diagram",
+      "venue_signals": [
+        "published-statement"
+      ],
+      "work_id": "2018-kagome-chenxi"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "c29aedae0dff40a0f138488dfda596c8e7ffa63fa865fa5ab79a00b9cb5605b9",
+      "decision": "include",
+      "doi": "10.1140/epjb/e2018-90197-2",
+      "entry_id": "2018-pc-epjb",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2018",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D019",
+      "sequence_index": 19,
+      "title": "Exotic entanglement scaling of Heisenberg antiferromagnet on honeycomb lattice",
+      "venue_signals": [],
+      "work_id": "2018-pc-epjb"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "0c5cbb6ff5bf978d04a56f821a2cd6cded81185f213f9c52f6747402d2769bab",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.99.205132",
+      "entry_id": "2019-finite-temperature-qes",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2019",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D023",
+      "sequence_index": 23,
+      "title": "Efficient quantum simulation for thermodynamics of infinite-size many-body systems in arbitrary dimensions",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2019-finite-temperature-qes"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "bd7ff1ffb4ea2a67be515147cef2aa4f37972129914695083188b475ffa6f567",
+      "decision": "include",
+      "doi": "10.1088/1367-2630/ab31ef",
+      "entry_id": "2019-machine-learning-by-unitary-tensor-network-of-hierarchical-tree-structure",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-citation-banner",
+        "pdf-metadata-creation-year-weak",
+        "author-confirmed-doi"
+      ],
+      "publication_year": "2019",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D021",
+      "sequence_index": 21,
+      "title": "Machine learning by unitary tensor network of hierarchical tree structure",
+      "venue_signals": [
+        "citation-banner"
+      ],
+      "work_id": "2019-machine-learning-by-unitary-tensor-network-of-hierarchical-tree-structure"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "d7447f5a4ef72b7246e65d07d571d8319e032c7243dcec929193b5449f6076ae",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.99.195101",
+      "entry_id": "2019-noise-tolerant-signature-ofzntopological-order-in-quantum-many-body-states",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2019",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D022",
+      "sequence_index": 22,
+      "title": "Noise-tolerant signature of Z<sub>N</sub> topological order in quantum many-body states",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2019-noise-tolerant-signature-ofzntopological-order-in-quantum-many-body-states"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "1375dd349bdda3e088512cb167969a651281c63322875a921400bbb78dd52968",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.101.075135",
+      "entry_id": "2020-gtnc",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2020",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D027",
+      "sequence_index": 27,
+      "title": "Generative tensor network classification model for supervised machine learning",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2020-gtnc"
+    },
+    {
+      "adjudication_note": "PDF title explicitly says Supplemental Material",
+      "canonical_pdf_sha256": "407877f8e5794ffb1dd3ea920670f0410a0504d031acf3054ea46b6868ed26cc",
+      "decision": "related",
+      "doi": "",
+      "entry_id": "2020-gtnc-sm",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2020",
+      "related_to": "2020-gtnc",
+      "review_reasons": [
+        "supplementary-name-signal",
+        "formal-publication-evidence-not-detected"
+      ],
+      "role": "supplementary_candidate",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "Supplemental Material for ‘Generative Tensor Network Classification Model for Supervised Machine Learning’",
+      "venue_signals": [],
+      "work_id": "2020-gtnc"
+    },
+    {
+      "adjudication_note": "Excluded from the formal-publication corpus: arXiv:1912.12923 is an earlier version of the formally published GTNC work represented by 2020-gtnc.",
+      "canonical_pdf_sha256": "e7bf18e9d1a407b73b4fa4d93cf4f91fd2f1694afeea4c3310208d6878ebfd84",
+      "decision": "related",
+      "doi": "",
+      "entry_id": "2020-ijcai子会议-gtnc",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2020",
+      "related_to": "2020-gtnc",
+      "review_reasons": [
+        "possible-conference-version",
+        "formal-publication-evidence-not-detected"
+      ],
+      "role": "publication_version",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "Generative Tensor Network Classification for Supervised Learning",
+      "venue_signals": [],
+      "work_id": "2020-ijcai子会议-gtnc"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "2115b36d207b79782e4a586ea46542dfe0307c6424e77348e5512c28d0f65c7f",
+      "decision": "include",
+      "doi": "10.1103/PhysRevA.101.032310",
+      "entry_id": "2020-mps_deep_encoding_circuit",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2020",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D025",
+      "sequence_index": 25,
+      "title": "Encoding of matrix product states into quantum circuits of one- and two-qubit gates",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2020-mps_deep_encoding_circuit"
+    },
+    {
+      "adjudication_note": "Excluded from the formal-publication corpus: the PDF identifies itself as an extended abstract explaining Phys. Rev. E 102, 012152 (2020).",
+      "canonical_pdf_sha256": "f2488f64095bc57c23184bbe2874861e033f699e1e9218ed6a5e0d877a146fec",
+      "decision": "related",
+      "doi": "",
+      "entry_id": "2020-nips子会议-tsgo",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-physical-review",
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2020",
+      "related_to": "2020-tsgo-tangent-space-gradient-optimization-of-tensor-network-for-machine-learning",
+      "review_reasons": [
+        "possible-conference-version"
+      ],
+      "role": "publication_version",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "Tangent-space gradient optimization: an efficient update scheme for tensor network machine learning and beyond",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2020-nips子会议-tsgo"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "a8eccea2d57dc66a5a6f39bf9e5a9be31472adecb5bd73775cf913b592896b00",
+      "decision": "include",
+      "doi": "10.1038/s41557-020-0544-y",
+      "entry_id": "2020-paulinets-hermann",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2020",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D024",
+      "sequence_index": 24,
+      "title": "Deep-neural-network solution of the electronic Schrödinger equation",
+      "venue_signals": [],
+      "work_id": "2020-paulinets-hermann"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "7011b39cba5a2d95b51ad498f25e2f6944b48e1ae03dee6ea262a1619364e777",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.101.045133",
+      "entry_id": "2020-sawtooth",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2020",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D026",
+      "sequence_index": 26,
+      "title": "Reentrance of the topological phase in a spin-1 frustrated Heisenberg chain",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2020-sawtooth"
+    },
+    {
+      "adjudication_note": "PDF title explicitly says Supplementary Material",
+      "canonical_pdf_sha256": "ddaae60dcf32f0e4a10ba3c993ed32936d28b2a5343082b1946cce28671c1fb9",
+      "decision": "related",
+      "doi": "",
+      "entry_id": "2020-sawtooth-supplementary",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2020",
+      "related_to": "2020-sawtooth",
+      "review_reasons": [
+        "supplementary-name-signal",
+        "formal-publication-evidence-not-detected"
+      ],
+      "role": "supplementary_candidate",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "Supplementary Material: Reentrance of Topological Phase in Spin-1 Frustrated Heisenberg Chain",
+      "venue_signals": [],
+      "work_id": "2020-sawtooth"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "475664c25833a534d582904740b556477fd9b7c9baa729c22ff7381054d5d254",
+      "decision": "include",
+      "doi": "10.1103/PhysRevResearch.2.033293",
+      "entry_id": "2020-tncs-physrevresearch2033293",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2020",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D029",
+      "sequence_index": 29,
+      "title": "Tensor network compressed sensing with unsupervised machine learning",
+      "venue_signals": [
+        "published-statement",
+        "physical-review"
+      ],
+      "work_id": "2020-tncs-physrevresearch2033293"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "b8116268f87e3aaee59a3b7173879a42e656e229c7304394bac03d3106e620a8",
+      "decision": "include",
+      "doi": "10.1103/PhysRevE.102.012152",
+      "entry_id": "2020-tsgo-tangent-space-gradient-optimization-of-tensor-network-for-machine-learning",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2020",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D028",
+      "sequence_index": 28,
+      "title": "Tangent-space gradient optimization of tensor network for machine learning",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2020-tsgo-tangent-space-gradient-optimization-of-tensor-network-for-machine-learning"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "5547d4e1fb841b2e493b4be371447af8708ec8129e7e20342dcc725e5ec22c41",
+      "decision": "include",
+      "doi": "10.1103/PhysRevA.104.042601",
+      "entry_id": "2021-adqc",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2021",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D031",
+      "sequence_index": 31,
+      "title": "Automatically differentiable quantum circuit for many-qubit state preparation",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2021-adqc"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "d0d6d807253a72950bdc9a0f398fc867eae93efbca90ccb581c77cbd6d42eab7",
+      "decision": "include",
+      "doi": "10.3389/fams.2021.716044",
+      "entry_id": "2021-entanglement-feature-extraction",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-published-year"
+      ],
+      "publication_year": "2021",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D037",
+      "sequence_index": 37,
+      "title": "Entanglement-Based Feature Extraction by Tensor Network Machine Learning",
+      "venue_signals": [
+        "published-statement"
+      ],
+      "work_id": "2021-entanglement-feature-extraction"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "6e9d3b959da0b28de236a86186bf7f5e80b5b175cd4fbabe8de088b5799739cd",
+      "decision": "include",
+      "doi": "10.21468/SciPostPhysCore.4.3.022",
+      "entry_id": "2021-mpnn",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-published-year"
+      ],
+      "publication_year": "2021",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D036",
+      "sequence_index": 36,
+      "title": "Predicting quantum potentials by deep neural network and metropolis sampling",
+      "venue_signals": [
+        "published-statement"
+      ],
+      "work_id": "2021-mpnn"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "4a9860c2f2094a410ea7c049ccf87a0074b2888d00b44855c5821c6b04e45362",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.103.075106",
+      "entry_id": "2021-quantum-phase-visualization",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2021",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D033",
+      "sequence_index": 33,
+      "title": "Visualizing quantum phases and identifying quantum phase transitions by nonlinear dimensional reduction",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2021-quantum-phase-visualization"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "a627ff6c0e50482e61746fedbcc7387c50f025ef3141cc668bcc19da4a0be2e4",
+      "decision": "include",
+      "doi": "10.1088/0256-307X/38/11/110301",
+      "entry_id": "2021-qubismnet",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-published-year"
+      ],
+      "publication_year": "2021",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D030",
+      "sequence_index": 30,
+      "title": "Deep Learning Quantum States for Hamiltonian Estimation",
+      "venue_signals": [
+        "published-statement"
+      ],
+      "work_id": "2021-qubismnet"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "00e2695b73f1d52773bd32cd1b6e709bd0d076d5ca1a57ba83721c84bd06fad7",
+      "decision": "include",
+      "doi": "10.1103/PhysRevE.103.013313",
+      "entry_id": "2021-virtual-configuration-binarization",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2021",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D034",
+      "sequence_index": 34,
+      "title": "Phase identification in many-body systems by virtual configuration binarization",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2021-virtual-configuration-binarization"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "ebd4ec5e017eba4efa9b014a10227b15fc8ac7fb57985922338fd51ad5996b98",
+      "decision": "include",
+      "doi": "10.1364/PRJ.434217",
+      "entry_id": "2021-光量子分类器",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-year"
+      ],
+      "publication_year": "2021",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D035",
+      "sequence_index": 35,
+      "title": "Experimental realization of a quantum image classifier via tensor-network-based machine learning",
+      "venue_signals": [],
+      "work_id": "2021-光量子分类器"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "fb1686329914242ae4158569848d1c306ebd9141eb612a6009dbdac91f8b2541",
+      "decision": "include",
+      "doi": "10.1103/PhysRevA.104.052413",
+      "entry_id": "2021-卢迎fgto",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2021",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D032",
+      "sequence_index": 32,
+      "title": "Preparation of many-body ground states by time evolution with variational microscopic magnetic fields and incomplete interactions",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2021-卢迎fgto"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "f30923d234b1bf72df0ae00036923d8f2f02f02f4e70f3d3197cd1423f0508a5",
+      "decision": "include",
+      "doi": "10.1088/0256-307X/39/10/100701",
+      "entry_id": "2022-cpl-tn特征选择-白生成",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2022",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D038",
+      "sequence_index": 38,
+      "title": "Unsupervised Recognition of Informative Features via Tensor Network Machine Learning and Quantum Entanglement Variations",
+      "venue_signals": [],
+      "work_id": "2022-cpl-tn特征选择-白生成"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "be1d0370519487b15ee9dbaa300cc6a07ce8c5ff8aaf89fda77f6b949657d099",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.105.165116",
+      "entry_id": "2022-functional-mps-洪瑞",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2022",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D040",
+      "sequence_index": 40,
+      "title": "Functional tensor network solving many-body Schrödinger equation",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2022-functional-mps-洪瑞"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "7b136264fd3ca98be1ba57a3ab9874c6e08c076616a9aecad961cbc47fbc3d31",
+      "decision": "include",
+      "doi": "10.3390/math10060940",
+      "entry_id": "2022-rlf李伟明",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-published-year"
+      ],
+      "publication_year": "2022",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D041",
+      "sequence_index": 41,
+      "title": "Non-Parametric Semi-Supervised Learning in Many-Body Hilbert Space with Rescaled Logarithmic Fidelity",
+      "venue_signals": [
+        "published-statement"
+      ],
+      "work_id": "2022-rlf李伟明"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "f7c361337e7686cc944049e69ed634c82748472793ca528bfdf9058de2833606",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.105.155155",
+      "entry_id": "2022-tn-tailoring-王顶族",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2022",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D039",
+      "sequence_index": 39,
+      "title": "Efficient simulation of quantum many-body thermodynamics by tailoring a zero-temperature tensor network",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2022-tn-tailoring-王顶族"
+    },
+    {
+      "adjudication_note": "book cover, not a paper PDF",
+      "canonical_pdf_sha256": "",
+      "decision": "exclude",
+      "doi": "",
+      "entry_id": "2022-张量网络-封面20231120",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "",
+      "publication_evidence": [],
+      "publication_year": "2022",
+      "related_to": "",
+      "review_reasons": [
+        "book-cover-or-copyright-page",
+        "canonical-pdf-missing"
+      ],
+      "role": "non_paper_candidate",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "张量网络 **Tensor Network**",
+      "venue_signals": [],
+      "work_id": "2022-张量网络-封面20231120"
+    },
+    {
+      "adjudication_note": "book cover/copyright pages, not a paper PDF",
+      "canonical_pdf_sha256": "",
+      "decision": "exclude",
+      "doi": "",
+      "entry_id": "2022-张量网络中文书封面及版权页",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "",
+      "publication_evidence": [],
+      "publication_year": "2022",
+      "related_to": "",
+      "review_reasons": [
+        "book-cover-or-copyright-page",
+        "canonical-pdf-missing"
+      ],
+      "role": "non_paper_candidate",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "l/ Ae \\y DA‘ LA ait Nloi ww Lt P aBl @ \\ °ensor Networ ae Ji Network ——.ae —— HEH ESp FLAE Sei ALS, PANT= yA.AMAR,Ka EBNFMeBe SHR,SKAFA RSRFUR, BFPSeASHROAR. CRPRICK39 i, MMSTensor Network Contractions[ (Switzerland) Springer],Ql, Q2 K SCI Hi Tl & we sast,PRL, IEEE TNNLS 337845K, fA Ri Wi AAA 2020 HeFB SBEHRS.HABARFESA. HRUREBSSA,HEME 1KAitTHAARFESH LMA AHA,BEEKARE AAW APHg|e A. RRB WHFS whet (IOPEliei Publishing)Paper Award,#1& HY Top Cited3Gt| AiR",
+      "venue_signals": [],
+      "work_id": "2022-张量网络中文书封面及版权页"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "bf7ea012eb1bd9b8630433a06afde10153338625079ccb1dcc9ffb6ef56d9dec",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.107.L220401",
+      "entry_id": "2023-kagome-方大智",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2023",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D042",
+      "sequence_index": 42,
+      "title": "Nature of the 1/9-magnetization plateau in the spin- <sup>1</sup> kagome Heisenberg antiferromagnet",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2023-kagome-方大智"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "19f7ab3a075248f2193e3e3a0182852479a83bc35474fe896eccef3b155ffc9e",
+      "decision": "include",
+      "doi": "10.1103/PhysRevResearch.5.023096",
+      "entry_id": "2023-luying-quvis",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2023",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D044",
+      "sequence_index": 44,
+      "title": "Quantum compiling with a variational instruction set for accurate and fast quantum computing",
+      "venue_signals": [
+        "published-statement",
+        "physical-review"
+      ],
+      "work_id": "2023-luying-quvis"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "70e0cfa99217420c681575222b192e386bad3c8dd11acb5dd74c0d99ee7fa9d2",
+      "decision": "include",
+      "doi": "10.21468/SciPostPhys.14.6.142",
+      "entry_id": "2023-resmps",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-published-year"
+      ],
+      "publication_year": "2023",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D045",
+      "sequence_index": 45,
+      "title": "Residual matrix product state for machine learning",
+      "venue_signals": [
+        "published-statement"
+      ],
+      "work_id": "2023-resmps"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "4890a40b26a05df6b3683064380088e2141f30cc3eec1065a7a8e06c0045da19",
+      "decision": "include",
+      "doi": "10.1103/PhysRevLett.131.020403",
+      "entry_id": "2023-schmidt-tns-prl",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2023",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D043",
+      "sequence_index": 43,
+      "title": "Tensor Network Efficiently Representing Schmidt Decomposition of Quantum Many-Body States",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2023-schmidt-tns-prl"
+    },
+    {
+      "adjudication_note": "Formal journal issue citation is Quantum Sci. Technol. 9, 015008 (2024); online publication was 26 October 2023. Formal issue year governs the corpus chronology.",
+      "canonical_pdf_sha256": "bc3d01d70b7f16625e50a801070aa798d82fbbe9dd4f120ac27a24d9bb8c7523",
+      "decision": "include",
+      "doi": "10.1088/2058-9565/ad038a",
+      "entry_id": "2023-王顶族qes边界奇异性",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-citation-banner",
+        "first-page-journal-header",
+        "pdf-metadata-creation-year-weak",
+        "author-confirmed-doi"
+      ],
+      "publication_year": "2024",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D046",
+      "sequence_index": 46,
+      "title": "Boundary-induced singularity in strongly-correlated quantum systems at finite temperature",
+      "venue_signals": [
+        "citation-banner",
+        "journal-header"
+      ],
+      "work_id": "2023-王顶族qes边界奇异性"
+    },
+    {
+      "adjudication_note": "canonical paper.pdf symlink is broken; no real readable PDF in scope",
+      "canonical_pdf_sha256": "",
+      "decision": "exclude",
+      "doi": "",
+      "entry_id": "2024-bai-nll-scaling",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "",
+      "publication_evidence": [],
+      "publication_year": "2024",
+      "related_to": "",
+      "review_reasons": [
+        "canonical-pdf-missing"
+      ],
+      "role": "publication_candidate",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "Universal Scaling Laws in Quantum-Probabilistic Machine Learning by Tensor Network: Toward Interpreting Representation and Generalization Powers",
+      "venue_signals": [],
+      "work_id": "2024-bai-nll-scaling"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "1b5b5a341ee571973f3635b9c77805ce23b8ea7c443ec9f106c33b28523e414f",
+      "decision": "include",
+      "doi": "10.1103/PhysRevLett.133.070402",
+      "entry_id": "2024-luying-entanglement-prl",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2024",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D048",
+      "sequence_index": 48,
+      "title": "Persistent Ballistic Entanglement Spreading with Optimal Control in Quantum Spin Chains",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2024-luying-entanglement-prl"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "278cdec807e7114e7e57c3c081ca942a570739b275567a18bf6a0f554bc92396",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.109.045139",
+      "entry_id": "2024-wang-eth-inhomogeneous",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2024",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D047",
+      "sequence_index": 47,
+      "title": "Eigenstate thermalization and its breakdown in quantum spin chains with inhomogeneous interactions",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2024-wang-eth-inhomogeneous"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "95a243806ce1bef19d7eb1ed9f944d3a4851e6a607d56b385c0ac0692072ac65",
+      "decision": "include",
+      "doi": "10.34133/icomputing.0123",
+      "entry_id": "2025-adtn-nn-compression",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-year"
+      ],
+      "publication_year": "2025",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D050",
+      "sequence_index": 50,
+      "title": "Compressing Neural Networks Using Tensor Networks with Exponentially Fewer Variational Parameters",
+      "venue_signals": [],
+      "work_id": "2025-adtn-nn-compression"
+    },
+    {
+      "adjudication_note": "Excluded from the formal-publication corpus: conference version superseded here by the formally published 2026 journal article.",
+      "canonical_pdf_sha256": "168f7b2ee1f6fa3c35da11678661c9146dd6901acd0f96d9e14cbbb0616d7c53",
+      "decision": "related",
+      "doi": "",
+      "entry_id": "2025-bai-orthogonality-catastrophe",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2025",
+      "related_to": "2026-icomputing-qml-orthogonality",
+      "review_reasons": [
+        "formal-publication-evidence-not-detected"
+      ],
+      "role": "publication_version",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "Quantum-Probabilistic Machine Learning: From Catastrophe of Orthogonality to Multi-qubit Encoding",
+      "venue_signals": [],
+      "work_id": "2025-bai-orthogonality-catastrophe"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "dd084482b2250529595708725d7e4bfd9b4e9478ec46508fc1e7a1f17b8efc77",
+      "decision": "include",
+      "doi": "10.1103/PhysRevB.111.245109",
+      "entry_id": "2025-ifmps-hong-rui",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2025",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D049",
+      "sequence_index": 49,
+      "title": "Entanglement scaling and criticality of infinite-size quantum many-body systems in continuous space addressed by a tensor network approach",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2025-ifmps-hong-rui"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "5b81fce66445db81ff0d5d82f6ed38a10fff34ed4d3fa239eb10efe097354cbb",
+      "decision": "include",
+      "doi": "10.1088/1674-1056/adeb5b",
+      "entry_id": "2026-cpb-chaos-ml",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2026",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D052",
+      "sequence_index": 52,
+      "title": "Machine learning of chaotic characteristics in classical nonlinear dynamics using variational quantum circuit",
+      "venue_signals": [],
+      "work_id": "2026-cpb-chaos-ml"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "f219cd07ae734994395691334f23911c3b586538fd7cc9887d63212fabe92f6b",
+      "decision": "include",
+      "doi": "10.1103/vwx9-3zwj",
+      "entry_id": "2026-fdz-kagome-magnetic-platform",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2026",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D055",
+      "sequence_index": 55,
+      "title": "Exotic transition and reentrance on the 1/9 magnetization plateau in a spin-1/2 anisotropic kagome antiferromagnet",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2026-fdz-kagome-magnetic-platform"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "fa92e4a54eb62eaa9183d68242ffb21887a2cdd017d775f11ae34f4e592ee94c",
+      "decision": "include",
+      "doi": "10.34133/icomputing.0232",
+      "entry_id": "2026-icomputing-qml-orthogonality",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-year"
+      ],
+      "publication_year": "2026",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D056",
+      "sequence_index": 56,
+      "title": "Orthogonality in Quantum-Probabilistic Machine Learning: An Investigation on Multiqubit Encoding",
+      "venue_signals": [],
+      "work_id": "2026-icomputing-qml-orthogonality"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "03432ffba17b1ff4363b635076943d93a8ed4a9e67e8be20221703966a9d542d",
+      "decision": "include",
+      "doi": "10.1103/6y5p-mp7q",
+      "entry_id": "2026-mpe-prl",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2026",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D053",
+      "sequence_index": 53,
+      "title": "Matrix-Product Entanglement Characterizing the Optimality of State-Preparation Quantum Circuits",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2026-mpe-prl"
+    },
+    {
+      "adjudication_note": "PDF title explicitly says Supplemental material",
+      "canonical_pdf_sha256": "2f45eb2287027b62dea7ed8c6a3a4f6dc69ba11a2d4fa0d38647121de8bda9be",
+      "decision": "related",
+      "doi": "",
+      "entry_id": "2026-mpe-prl-supp",
+      "formal_publication_signal": false,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2026",
+      "related_to": "2026-mpe-prl",
+      "review_reasons": [
+        "supplementary-name-signal",
+        "formal-publication-evidence-not-detected"
+      ],
+      "role": "supplementary_candidate",
+      "run_id": "",
+      "sequence_index": null,
+      "title": "Supplemental material of “Matrix-product entanglement characterizing the optimality of state-preparation quantum circuits”",
+      "venue_signals": [],
+      "work_id": "2026-mpe-prl"
+    },
+    {
+      "adjudication_note": "",
+      "canonical_pdf_sha256": "aa198f9be64d5c7fea873d412d1503c9957036eca37fb736ba6ecd764c3af038",
+      "decision": "include",
+      "doi": "10.1103/vb4b-m5h6",
+      "entry_id": "2026-setn-zhu-hao",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-physical-review",
+        "first-page-published-year"
+      ],
+      "publication_year": "2026",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D054",
+      "sequence_index": 54,
+      "title": "Statistics-encoded tensor network approach in disordered quantum many-body spin chains",
+      "venue_signals": [
+        "physical-review"
+      ],
+      "work_id": "2026-setn-zhu-hao"
+    },
+    {
+      "adjudication_note": "Keep 2026 as formal publication year; the 2025 substring in DOI 10.1038/s41534-025-01141-7 is not the publication year",
+      "canonical_pdf_sha256": "0c2498e2497147420ea19049a3d63452b1eff140dafa6d4cf6725cf85b5c415b",
+      "decision": "include",
+      "doi": "10.1038/s41534-025-01141-7",
+      "entry_id": "2026-tianda-graph-qml",
+      "formal_publication_signal": true,
+      "publication_date_evidence": "PDF journal header: npj Quantum Information | (2026) 12:8",
+      "publication_evidence": [
+        "first-page-doi",
+        "first-page-published-statement",
+        "first-page-journal-header",
+        "pdf-metadata-creation-year-weak"
+      ],
+      "publication_year": "2026",
+      "related_to": "",
+      "review_reasons": [],
+      "role": "publication_candidate",
+      "run_id": "D051",
+      "sequence_index": 51,
+      "title": "Unveiling the nature of graphs through quantum graphon learning",
+      "venue_signals": [
+        "published-statement",
+        "journal-header"
+      ],
+      "work_id": "2026-tianda-graph-qml"
+    }
+  ],
+  "schema": "ran-asks.paper-artifact.corpus.v1",
+  "source_manifest_schema": "wikigraph.e1.manifest.v1",
+  "source_manifest_sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a"
+}

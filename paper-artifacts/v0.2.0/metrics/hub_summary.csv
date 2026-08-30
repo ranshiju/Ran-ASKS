@@ -1,0 +1,19 @@
+hub_id,hub_label,birth_step,birth_year,parent_hub_id,active_at_final,supporting_papers_at_birth,supporting_papers_at_final,member_count_at_birth,member_count_at_final,macro_domain
+academic/wiki/hubs/PEPS 与 iPEPS 更新方法,PEPS 与 iPEPS 更新方法,12,2017,,1,3,34,5,26,TN-core
+academic/wiki/hubs/纠缠熵与纠缠谱诊断,纠缠熵与纠缠谱诊断,14,2017,,1,2,16,2,10,many-body
+academic/wiki/hubs/Heisenberg 反铁磁模型,Heisenberg 反铁磁模型,20,2019,,1,5,10,2,2,many-body
+academic/wiki/hubs/二维量子多体系统与临界性,二维量子多体系统与临界性,20,2019,,1,2,2,3,3,many-body
+academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断,拓扑纠缠熵与 Rényi 诊断,22,2019,academic/wiki/hubs/纠缠熵与纠缠谱诊断,1,1,2,2,5,many-body
+academic/wiki/hubs/量子格点模型的晶格几何,量子格点模型的晶格几何,23,2019,,1,3,3,4,4,many-body
+academic/wiki/hubs/多参考 Hartree–Fock 与耦合簇方法,多参考 Hartree–Fock 与耦合簇方法,24,2020,,1,1,1,3,3,many-body
+academic/wiki/hubs/量子与变分蒙特卡洛方法,量子与变分蒙特卡洛方法,24,2020,,1,6,7,4,6,many-body
+academic/wiki/hubs/一维量子自旋链与基态,一维量子自旋链与基态,30,2021,,1,1,1,1,2,many-body
+academic/wiki/hubs/量子自旋模型与自旋液体,量子自旋模型与自旋液体,30,2021,,1,4,3,6,6,many-body
+academic/wiki/hubs/神经网络求解电子薛定谔方程,神经网络求解电子薛定谔方程,36,2021,,1,2,2,5,5,quantum-AI
+academic/wiki/hubs/局域与双体纠缠熵及面积律,局域与双体纠缠熵及面积律,37,2021,academic/wiki/hubs/纠缠熵与纠缠谱诊断,1,7,7,8,12,many-body
+academic/wiki/hubs/张量重正化群及可微变体,张量重正化群及可微变体,39,2022,,1,20,20,5,5,TN-core
+academic/wiki/hubs/PEPS/PESS 表示及高维推广,PEPS/PESS 表示及高维推广,42,2023,,1,10,32,6,15,many-body
+academic/wiki/hubs/价键固体与价键晶体,价键固体与价键晶体,42,2023,,1,3,3,4,4,many-body
+academic/wiki/hubs/张量网络方法与机器学习,张量网络方法与机器学习,46,2024,,1,3,2,4,4,TN-ML
+academic/wiki/hubs/关联长度与最近邻关联诊断,关联长度与最近邻关联诊断,55,2026,academic/wiki/hubs/二维量子多体系统与临界性,1,7,5,8,7,many-body
+academic/wiki/hubs/msQFM 及其编码方案,msQFM 及其编码方案,56,2026,academic/wiki/hubs/张量网络方法与机器学习,1,2,2,2,2,quantum-AI

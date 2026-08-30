@@ -1,0 +1,397 @@
+{
+  "births_by_year": {
+    "2017": 2,
+    "2019": 4,
+    "2020": 2,
+    "2021": 4,
+    "2022": 1,
+    "2023": 2,
+    "2024": 1,
+    "2026": 2
+  },
+  "mapped_papers": 50,
+  "mapping_coverage": 0.8928571428571429,
+  "paper_mapping": [
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "secondary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "work_id": "2010-distorted-kagome"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "secondary": "",
+      "work_id": "2010-ltrg"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "secondary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "work_id": "2012-spin-1-chain-闫"
+    },
+    {
+      "max_overlap": 7,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/二维量子多体系统与临界性",
+      "work_id": "2012-odtns"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "secondary": "academic/wiki/hubs/量子与变分蒙特卡洛方法",
+      "work_id": "2014-zhaoyanghoneycombladder"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/局域与双体纠缠熵及面积律",
+      "work_id": "2013-ncd-physrevb88064407"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "secondary": "academic/wiki/hubs/关联长度与最近邻关联诊断",
+      "work_id": "2013-kt-phase"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "work_id": "2014-husimi"
+    },
+    {
+      "max_overlap": 4,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2016-aop-physreve93053310"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "secondary": "",
+      "work_id": "2015-sierpinskie2015-60745-5"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "work_id": "2017-ptdmrgphysrevb95064110"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/量子自旋模型与自旋液体",
+      "secondary": "academic/wiki/hubs/关联长度与最近邻关联诊断",
+      "work_id": "2017-octa-kagome"
+    },
+    {
+      "max_overlap": 5,
+      "primary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "secondary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "work_id": "2017-criticality-tn-2d"
+    },
+    {
+      "max_overlap": 5,
+      "primary": "academic/wiki/hubs/局域与双体纠缠熵及面积律",
+      "secondary": "academic/wiki/hubs/张量网络方法与机器学习",
+      "work_id": "2017-fewbody-qes-ground-states"
+    },
+    {
+      "max_overlap": 0,
+      "primary": "",
+      "secondary": "",
+      "work_id": "2017-cruezphysrevx7031057"
+    },
+    {
+      "max_overlap": 6,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "work_id": "2018-kagome-chenxi"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/价键固体与价键晶体",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2018-emergent-spin-1-trimerized-valence-bond-crystal"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2018-csw-physrevb98085111"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "work_id": "2018-pc-epjb"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "secondary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "work_id": "2018-091彭程"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "work_id": "2019-machine-learning-by-unitary-tensor-network-of-hierarchical-tree-structure"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断",
+      "secondary": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "work_id": "2019-noise-tolerant-signature-ofzntopological-order-in-quantum-many-body-states"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "secondary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "work_id": "2019-finite-temperature-qes"
+    },
+    {
+      "max_overlap": 4,
+      "primary": "academic/wiki/hubs/神经网络求解电子薛定谔方程",
+      "secondary": "academic/wiki/hubs/多参考 Hartree–Fock 与耦合簇方法",
+      "work_id": "2020-paulinets-hermann"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "secondary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "work_id": "2020-mps_deep_encoding_circuit"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "secondary": "",
+      "work_id": "2020-sawtooth"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2020-gtnc"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "secondary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "work_id": "2020-tsgo-tangent-space-gradient-optimization-of-tensor-network-for-machine-learning"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/局域与双体纠缠熵及面积律",
+      "work_id": "2020-tncs-physrevresearch2033293"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/一维量子自旋链与基态",
+      "secondary": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "work_id": "2021-qubismnet"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "secondary": "academic/wiki/hubs/量子与变分蒙特卡洛方法",
+      "work_id": "2021-adqc"
+    },
+    {
+      "max_overlap": 0,
+      "primary": "",
+      "secondary": "",
+      "work_id": "2021-卢迎fgto"
+    },
+    {
+      "max_overlap": 0,
+      "primary": "",
+      "secondary": "",
+      "work_id": "2021-quantum-phase-visualization"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2021-virtual-configuration-binarization"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2021-光量子分类器"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/神经网络求解电子薛定谔方程",
+      "secondary": "",
+      "work_id": "2021-mpnn"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/局域与双体纠缠熵及面积律",
+      "work_id": "2021-entanglement-feature-extraction"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断",
+      "secondary": "",
+      "work_id": "2022-cpl-tn特征选择-白生成"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/张量重正化群及可微变体",
+      "secondary": "",
+      "work_id": "2022-tn-tailoring-王顶族"
+    },
+    {
+      "max_overlap": 4,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2022-functional-mps-洪瑞"
+    },
+    {
+      "max_overlap": 0,
+      "primary": "",
+      "secondary": "",
+      "work_id": "2022-rlf李伟明"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "secondary": "academic/wiki/hubs/价键固体与价键晶体",
+      "work_id": "2023-kagome-方大智"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "work_id": "2023-schmidt-tns-prl"
+    },
+    {
+      "max_overlap": 0,
+      "primary": "",
+      "secondary": "",
+      "work_id": "2023-luying-quvis"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "secondary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "work_id": "2023-resmps"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "secondary": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "work_id": "2023-王顶族qes边界奇异性"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2024-wang-eth-inhomogeneous"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "secondary": "",
+      "work_id": "2024-luying-entanglement-prl"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/关联长度与最近邻关联诊断",
+      "work_id": "2025-ifmps-hong-rui"
+    },
+    {
+      "max_overlap": 5,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/张量网络方法与机器学习",
+      "work_id": "2025-adtn-nn-compression"
+    },
+    {
+      "max_overlap": 0,
+      "primary": "",
+      "secondary": "",
+      "work_id": "2026-tianda-graph-qml"
+    },
+    {
+      "max_overlap": 1,
+      "primary": "academic/wiki/hubs/msQFM 及其编码方案",
+      "secondary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "work_id": "2026-cpb-chaos-ml"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "work_id": "2026-mpe-prl"
+    },
+    {
+      "max_overlap": 2,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "work_id": "2026-setn-zhu-hao"
+    },
+    {
+      "max_overlap": 4,
+      "primary": "academic/wiki/hubs/关联长度与最近邻关联诊断",
+      "secondary": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "work_id": "2026-fdz-kagome-magnetic-platform"
+    },
+    {
+      "max_overlap": 3,
+      "primary": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "secondary": "academic/wiki/hubs/msQFM 及其编码方案",
+      "work_id": "2026-icomputing-qml-orthogonality"
+    }
+  ],
+  "period_summary": [
+    {
+      "hub_births": 2,
+      "mean_churn": 0.005480560664110555,
+      "papers": 19,
+      "period": "2010-2018",
+      "pooled_reuse": 0.2111111111111111
+    },
+    {
+      "hub_births": 10,
+      "mean_churn": 0.0047865823519605555,
+      "papers": 18,
+      "period": "2019-2021",
+      "pooled_reuse": 0.22402597402597402
+    },
+    {
+      "hub_births": 6,
+      "mean_churn": 0.0037833732313547366,
+      "papers": 19,
+      "period": "2022-2026",
+      "pooled_reuse": 0.14251207729468598
+    }
+  ],
+  "supporting_papers_final": {
+    "academic/wiki/hubs/Heisenberg 反铁磁模型": 10,
+    "academic/wiki/hubs/PEPS 与 iPEPS 更新方法": 34,
+    "academic/wiki/hubs/PEPS/PESS 表示及高维推广": 32,
+    "academic/wiki/hubs/msQFM 及其编码方案": 2,
+    "academic/wiki/hubs/一维量子自旋链与基态": 1,
+    "academic/wiki/hubs/二维量子多体系统与临界性": 2,
+    "academic/wiki/hubs/价键固体与价键晶体": 3,
+    "academic/wiki/hubs/关联长度与最近邻关联诊断": 5,
+    "academic/wiki/hubs/多参考 Hartree–Fock 与耦合簇方法": 1,
+    "academic/wiki/hubs/局域与双体纠缠熵及面积律": 7,
+    "academic/wiki/hubs/张量网络方法与机器学习": 2,
+    "academic/wiki/hubs/张量重正化群及可微变体": 20,
+    "academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断": 2,
+    "academic/wiki/hubs/神经网络求解电子薛定谔方程": 2,
+    "academic/wiki/hubs/纠缠熵与纠缠谱诊断": 16,
+    "academic/wiki/hubs/量子与变分蒙特卡洛方法": 7,
+    "academic/wiki/hubs/量子格点模型的晶格几何": 3,
+    "academic/wiki/hubs/量子自旋模型与自旋液体": 3
+  },
+  "tied_maximum_papers": 15,
+  "unmapped_papers": 6
+}

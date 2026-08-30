@@ -246,7 +246,9 @@ def verify(destination: Path) -> int:
         if content_path.stat().st_size > 10_000_000:
             failures.append(f"oversized release file: {path}")
             continue
-        if content_path.suffix.lower() in {".md", ".py", ".yaml", ".yml", ".txt", ".json", ".sh", ".example"}:
+        if content_path.suffix.lower() in {
+            ".csv", ".example", ".json", ".jsonl", ".md", ".py", ".sh", ".txt", ".yaml", ".yml"
+        }:
             text = content_path.read_text(encoding="utf-8", errors="ignore").lower()
             for pattern in SENSITIVE_PATTERNS:
                 if pattern.search(text):

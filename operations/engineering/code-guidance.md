@@ -912,3 +912,11 @@ python3 .scripts/visual_to_editable_ppt.py <figure.png|document.pdf> \
 - **调用**：`python3 .scripts/open_source_release.py build <目标目录> --clean --force`；随后 `python3 .scripts/open_source_release.py verify <目标目录>`。
 - **边界**：只复制 manifest 批准文件和公开资产；不读取或复制业务知识内容。DSH 作为公开执行层随 `dsh/**` 发布；active `projects/` 与 `.project/` 节点从公开工程图移除。目标非空时必须同时显式给出 `--clean --force`；脚本保留目标的 `.git` 元数据。
 - **验证**：`python3 .scripts/test_open_source_release.py`；发布前再运行 `verify`，并在生成树内运行 `python3 .scripts/engineering_graph.py validate` 与相关工程回归。
+
+## 7. 论文数据产物：`.scripts/paper_artifact.py`
+
+- **定位**：把冻结的隔离实验导出为与论文/代码版本绑定的可审计 Wiki、Graph 和数值数据包；Raw、数据库、向量与 API 记录不进入产物。
+- **构建**：在私有工作库运行 `python3 .scripts/paper_artifact.py build`；构建只读冻结实验输入，重建 `paper-artifacts/v0.2.0/` 中的生成子目录和校验和，不改实验原件。
+- **清理**：Wiki 的本地 source locator 和 Graph provenance 路径统一改写为 `raw-not-distributed/...`；Graph 中的 Raw node ID 仅作为拓扑标识保留。
+- **版本**：paper artifact `1.0.0` 独立绑定 Ran-ASKS `v0.2.0`。首次公开 tag/Release 后原目录不可原地更新；数据修正必须建立新 artifact version。`config/code-compatibility.json` 对照冻结运行与发布代码哈希，任何 post-run drift 都必须在 `CODE_PROVENANCE.md` 中明确披露。
+- **验证**：`python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0` 与 `python3 .scripts/test_paper_artifact.py`；随后仍须走完整开源发布 build/verify。

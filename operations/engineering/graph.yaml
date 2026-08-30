@@ -333,6 +333,14 @@ nodes:
     path: .scripts/graph_dump.py
     kind: diagnostic
     role: graph-audit-snapshot
+  e1_experiment:
+    path: .scripts/e1_experiment.py
+    kind: implementation
+    role: dual-locked-isolated-fresh-local-compilation-chronological-graph-fusion-observation-and-validated-main-kb-promotion
+  e1_experiment_test:
+    path: .scripts/test_e1_experiment.py
+    kind: test
+    role: e1-manifest-isolation-metrics-snapshot-and-promotion-guard-regression
   graph_visualize:
     path: .scripts/graph_visualize.py
     kind: diagnostic
@@ -345,6 +353,14 @@ nodes:
     path: .scripts/open_source_release.py
     kind: implementation
     role: manifest-governed-public-release-builder
+  paper_artifact:
+    path: .scripts/paper_artifact.py
+    kind: implementation
+    role: version-bound-sanitized-paper-wiki-graph-and-metrics-artifact-builder
+  paper_artifact_v020:
+    path: paper-artifacts/v0.2.0/metadata.json
+    kind: data
+    role: frozen-paper-artifact-1.0.0-for-ran-asks-0.2.0
   calibrate_thresholds:
     path: .scripts/calibrate_embedding_thresholds.py
     kind: diagnostic
@@ -446,6 +462,10 @@ nodes:
     path: .scripts/test_open_source_release.py
     kind: test
     role: public-release-isolation-regression
+  paper_artifact_test:
+    path: .scripts/test_paper_artifact.py
+    kind: test
+    role: paper-artifact-integrity-privacy-and-count-regression
   triples_legacy:
     path: .scripts/rebuild_triples.py
     kind: legacy
@@ -783,6 +803,27 @@ edges:
 - - graph_ingest
   - uses
   - hub_semantics
+- - e1_experiment
+  - uses
+  - extractor
+- - e1_experiment
+  - uses
+  - ingest_paper
+- - e1_experiment
+  - uses
+  - graph_ingest
+- - e1_experiment
+  - uses
+  - hub_semantics
+- - e1_experiment
+  - uses
+  - graph_lib
+- - e1_experiment
+  - uses
+  - graph_validate
+- - e1_experiment
+  - tested_by
+  - e1_experiment_test
 - - graph_delta
   - uses
   - graph_lib
@@ -975,6 +1016,12 @@ edges:
 - - open_source_release
   - tested_by
   - open_source_release_test
+- - paper_artifact
+  - writes
+  - paper_artifact_v020
+- - paper_artifact
+  - tested_by
+  - paper_artifact_test
 - - handbook
   - documents
   - graph_db
@@ -1614,6 +1661,9 @@ verification:
   - python3 .scripts/test_ingest_pipeline.py
   open_source_release:
   - python3 .scripts/test_open_source_release.py
+  paper_artifact:
+  - python3 .scripts/test_paper_artifact.py
+  - python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
   visual_qa:
   - python3 .scripts/test_visual_qa.py
   - python3 dsh/test_visual_tools.py
@@ -1624,6 +1674,34 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  e1_experiment:
+    preconditions:
+    - manifest 明确区分 publication/work、canonical PDF、related/supplementary/non-paper 与 legacy-extraction-fallback；目录条目数不得直接当论文数
+    - Phase L run-lock 冻结 manifest、source、extractor、LLM 与 local compiler；Phase G fusion-lock 另行绑定 Phase-L run-lock/audit/全部 verified bundle、graph/Hub code、embedding、阈值、隔离路径与 Agent gate，依赖当前 G_t 的 attach plan 不进入 local artifact freeze
+    - Phase-G 代码或阈值变化只使 fusion-lock 与既有 G0..Gt 失效，不使已由 Phase-L run-lock 和 bundle 哈希冻结的 local artifacts 失效，也不得因此重调已冻结语料的 LLM
+    - 实验 workspace、graph DB、Wiki、临时目录和 embedding cache 与生产派生状态物理隔离；raw 仅只读
+    - 每篇每阶段使用原子 checkpoint；completed 仅在产物哈希复验通过时可跳过，fusion 只从最高连续 validated snapshot 恢复
+    - raw 是事实证据层；Wiki/graph 以可回溯的知识结构与导航为目标，近似命名、粒度和 membership 为 soft state，来源丢失、结构不可解析、关键事实捏造和明显误导导航才是硬错误
+    - Hub lifecycle 候选必须经完整 Agent gate；缺 gate checkpoint 为 agent_required，gate 哈希忽略三位小数以下 embedding 抖动但不忽略成员或候选结构变化；显式 reject 可按 step-independent candidate signature 跨步骤复用，只有成员与完整候选结构不变时生效，结构变化必须重新 gate
+    - formal graph、fusion ledger、embedding cache、derived Hub pages、gate inputs 与 G0..GN 全部位于 runs/<phase-l-run-lock-prefix>/，init/fuse 每次入口复验 fusion-lock；G0 receipt 与后续 snapshot 均带逐文件 SHA-256
+    - shakedown 与 formal 使用不同 ledger/artifact root；formal 仅可按 run-lock 逐文件哈希引用 fresh extraction，不得复用 shakedown bibliography/Wiki/semantics/bundle
+    - 冻结 manifest 的显式 adjudication_note/date evidence 可作为前置 Agent gate 应用于对应书目冲突，但必须记录 from/to/evidence normalization；无显式裁决不得静默覆盖
+    - Phase-L 编译代码变化使旧 run-lock 失效时，先以全部已保存 bibliography/Wiki/semantics 调用结果离线回放当前 schema、wrapper 与 validator；仅 Phase-G 代码变化时跑 graph/Hub 回归并冻结新 fusion-lock，不重跑 Phase L
+    writes:
+    - projects/ForBetterScience/experiments/e1-chronological/ 下的候选/冻结 manifest、run-lock、fusion-lock、shakedown local artifacts、run-specific formal artifacts、G0..GN 快照、observer logs、metrics 与 figures
+    - 仅显式 promote-main 且 frozen artifact、逐篇校验、生产备份与前置哈希均通过时，受控更新对应生产 Wiki 与 cross-domain/graph.db
+    forbidden:
+    - 修改 academic/raw/works/papers 或以新 extraction 覆盖任何 raw 派生文件
+    - 默认调用 re_ingest.py 复用旧 paper.md 代替 fresh PDF extraction
+    - 将书籍封面、版权页、supplementary 或同一 publication 的不同版本静默计为独立 work
+    - 在 local compilation 阶段读取生产 graph 或提前冻结依赖 G_t 的 identity/Hub decision
+    - 通过临时替换、删除或清空生产 graph.db/Wiki 运行实验
+    - 未冻结/复验 fusion-lock、Phase-L run-lock/audit/bundle 哈希漂移、未通过 shakedown 或运行中配置漂移时继续正式 N-step fusion
+    - 未经显式 promote-main、无逐篇备份或校验失败时更新主知识库
+    - 将旧 running/failed 状态当 completed 跳过，或从非连续 snapshot 恢复 chronological fusion
+    verify:
+    - python3 .scripts/test_e1_experiment.py
+    - python3 .scripts/engineering_graph.py validate
   ingest_inbox:
     preconditions:
     - 底层摄入 stdout 可同时包含进度文本、图报告嵌套 JSON 与最终工作流 JSON
@@ -1726,6 +1804,20 @@ script_contracts:
     - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
     verify:
     - python3 .scripts/test_open_source_release.py
+  paper_artifact:
+    preconditions:
+    - 冻结的隔离实验、G056 JSONL、56 个 step report、论文派生指标与三个维护型说明文件均存在
+    - 目标版本明确区分 artifact version 与 Ran-ASKS release version
+    writes:
+    - paper-artifacts/v0.2.0/ 中的 corpus、wiki、graph、metrics、config、validation、metadata、代码来源说明与 checksums
+    forbidden:
+    - 修改 raw、冻结实验原件、生产 Wiki 或生产 graph.db
+    - 发布 PDF、解析原文、SQLite、embedding cache、API 记录、凭据或本地绝对路径
+    - 首次公开 tag/Release 后原地修改已发布 artifact version
+    - 发布代码与冻结运行哈希不一致时省略逐文件兼容性披露
+    verify:
+    - python3 .scripts/test_paper_artifact.py
+    - python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
   wiki_skeleton:
     preconditions:
     - 目标 wiki 路径与 type 已确认；论文页已有 paper.md；会议页已有 raw 原文（历史页可回退 corrected.md）

@@ -1,0 +1,179 @@
+{
+  "analyzer_version": "1.1.0",
+  "corpus": {
+    "formal_publications": 56,
+    "manifest_decisions": {
+      "exclude": 3,
+      "include": 56,
+      "related": 6,
+      "review": 0
+    },
+    "manifest_entries": 65
+  },
+  "density_outlier_sensitivity": {
+    "created_canonical_nodes": 104,
+    "entry_id": "2024-wang-eth-inhomogeneous",
+    "final": {
+      "C_direct_nodes_excluding_sensitivity_entry": 0.014322916666666666,
+      "C_observed": 0.01261467889908257,
+      "M_direct_contribution_excluding_sensitivity_entry": 0.07662835249042145,
+      "M_observed": 0.06764374295377677,
+      "R_cumulative": 0.18853974121996303,
+      "R_cumulative_excluding_sensitivity_entry": 0.20717948717948717
+    },
+    "identity": {
+      "R_slope_excluding_sensitivity_observation": -0.0003090665028636687,
+      "abstain": 0,
+      "create": 105,
+      "full_R_slope_per_step": -0.0005406651814136179,
+      "reuse": 2,
+      "reuse_fraction": 0.018691588785046728,
+      "share_of_all_create_decisions": 0.11958997722095673
+    },
+    "interpretation_boundary": "This is a deterministic direct-contribution sensitivity analysis on the fixed formal attachment and membership outcomes. It removes the D047 observation from R summaries, removes D047 work support and exclusive nodes from M, and removes D047-created old nodes from C. The result quantifies direct contribution under the fixed fusion outcomes.",
+    "sequence_label": "D047",
+    "step": 47
+  },
+  "descriptive_preregistered_pattern_check": {
+    "M_ols_slope_positive": false,
+    "R_ols_slope_positive": false,
+    "committed_hub_lifecycle_observed": true,
+    "note": "These are descriptive checks, not post-hoc significance tests. No numeric stability threshold for C was preregistered."
+  },
+  "hub_lifecycle": {
+    "active_hubs_final": 18,
+    "committed_events": 18,
+    "event_counts": {
+      "birth": 18
+    }
+  },
+  "identity_totals": {
+    "abstain": 5,
+    "create": 878,
+    "pooled_reuse_fraction": 0.18853974121996303,
+    "reuse": 204
+  },
+  "outputs": {
+    "figures/figure-s1-density-outlier-sensitivity.pdf": {
+      "bytes": 24434,
+      "sha256": "f2a5dc8d69f0feb2f4a278673d56b7d5726c7c47e7a8c9b91e0aaa1417c5c45d"
+    },
+    "figures/figure-s1-density-outlier-sensitivity.png": {
+      "bytes": 188011,
+      "sha256": "eafc471c36a918a143ef03ff9f68fee2784c6e760a2df2b628362f9430a8f048"
+    },
+    "figures/figure1a-compilation-trajectory.pdf": {
+      "bytes": 36512,
+      "sha256": "e9e3f7b0297c667ec484150d4e23c1037f9ba943159b151f21d1eb575ccae07a"
+    },
+    "figures/figure1a-compilation-trajectory.png": {
+      "bytes": 164315,
+      "sha256": "e191821d579259e9b8b1fb2c681a5704375edc6db8df3c8b24ca5104e885ccd9"
+    },
+    "figures/figure1b-hub-lineage.pdf": {
+      "bytes": 93257,
+      "sha256": "45be76bab3b64eb2bc362ead28294c51625f382e4b0ac4f31e07f8c83fc3dbce"
+    },
+    "figures/figure1b-hub-lineage.png": {
+      "bytes": 162864,
+      "sha256": "b64d314f7831034fe30e4570feb863b9a9e72135ae508d95c12a2ecbc7858805"
+    },
+    "metrics/density-outlier-sensitivity.csv": {
+      "bytes": 8648,
+      "sha256": "1493f18b1eee2de29f6ef08b8ba6e16f1c195ccb96fa105a681d2f7664df1e51"
+    },
+    "metrics/density-outlier-sensitivity.json": {
+      "bytes": 1155,
+      "sha256": "e581607a56dd43c5d0a8c10c5980a40bcbce68d498d0f49b3c3c93b1b67111e5"
+    },
+    "metrics/hub-lineage.json": {
+      "bytes": 98463,
+      "sha256": "63c91310f1e505bda3b4b9c5600e5ac8e7ea6922ba3bc782d5b272646e1d9fe4"
+    },
+    "metrics/hub-membership-trajectory.csv": {
+      "bytes": 109112,
+      "sha256": "365b6d7721a7033cb5116ac81f16a533777dd64482a82f97e821cbe2c9077735"
+    },
+    "metrics/trajectory.csv": {
+      "bytes": 15480,
+      "sha256": "44b23a5a8d50e3ed24f7ed3658e97a4890423a1daf75a2408837713a946cc627"
+    }
+  },
+  "schema": "wikigraph.e1.analysis-summary.v1",
+  "source_finished_at": "2026-08-29T12:40:11.258142+00:00",
+  "source_hashes": {
+    "fusion_ledger_sha256": "ad96425cfb181779736e9a5f79d7ef47fb496543d6673f158caea148e2905eea",
+    "fusion_lock_sha256": "5ea7884df2255efddc92c9badd79efde8804ba58793bf55ba0e855e6ea5df2c0",
+    "manifest_frozen_sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a"
+  },
+  "trajectory": {
+    "C": {
+      "first": 0.0,
+      "first_10_mean": 0.0,
+      "last": 0.01261467889908257,
+      "last_10_mean": 0.002303795192540309,
+      "maximum": {
+        "step": 15,
+        "value": 0.03139013452914798
+      },
+      "mean": 0.004667139376092548,
+      "median": 0.0013089005235602095,
+      "minimum": {
+        "step": 2,
+        "value": 0.0
+      },
+      "n": 55,
+      "ols_slope_per_step": -2.7208019517741482e-05,
+      "zero_steps": 26
+    },
+    "M": {
+      "first": 0.0,
+      "first_10_mean": 0.0765775754077216,
+      "last": 0.06764374295377677,
+      "last_10_mean": 0.06973742207108084,
+      "maximum": {
+        "step": 12,
+        "value": 0.14201183431952663
+      },
+      "mean": 0.08766850011853845,
+      "median": 0.08754380592698445,
+      "minimum": {
+        "step": 1,
+        "value": 0.0
+      },
+      "n": 56,
+      "ols_slope_per_step": -0.00029438450659092466,
+      "zero_steps": 2
+    },
+    "R": {
+      "first": 0.0,
+      "first_10_mean": 0.17150090247916336,
+      "last": 0.21052631578947367,
+      "last_10_mean": 0.15123198516470557,
+      "maximum": {
+        "step": 19,
+        "value": 0.5333333333333333
+      },
+      "mean": 0.2042895089482723,
+      "median": 0.2,
+      "minimum": {
+        "step": 1,
+        "value": 0.0
+      },
+      "n": 56,
+      "ols_slope_per_step": -0.0005406651814136179,
+      "zero_steps": 5
+    }
+  },
+  "validation": {
+    "corpus_size": 56,
+    "errors": [],
+    "fusion_completed": 56,
+    "receipt_hashes_verified": 170,
+    "snapshot_completed": 56,
+    "snapshot_pairs": 57,
+    "sqlite_quick_checks": 57,
+    "status": "valid",
+    "step_reports_verified": 56
+  }
+}

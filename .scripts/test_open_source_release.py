@@ -32,9 +32,27 @@ def main() -> None:
             destination / "README.md"
         ).read_text(encoding="utf-8")
         assert (destination / ".scripts/route.py").is_file()
+        assert (destination / ".scripts/e1_experiment.py").is_file()
+        assert (destination / ".scripts/test_e1_experiment.py").is_file()
         assert (destination / "operations/QUERY.md").is_file()
         assert (destination / "agents/writer/AGENT.md").is_file()
         assert (destination / "dsh/agent_loop.py").is_file()
+        assert (destination / "paper-artifacts/v0.2.0/metadata.json").is_file()
+        assert (destination / "paper-artifacts/v0.2.0/wiki/papers").is_dir()
+        assert (destination / "paper-artifacts/v0.2.0/wiki/hubs").is_dir()
+        assert (destination / "paper-artifacts/v0.2.0/graph/final-graph.jsonl").is_file()
+        artifact_check = subprocess.run(
+            [
+                sys.executable,
+                ".scripts/paper_artifact.py",
+                "verify",
+                "paper-artifacts/v0.2.0",
+            ],
+            cwd=destination, text=True, capture_output=True,
+        )
+        assert artifact_check.returncode == 0, artifact_check.stdout + artifact_check.stderr
+        assert not any((destination / "paper-artifacts").rglob("*.db"))
+        assert not any((destination / "paper-artifacts").rglob("*.pdf"))
         assert (destination / "academic/raw/.gitkeep").is_file()
         assert (destination / "academic/frontier/.gitkeep").is_file()
         assert not (destination / "academic/raw/example.pdf").exists()
@@ -43,7 +61,10 @@ def main() -> None:
         assert (destination / "operations/engineering/open-source-assets/README.md").is_file()
         graph_text = (destination / "operations/engineering/graph.yaml").read_text(encoding="utf-8")
         assert "frontier_store:" in graph_text
-        assert "projects/ForBetterScience" not in graph_text
+        assert "e1_experiment_workspace:" not in graph_text
+        assert "e1_experiment_plan:" not in graph_text
+        assert "e1_analysis:" not in graph_text
+        assert "path: projects/ForBetterScience" not in graph_text
         graph_check = subprocess.run(
             [sys.executable, ".scripts/engineering_graph.py", "validate"],
             cwd=destination, text=True, capture_output=True,

@@ -1,0 +1,40 @@
+{
+  "artifact_id": "ran-asks-arxiv-initial-e1-56",
+  "artifact_version": "1.0.0",
+  "asks_release_version": "0.2.0",
+  "code_compatibility": {
+    "details": "config/code-compatibility.json",
+    "exact_matches": 15,
+    "files_recorded_by_frozen_run": 16,
+    "post_run_drift": 1
+  },
+  "corpus_decisions": {
+    "exclude": 3,
+    "include": 56,
+    "related": 6
+  },
+  "corpus_entries": 65,
+  "corpus_manifest_sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a",
+  "derived_tables": {
+    "hub_count": 18,
+    "hub_state_rows": 454,
+    "mapped_papers": 50,
+    "paper_mapping_rows": 56,
+    "unmapped_papers": 6
+  },
+  "graph": {
+    "aliases": 872,
+    "edge_origins": 1966,
+    "edges": 2089,
+    "nodes": 1104
+  },
+  "paper_title": "LLMs Interpret, Embeddings Organize, Graphs Emerge: Agent-Driven Compilation of Scientific Knowledge",
+  "raw_distributed": false,
+  "schema": "ran-asks.paper-artifact.v1",
+  "source_finished_at": "2026-08-29T12:40:11.258142+00:00",
+  "source_run_id": "bd7dc4b6e166",
+  "wiki": {
+    "hubs": 18,
+    "papers": 56
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "created_canonical_nodes": 104,
+  "entry_id": "2024-wang-eth-inhomogeneous",
+  "final": {
+    "C_direct_nodes_excluding_sensitivity_entry": 0.014322916666666666,
+    "C_observed": 0.01261467889908257,
+    "M_direct_contribution_excluding_sensitivity_entry": 0.07662835249042145,
+    "M_observed": 0.06764374295377677,
+    "R_cumulative": 0.18853974121996303,
+    "R_cumulative_excluding_sensitivity_entry": 0.20717948717948717
+  },
+  "identity": {
+    "R_slope_excluding_sensitivity_observation": -0.0003090665028636687,
+    "abstain": 0,
+    "create": 105,
+    "full_R_slope_per_step": -0.0005406651814136179,
+    "reuse": 2,
+    "reuse_fraction": 0.018691588785046728,
+    "share_of_all_create_decisions": 0.11958997722095673
+  },
+  "interpretation_boundary": "This is a deterministic direct-contribution sensitivity analysis on the fixed formal attachment and membership outcomes. It removes the D047 observation from R summaries, removes D047 work support and exclusive nodes from M, and removes D047-created old nodes from C. The result quantifies direct contribution under the fixed fusion outcomes.",
+  "sequence_label": "D047",
+  "step": 47
+}

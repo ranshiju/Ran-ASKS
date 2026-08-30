@@ -1,0 +1,4845 @@
+{
+  "committed_events": [
+    {
+      "agent_gate_input_hash": "da134ceba3953a3b8d4e34661bdb8dd9622f27b7fba2e07e4ac2be0758ba51fa",
+      "agent_gate_output_hash": "2a5a47fe05e4623ec31a9bdfe441d75de4623d9caf73cfeed6f25d3de61733a0",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2012-odtns",
+        "2016-aop-physreve93053310",
+        "2017-octa-kagome"
+      ],
+      "event_id": "G012-birth-01",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/PEPS 与 iPEPS 更新方法"
+      ],
+      "member_set_after": [
+        "PEPS",
+        "full update",
+        "无穷投影纠缠对态",
+        "无限投影纠缠对态",
+        "无限投影纠缠对态的簇更新"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "以投影纠缠对态（PEPS/iPEPS）及 full update、cluster update 为核心的二维张量网络表示与优化方法。",
+      "step": 12,
+      "title": "PEPS 与 iPEPS 更新方法",
+      "trigger_work_id": "2017-octa-kagome"
+    },
+    {
+      "agent_gate_input_hash": "be8dfc5339b3e188a5d18ad7c32f15758391bd1ccfcd51492e03747ea9b50ee0",
+      "agent_gate_output_hash": "dfde27e3f537727f9a5ea189caaf610af0abd0d8030389a502ba5a4137a61041",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2012-spin-1-chain-闫",
+        "2013-kt-phase",
+        "2013-ncd-physrevb88064407",
+        "2016-aop-physreve93053310",
+        "2017-criticality-tn-2d",
+        "2017-fewbody-qes-ground-states"
+      ],
+      "event_id": "G014-birth-01",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/纠缠熵与纠缠谱诊断"
+      ],
+      "member_set_after": [
+        "准纠缠熵",
+        "纠缠熵",
+        "纠缠熵纠缠熵",
+        "纠缠谱entanglement spectrum",
+        "边界态纠缠谱"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "以纠缠熵、准纠缠熵和纠缠谱（含边界态纠缠谱）表征量子态、相与边界结构的诊断方法。",
+      "step": 14,
+      "title": "纠缠熵与纠缠谱诊断",
+      "trigger_work_id": "2017-fewbody-qes-ground-states"
+    },
+    {
+      "agent_gate_input_hash": "3abe8e46637c9e9345254365c09c25655dc33b20156bd37151c24610eb6439fa",
+      "agent_gate_output_hash": "e30ab9b6493748f78eb9fd66d5dbdd8d29abac8245ecc6458b3342ec4c44dc07",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2010-distorted-kagome",
+        "2012-odtns",
+        "2014-husimi",
+        "2015-sierpinskie2015-60745-5",
+        "2018-091彭程",
+        "2018-pc-epjb"
+      ],
+      "event_id": "G020-birth-01",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/Heisenberg 反铁磁模型"
+      ],
+      "member_set_after": [
+        "各向同性反铁磁模型",
+        "海森堡反铁磁模型",
+        "蜂窝格自旋海森堡反铁磁体",
+        "蜂窝状六角格子自旋海森堡反铁磁模型"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "各向同性 Heisenberg 反铁磁模型及其在蜂窝格等二维晶格上的自旋-1/2 实现与基态研究。",
+      "step": 20,
+      "title": "Heisenberg 反铁磁模型",
+      "trigger_work_id": "2018-091彭程"
+    },
+    {
+      "agent_gate_input_hash": "3abe8e46637c9e9345254365c09c25655dc33b20156bd37151c24610eb6439fa",
+      "agent_gate_output_hash": "e30ab9b6493748f78eb9fd66d5dbdd8d29abac8245ecc6458b3342ec4c44dc07",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2012-odtns",
+        "2017-criticality-tn-2d",
+        "2018-091彭程"
+      ],
+      "event_id": "G020-birth-03",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/二维量子多体系统与临界性"
+      ],
+      "member_set_after": [
+        "二维量子多体系统",
+        "二维量子多体系统基态临界性",
+        "二维量子模型",
+        "通过边界态纠缠谱行为表征二维量子态临界性"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "二维量子多体模型的基态、临界行为及其纠缠谱等结构性诊断。",
+      "step": 20,
+      "title": "二维量子多体系统与临界性",
+      "trigger_work_id": "2018-091彭程"
+    },
+    {
+      "agent_gate_input_hash": "6f9cda1b830596b3858fd6cf090fbf4bb36ffb23114ccb0d218741c40c06345c",
+      "agent_gate_output_hash": "df429dcd493ac14775b19c50c21c0c58a2aa5f6ab2b4fae579f90257fe41ed95",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2013-kt-phase",
+        "2013-ncd-physrevb88064407",
+        "2019-noise-tolerant-signature-ofzntopological-order-in-quantum-many-body-states"
+      ],
+      "event_id": "G022-birth-01",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断"
+      ],
+      "member_set_after": [
+        "准纠缠熵",
+        "拓扑Renyi",
+        "拓扑Renyi熵",
+        "拓扑纠缠熵"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [
+        "academic/wiki/hubs/纠缠熵与纠缠谱诊断"
+      ],
+      "scope": "用拓扑纠缠熵、拓扑 Rényi 熵及相关准纠缠熵信号识别拓扑有序与量子多体态结构。",
+      "step": 22,
+      "title": "拓扑纠缠熵与 Rényi 诊断",
+      "trigger_work_id": "2019-noise-tolerant-signature-ofzntopological-order-in-quantum-many-body-states"
+    },
+    {
+      "agent_gate_input_hash": "ed80f9083fbb005af01a8bd839192adae2a07c79857d230dc87e57561abdbb21",
+      "agent_gate_output_hash": "56784602f52d9c6c7a9de24ad9f82c7fb224ef8d3c9be792b1bcab8cd1d95d08",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2015-sierpinskie2015-60745-5",
+        "2017-criticality-tn-2d",
+        "2017-fewbody-qes-ground-states",
+        "2018-pc-epjb",
+        "2019-finite-temperature-qes"
+      ],
+      "event_id": "G023-birth-01",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/量子格点模型的晶格几何"
+      ],
+      "member_set_after": [
+        "checkerboard格子",
+        "honeycomb格子",
+        "立方晶格",
+        "简单立方格子简单立方格子",
+        "蜂窝晶格",
+        "蜂窝格子蜂窝格子",
+        "贝特晶格"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "用于量子格点与多体模型的蜂窝、checkerboard、简单立方和 Bethe 等晶格几何及网络结构。",
+      "step": 23,
+      "title": "量子格点模型的晶格几何",
+      "trigger_work_id": "2019-finite-temperature-qes"
+    },
+    {
+      "agent_gate_input_hash": "4f9268c8a7979a2911f3d15e22a2ec5d8183c5d28bf27015069ebc8134a8fcff",
+      "agent_gate_output_hash": "e85043885fbdcb21ca61aae67ceed287632b202ffdc1595e65d27a76758edbc7",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2012-odtns",
+        "2013-ncd-physrevb88064407",
+        "2014-zhaoyanghoneycombladder",
+        "2017-criticality-tn-2d",
+        "2018-kagome-chenxi",
+        "2020-paulinets-hermann"
+      ],
+      "event_id": "G024-birth-02",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/量子与变分蒙特卡洛方法"
+      ],
+      "member_set_after": [
+        "变分蒙特卡洛",
+        "蒙特卡洛采样",
+        "量子蒙特卡洛",
+        "量子蒙特卡洛方法"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "量子蒙特卡洛、变分蒙特卡洛及其随机采样技术在量子多体计算中的方法与应用。",
+      "step": 24,
+      "title": "量子与变分蒙特卡洛方法",
+      "trigger_work_id": "2020-paulinets-hermann"
+    },
+    {
+      "agent_gate_input_hash": "4f9268c8a7979a2911f3d15e22a2ec5d8183c5d28bf27015069ebc8134a8fcff",
+      "agent_gate_output_hash": "e85043885fbdcb21ca61aae67ceed287632b202ffdc1595e65d27a76758edbc7",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2020-paulinets-hermann"
+      ],
+      "event_id": "G024-birth-03",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/多参考 Hartree–Fock 与耦合簇方法"
+      ],
+      "member_set_after": [
+        "Hartree–Fock方法",
+        "MR-CC",
+        "多参考方法",
+        "多参考耦合簇multi-reference耦合簇(MR-CC)"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "面向强关联电子结构的 Hartree–Fock、多参考构造与多参考耦合簇（MR-CC）方法。",
+      "step": 24,
+      "title": "多参考 Hartree–Fock 与耦合簇方法",
+      "trigger_work_id": "2020-paulinets-hermann"
+    },
+    {
+      "agent_gate_input_hash": "4bf94d08a685bebb4419bc1049e8fb420a8a07b5716a69042771e106487e503b",
+      "agent_gate_output_hash": "b1be1d3b3e4e6e1dc958f3dec2a4122ec8c63df556f90bca38c95d27b12f7099",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2014-husimi",
+        "2017-criticality-tn-2d",
+        "2017-fewbody-qes-ground-states",
+        "2017-octa-kagome",
+        "2018-kagome-chenxi",
+        "2021-qubismnet"
+      ],
+      "event_id": "G030-birth-02",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/量子自旋模型与自旋液体"
+      ],
+      "member_set_after": [
+        "二维量子自旋液体",
+        "费米型代数量子自旋液体fermionic algebraic quantum spin liquid",
+        "量子自旋模型",
+        "量子自旋模型量子自旋模型",
+        "量子自旋液体"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "量子自旋模型中的二维量子自旋液体、费米型代数自旋液体及相关强关联基态。",
+      "step": 30,
+      "title": "量子自旋模型与自旋液体",
+      "trigger_work_id": "2021-qubismnet"
+    },
+    {
+      "agent_gate_input_hash": "4bf94d08a685bebb4419bc1049e8fb420a8a07b5716a69042771e106487e503b",
+      "agent_gate_output_hash": "b1be1d3b3e4e6e1dc958f3dec2a4122ec8c63df556f90bca38c95d27b12f7099",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2010-ltrg",
+        "2020-mps_deep_encoding_circuit",
+        "2020-sawtooth",
+        "2021-qubismnet"
+      ],
+      "event_id": "G030-birth-03",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/一维量子自旋链与基态"
+      ],
+      "member_set_after": [
+        "一维XY自旋链",
+        "一维强关联自旋模型的基态",
+        "一维自旋模型",
+        "自旋-1 锯齿链"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "一维强关联自旋模型及 XY 链、自旋-1 锯齿链等具体量子链的基态与相结构。",
+      "step": 30,
+      "title": "一维量子自旋链与基态",
+      "trigger_work_id": "2021-qubismnet"
+    },
+    {
+      "agent_gate_input_hash": "431b1326a007e62fe97f4457531cc365c33934cdd69dbe5d6d855d65ec56be1c",
+      "agent_gate_output_hash": "21c90e152d316216c3112ba9ced54b190b0be2e2b1695bac1f40786708c0ea5e",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2020-paulinets-hermann",
+        "2021-mpnn"
+      ],
+      "event_id": "G036-birth-02",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/神经网络求解电子薛定谔方程"
+      ],
+      "member_set_after": [
+        "PauliNet",
+        "推广至多电子薛定谔方程反演",
+        "电子薛定谔方程",
+        "电子薛定谔方程求解",
+        "薛定谔方程"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "以 PauliNet 等神经量子态方法求解、反演单电子与多电子薛定谔方程。",
+      "step": 36,
+      "title": "神经网络求解电子薛定谔方程",
+      "trigger_work_id": "2021-mpnn"
+    },
+    {
+      "agent_gate_input_hash": "89497a15e8a876c7a5505af61aa67aedec4476020f372467d9108f7e6ad6d628",
+      "agent_gate_output_hash": "d927be5bcdbad1c412b6ee4d5196b745a0032a170fb45d0c1e13817269c89cdd",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2013-kt-phase",
+        "2013-ncd-physrevb88064407",
+        "2020-tncs-physrevresearch2033293",
+        "2021-entanglement-feature-extraction"
+      ],
+      "event_id": "G037-birth-02",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/局域与双体纠缠熵及面积律"
+      ],
+      "member_set_after": [
+        "BEE",
+        "SEE",
+        "准纠缠熵",
+        "纠缠熵面积律"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [
+        "academic/wiki/hubs/纠缠熵与纠缠谱诊断"
+      ],
+      "scope": "单点纠缠熵（SEE）、双体纠缠熵（BEE）、准纠缠熵及纠缠熵面积律的定义、提取与物理诊断。",
+      "step": 37,
+      "title": "局域与双体纠缠熵及面积律",
+      "trigger_work_id": "2021-entanglement-feature-extraction"
+    },
+    {
+      "agent_gate_input_hash": "7050e4dd4b18c36f3162bfd812faf07908b6195b12282a650461d6ab8ec1f691",
+      "agent_gate_output_hash": "3ad6c3a47a5069c6833e8a2c014291c55ff327c493e0245deb1a9c7952a36de9",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2010-distorted-kagome",
+        "2010-ltrg",
+        "2012-odtns",
+        "2012-spin-1-chain-闫",
+        "2013-kt-phase",
+        "2014-husimi",
+        "2014-zhaoyanghoneycombladder",
+        "2019-finite-temperature-qes",
+        "2022-tn-tailoring-王顶族"
+      ],
+      "event_id": "G039-birth-02",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/张量重正化群及可微变体"
+      ],
+      "member_set_after": [
+        "LTRG",
+        "TRG",
+        "可微张量重正",
+        "可微张量重正化群"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "张量重正化群（TRG）、线性化 TRG（LTRG）与可微张量重正化群（∂TRG）的收缩、优化与应用。",
+      "step": 39,
+      "title": "张量重正化群及可微变体",
+      "trigger_work_id": "2022-tn-tailoring-王顶族"
+    },
+    {
+      "agent_gate_input_hash": "06ee30a2a94ef4181f9fe6812b522dac728740949b81c86896e23630d9788579",
+      "agent_gate_output_hash": "11becea6d6944977410cc64288343c5f521bda217bff77c66508be4dc92e85e9",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2016-aop-physreve93053310",
+        "2021-adqc",
+        "2022-functional-mps-洪瑞",
+        "2023-kagome-方大智"
+      ],
+      "event_id": "G042-birth-02",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/PEPS/PESS 表示及高维推广"
+      ],
+      "member_set_after": [
+        "PESS",
+        "全更新无穷投影纠缠对态",
+        "推广到投影纠缠对态",
+        "推广至高维投影纠缠对态",
+        "无穷投影纠缠对态"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "投影纠缠对态（PEPS/iPEPS）、投影纠缠单纯态（PESS）及其全更新和高维推广框架。",
+      "step": 42,
+      "title": "PEPS/PESS 表示及高维推广",
+      "trigger_work_id": "2023-kagome-方大智"
+    },
+    {
+      "agent_gate_input_hash": "06ee30a2a94ef4181f9fe6812b522dac728740949b81c86896e23630d9788579",
+      "agent_gate_output_hash": "11becea6d6944977410cc64288343c5f521bda217bff77c66508be4dc92e85e9",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2017-octa-kagome",
+        "2018-emergent-spin-1-trimerized-valence-bond-crystal",
+        "2023-kagome-方大智"
+      ],
+      "event_id": "G042-birth-03",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/价键固体与价键晶体"
+      ],
+      "member_set_after": [
+        "TVBC",
+        "VBC",
+        "二聚化价键晶体",
+        "价键固体valence bond solid(VBS)"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "价键固体/价键晶体（VBS/VBC）及二聚化、三聚化价键晶体等空间对称性破缺相。",
+      "step": 42,
+      "title": "价键固体与价键晶体",
+      "trigger_work_id": "2023-kagome-方大智"
+    },
+    {
+      "agent_gate_input_hash": "f43429eff58ab6b7940df4ace7ac997aaaaadaedd8a189bc6586eea4be62665f",
+      "agent_gate_output_hash": "b7d0490b725ff20f49227ef37f9b6e13a371e1096b25c3dffa8c52b9c23b3e9f",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2017-fewbody-qes-ground-states",
+        "2021-光量子分类器",
+        "2022-cpl-tn特征选择-白生成",
+        "2023-kagome-方大智",
+        "2023-王顶族qes边界奇异性"
+      ],
+      "event_id": "G046-birth-03",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/张量网络方法与机器学习"
+      ],
+      "member_set_after": [
+        "变分张量网络方法",
+        "张量网络方法",
+        "张量网络机器学习",
+        "张量网络算法张量网络算法"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [],
+      "scope": "变分张量网络算法、通用张量网络方法及其在机器学习模型与任务中的应用。",
+      "step": 46,
+      "title": "张量网络方法与机器学习",
+      "trigger_work_id": "2023-王顶族qes边界奇异性"
+    },
+    {
+      "agent_gate_input_hash": "00f8b8413b319f96f42516b4de521f44a11f170e9661a7d0733562cfba7dc5c4",
+      "agent_gate_output_hash": "499b10f5811a68b12e25c78bdd704d6d6a433d0673514fcbd9573392bad2c189",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2013-kt-phase",
+        "2018-091彭程",
+        "2025-ifmps-hong-rui",
+        "2026-fdz-kagome-magnetic-platform"
+      ],
+      "event_id": "G055-birth-10",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/关联长度与最近邻关联诊断"
+      ],
+      "member_set_after": [
+        "关联长度",
+        "关联长度奇异性",
+        "最近邻关联",
+        "最近邻关联奇异性"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [
+        "academic/wiki/hubs/二维量子多体系统与临界性"
+      ],
+      "scope": "关联长度、最近邻关联及其奇异行为对量子多体系统相变与临界结构的诊断。",
+      "step": 55,
+      "title": "关联长度与最近邻关联诊断",
+      "trigger_work_id": "2026-fdz-kagome-magnetic-platform"
+    },
+    {
+      "agent_gate_input_hash": "cc02d8b710822e4efd5358ba27189da98392f8cba3328c2824a4808d1af55fb9",
+      "agent_gate_output_hash": "18827f95c0a13b606c30cd514911d7088552e75b92922bded3a756969dec8d89",
+      "child_hubs": [],
+      "contributing_work_ids": [
+        "2026-icomputing-qml-orthogonality"
+      ],
+      "event_id": "G056-birth-06",
+      "event_type": "birth",
+      "involved_hubs": [
+        "academic/wiki/hubs/msQFM 及其编码方案"
+      ],
+      "member_set_after": [
+        "msQFM",
+        "msQFM-binary",
+        "msQFM-binary编码方案",
+        "msQFM-copy",
+        "msQFM-copy编码方案"
+      ],
+      "member_set_before": [],
+      "parent_hubs": [
+        "academic/wiki/hubs/张量网络方法与机器学习"
+      ],
+      "scope": "多自旋量子特征映射（msQFM）、msQFM-copy、msQFM-binary 及其在张量网络机器学习中的编码策略。",
+      "step": 56,
+      "title": "msQFM 及其编码方案",
+      "trigger_work_id": "2026-icomputing-qml-orthogonality"
+    }
+  ],
+  "event_counts": {
+    "birth": 18
+  },
+  "hubs": [
+    {
+      "birth_step": 12,
+      "event_id": "G012-birth-01",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 5,
+          "step": 12
+        },
+        {
+          "member_count": 6,
+          "step": 13
+        },
+        {
+          "member_count": 7,
+          "step": 14
+        },
+        {
+          "member_count": 7,
+          "step": 15
+        },
+        {
+          "member_count": 10,
+          "step": 16
+        },
+        {
+          "member_count": 10,
+          "step": 17
+        },
+        {
+          "member_count": 10,
+          "step": 18
+        },
+        {
+          "member_count": 11,
+          "step": 19
+        },
+        {
+          "member_count": 12,
+          "step": 20
+        },
+        {
+          "member_count": 12,
+          "step": 21
+        },
+        {
+          "member_count": 12,
+          "step": 22
+        },
+        {
+          "member_count": 12,
+          "step": 23
+        },
+        {
+          "member_count": 12,
+          "step": 24
+        },
+        {
+          "member_count": 12,
+          "step": 25
+        },
+        {
+          "member_count": 12,
+          "step": 26
+        },
+        {
+          "member_count": 12,
+          "step": 27
+        },
+        {
+          "member_count": 12,
+          "step": 28
+        },
+        {
+          "member_count": 12,
+          "step": 29
+        },
+        {
+          "member_count": 12,
+          "step": 30
+        },
+        {
+          "member_count": 12,
+          "step": 31
+        },
+        {
+          "member_count": 12,
+          "step": 32
+        },
+        {
+          "member_count": 12,
+          "step": 33
+        },
+        {
+          "member_count": 12,
+          "step": 34
+        },
+        {
+          "member_count": 12,
+          "step": 35
+        },
+        {
+          "member_count": 12,
+          "step": 36
+        },
+        {
+          "member_count": 12,
+          "step": 37
+        },
+        {
+          "member_count": 12,
+          "step": 38
+        },
+        {
+          "member_count": 12,
+          "step": 39
+        },
+        {
+          "member_count": 15,
+          "step": 40
+        },
+        {
+          "member_count": 16,
+          "step": 41
+        },
+        {
+          "member_count": 16,
+          "step": 42
+        },
+        {
+          "member_count": 18,
+          "step": 43
+        },
+        {
+          "member_count": 18,
+          "step": 44
+        },
+        {
+          "member_count": 18,
+          "step": 45
+        },
+        {
+          "member_count": 19,
+          "step": 46
+        },
+        {
+          "member_count": 19,
+          "step": 47
+        },
+        {
+          "member_count": 19,
+          "step": 48
+        },
+        {
+          "member_count": 19,
+          "step": 49
+        },
+        {
+          "member_count": 21,
+          "step": 50
+        },
+        {
+          "member_count": 20,
+          "step": 51
+        },
+        {
+          "member_count": 20,
+          "step": 52
+        },
+        {
+          "member_count": 21,
+          "step": 53
+        },
+        {
+          "member_count": 21,
+          "step": 54
+        },
+        {
+          "member_count": 21,
+          "step": 55
+        },
+        {
+          "member_count": 26,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "PEPS 与 iPEPS 更新方法",
+      "trigger_work_id": "2017-octa-kagome"
+    },
+    {
+      "birth_step": 14,
+      "event_id": "G014-birth-01",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 2,
+          "step": 14
+        },
+        {
+          "member_count": 5,
+          "step": 15
+        },
+        {
+          "member_count": 6,
+          "step": 16
+        },
+        {
+          "member_count": 7,
+          "step": 17
+        },
+        {
+          "member_count": 7,
+          "step": 18
+        },
+        {
+          "member_count": 7,
+          "step": 19
+        },
+        {
+          "member_count": 7,
+          "step": 20
+        },
+        {
+          "member_count": 7,
+          "step": 21
+        },
+        {
+          "member_count": 7,
+          "step": 22
+        },
+        {
+          "member_count": 7,
+          "step": 23
+        },
+        {
+          "member_count": 7,
+          "step": 24
+        },
+        {
+          "member_count": 7,
+          "step": 25
+        },
+        {
+          "member_count": 7,
+          "step": 26
+        },
+        {
+          "member_count": 7,
+          "step": 27
+        },
+        {
+          "member_count": 7,
+          "step": 28
+        },
+        {
+          "member_count": 7,
+          "step": 29
+        },
+        {
+          "member_count": 7,
+          "step": 30
+        },
+        {
+          "member_count": 7,
+          "step": 31
+        },
+        {
+          "member_count": 7,
+          "step": 32
+        },
+        {
+          "member_count": 7,
+          "step": 33
+        },
+        {
+          "member_count": 7,
+          "step": 34
+        },
+        {
+          "member_count": 7,
+          "step": 35
+        },
+        {
+          "member_count": 7,
+          "step": 36
+        },
+        {
+          "member_count": 7,
+          "step": 37
+        },
+        {
+          "member_count": 8,
+          "step": 38
+        },
+        {
+          "member_count": 8,
+          "step": 39
+        },
+        {
+          "member_count": 8,
+          "step": 40
+        },
+        {
+          "member_count": 8,
+          "step": 41
+        },
+        {
+          "member_count": 8,
+          "step": 42
+        },
+        {
+          "member_count": 8,
+          "step": 43
+        },
+        {
+          "member_count": 8,
+          "step": 44
+        },
+        {
+          "member_count": 8,
+          "step": 45
+        },
+        {
+          "member_count": 8,
+          "step": 46
+        },
+        {
+          "member_count": 8,
+          "step": 47
+        },
+        {
+          "member_count": 9,
+          "step": 48
+        },
+        {
+          "member_count": 9,
+          "step": 49
+        },
+        {
+          "member_count": 9,
+          "step": 50
+        },
+        {
+          "member_count": 9,
+          "step": 51
+        },
+        {
+          "member_count": 9,
+          "step": 52
+        },
+        {
+          "member_count": 9,
+          "step": 53
+        },
+        {
+          "member_count": 9,
+          "step": 54
+        },
+        {
+          "member_count": 10,
+          "step": 55
+        },
+        {
+          "member_count": 10,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "纠缠熵与纠缠谱诊断",
+      "trigger_work_id": "2017-fewbody-qes-ground-states"
+    },
+    {
+      "birth_step": 20,
+      "event_id": "G020-birth-01",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 2,
+          "step": 20
+        },
+        {
+          "member_count": 2,
+          "step": 21
+        },
+        {
+          "member_count": 2,
+          "step": 22
+        },
+        {
+          "member_count": 2,
+          "step": 23
+        },
+        {
+          "member_count": 2,
+          "step": 24
+        },
+        {
+          "member_count": 2,
+          "step": 25
+        },
+        {
+          "member_count": 2,
+          "step": 26
+        },
+        {
+          "member_count": 2,
+          "step": 27
+        },
+        {
+          "member_count": 2,
+          "step": 28
+        },
+        {
+          "member_count": 2,
+          "step": 29
+        },
+        {
+          "member_count": 2,
+          "step": 30
+        },
+        {
+          "member_count": 2,
+          "step": 31
+        },
+        {
+          "member_count": 2,
+          "step": 32
+        },
+        {
+          "member_count": 2,
+          "step": 33
+        },
+        {
+          "member_count": 2,
+          "step": 34
+        },
+        {
+          "member_count": 2,
+          "step": 35
+        },
+        {
+          "member_count": 2,
+          "step": 36
+        },
+        {
+          "member_count": 2,
+          "step": 37
+        },
+        {
+          "member_count": 2,
+          "step": 38
+        },
+        {
+          "member_count": 2,
+          "step": 39
+        },
+        {
+          "member_count": 2,
+          "step": 40
+        },
+        {
+          "member_count": 2,
+          "step": 41
+        },
+        {
+          "member_count": 2,
+          "step": 42
+        },
+        {
+          "member_count": 2,
+          "step": 43
+        },
+        {
+          "member_count": 2,
+          "step": 44
+        },
+        {
+          "member_count": 2,
+          "step": 45
+        },
+        {
+          "member_count": 2,
+          "step": 46
+        },
+        {
+          "member_count": 2,
+          "step": 47
+        },
+        {
+          "member_count": 2,
+          "step": 48
+        },
+        {
+          "member_count": 2,
+          "step": 49
+        },
+        {
+          "member_count": 2,
+          "step": 50
+        },
+        {
+          "member_count": 2,
+          "step": 51
+        },
+        {
+          "member_count": 2,
+          "step": 52
+        },
+        {
+          "member_count": 2,
+          "step": 53
+        },
+        {
+          "member_count": 2,
+          "step": 54
+        },
+        {
+          "member_count": 2,
+          "step": 55
+        },
+        {
+          "member_count": 2,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "Heisenberg 反铁磁模型",
+      "trigger_work_id": "2018-091彭程"
+    },
+    {
+      "birth_step": 20,
+      "event_id": "G020-birth-03",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/二维量子多体系统与临界性",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 3,
+          "step": 20
+        },
+        {
+          "member_count": 3,
+          "step": 21
+        },
+        {
+          "member_count": 3,
+          "step": 22
+        },
+        {
+          "member_count": 3,
+          "step": 23
+        },
+        {
+          "member_count": 3,
+          "step": 24
+        },
+        {
+          "member_count": 3,
+          "step": 25
+        },
+        {
+          "member_count": 3,
+          "step": 26
+        },
+        {
+          "member_count": 3,
+          "step": 27
+        },
+        {
+          "member_count": 3,
+          "step": 28
+        },
+        {
+          "member_count": 3,
+          "step": 29
+        },
+        {
+          "member_count": 3,
+          "step": 30
+        },
+        {
+          "member_count": 3,
+          "step": 31
+        },
+        {
+          "member_count": 3,
+          "step": 32
+        },
+        {
+          "member_count": 3,
+          "step": 33
+        },
+        {
+          "member_count": 3,
+          "step": 34
+        },
+        {
+          "member_count": 3,
+          "step": 35
+        },
+        {
+          "member_count": 3,
+          "step": 36
+        },
+        {
+          "member_count": 3,
+          "step": 37
+        },
+        {
+          "member_count": 3,
+          "step": 38
+        },
+        {
+          "member_count": 3,
+          "step": 39
+        },
+        {
+          "member_count": 3,
+          "step": 40
+        },
+        {
+          "member_count": 3,
+          "step": 41
+        },
+        {
+          "member_count": 3,
+          "step": 42
+        },
+        {
+          "member_count": 3,
+          "step": 43
+        },
+        {
+          "member_count": 3,
+          "step": 44
+        },
+        {
+          "member_count": 3,
+          "step": 45
+        },
+        {
+          "member_count": 3,
+          "step": 46
+        },
+        {
+          "member_count": 3,
+          "step": 47
+        },
+        {
+          "member_count": 3,
+          "step": 48
+        },
+        {
+          "member_count": 3,
+          "step": 49
+        },
+        {
+          "member_count": 3,
+          "step": 50
+        },
+        {
+          "member_count": 3,
+          "step": 51
+        },
+        {
+          "member_count": 3,
+          "step": 52
+        },
+        {
+          "member_count": 3,
+          "step": 53
+        },
+        {
+          "member_count": 3,
+          "step": 54
+        },
+        {
+          "member_count": 3,
+          "step": 55
+        },
+        {
+          "member_count": 3,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "二维量子多体系统与临界性",
+      "trigger_work_id": "2018-091彭程"
+    },
+    {
+      "birth_step": 22,
+      "event_id": "G022-birth-01",
+      "parent_hubs": [
+        "academic/wiki/hubs/纠缠熵与纠缠谱诊断"
+      ],
+      "path": "academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 2,
+          "step": 22
+        },
+        {
+          "member_count": 3,
+          "step": 23
+        },
+        {
+          "member_count": 3,
+          "step": 24
+        },
+        {
+          "member_count": 3,
+          "step": 25
+        },
+        {
+          "member_count": 3,
+          "step": 26
+        },
+        {
+          "member_count": 3,
+          "step": 27
+        },
+        {
+          "member_count": 3,
+          "step": 28
+        },
+        {
+          "member_count": 3,
+          "step": 29
+        },
+        {
+          "member_count": 3,
+          "step": 30
+        },
+        {
+          "member_count": 3,
+          "step": 31
+        },
+        {
+          "member_count": 3,
+          "step": 32
+        },
+        {
+          "member_count": 3,
+          "step": 33
+        },
+        {
+          "member_count": 3,
+          "step": 34
+        },
+        {
+          "member_count": 3,
+          "step": 35
+        },
+        {
+          "member_count": 3,
+          "step": 36
+        },
+        {
+          "member_count": 3,
+          "step": 37
+        },
+        {
+          "member_count": 5,
+          "step": 38
+        },
+        {
+          "member_count": 5,
+          "step": 39
+        },
+        {
+          "member_count": 5,
+          "step": 40
+        },
+        {
+          "member_count": 5,
+          "step": 41
+        },
+        {
+          "member_count": 5,
+          "step": 42
+        },
+        {
+          "member_count": 5,
+          "step": 43
+        },
+        {
+          "member_count": 5,
+          "step": 44
+        },
+        {
+          "member_count": 5,
+          "step": 45
+        },
+        {
+          "member_count": 5,
+          "step": 46
+        },
+        {
+          "member_count": 5,
+          "step": 47
+        },
+        {
+          "member_count": 5,
+          "step": 48
+        },
+        {
+          "member_count": 5,
+          "step": 49
+        },
+        {
+          "member_count": 5,
+          "step": 50
+        },
+        {
+          "member_count": 5,
+          "step": 51
+        },
+        {
+          "member_count": 5,
+          "step": 52
+        },
+        {
+          "member_count": 5,
+          "step": 53
+        },
+        {
+          "member_count": 5,
+          "step": 54
+        },
+        {
+          "member_count": 5,
+          "step": 55
+        },
+        {
+          "member_count": 5,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "拓扑纠缠熵与 Rényi 诊断",
+      "trigger_work_id": "2019-noise-tolerant-signature-ofzntopological-order-in-quantum-many-body-states"
+    },
+    {
+      "birth_step": 23,
+      "event_id": "G023-birth-01",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/量子格点模型的晶格几何",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 4,
+          "step": 23
+        },
+        {
+          "member_count": 4,
+          "step": 24
+        },
+        {
+          "member_count": 4,
+          "step": 25
+        },
+        {
+          "member_count": 4,
+          "step": 26
+        },
+        {
+          "member_count": 4,
+          "step": 27
+        },
+        {
+          "member_count": 4,
+          "step": 28
+        },
+        {
+          "member_count": 4,
+          "step": 29
+        },
+        {
+          "member_count": 4,
+          "step": 30
+        },
+        {
+          "member_count": 4,
+          "step": 31
+        },
+        {
+          "member_count": 4,
+          "step": 32
+        },
+        {
+          "member_count": 4,
+          "step": 33
+        },
+        {
+          "member_count": 4,
+          "step": 34
+        },
+        {
+          "member_count": 4,
+          "step": 35
+        },
+        {
+          "member_count": 4,
+          "step": 36
+        },
+        {
+          "member_count": 4,
+          "step": 37
+        },
+        {
+          "member_count": 4,
+          "step": 38
+        },
+        {
+          "member_count": 4,
+          "step": 39
+        },
+        {
+          "member_count": 4,
+          "step": 40
+        },
+        {
+          "member_count": 4,
+          "step": 41
+        },
+        {
+          "member_count": 4,
+          "step": 42
+        },
+        {
+          "member_count": 4,
+          "step": 43
+        },
+        {
+          "member_count": 4,
+          "step": 44
+        },
+        {
+          "member_count": 4,
+          "step": 45
+        },
+        {
+          "member_count": 4,
+          "step": 46
+        },
+        {
+          "member_count": 4,
+          "step": 47
+        },
+        {
+          "member_count": 4,
+          "step": 48
+        },
+        {
+          "member_count": 4,
+          "step": 49
+        },
+        {
+          "member_count": 4,
+          "step": 50
+        },
+        {
+          "member_count": 4,
+          "step": 51
+        },
+        {
+          "member_count": 4,
+          "step": 52
+        },
+        {
+          "member_count": 4,
+          "step": 53
+        },
+        {
+          "member_count": 4,
+          "step": 54
+        },
+        {
+          "member_count": 4,
+          "step": 55
+        },
+        {
+          "member_count": 4,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "量子格点模型的晶格几何",
+      "trigger_work_id": "2019-finite-temperature-qes"
+    },
+    {
+      "birth_step": 24,
+      "event_id": "G024-birth-03",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/多参考 Hartree–Fock 与耦合簇方法",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 3,
+          "step": 24
+        },
+        {
+          "member_count": 3,
+          "step": 25
+        },
+        {
+          "member_count": 3,
+          "step": 26
+        },
+        {
+          "member_count": 3,
+          "step": 27
+        },
+        {
+          "member_count": 3,
+          "step": 28
+        },
+        {
+          "member_count": 3,
+          "step": 29
+        },
+        {
+          "member_count": 3,
+          "step": 30
+        },
+        {
+          "member_count": 3,
+          "step": 31
+        },
+        {
+          "member_count": 3,
+          "step": 32
+        },
+        {
+          "member_count": 3,
+          "step": 33
+        },
+        {
+          "member_count": 3,
+          "step": 34
+        },
+        {
+          "member_count": 3,
+          "step": 35
+        },
+        {
+          "member_count": 3,
+          "step": 36
+        },
+        {
+          "member_count": 3,
+          "step": 37
+        },
+        {
+          "member_count": 3,
+          "step": 38
+        },
+        {
+          "member_count": 3,
+          "step": 39
+        },
+        {
+          "member_count": 3,
+          "step": 40
+        },
+        {
+          "member_count": 3,
+          "step": 41
+        },
+        {
+          "member_count": 3,
+          "step": 42
+        },
+        {
+          "member_count": 3,
+          "step": 43
+        },
+        {
+          "member_count": 3,
+          "step": 44
+        },
+        {
+          "member_count": 3,
+          "step": 45
+        },
+        {
+          "member_count": 3,
+          "step": 46
+        },
+        {
+          "member_count": 3,
+          "step": 47
+        },
+        {
+          "member_count": 3,
+          "step": 48
+        },
+        {
+          "member_count": 3,
+          "step": 49
+        },
+        {
+          "member_count": 3,
+          "step": 50
+        },
+        {
+          "member_count": 3,
+          "step": 51
+        },
+        {
+          "member_count": 3,
+          "step": 52
+        },
+        {
+          "member_count": 3,
+          "step": 53
+        },
+        {
+          "member_count": 3,
+          "step": 54
+        },
+        {
+          "member_count": 3,
+          "step": 55
+        },
+        {
+          "member_count": 3,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "多参考 Hartree–Fock 与耦合簇方法",
+      "trigger_work_id": "2020-paulinets-hermann"
+    },
+    {
+      "birth_step": 24,
+      "event_id": "G024-birth-02",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/量子与变分蒙特卡洛方法",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 4,
+          "step": 24
+        },
+        {
+          "member_count": 4,
+          "step": 25
+        },
+        {
+          "member_count": 4,
+          "step": 26
+        },
+        {
+          "member_count": 4,
+          "step": 27
+        },
+        {
+          "member_count": 4,
+          "step": 28
+        },
+        {
+          "member_count": 4,
+          "step": 29
+        },
+        {
+          "member_count": 4,
+          "step": 30
+        },
+        {
+          "member_count": 6,
+          "step": 31
+        },
+        {
+          "member_count": 6,
+          "step": 32
+        },
+        {
+          "member_count": 6,
+          "step": 33
+        },
+        {
+          "member_count": 6,
+          "step": 34
+        },
+        {
+          "member_count": 6,
+          "step": 35
+        },
+        {
+          "member_count": 6,
+          "step": 36
+        },
+        {
+          "member_count": 6,
+          "step": 37
+        },
+        {
+          "member_count": 6,
+          "step": 38
+        },
+        {
+          "member_count": 6,
+          "step": 39
+        },
+        {
+          "member_count": 6,
+          "step": 40
+        },
+        {
+          "member_count": 6,
+          "step": 41
+        },
+        {
+          "member_count": 6,
+          "step": 42
+        },
+        {
+          "member_count": 6,
+          "step": 43
+        },
+        {
+          "member_count": 6,
+          "step": 44
+        },
+        {
+          "member_count": 6,
+          "step": 45
+        },
+        {
+          "member_count": 6,
+          "step": 46
+        },
+        {
+          "member_count": 6,
+          "step": 47
+        },
+        {
+          "member_count": 6,
+          "step": 48
+        },
+        {
+          "member_count": 6,
+          "step": 49
+        },
+        {
+          "member_count": 6,
+          "step": 50
+        },
+        {
+          "member_count": 6,
+          "step": 51
+        },
+        {
+          "member_count": 6,
+          "step": 52
+        },
+        {
+          "member_count": 6,
+          "step": 53
+        },
+        {
+          "member_count": 6,
+          "step": 54
+        },
+        {
+          "member_count": 6,
+          "step": 55
+        },
+        {
+          "member_count": 6,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "量子与变分蒙特卡洛方法",
+      "trigger_work_id": "2020-paulinets-hermann"
+    },
+    {
+      "birth_step": 30,
+      "event_id": "G030-birth-03",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/一维量子自旋链与基态",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 1,
+          "step": 30
+        },
+        {
+          "member_count": 2,
+          "step": 31
+        },
+        {
+          "member_count": 2,
+          "step": 32
+        },
+        {
+          "member_count": 2,
+          "step": 33
+        },
+        {
+          "member_count": 2,
+          "step": 34
+        },
+        {
+          "member_count": 2,
+          "step": 35
+        },
+        {
+          "member_count": 2,
+          "step": 36
+        },
+        {
+          "member_count": 2,
+          "step": 37
+        },
+        {
+          "member_count": 2,
+          "step": 38
+        },
+        {
+          "member_count": 2,
+          "step": 39
+        },
+        {
+          "member_count": 2,
+          "step": 40
+        },
+        {
+          "member_count": 2,
+          "step": 41
+        },
+        {
+          "member_count": 2,
+          "step": 42
+        },
+        {
+          "member_count": 2,
+          "step": 43
+        },
+        {
+          "member_count": 2,
+          "step": 44
+        },
+        {
+          "member_count": 2,
+          "step": 45
+        },
+        {
+          "member_count": 2,
+          "step": 46
+        },
+        {
+          "member_count": 2,
+          "step": 47
+        },
+        {
+          "member_count": 2,
+          "step": 48
+        },
+        {
+          "member_count": 2,
+          "step": 49
+        },
+        {
+          "member_count": 2,
+          "step": 50
+        },
+        {
+          "member_count": 2,
+          "step": 51
+        },
+        {
+          "member_count": 2,
+          "step": 52
+        },
+        {
+          "member_count": 2,
+          "step": 53
+        },
+        {
+          "member_count": 2,
+          "step": 54
+        },
+        {
+          "member_count": 2,
+          "step": 55
+        },
+        {
+          "member_count": 2,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "一维量子自旋链与基态",
+      "trigger_work_id": "2021-qubismnet"
+    },
+    {
+      "birth_step": 30,
+      "event_id": "G030-birth-02",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/量子自旋模型与自旋液体",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 6,
+          "step": 30
+        },
+        {
+          "member_count": 6,
+          "step": 31
+        },
+        {
+          "member_count": 6,
+          "step": 32
+        },
+        {
+          "member_count": 6,
+          "step": 33
+        },
+        {
+          "member_count": 6,
+          "step": 34
+        },
+        {
+          "member_count": 6,
+          "step": 35
+        },
+        {
+          "member_count": 6,
+          "step": 36
+        },
+        {
+          "member_count": 6,
+          "step": 37
+        },
+        {
+          "member_count": 6,
+          "step": 38
+        },
+        {
+          "member_count": 6,
+          "step": 39
+        },
+        {
+          "member_count": 6,
+          "step": 40
+        },
+        {
+          "member_count": 6,
+          "step": 41
+        },
+        {
+          "member_count": 6,
+          "step": 42
+        },
+        {
+          "member_count": 6,
+          "step": 43
+        },
+        {
+          "member_count": 6,
+          "step": 44
+        },
+        {
+          "member_count": 6,
+          "step": 45
+        },
+        {
+          "member_count": 6,
+          "step": 46
+        },
+        {
+          "member_count": 6,
+          "step": 47
+        },
+        {
+          "member_count": 6,
+          "step": 48
+        },
+        {
+          "member_count": 6,
+          "step": 49
+        },
+        {
+          "member_count": 6,
+          "step": 50
+        },
+        {
+          "member_count": 6,
+          "step": 51
+        },
+        {
+          "member_count": 6,
+          "step": 52
+        },
+        {
+          "member_count": 6,
+          "step": 53
+        },
+        {
+          "member_count": 6,
+          "step": 54
+        },
+        {
+          "member_count": 6,
+          "step": 55
+        },
+        {
+          "member_count": 6,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "量子自旋模型与自旋液体",
+      "trigger_work_id": "2021-qubismnet"
+    },
+    {
+      "birth_step": 36,
+      "event_id": "G036-birth-02",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/神经网络求解电子薛定谔方程",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 0,
+          "step": 30
+        },
+        {
+          "member_count": 0,
+          "step": 31
+        },
+        {
+          "member_count": 0,
+          "step": 32
+        },
+        {
+          "member_count": 0,
+          "step": 33
+        },
+        {
+          "member_count": 0,
+          "step": 34
+        },
+        {
+          "member_count": 0,
+          "step": 35
+        },
+        {
+          "member_count": 5,
+          "step": 36
+        },
+        {
+          "member_count": 5,
+          "step": 37
+        },
+        {
+          "member_count": 5,
+          "step": 38
+        },
+        {
+          "member_count": 5,
+          "step": 39
+        },
+        {
+          "member_count": 5,
+          "step": 40
+        },
+        {
+          "member_count": 5,
+          "step": 41
+        },
+        {
+          "member_count": 5,
+          "step": 42
+        },
+        {
+          "member_count": 5,
+          "step": 43
+        },
+        {
+          "member_count": 5,
+          "step": 44
+        },
+        {
+          "member_count": 5,
+          "step": 45
+        },
+        {
+          "member_count": 5,
+          "step": 46
+        },
+        {
+          "member_count": 5,
+          "step": 47
+        },
+        {
+          "member_count": 5,
+          "step": 48
+        },
+        {
+          "member_count": 5,
+          "step": 49
+        },
+        {
+          "member_count": 5,
+          "step": 50
+        },
+        {
+          "member_count": 5,
+          "step": 51
+        },
+        {
+          "member_count": 5,
+          "step": 52
+        },
+        {
+          "member_count": 5,
+          "step": 53
+        },
+        {
+          "member_count": 5,
+          "step": 54
+        },
+        {
+          "member_count": 5,
+          "step": 55
+        },
+        {
+          "member_count": 5,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "神经网络求解电子薛定谔方程",
+      "trigger_work_id": "2021-mpnn"
+    },
+    {
+      "birth_step": 37,
+      "event_id": "G037-birth-02",
+      "parent_hubs": [
+        "academic/wiki/hubs/纠缠熵与纠缠谱诊断"
+      ],
+      "path": "academic/wiki/hubs/局域与双体纠缠熵及面积律",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 0,
+          "step": 30
+        },
+        {
+          "member_count": 0,
+          "step": 31
+        },
+        {
+          "member_count": 0,
+          "step": 32
+        },
+        {
+          "member_count": 0,
+          "step": 33
+        },
+        {
+          "member_count": 0,
+          "step": 34
+        },
+        {
+          "member_count": 0,
+          "step": 35
+        },
+        {
+          "member_count": 0,
+          "step": 36
+        },
+        {
+          "member_count": 8,
+          "step": 37
+        },
+        {
+          "member_count": 12,
+          "step": 38
+        },
+        {
+          "member_count": 12,
+          "step": 39
+        },
+        {
+          "member_count": 12,
+          "step": 40
+        },
+        {
+          "member_count": 12,
+          "step": 41
+        },
+        {
+          "member_count": 12,
+          "step": 42
+        },
+        {
+          "member_count": 12,
+          "step": 43
+        },
+        {
+          "member_count": 12,
+          "step": 44
+        },
+        {
+          "member_count": 12,
+          "step": 45
+        },
+        {
+          "member_count": 12,
+          "step": 46
+        },
+        {
+          "member_count": 12,
+          "step": 47
+        },
+        {
+          "member_count": 12,
+          "step": 48
+        },
+        {
+          "member_count": 12,
+          "step": 49
+        },
+        {
+          "member_count": 12,
+          "step": 50
+        },
+        {
+          "member_count": 12,
+          "step": 51
+        },
+        {
+          "member_count": 12,
+          "step": 52
+        },
+        {
+          "member_count": 12,
+          "step": 53
+        },
+        {
+          "member_count": 12,
+          "step": 54
+        },
+        {
+          "member_count": 12,
+          "step": 55
+        },
+        {
+          "member_count": 12,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "局域与双体纠缠熵及面积律",
+      "trigger_work_id": "2021-entanglement-feature-extraction"
+    },
+    {
+      "birth_step": 39,
+      "event_id": "G039-birth-02",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/张量重正化群及可微变体",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 0,
+          "step": 30
+        },
+        {
+          "member_count": 0,
+          "step": 31
+        },
+        {
+          "member_count": 0,
+          "step": 32
+        },
+        {
+          "member_count": 0,
+          "step": 33
+        },
+        {
+          "member_count": 0,
+          "step": 34
+        },
+        {
+          "member_count": 0,
+          "step": 35
+        },
+        {
+          "member_count": 0,
+          "step": 36
+        },
+        {
+          "member_count": 0,
+          "step": 37
+        },
+        {
+          "member_count": 0,
+          "step": 38
+        },
+        {
+          "member_count": 5,
+          "step": 39
+        },
+        {
+          "member_count": 5,
+          "step": 40
+        },
+        {
+          "member_count": 5,
+          "step": 41
+        },
+        {
+          "member_count": 5,
+          "step": 42
+        },
+        {
+          "member_count": 5,
+          "step": 43
+        },
+        {
+          "member_count": 5,
+          "step": 44
+        },
+        {
+          "member_count": 5,
+          "step": 45
+        },
+        {
+          "member_count": 5,
+          "step": 46
+        },
+        {
+          "member_count": 5,
+          "step": 47
+        },
+        {
+          "member_count": 5,
+          "step": 48
+        },
+        {
+          "member_count": 5,
+          "step": 49
+        },
+        {
+          "member_count": 5,
+          "step": 50
+        },
+        {
+          "member_count": 5,
+          "step": 51
+        },
+        {
+          "member_count": 5,
+          "step": 52
+        },
+        {
+          "member_count": 5,
+          "step": 53
+        },
+        {
+          "member_count": 5,
+          "step": 54
+        },
+        {
+          "member_count": 5,
+          "step": 55
+        },
+        {
+          "member_count": 5,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "张量重正化群及可微变体",
+      "trigger_work_id": "2022-tn-tailoring-王顶族"
+    },
+    {
+      "birth_step": 42,
+      "event_id": "G042-birth-02",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 0,
+          "step": 30
+        },
+        {
+          "member_count": 0,
+          "step": 31
+        },
+        {
+          "member_count": 0,
+          "step": 32
+        },
+        {
+          "member_count": 0,
+          "step": 33
+        },
+        {
+          "member_count": 0,
+          "step": 34
+        },
+        {
+          "member_count": 0,
+          "step": 35
+        },
+        {
+          "member_count": 0,
+          "step": 36
+        },
+        {
+          "member_count": 0,
+          "step": 37
+        },
+        {
+          "member_count": 0,
+          "step": 38
+        },
+        {
+          "member_count": 0,
+          "step": 39
+        },
+        {
+          "member_count": 0,
+          "step": 40
+        },
+        {
+          "member_count": 0,
+          "step": 41
+        },
+        {
+          "member_count": 6,
+          "step": 42
+        },
+        {
+          "member_count": 12,
+          "step": 43
+        },
+        {
+          "member_count": 12,
+          "step": 44
+        },
+        {
+          "member_count": 13,
+          "step": 45
+        },
+        {
+          "member_count": 14,
+          "step": 46
+        },
+        {
+          "member_count": 14,
+          "step": 47
+        },
+        {
+          "member_count": 14,
+          "step": 48
+        },
+        {
+          "member_count": 14,
+          "step": 49
+        },
+        {
+          "member_count": 14,
+          "step": 50
+        },
+        {
+          "member_count": 14,
+          "step": 51
+        },
+        {
+          "member_count": 14,
+          "step": 52
+        },
+        {
+          "member_count": 15,
+          "step": 53
+        },
+        {
+          "member_count": 15,
+          "step": 54
+        },
+        {
+          "member_count": 15,
+          "step": 55
+        },
+        {
+          "member_count": 15,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "PEPS/PESS 表示及高维推广",
+      "trigger_work_id": "2023-kagome-方大智"
+    },
+    {
+      "birth_step": 42,
+      "event_id": "G042-birth-03",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/价键固体与价键晶体",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 0,
+          "step": 30
+        },
+        {
+          "member_count": 0,
+          "step": 31
+        },
+        {
+          "member_count": 0,
+          "step": 32
+        },
+        {
+          "member_count": 0,
+          "step": 33
+        },
+        {
+          "member_count": 0,
+          "step": 34
+        },
+        {
+          "member_count": 0,
+          "step": 35
+        },
+        {
+          "member_count": 0,
+          "step": 36
+        },
+        {
+          "member_count": 0,
+          "step": 37
+        },
+        {
+          "member_count": 0,
+          "step": 38
+        },
+        {
+          "member_count": 0,
+          "step": 39
+        },
+        {
+          "member_count": 0,
+          "step": 40
+        },
+        {
+          "member_count": 0,
+          "step": 41
+        },
+        {
+          "member_count": 4,
+          "step": 42
+        },
+        {
+          "member_count": 4,
+          "step": 43
+        },
+        {
+          "member_count": 4,
+          "step": 44
+        },
+        {
+          "member_count": 4,
+          "step": 45
+        },
+        {
+          "member_count": 4,
+          "step": 46
+        },
+        {
+          "member_count": 4,
+          "step": 47
+        },
+        {
+          "member_count": 4,
+          "step": 48
+        },
+        {
+          "member_count": 4,
+          "step": 49
+        },
+        {
+          "member_count": 4,
+          "step": 50
+        },
+        {
+          "member_count": 4,
+          "step": 51
+        },
+        {
+          "member_count": 4,
+          "step": 52
+        },
+        {
+          "member_count": 4,
+          "step": 53
+        },
+        {
+          "member_count": 4,
+          "step": 54
+        },
+        {
+          "member_count": 4,
+          "step": 55
+        },
+        {
+          "member_count": 4,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "价键固体与价键晶体",
+      "trigger_work_id": "2023-kagome-方大智"
+    },
+    {
+      "birth_step": 46,
+      "event_id": "G046-birth-03",
+      "parent_hubs": [],
+      "path": "academic/wiki/hubs/张量网络方法与机器学习",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 0,
+          "step": 30
+        },
+        {
+          "member_count": 0,
+          "step": 31
+        },
+        {
+          "member_count": 0,
+          "step": 32
+        },
+        {
+          "member_count": 0,
+          "step": 33
+        },
+        {
+          "member_count": 0,
+          "step": 34
+        },
+        {
+          "member_count": 0,
+          "step": 35
+        },
+        {
+          "member_count": 0,
+          "step": 36
+        },
+        {
+          "member_count": 0,
+          "step": 37
+        },
+        {
+          "member_count": 0,
+          "step": 38
+        },
+        {
+          "member_count": 0,
+          "step": 39
+        },
+        {
+          "member_count": 0,
+          "step": 40
+        },
+        {
+          "member_count": 0,
+          "step": 41
+        },
+        {
+          "member_count": 0,
+          "step": 42
+        },
+        {
+          "member_count": 0,
+          "step": 43
+        },
+        {
+          "member_count": 0,
+          "step": 44
+        },
+        {
+          "member_count": 0,
+          "step": 45
+        },
+        {
+          "member_count": 4,
+          "step": 46
+        },
+        {
+          "member_count": 2,
+          "step": 47
+        },
+        {
+          "member_count": 2,
+          "step": 48
+        },
+        {
+          "member_count": 2,
+          "step": 49
+        },
+        {
+          "member_count": 4,
+          "step": 50
+        },
+        {
+          "member_count": 4,
+          "step": 51
+        },
+        {
+          "member_count": 4,
+          "step": 52
+        },
+        {
+          "member_count": 4,
+          "step": 53
+        },
+        {
+          "member_count": 4,
+          "step": 54
+        },
+        {
+          "member_count": 4,
+          "step": 55
+        },
+        {
+          "member_count": 4,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "张量网络方法与机器学习",
+      "trigger_work_id": "2023-王顶族qes边界奇异性"
+    },
+    {
+      "birth_step": 55,
+      "event_id": "G055-birth-10",
+      "parent_hubs": [
+        "academic/wiki/hubs/二维量子多体系统与临界性"
+      ],
+      "path": "academic/wiki/hubs/关联长度与最近邻关联诊断",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 0,
+          "step": 30
+        },
+        {
+          "member_count": 0,
+          "step": 31
+        },
+        {
+          "member_count": 0,
+          "step": 32
+        },
+        {
+          "member_count": 0,
+          "step": 33
+        },
+        {
+          "member_count": 0,
+          "step": 34
+        },
+        {
+          "member_count": 0,
+          "step": 35
+        },
+        {
+          "member_count": 0,
+          "step": 36
+        },
+        {
+          "member_count": 0,
+          "step": 37
+        },
+        {
+          "member_count": 0,
+          "step": 38
+        },
+        {
+          "member_count": 0,
+          "step": 39
+        },
+        {
+          "member_count": 0,
+          "step": 40
+        },
+        {
+          "member_count": 0,
+          "step": 41
+        },
+        {
+          "member_count": 0,
+          "step": 42
+        },
+        {
+          "member_count": 0,
+          "step": 43
+        },
+        {
+          "member_count": 0,
+          "step": 44
+        },
+        {
+          "member_count": 0,
+          "step": 45
+        },
+        {
+          "member_count": 0,
+          "step": 46
+        },
+        {
+          "member_count": 0,
+          "step": 47
+        },
+        {
+          "member_count": 0,
+          "step": 48
+        },
+        {
+          "member_count": 0,
+          "step": 49
+        },
+        {
+          "member_count": 0,
+          "step": 50
+        },
+        {
+          "member_count": 0,
+          "step": 51
+        },
+        {
+          "member_count": 0,
+          "step": 52
+        },
+        {
+          "member_count": 0,
+          "step": 53
+        },
+        {
+          "member_count": 0,
+          "step": 54
+        },
+        {
+          "member_count": 8,
+          "step": 55
+        },
+        {
+          "member_count": 7,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "关联长度与最近邻关联诊断",
+      "trigger_work_id": "2026-fdz-kagome-magnetic-platform"
+    },
+    {
+      "birth_step": 56,
+      "event_id": "G056-birth-06",
+      "parent_hubs": [
+        "academic/wiki/hubs/张量网络方法与机器学习"
+      ],
+      "path": "academic/wiki/hubs/msQFM 及其编码方案",
+      "series": [
+        {
+          "member_count": 0,
+          "step": 0
+        },
+        {
+          "member_count": 0,
+          "step": 1
+        },
+        {
+          "member_count": 0,
+          "step": 2
+        },
+        {
+          "member_count": 0,
+          "step": 3
+        },
+        {
+          "member_count": 0,
+          "step": 4
+        },
+        {
+          "member_count": 0,
+          "step": 5
+        },
+        {
+          "member_count": 0,
+          "step": 6
+        },
+        {
+          "member_count": 0,
+          "step": 7
+        },
+        {
+          "member_count": 0,
+          "step": 8
+        },
+        {
+          "member_count": 0,
+          "step": 9
+        },
+        {
+          "member_count": 0,
+          "step": 10
+        },
+        {
+          "member_count": 0,
+          "step": 11
+        },
+        {
+          "member_count": 0,
+          "step": 12
+        },
+        {
+          "member_count": 0,
+          "step": 13
+        },
+        {
+          "member_count": 0,
+          "step": 14
+        },
+        {
+          "member_count": 0,
+          "step": 15
+        },
+        {
+          "member_count": 0,
+          "step": 16
+        },
+        {
+          "member_count": 0,
+          "step": 17
+        },
+        {
+          "member_count": 0,
+          "step": 18
+        },
+        {
+          "member_count": 0,
+          "step": 19
+        },
+        {
+          "member_count": 0,
+          "step": 20
+        },
+        {
+          "member_count": 0,
+          "step": 21
+        },
+        {
+          "member_count": 0,
+          "step": 22
+        },
+        {
+          "member_count": 0,
+          "step": 23
+        },
+        {
+          "member_count": 0,
+          "step": 24
+        },
+        {
+          "member_count": 0,
+          "step": 25
+        },
+        {
+          "member_count": 0,
+          "step": 26
+        },
+        {
+          "member_count": 0,
+          "step": 27
+        },
+        {
+          "member_count": 0,
+          "step": 28
+        },
+        {
+          "member_count": 0,
+          "step": 29
+        },
+        {
+          "member_count": 0,
+          "step": 30
+        },
+        {
+          "member_count": 0,
+          "step": 31
+        },
+        {
+          "member_count": 0,
+          "step": 32
+        },
+        {
+          "member_count": 0,
+          "step": 33
+        },
+        {
+          "member_count": 0,
+          "step": 34
+        },
+        {
+          "member_count": 0,
+          "step": 35
+        },
+        {
+          "member_count": 0,
+          "step": 36
+        },
+        {
+          "member_count": 0,
+          "step": 37
+        },
+        {
+          "member_count": 0,
+          "step": 38
+        },
+        {
+          "member_count": 0,
+          "step": 39
+        },
+        {
+          "member_count": 0,
+          "step": 40
+        },
+        {
+          "member_count": 0,
+          "step": 41
+        },
+        {
+          "member_count": 0,
+          "step": 42
+        },
+        {
+          "member_count": 0,
+          "step": 43
+        },
+        {
+          "member_count": 0,
+          "step": 44
+        },
+        {
+          "member_count": 0,
+          "step": 45
+        },
+        {
+          "member_count": 0,
+          "step": 46
+        },
+        {
+          "member_count": 0,
+          "step": 47
+        },
+        {
+          "member_count": 0,
+          "step": 48
+        },
+        {
+          "member_count": 0,
+          "step": 49
+        },
+        {
+          "member_count": 0,
+          "step": 50
+        },
+        {
+          "member_count": 0,
+          "step": 51
+        },
+        {
+          "member_count": 0,
+          "step": 52
+        },
+        {
+          "member_count": 0,
+          "step": 53
+        },
+        {
+          "member_count": 0,
+          "step": 54
+        },
+        {
+          "member_count": 0,
+          "step": 55
+        },
+        {
+          "member_count": 2,
+          "step": 56
+        }
+      ],
+      "status": "active",
+      "title": "msQFM 及其编码方案",
+      "trigger_work_id": "2026-icomputing-qml-orthogonality"
+    }
+  ],
+  "schema": "wikigraph.e1.hub-lineage.v1",
+  "steps": 56
+}

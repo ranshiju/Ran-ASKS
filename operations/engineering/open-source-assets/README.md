@@ -48,16 +48,38 @@ Development continues on `main`, so the repository may advance more quickly
 than the paper. Every paper-associated implementation will be preserved as an
 immutable Git tag and GitHub Release.
 
-| Manuscript | Ran-ASKS version | Status |
-| --- | --- | --- |
-| Initial arXiv submission | `v0.2.0` | The arXiv identifier and immutable release link will be added after posting |
+| Manuscript | Ran-ASKS version | Paper artifact | Status |
+| --- | --- | --- | --- |
+| Initial arXiv submission | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | The arXiv identifier and immutable release link will be added after posting |
 
 The manuscript formulates *scientific knowledge compilation* and presents a
 worked chronological demonstration on 56 formally published papers from one
 research program. The compiled graph yields a source-traceable author research
 portrait organized around a persistent tensor-network methodological trunk.
-The personal paper corpus and private compiled knowledge base are outside this
-engineering template.
+The Raw paper corpus and private compiled knowledge base remain outside this
+repository. A sanitized, frozen export of the isolated demonstration is
+included so that readers can inspect the compiled Wiki, Graph, Hubs, and
+reported measurements without receiving the source PDFs or personal state.
+
+### Frozen paper artifact
+
+[`paper-artifacts/v0.2.0/`](paper-artifacts/v0.2.0/) contains paper artifact
+`1.0.0`: 56 compiled paper Wiki pages, 18 Hub pages, a portable final Graph
+export, the complete reviewed publication manifest, figure/portrait data,
+thresholds, model identifiers, validation summaries, and checksums. It is bound
+to the paper's Ran-ASKS `v0.2.0` release and will not track later changes on
+`main`. The artifact's code-provenance record reports that 15 of 16 frozen-run
+code/configuration hashes match the `v0.2.0` release candidate exactly and
+discloses the one post-run script change without implying that the frozen data
+were regenerated. The frozen experiment harness and its regression test are included as
+`.scripts/e1_experiment.py` and `.scripts/test_e1_experiment.py`; a new run still
+requires a separately authorized source corpus and configured model backends.
+
+Verify it locally with:
+
+```bash
+python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
+```
 
 ## How it works
 
@@ -132,6 +154,7 @@ ingested Raw record in place. The main task specifications live under
 | `dsh/` | Optional guarded agent loop and tool registry |
 | `academic/`, `admin/`, `teaching/`, `business/` | Independent domain templates |
 | `cross-domain/` | Cross-domain graph, Hubs, and navigation surfaces |
+| `paper-artifacts/` | Frozen, sanitized Wiki/Graph data and measurements tied to a paper release |
 | `inbox/` | Local intake boundary for authorized source material |
 | `slide-library/` | Reusable slide reconstruction and composition workspace |
 
@@ -155,10 +178,13 @@ For release construction and privacy audit, see
 ## Privacy and publication
 
 This repository is an engineering template, not a published personal knowledge
-base. Its data directories contain placeholders only. The included `.gitignore`
-excludes knowledge content, graph databases, runtime caches, inboxes, local
-memory, outputs, and `.env` files by default. Review staged changes before every
-commit, especially when a file under `raw/` or `wiki/` has been force-added.
+base. Operational data directories contain placeholders only. The sole content
+exception is a manifest-approved, frozen paper artifact under
+`paper-artifacts/`; it is sanitized and independently verified. The included
+`.gitignore` excludes other knowledge content, graph databases, runtime caches,
+inboxes, local memory, outputs, and `.env` files by default. Review staged
+changes before every commit, especially when a file under `raw/` or `wiki/` has
+been force-added.
 
 See [DATA_POLICY.md](DATA_POLICY.md) for the publication boundary.
 
@@ -201,3 +227,7 @@ contact channel.
 PolyForm Noncommercial is not an OSI-approved open-source license because it
 restricts commercial use. The term "public release" in this repository refers
 to source visibility, not OSI open-source status.
+
+The frozen paper data and compiled Wiki/Graph artifact are separately licensed
+under `CC BY-NC 4.0`; see
+[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md).

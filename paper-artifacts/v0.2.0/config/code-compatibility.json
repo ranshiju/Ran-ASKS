@@ -1,0 +1,88 @@
+{
+  "comparison_target": "Ran-ASKS v0.2.0 release candidate",
+  "exact_matches": 15,
+  "files": {
+    ".scripts/direction_matcher.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "487143acfafc501dfd8a579ca1c04018c98864e82e0affa64725cdf2569441ad",
+      "release_candidate_sha256": "487143acfafc501dfd8a579ca1c04018c98864e82e0affa64725cdf2569441ad"
+    },
+    ".scripts/e1_experiment.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "ed7d9b5482051d4b040fdcbe81e02c6b196c8ab9e5a2e2107cd13e10f4ed2074",
+      "release_candidate_sha256": "ed7d9b5482051d4b040fdcbe81e02c6b196c8ab9e5a2e2107cd13e10f4ed2074"
+    },
+    ".scripts/embed_helper.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "d2324b12dad8002d60183391042410f36a703036f99fc0b363fb78f52be06d1b",
+      "release_candidate_sha256": "d2324b12dad8002d60183391042410f36a703036f99fc0b363fb78f52be06d1b"
+    },
+    ".scripts/graph_delta.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "bd24fb91a3972a7b2b1ca0536e19942a228ca46f158111256d12c779fa16f0ec",
+      "release_candidate_sha256": "bd24fb91a3972a7b2b1ca0536e19942a228ca46f158111256d12c779fa16f0ec"
+    },
+    ".scripts/graph_ingest.py": {
+      "exact_match": false,
+      "frozen_run_sha256": "658fce0d6f7bceef6b583dea38f9f797ebd16e21d85d17bee1e74efb927350d7",
+      "release_candidate_sha256": "ea5d930ef39b109056108bdb3d52f34781a20ef41cd80a9a585360132f5989e6"
+    },
+    ".scripts/graph_lib.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "58397d89190d4ef88388fc1acf017a8ae79e03eb8f6f046fa70b6b045fa5a850",
+      "release_candidate_sha256": "58397d89190d4ef88388fc1acf017a8ae79e03eb8f6f046fa70b6b045fa5a850"
+    },
+    ".scripts/graph_validate.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "eec8b3e2979a2d7c83ee679f49be9239d5c953bfef1f5e7c16ebaca4d3016fb3",
+      "release_candidate_sha256": "eec8b3e2979a2d7c83ee679f49be9239d5c953bfef1f5e7c16ebaca4d3016fb3"
+    },
+    ".scripts/hub_semantics.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "c4d1d865c189fcf1ef1ac9b92cbe565ccabb9a110e67c3456c3c9b4ec8bbd212",
+      "release_candidate_sha256": "c4d1d865c189fcf1ef1ac9b92cbe565ccabb9a110e67c3456c3c9b4ec8bbd212"
+    },
+    ".scripts/node_semantics.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "33e605c26c9c8411420c9328125298bd1a778a69bffa6a050577673cfbc2de47",
+      "release_candidate_sha256": "33e605c26c9c8411420c9328125298bd1a778a69bffa6a050577673cfbc2de47"
+    },
+    ".scripts/predicate-registry.json": {
+      "exact_match": true,
+      "frozen_run_sha256": "3f6ebbbd857e986db9767bdd194e7ac8806545f1a3f21f72fdb3ddce7a2d485a",
+      "release_candidate_sha256": "3f6ebbbd857e986db9767bdd194e7ac8806545f1a3f21f72fdb3ddce7a2d485a"
+    },
+    ".scripts/predicate_tiers.yaml": {
+      "exact_match": true,
+      "frozen_run_sha256": "a79cac2d45e239de3cb90c8712e194cba7320e7c1b710d6ad9e863659642b4ae",
+      "release_candidate_sha256": "a79cac2d45e239de3cb90c8712e194cba7320e7c1b710d6ad9e863659642b4ae"
+    },
+    ".scripts/sync_keyword_aliases.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "bede64d25cebbe0e82002209d708b4bee6d45b290ab62f834964c41ff5e38e91",
+      "release_candidate_sha256": "bede64d25cebbe0e82002209d708b4bee6d45b290ab62f834964c41ff5e38e91"
+    },
+    ".scripts/wiki_locator.py": {
+      "exact_match": true,
+      "frozen_run_sha256": "220271f04cdaf1d48d877c3332f1a771d63d7acca4f899d3d0ede12a521d0018",
+      "release_candidate_sha256": "220271f04cdaf1d48d877c3332f1a771d63d7acca4f899d3d0ede12a521d0018"
+    },
+    "operations/HUB.md": {
+      "exact_match": true,
+      "frozen_run_sha256": "d6e77a7d9f0bc70a3ac2cf26d8f903713bdbc4f7e39b12ce38c167a55323da40",
+      "release_candidate_sha256": "d6e77a7d9f0bc70a3ac2cf26d8f903713bdbc4f7e39b12ce38c167a55323da40"
+    },
+    "operations/config/arxiv-directions.yaml": {
+      "exact_match": true,
+      "frozen_run_sha256": "a0ef7aa17d93814dbd66d1250b26b1b6d5414ffd10a65d2d3361e939dbb6f9f6",
+      "release_candidate_sha256": "a0ef7aa17d93814dbd66d1250b26b1b6d5414ffd10a65d2d3361e939dbb6f9f6"
+    },
+    "operations/config/graph-schema.yaml": {
+      "exact_match": true,
+      "frozen_run_sha256": "0d4fefbc64d499e532e2c3d20cc12678dfdd1c49f74d89c5aacd57641e46615d",
+      "release_candidate_sha256": "0d4fefbc64d499e532e2c3d20cc12678dfdd1c49f74d89c5aacd57641e46615d"
+    }
+  },
+  "files_recorded_by_frozen_run": 16,
+  "post_run_drift": 1
+}

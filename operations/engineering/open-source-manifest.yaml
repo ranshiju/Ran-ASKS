@@ -15,14 +15,13 @@ include:
   - teaching/SCHEMA.md
   - business/SCHEMA.md
   - cross-domain/SCHEMA.md
+  - paper-artifacts/**
   - operations/engineering/engineering-handbook.md
   - operations/engineering/code-guidance.md
 exclude:
   - "**/.DS_Store"
   - .scripts/__pycache__/**
   - .scripts/embed_cache/**
-  - .scripts/e1_experiment.py
-  - .scripts/test_e1_experiment.py
   - .scripts/citation-templates/unmatched.log
   - .scripts/query_sessions/*.json
   - .scripts/speech_entity_index.json

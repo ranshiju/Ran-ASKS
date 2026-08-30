@@ -1,0 +1,873 @@
+alias,node_path
+1/3磁化平台1/3 magnetization plateau,磁化平台
+1/9磁化平台内的两种价键图案相变,磁化平台内的两种价键图案相变
+ADQC,ADQC
+ADTN,ADTN
+AIII,对称类
+AIII对称类AIII symmetry class,对称类
+AOP,AOP
+APL,APL
+BEE,BEE
+Bethe lattice,贝特晶格
+CFT,CFT
+CNN,CNN
+COO,COO
+CQOs,CQOs
+CSW,CSW
+Co(N₃)₂(bpg)·DMF_{4/3},DMF
+Creutz,梯子
+Creutz梯子Creutz ladder,梯子
+DCT,DCT
+DFT,DFT
+DMET,DMET
+DMF,DMF
+DMF,拟合DMF磁化率并提取交换耦合常数
+DMFT,DMFT
+DMPSC,DMPSC
+DMRG,DMRG
+DNN,DNN
+Delta,Delta
+Delta,工作区间
+Delta-theta,Delta-theta
+EBH,EBH
+ESN,ESN
+ETH,ETH
+FCI,FCI
+FGTO,FGTO
+FNO,FNO
+FTN,FTN
+Floquet,Floquet
+Fourier neural operator,FNO
+GCNN,GCNN
+GMPSC,GMPSC
+GNN,GNN
+GTNC,GTNC
+GWD,距离
+Gromov-Wasserstein,距离
+Gromov-Wasserstein距离Gromov-Wasserstein distance(GWD),距离
+Haldane,Haldane
+Hamiltoniantuning Hamiltonian,TH
+Hartree,多参考方法
+Heisenberg,各向同性反铁磁模型
+Heisenberg antiferromagnet,海森堡反铁磁模型
+Heisenberg chain,海森堡链
+Heisenberg model,海森堡模型
+Herbertsmithite,OH
+Hilbert space shattering,希尔伯特空间碎裂
+Hilbert space shattering,现象
+Hilbert space shattering现象,现象
+Hubbard,相互作用
+Hubbard相互作用Hubbard interaction,相互作用
+Husimi,无限晶格
+IGNR,IGNR
+ITSA,ITSA
+Ising,二维模型
+KNN,近邻
+KT,KT
+Kosterlitz-Thouless,KT
+Kosterlitz-Thouless,再入现象可出现在属于普适类的相之下
+Kosterlitz-Thouless,普适类
+Kosterlitz-Thouless普适类,普适类
+Kosterlitz-Thouless相变Kosterlitz-Thouless phase transition(KT),KT
+Kullback,散度
+Kullback–Leibler散度,散度
+K近邻K-nearest neighbor(KNN),近邻
+LSTM,LSTM
+LTRG,LTRG
+Landau-Ginzburg,范式
+Landau-Ginzburg范式,范式
+Lyapunov exponent,李雅普诺夫指数
+MBL,MBL
+MERA,MERA
+MNIST,MNIST
+MNIST手写数字数据集MNIST,MNIST
+MPD,MPD
+MPNN,MPNN
+MPO,MPO
+MPS,MPS
+MR-CC,MR-CC
+MUSCO,MUSCO
+Metropolis,MPNN
+Metropolis,采样量子势神经网络
+Metropolis势神经网络Metropolis potential neural network(MPNN),MPNN
+Metropolis采样量子势神经网络,采样量子势神经网络
+NCD,NCD
+NLF,NLF
+NN-RVB,NN-RVB
+NSSL,NSSL
+NTD,NTD
+ODTNS,ODTNS
+OH,OH
+Oshikawa-Yamanaka-Affleck,判据
+Oshikawa-Yamanaka-Affleck判据,判据
+PCA,PCA
+PEPO,PEPO
+PEPS,PEPS
+PESS,PESS
+PT-DMRG,PT-DMRG
+Page,Page
+PauliNet,PauliNet
+PauliNet,波函数
+PauliNet波函数ansatz,波函数
+Potts,Potts
+Potts,三态模型
+Potts,四态模型
+QES,QES
+QFT,QFT
+QKF,QKF
+QPNN,QPNN
+Qubism,映射
+Qubism映射Qubism mapping,映射
+RD,RD
+RDM,RDM
+RLF,RLF
+RMT,RMT
+ResMPS,线性简化版
+Residual matrix product state,Residual matrix product state
+Residual matrix product state(ResMPS),Residual matrix product state
+SEE,SEE
+SVD,SVD
+SVM,SVM
+SWAP,SWAP
+Schmidt,Schmidt
+Schrieffer-Heeger,模型
+SciPost Phys,SciPost Phys
+SciPost Phys. Core,SciPost Phys
+Sierpi,Sierpi
+Sierpi,自旋关联图样继承Sierpi旋转对称性
+Sierpiński gasket,Sierpi
+Su-Schrieffer-Heeger模型Su-Schrieffer-Heeger model,模型
+TFIM,TFIM
+TH,TH
+TIT,TIT
+TLCC,TLCC
+TNCS,TNCS
+TNS,TNS
+TPDO,TPDO
+TRD,TRD
+TRG,TRG
+TSGO,TSGO
+TT,TT
+TTD,TTD
+TTN,TTN
+TVBC,TVBC
+Tomonaga-Luttinger,液体
+Tomonaga-Luttinger液体,液体
+Tucker,NTD
+VBC,VBC
+VCB,VCB
+VQC,VQC
+XXZ,XXZ
+XXZ,自旋链
+ab initio optimization principle,initio optimization principle
+ab initio优化原理ab initio optimization principle(AOP),AOP
+algebraic paramagnetic liquid,APL
+area law of entanglement entropy,纠缠熵面积律
+automatically differentiable quantum circuit,ADQC
+automatically differentiable tensor network,ADTN
+bifurcation diagram,分岔图
+bipartite entanglement entropy,BEE
+catastrophe of orthogonality,COO
+central charge,中心荷
+central charge of conformal field theory,共形场论中心荷
+central-orthogonal form,中心正交形式
+chaotic nonlinear dynamics,混沌非线性系统
+chi-specified matrix product entanglement,指定矩阵乘积纠缠
+cluster update,无限投影纠缠对态的簇更新
+compressed sensing,压缩感知
+conditional graphon learning,条件图生成函数学习
+conformal field theory,CFT
+continuous matrix product operator,连续矩阵乘积算符
+continuous space,连续空间
+controllable spin wire,CSW
+convolutional neural network,CNN
+correlation length,关联长度
+coupled quantum oscillators,CQOs
+cubic lattice,立方晶格
+data re-uploading quantum circuit,数据重上传量子电路
+decimation,无限时间演化块
+deep belief network,深度信念网络
+deep convolutional network,深度卷积网络
+deep neural network,DNN
+deep neural network autoencoder,深度神经网络自编码器
+density matrix embedding theory,DMET
+density matrix renormalization group,DMRG
+differentiable tensor renormalization group,可微张量重正化群
+dimerized valence bond crystal,二聚化价键晶体
+discrete cosine transform,DCT
+discriminative matrix product state classifier,DMPSC
+distributed stochastic neighbor embedding,分布随机邻域嵌入
+domino,堆积模型
+down,自旋构型
+dropout,dropout
+dynamical mean-field theory,DMFT
+echo state network,ESN
+eigenstate thermalization,ETH
+entanglement bath Hamiltonian,EBH
+exact diagonalization,精确对角化
+fashion image classification,时装图像分类
+fashion-MNIST,时尚产品图像分类
+fine-grained time optimization,FGTO
+fine-tuning,边界矩阵乘积态
+finite-temperature evolution,有限温演化
+floating phase,浮游相
+full configuration interaction,FCI
+full update,full update
+functional tensor network,FTN
+generative matrix product state classifier,GMPSC
+generative tensor network,生成式张量网络
+generative tensor network classification,GTNC
+geometric structure,几何结构
+graph convolutional neural network,GCNN
+graph neural network,GNN
+graphon neural representation,IGNR
+handwritten digit image recognition,手写数字图像识别
+honeycomb,honeycomb
+honeycomb,格子模型基态
+honeycomb,格子自旋模型
+honeycomb lattice,蜂窝晶格
+honeycomb格子XXZ模型基态,格子模型基态
+honeycomb格子最近邻共振价键态,honeycomb
+honeycomb格子自旋1/2XXZ模型,格子自旋模型
+imaginary time evolution,虚时演化
+imaginary-time-sweep algorithm,ITSA
+infinite PEPS,无限投影纠缠对态
+infinite density matrix renormalization group,无限密度矩阵重正化群
+infinite matrix product state,无穷矩阵乘积态
+infinite projected entangled pair state,全更新无穷投影纠缠对态
+infinite projected entangled-pair states,无穷投影纠缠对态
+infinite time-evolving block decimation,无限时间演化分块删截
+initio,AOP
+initio optimization principle,initio optimization principle
+ization group,可微张量重正
+kagome,扭曲格点
+kagome Ising,广义模型
+kagome lattice,笼目晶格
+large-scale numerical simulation,大规模数值模拟
+laser-assisted tunneling,激光辅助隧穿
+lazy learning baseline,懒学习基线
+level statistics,能级统计
+linearized tensor renormalization group,LTRG
+logarithmic fidelity,对数保真度
+long short-term memory,LSTM
+loop characterization,环路特征
+low-rank adaptation,低秩适配
+magnetic susceptibility,磁化率
+magnetization plateau,磁化平台
+many-body Hilbert space,多体希尔伯特空间
+many-body Schr,多体薛定谔方程
+many-body localization,MBL
+matrix product disentangler,MPD
+matrix product operator,MPO
+matrix product operator transfer matrix,矩阵乘积算符转移矩阵
+matrix product state,MPS
+maximal coding rate reduction,最大编码率约减
+mean-field argument,平均场论证
+measurement-induced entanglement entropy variation,测量引起纠缠熵变化
+multi-reference coupled cluster,MR-CC
+multiscale entanglement renormalization ansatz,MERA
+multiscale tensor optimization,MUSCO
+naive Bayes classifier,朴素贝叶斯分类器
+nearest neighbor,近邻
+nearest-neighbor resonating valence bond state,NN-RVB
+negative log-fidelity,NLF
+network contractor dynamics,NCD
+neural network,神经网络
+non-parametric semi-supervised learning,NSSL
+numerical renormalization group,数值重整化群
+octa-kagome lattice,八角笼目晶格
+one-step forward prediction,一步前向预测
+orientation-dependent tensor network state,ODTNS
+orthogonal function basis,正交函数基
+paramagnetic phase,顺磁相
+partially ordered phase,部分有序相
+partition function,配分函数
+perturbation theory of the DMRG,PT-DMRG
+pixel labeling,像素质标签
+principal component analysis,PCA
+projected entangle pair state,PEPS
+projected entangled pair operator,PEPO
+projected entangled pair states,推广到投影纠缠对态
+projected entangled simplex state,PESS
+quantum Fourier transform,QFT
+quantum Monte Carlo,量子蒙特卡洛
+quantum chaos,量子混沌
+quantum entanglement,量子纠缠
+quantum entanglement simulator,QES
+quantum feature map,量子特征映射
+quantum kernel function,QKF
+quantum minimal instruction set,量子最小指令集
+quantum potential neural network,QPNN
+quantum spin liquid,量子自旋液体
+quantum spin model,量子自旋模型
+quantum variational instruction set,量子变分指令集
+quasi-entanglement entropy,准纠缠熵
+random matrix theory,RMT
+rank-,秩分解
+real-space renormalization group,实空间重整化群
+reduced density matrix,RDM
+rescaled logarithmic fidelity,RLF
+ring degeneracy,RD
+sigma,sigma
+simple update,含对称性的投影纠缠对态
+simple update scheme,简单更新方案
+single-site entanglement entropy,SEE
+singular value decomposition,SVD
+spectral clustering,谱聚类
+spectral form factor,谱形因子
+spin state number q,格点自旋自由度
+spin-,spin-
+square spin ladder,方型自旋梯
+star lattice,星型格子
+state preparation,量子线路
+state-of-the-art tensor network,既有方法
+statistics-encoded tensor network,statistics-encoded tensor network
+statistics-encoded tensor network(SeTN),statistics-encoded tensor network
+super-orthogonalization,超正交化
+support vector machine,SVM
+survival probability,存活概率
+symmetric tensor network state,对称张量网络态
+tangent-space gradient optimization,TSGO
+tensor network,张量网络
+tensor network compressed sensing,TNCS
+tensor network machine learning,张量网络机器学习
+tensor network method,张量网络方法
+tensor network state,TNS
+tensor network tailoring,张量网络剪裁
+tensor product density operator,TPDO
+tensor renormalization group,TRG
+tensor ring decomposition,TRD
+tensor train,TT
+tensor-train decomposition,TTD
+time matrix product state,时间矩阵乘积态
+topological insulator,拓扑绝缘体
+transverse field Ising model,TFIM
+transverse light cone contraction,TLCC
+tree tensor network,TTN
+triangulated lattice,TIT
+trimerized valence bond crystal,TVBC
+t分布随机邻域嵌入t-distributed stochastic neighbor embedding(t-SNE),分布随机邻域嵌入
+unitary tensor network,酉张量网络
+universal learning,通用学习范式
+unsupervised feature recognition,无监督特征识别
+unsupervised machine learning,无监督机器学习
+up-up-down自旋构型up-up-down spin configuration,自旋构型
+valence bond crystal,VBC
+variational quantum circuit,VQC
+virtual configuration binarization,VCB
+white shoe recognition problem,白鞋识别问题
+worm update,worm update
+χ-指定矩阵乘积纠缠chi-specified matrix product entanglement(χ-MPE),指定矩阵乘积纠缠
+一步前向预测,一步前向预测
+一步前向预测one-step forward prediction,一步前向预测
+三态Potts模型three-state Potts model,三态模型
+三态模型,三态模型
+三角化点阵,TIT
+三角化点阵triangulated lattice(TIT),TIT
+中心正交形式,中心正交形式
+中心正交形式central-orthogonal form,中心正交形式
+中心荷,中心荷
+中心荷central charge,中心荷
+临界指数临界指数,临界指数临界指数
+临界指数临界指数(critical exponent),临界指数临界指数
+主成分分析,PCA
+主成分分析principal component analysis(PCA),PCA
+二维Ising模型two-dimensional Ising model,二维模型
+二维模型,二维模型
+二聚化价键晶体,二聚化价键晶体
+二聚化价键晶体dimerized valence bond crystal,二聚化价键晶体
+代数顺磁液体,APL
+代数顺磁液体algebraic paramagnetic liquid(APL),APL
+价键晶体,VBC
+价键晶体valence bond crystal(VBC),VBC
+优化原理,AOP
+低秩适配,低秩适配
+低秩适配low-rank adaptation(LoRA),低秩适配
+偶极相互作用在r约1微米下提供足够强的自旋交换,偶极相互作用在约微米下提供足够强的自旋交换
+偶极相互作用在约微米下提供足够强的自旋交换,偶极相互作用在约微米下提供足够强的自旋交换
+偶极相互作用按r^-3衰减引入次近邻项,偶极相互作用按衰减引入次近邻项
+偶极相互作用按r^-3衰减引入次近邻项的影响未在本文处理,偶极相互作用按衰减引入次近邻项的影响未在本文处理
+偶极相互作用按r^-3衰减引入次近邻项的影响未处理,偶极相互作用按衰减引入次近邻项的影响未处理
+偶极相互作用按衰减引入次近邻项,偶极相互作用按衰减引入次近邻项
+偶极相互作用按衰减引入次近邻项的影响未在本文处理,偶极相互作用按衰减引入次近邻项的影响未在本文处理
+偶极相互作用按衰减引入次近邻项的影响未处理,偶极相互作用按衰减引入次近邻项的影响未处理
+偶极相互作用随主量子数n以n^4增强,偶极相互作用随主量子数以增强
+偶极相互作用随主量子数n以n^4增强提供强自旋交换,偶极相互作用随主量子数以增强提供强自旋交换
+偶极相互作用随主量子数以增强,偶极相互作用随主量子数以增强
+偶极相互作用随主量子数以增强提供强自旋交换,偶极相互作用随主量子数以增强提供强自旋交换
+傅里叶神经算子,FNO
+傅里叶神经算子Fourier neural operator(FNO),FNO
+像素质标签,像素质标签
+像素质标签pixel labeling,像素质标签
+全更新无穷投影纠缠对态,全更新无穷投影纠缠对态
+全更新无穷投影纠缠对态infinite projected entangled pair state(iPEPS),全更新无穷投影纠缠对态
+全配置相互作用方法,FCI
+全配置相互作用方法full configuration interaction(FCI),FCI
+八角—笼目晶格octa-kagome lattice,八角笼目晶格
+八角笼目晶格,八角笼目晶格
+共形场论,CFT
+共形场论conformal field theory(CFT),CFT
+共形场论中心荷,共形场论中心荷
+共形场论中心荷central charge of conformal field theory,共形场论中心荷
+关联长度,关联长度
+关联长度correlation length,关联长度
+关联长度关联长度,关联长度关联长度
+关联长度关联长度(correlation length),关联长度关联长度
+再入现象可出现在属于Kosterlitz-Thouless普适类的相之下,再入现象可出现在属于普适类的相之下
+再入现象可出现在属于普适类的相之下,再入现象可出现在属于普适类的相之下
+冷原子实验冷原子实验,冷原子实验冷原子实验
+冷原子实验冷原子实验(cold atom experiment),冷原子实验冷原子实验
+准纠缠熵,准纠缠熵
+准纠缠熵quasi-entanglement entropy,准纠缠熵
+几何结构,几何结构
+几何结构geometric structure,几何结构
+函数张量网络,FTN
+函数张量网络functional tensor network(FTN),FTN
+分岔图,分岔图
+分岔图bifurcation diagram,分岔图
+分布随机邻域嵌入,分布随机邻域嵌入
+切空间梯度优化,TSGO
+切空间梯度优化tangent-space gradient optimization(TSGO),TSGO
+判别式矩阵乘积态分类器,DMPSC
+判别式矩阵乘积态分类器discriminative matrix product state classifier(DMPSC),DMPSC
+判据,判据
+动力学平均场,DMFT
+动力学平均场dynamical mean-field theory(DMFT),DMFT
+势神经网络,MPNN
+单原子寻址调制sigma_i^z sigma_{i+1}^z项上的线性梯度,sigma
+单原子寻址调制项上的线性梯度,sigma
+单态二聚体极限与Haldane链极限,Haldane
+单态二聚体极限与链极限,Haldane
+单点纠缠熵,SEE
+单点纠缠熵single-site entanglement entropy(SEE),SEE
+卷积神经网络,CNN
+卷积神经网络convolutional neural network(CNN),CNN
+压缩感知,压缩感知
+压缩感知compressed sensing,压缩感知
+双点纠缠熵,BEE
+双点纠缠熵bipartite entanglement entropy(BEE),BEE
+变分量子电路,VQC
+变分量子电路variational quantum circuit(VQC),VQC
+可微张量重正,可微张量重正
+可微张量重正ization group(∂TRG),可微张量重正
+可微张量重正化群,可微张量重正化群
+可微张量重正化群differentiable tensor renormalization group(∂TRG),可微张量重正化群
+可控自旋链,CSW
+可控自旋链controllable spin wire(CSW),CSW
+各向同性Heisenberg反铁磁模型,各向同性反铁磁模型
+各向同性反铁磁模型,各向同性反铁磁模型
+各向异性三态Potts模型的相结构与再入现象,Potts
+各向异性三态模型的相结构与再入现象,Potts
+含SU(2)对称性的simple update投影纠缠对态,含对称性的投影纠缠对态
+含对称性的投影纠缠对态,含对称性的投影纠缠对态
+含非线性激活与dropout的ResMPS(aResMPS),dropout
+含非线性激活与的,dropout
+周期旋转自旋轴Floquet工程化XXZ相互作用,Floquet
+周期旋转自旋轴工程化相互作用,Floquet
+囚禁离子实验囚禁离子实验,囚禁离子实验囚禁离子实验
+囚禁离子实验囚禁离子实验(trapped ion experiment),囚禁离子实验囚禁离子实验
+四态Potts模型four-state Potts model,四态模型
+四态模型,四态模型
+回声状态网络,ESN
+回声状态网络echo state network(ESN),ESN
+图卷积神经网络,GCNN
+图卷积神经网络graph convolutional neural network(GCNN),GCNN
+图神经网络,GNN
+图神经网络graph neural network(GNN),GNN
+在r约1微米下提供足够强的自旋交换,在约微米下提供足够强的自旋交换
+在约微米下提供足够强的自旋交换,在约微米下提供足够强的自旋交换
+堆积domino模型stacked domino model,堆积模型
+堆积模型,堆积模型
+外磁场下自旋-1/2 笼目海森堡反铁磁体有限温热力学,外磁场下自旋笼目海森堡反铁磁体有限温热力学
+外磁场下自旋笼目海森堡反铁磁体有限温热力学,外磁场下自旋笼目海森堡反铁磁体有限温热力学
+外磁场沿自旋z方向调节交换各向异性,外磁场沿自旋方向调节交换各向异性
+外磁场沿自旋方向调节交换各向异性,外磁场沿自旋方向调节交换各向异性
+多体局域化,MBL
+多体局域化many-body localization(MBL),MBL
+多体希尔伯特空间,多体希尔伯特空间
+多体希尔伯特空间many-body Hilbert space,多体希尔伯特空间
+多体薛定谔方程,多体薛定谔方程
+多体薛定谔方程many-body Schrödinger equation,多体薛定谔方程
+多参考Hartree–Fock方法,多参考方法
+多参考方法,多参考方法
+多参考耦合簇,MR-CC
+多参考耦合簇multi-reference coupled cluster(MR-CC),MR-CC
+多尺度张量优化,MUSCO
+多尺度张量优化multiscale tensor optimization(MUSCO),MUSCO
+多尺度纠缠重正化拟设态,MERA
+多尺度纠缠重正化拟设态multiscale entanglement renormalization ansatz(MERA),MERA
+多比特SWAP线路multi-qubit SWAP circuit,SWAP
+多比特线路,SWAP
+大规模数值模拟,大规模数值模拟
+大规模数值模拟large-scale numerical simulation,大规模数值模拟
+奇异值分解,SVD
+奇异值分解singular value decomposition(SVD),SVD
+存活概率,存活概率
+存活概率survival probability,存活概率
+实空间重整化群,实空间重整化群
+实空间重整化群real-space renormalization group,实空间重整化群
+密度泛函理论密度泛函理论,DFT
+密度泛函理论密度泛函理论(DFT),DFT
+密度矩阵嵌入理论,DMET
+密度矩阵嵌入理论density matrix embedding theory(DMET),DMET
+密度矩阵重整化群,DMRG
+密度矩阵重整化群density matrix renormalization group(DMRG),DMRG
+对数保真度,对数保真度
+对数保真度logarithmic fidelity,对数保真度
+对称张量网络态,对称张量网络态
+对称张量网络态symmetric tensor network state(symmetric TNS),对称张量网络态
+对称类,对称类
+少体模型少体模型,少体模型少体模型
+少体模型少体模型(few-body model),少体模型少体模型
+工作区间,工作区间
+工作区间0≤Delta±theta≤2J,工作区间
+工作区间0≤Delta±theta≤2J覆盖混沌与非遍历两区,Delta
+工作区间覆盖混沌与非遍历两区,Delta
+希尔伯特空间碎裂,希尔伯特空间碎裂
+希尔伯特空间碎裂Hilbert space shattering,希尔伯特空间碎裂
+平均场论证,平均场论证
+平均场论证mean-field argument,平均场论证
+广义kagome Ising模型generalized kagome Ising model,广义模型
+广义模型,广义模型
+张量乘积密度算符,TPDO
+张量乘积密度算符tensor product density operator(TPDO),TPDO
+张量列分解,TTD
+张量列分解tensor-train decomposition(TTD),TTD
+张量环分解,TRD
+张量环分解tensor ring decomposition(TRD),TRD
+张量网络,张量网络
+张量网络tensor network,张量网络
+张量网络剪裁,张量网络剪裁
+张量网络剪裁tensor network tailoring(TN tailoring),张量网络剪裁
+张量网络压缩感知,TNCS
+张量网络压缩感知tensor network compressed sensing(TNCS),TNCS
+张量网络态,TNS
+张量网络态tensor network state(TNS),TNS
+张量网络方法,张量网络方法
+张量网络方法tensor network method,张量网络方法
+张量网络机器学习,张量网络机器学习
+张量网络机器学习tensor network machine learning,张量网络机器学习
+张量网络算法张量网络算法,张量网络算法张量网络算法
+张量网络算法张量网络算法(tensor network algorithm),张量网络算法张量网络算法
+张量训练,TT
+张量训练tensor train(TT),TT
+张量重正化群,TRG
+张量重正化群tensor renormalization group(TRG),TRG
+强梯度非遍历区行为与均匀可积XXZ链不同,XXZ
+强梯度非遍历区行为与均匀可积链不同,XXZ
+懒学习基线,懒学习基线
+懒学习基线lazy learning baseline,懒学习基线
+手写数字图像识别,手写数字图像识别
+手写数字图像识别handwritten digit image recognition,手写数字图像识别
+手写数字数据集,MNIST
+扭曲kagome格点distorted kagome lattice,扭曲格点
+扭曲格点,扭曲格点
+投影纠缠单纯态,PESS
+投影纠缠单纯态projected entangled simplex state(PESS),PESS
+投影纠缠对态,PEPS
+投影纠缠对态projected entangle pair state(PEPS),PEPS
+投影纠缠对算符,PEPO
+投影纠缠对算符projected entangled pair operator(PEPO),PEPO
+拓扑绝缘体,拓扑绝缘体
+拓扑绝缘体topological insulator,拓扑绝缘体
+拟合Co(N₃)₂(bpg)·DMF_{4/3}磁化率并提取交换耦合常数,拟合DMF磁化率并提取交换耦合常数
+拟合磁化率并提取交换耦合常数,拟合DMF磁化率并提取交换耦合常数
+指定矩阵乘积纠缠,指定矩阵乘积纠缠
+推广到投影纠缠对态,推广到投影纠缠对态
+推广到投影纠缠对态projected entangled pair states,推广到投影纠缠对态
+支持向量机,SVM
+支持向量机support vector machine(SVM),SVM
+散度,散度
+数值重整化群,数值重整化群
+数值重整化群numerical renormalization group,数值重整化群
+数据重上传量子电路,数据重上传量子电路
+数据重上传量子电路data re-uploading quantum circuit,数据重上传量子电路
+方型自旋梯,方型自旋梯
+方型自旋梯square spin ladder,方型自旋梯
+无监督机器学习,无监督机器学习
+无监督机器学习unsupervised machine learning,无监督机器学习
+无监督特征识别,无监督特征识别
+无监督特征识别unsupervised feature recognition,无监督特征识别
+无穷投影纠缠对态,无穷投影纠缠对态
+无穷投影纠缠对态infinite projected entangled-pair states(infinite PEPS),无穷投影纠缠对态
+无穷矩阵乘积态,无穷矩阵乘积态
+无穷矩阵乘积态infinite matrix product state(iMPS),无穷矩阵乘积态
+无限Husimi晶格infinite Husimi lattice,无限晶格
+无限密度矩阵重正化群,无限密度矩阵重正化群
+无限密度矩阵重正化群infinite density matrix renormalization group(iDMRG),无限密度矩阵重正化群
+无限投影纠缠对态,无限投影纠缠对态
+无限投影纠缠对态infinite PEPS(iPEPS),无限投影纠缠对态
+无限投影纠缠对态的完全更新,full update
+无限投影纠缠对态的完全更新full update,full update
+无限投影纠缠对态的簇更新,无限投影纠缠对态的簇更新
+无限投影纠缠对态的簇更新cluster update,无限投影纠缠对态的簇更新
+无限时间演化分块删截,无限时间演化分块删截
+无限时间演化分块删截infinite time-evolving block decimation(iTEBD),无限时间演化分块删截
+无限时间演化块,无限时间演化块
+"无限时间演化块decimation(infinite time-evolving block decimation,iTEBD)",无限时间演化块
+无限晶格,无限晶格
+既有state-of-the-art tensor network方法,既有方法
+既有方法,既有方法
+时尚产品图像分类,时尚产品图像分类
+时尚产品图像分类fashion-MNIST,时尚产品图像分类
+时装图像分类,时装图像分类
+时装图像分类fashion image classification,时装图像分类
+时间矩阵乘积态,时间矩阵乘积态
+时间矩阵乘积态time matrix product state(tMPS),时间矩阵乘积态
+星型格子,星型格子
+星型格子star lattice,星型格子
+映射,映射
+普适类,普适类
+最大编码率约减,最大编码率约减
+最大编码率约减maximal coding rate reduction(MCR²),最大编码率约减
+最近邻共振价键态,NN-RVB
+最近邻共振价键态nearest-neighbor resonating valence bond state(NN-RVB),NN-RVB
+有限温演化,有限温演化
+有限温演化finite-temperature evolution,有限温演化
+本征态热化,ETH
+本征态热化eigenstate thermalization(ETH),ETH
+朴素贝叶斯分类器,朴素贝叶斯分类器
+朴素贝叶斯分类器naive Bayes classifier,朴素贝叶斯分类器
+李雅普诺夫指数,李雅普诺夫指数
+李雅普诺夫指数Lyapunov exponent,李雅普诺夫指数
+条件图生成函数学习,条件图生成函数学习
+条件图生成函数学习conditional graphon learning,条件图生成函数学习
+树张量网络,TTN
+树张量网络tree tensor network(TTN),TTN
+格子最近邻共振价键态,honeycomb
+格子模型基态,格子模型基态
+格子自旋模型,格子自旋模型
+格点自旋自由度,格点自旋自由度
+格点自旋自由度spin state number q,格点自旋自由度
+梯子,梯子
+模型,模型
+横向伊辛模型横场伊辛模型,横向伊辛模型横场伊辛模型
+横向伊辛模型横场伊辛模型(transverse-field Ising model),横向伊辛模型横场伊辛模型
+横向光锥收缩,TLCC
+横向光锥收缩transverse light cone contraction(TLCC),TLCC
+横向场伊辛模型,TFIM
+横向场伊辛模型transverse field Ising model(TFIM),TFIM
+正交函数基,正交函数基
+正交函数基orthogonal function basis,正交函数基
+正交性灾变,COO
+正交性灾变catastrophe of orthogonality(COO),COO
+正定矩阵乘积态编码Schmidt系数,Schmidt
+正定矩阵乘积态编码系数,Schmidt
+沿链线性变化的两端取值Delta-theta与Delta+theta,Delta-theta
+沿链线性变化的两端取值与,Delta-theta
+波函数,波函数
+测量引起纠缠熵变化,测量引起纠缠熵变化
+测量引起纠缠熵变化measurement-induced entanglement entropy variation,测量引起纠缠熵变化
+浮游相,浮游相
+浮游相floating phase,浮游相
+海森堡反铁磁模型,海森堡反铁磁模型
+海森堡反铁磁模型Heisenberg antiferromagnet,海森堡反铁磁模型
+海森堡模型,海森堡模型
+海森堡模型Heisenberg model,海森堡模型
+海森堡链,海森堡链
+海森堡链Heisenberg chain,海森堡链
+液体,液体
+深度信念网络,深度信念网络
+深度信念网络deep belief network,深度信念网络
+深度卷积网络,深度卷积网络
+深度卷积网络deep convolutional network,深度卷积网络
+深度神经网络,DNN
+深度神经网络deep neural network(DNN),DNN
+深度神经网络自编码器,深度神经网络自编码器
+深度神经网络自编码器deep neural network autoencoder,深度神经网络自编码器
+混沌非线性系统,混沌非线性系统
+混沌非线性系统chaotic nonlinear dynamics,混沌非线性系统
+激光辅助隧穿,激光辅助隧穿
+激光辅助隧穿laser-assisted tunneling,激光辅助隧穿
+环简并度,RD
+环简并度ring degeneracy(RD),RD
+环路特征,环路特征
+环路特征loop characterization,环路特征
+现象,现象
+生成式张量网络,生成式张量网络
+生成式张量网络generative tensor network,生成式张量网络
+生成式张量网络分类,GTNC
+生成式张量网络分类generative tensor network classification(GTNC),GTNC
+生成式矩阵乘积态分类器,GMPSC
+生成式矩阵乘积态分类器generative matrix product state classifier(GMPSC),GMPSC
+用PauliNet求解电子薛定谔方程,PauliNet
+用求解电子薛定谔方程,PauliNet
+白鞋识别问题,白鞋识别问题
+白鞋识别问题white shoe recognition problem,白鞋识别问题
+相互作用,相互作用
+相变,KT
+相变温度的标定与β–T相图的绘制,相变温度的标定与相图的绘制
+相变温度的标定与相图的绘制,相变温度的标定与相图的绘制
+矩阵乘积态,MPS
+矩阵乘积态matrix product state(MPS),MPS
+矩阵乘积态切空间微扰理论,PT-DMRG
+矩阵乘积态切空间微扰理论perturbation theory of the DMRG(PT-DMRG),PT-DMRG
+矩阵乘积态方法矩阵乘积态方法,矩阵乘积态方法矩阵乘积态方法
+矩阵乘积态方法矩阵乘积态方法(MPS method),矩阵乘积态方法矩阵乘积态方法
+矩阵乘积算符,MPO
+矩阵乘积算符matrix product operator(MPO),MPO
+矩阵乘积算符转移矩阵,矩阵乘积算符转移矩阵
+矩阵乘积算符转移矩阵matrix product operator transfer matrix,矩阵乘积算符转移矩阵
+矩阵乘积解纠缠器,MPD
+矩阵乘积解纠缠器matrix product disentangler(MPD),MPD
+磁化平台,磁化平台
+磁化平台内的两种价键图案相变,磁化平台内的两种价键图案相变
+磁化率,磁化率
+磁化率magnetic susceptibility,磁化率
+磁化磁化,磁化磁化
+磁化磁化(magnetization),磁化磁化
+神经网络,神经网络
+神经网络neural network,神经网络
+离散余弦变换,DCT
+离散余弦变换discrete cosine transform(DCT),DCT
+秩1分解rank-1 decomposition,秩分解
+秩分解,秩分解
+立方晶格,立方晶格
+立方晶格cubic lattice,立方晶格
+笼目晶格,笼目晶格
+笼目晶格kagome lattice,笼目晶格
+简单更新方案,简单更新方案
+简单更新方案simple update scheme,简单更新方案
+简单立方格子简单立方格子,简单立方格子简单立方格子
+简单立方格子简单立方格子(simple cubic lattice),简单立方格子简单立方格子
+精确对角化,精确对角化
+精确对角化exact diagonalization,精确对角化
+精确对角化精确对角化,精确对角化精确对角化
+精确对角化精确对角化(exact diagonalization),精确对角化精确对角化
+纠缠浴哈密顿量,EBH
+纠缠浴哈密顿量entanglement bath Hamiltonian(EBH),EBH
+纠缠浴纠缠浴,纠缠浴纠缠浴
+纠缠浴纠缠浴(entanglement bath),纠缠浴纠缠浴
+纠缠熵纠缠熵,纠缠熵纠缠熵
+纠缠熵纠缠熵(entanglement entropy),纠缠熵纠缠熵
+纠缠熵面积律,纠缠熵面积律
+纠缠熵面积律area law of entanglement entropy,纠缠熵面积律
+约化密度矩阵,RDM
+约化密度矩阵reduced density matrix(RDM),RDM
+线性化张量重正化群,LTRG
+线性化张量重正化群linearized tensor renormalization group(LTRG),LTRG
+线性简化版,线性简化版
+线性简化版ResMPS(sResMPS),线性简化版
+细粒度时间优化,FGTO
+细粒度时间优化fine-grained time optimization(FGTO),FGTO
+经典图生成函数学习神经网络,IGNR
+经典图生成函数学习神经网络graphon neural representation(IGNR),IGNR
+网络Tucker分解network Tucker decomposition(NTD),NTD
+网络分解,NTD
+网络收缩动力学,NCD
+网络收缩动力学network contractor dynamics(NCD),NCD
+耦合量子振子,CQOs
+耦合量子振子coupled quantum oscillators(CQOs),CQOs
+能级统计,能级统计
+能级统计level statistics,能级统计
+自动可微张量网络,ADTN
+自动可微张量网络automatically differentiable tensor network(ADTN),ADTN
+自动可微量子电路,ADQC
+自动可微量子电路automatically differentiable quantum circuit(ADQC),ADQC
+自旋-1/2 XXZ链spin-1/2 XXZ chain,自旋链
+自旋-1/2双腿蜂窝自旋梯spin-1/2 two-leg honeycomb spin ladder,spin-
+自旋-1三聚化价键晶体trimerized valence bond crystal(TVBC),TVBC
+自旋-1锯齿链反铁磁海森堡模型相图,自旋锯齿链反铁磁海森堡模型相图
+自旋三聚化价键晶体,TVBC
+自旋关联图样继承Sierpiński gasket旋转对称性,自旋关联图样继承Sierpi旋转对称性
+自旋关联图样继承旋转对称性,自旋关联图样继承Sierpi旋转对称性
+自旋双腿蜂窝自旋梯,spin-
+自旋构型,自旋构型
+自旋链,自旋链
+自旋锯齿链反铁磁海森堡模型相图,自旋锯齿链反铁磁海森堡模型相图
+范式,范式
+虚拟配置二值化,VCB
+虚拟配置二值化virtual configuration binarization(VCB),VCB
+虚时演化,虚时演化
+虚时演化imaginary time evolution,虚时演化
+虚时间扫描算法,ITSA
+虚时间扫描算法imaginary-time-sweep algorithm(ITSA),ITSA
+蜂窝晶格,蜂窝晶格
+蜂窝晶格honeycomb lattice,蜂窝晶格
+蜂窝格子蜂窝格子,蜂窝格子蜂窝格子
+蜂窝格子蜂窝格子(honeycomb lattice),蜂窝格子蜂窝格子
+蜂窝格自旋-1/2海森堡反铁磁体,蜂窝格自旋海森堡反铁磁体
+蜂窝格自旋海森堡反铁磁体,蜂窝格自旋海森堡反铁磁体
+蜂窝状六角格子自旋1/2海森堡反铁磁模型,蜂窝状六角格子自旋海森堡反铁磁模型
+蜂窝状六角格子自旋海森堡反铁磁模型,蜂窝状六角格子自旋海森堡反铁磁模型
+谱形因子,谱形因子
+谱形因子spectral form factor,谱形因子
+谱聚类,谱聚类
+谱聚类spectral clustering,谱聚类
+贝特晶格,贝特晶格
+贝特晶格Bethe lattice,贝特晶格
+贝特近似贝特近似,贝特近似贝特近似
+贝特近似贝特近似(Bethe approximation),贝特近似贝特近似
+负对数保真度距离,NLF
+负对数保真度距离negative log-fidelity(NLF),NLF
+赫伯史密斯矿,OH
+赫伯史密斯矿Herbertsmithite(ZnCu₃(OH)₆Cl₂),OH
+超正交化,超正交化
+超正交化super-orthogonalization,超正交化
+距离,距离
+边界张量边界张量,边界张量边界张量
+边界张量边界张量(boundary tensor),边界张量边界张量
+边界矩阵乘积态,边界矩阵乘积态
+边界矩阵乘积态fine-tuning,边界矩阵乘积态
+边界调谐,TH
+边界调谐Hamiltoniantuning Hamiltonian(TH),TH
+近邻,近邻
+连续时间世界线量子蒙特卡罗,worm update
+连续时间世界线量子蒙特卡罗worm update,worm update
+连续矩阵乘积算符,连续矩阵乘积算符
+连续矩阵乘积算符continuous matrix product operator(cMPO),连续矩阵乘积算符
+连续空间,连续空间
+连续空间continuous space,连续空间
+通用学习范式,通用学习范式
+通用学习范式universal learning,通用学习范式
+部分有序相,部分有序相
+部分有序相partially ordered phase,部分有序相
+酉张量网络,酉张量网络
+酉张量网络unitary tensor network,酉张量网络
+配分函数,配分函数
+配分函数partition function,配分函数
+采样量子势神经网络,采样量子势神经网络
+重标度对数保真度,RLF
+重标度对数保真度rescaled logarithmic fidelity(RLF),RLF
+量子傅里叶变换,QFT
+量子傅里叶变换quantum Fourier transform(QFT),QFT
+量子势神经网络,QPNN
+量子势神经网络quantum potential neural network(QPNN),QPNN
+量子变分指令集,量子变分指令集
+量子变分指令集quantum variational instruction set(QuVIS),量子变分指令集
+量子最小指令集,量子最小指令集
+量子最小指令集quantum minimal instruction set(QuMIS),量子最小指令集
+量子核函数,QKF
+量子核函数quantum kernel function(QKF),QKF
+量子混沌,量子混沌
+量子混沌quantum chaos,量子混沌
+量子特征映射,量子特征映射
+量子特征映射quantum feature map,量子特征映射
+量子相变量子相变,量子相变量子相变
+量子相变量子相变(quantum phase transition),量子相变量子相变
+量子纠缠,量子纠缠
+量子纠缠quantum entanglement,量子纠缠
+量子纠缠模拟器,QES
+量子纠缠模拟器quantum entanglement simulator(QES),QES
+量子线路,量子线路
+量子线路state preparation,量子线路
+量子自旋模型,量子自旋模型
+量子自旋模型quantum spin model,量子自旋模型
+量子自旋模型量子自旋模型,量子自旋模型量子自旋模型
+量子自旋模型量子自旋模型(quantum spin model),量子自旋模型量子自旋模型
+量子自旋液体,量子自旋液体
+量子自旋液体quantum spin liquid,量子自旋液体
+量子蒙特卡洛,量子蒙特卡洛
+量子蒙特卡洛quantum Monte Carlo,量子蒙特卡洛
+长短期记忆网络,LSTM
+长短期记忆网络long short-term memory(LSTM),LSTM
+随机幺正演化下纠缠增长偏离Page值,Page
+随机幺正演化下纠缠增长偏离值,Page
+随机矩阵理论,RMT
+随机矩阵理论random matrix theory(RMT),RMT
+非参数半监督学习,NSSL
+非参数半监督学习non-parametric semi-supervised learning(NSSL),NSSL
+面向密度张量网络态,ODTNS
+面向密度张量网络态orientation-dependent tensor network state(ODTNS),ODTNS
+顺磁相,顺磁相
+顺磁相paramagnetic phase,顺磁相

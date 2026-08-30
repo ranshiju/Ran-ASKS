@@ -1,0 +1,80 @@
+{
+  "audited_at": "2026-08-29T08:30:00Z",
+  "checks": [
+    {
+      "name": "chronological_source_navigation",
+      "note": "早期、中期、晚期样本的研究方向定位均保留可解析的本地 paper.md 脚注；Wiki 用作导航结构，事实回答仍须回溯 source package。",
+      "result": "pass"
+    },
+    {
+      "name": "formal_publication_deduplication",
+      "note": "会议稿、extended abstract 与后续正式期刊扩展版已按作品关系去重；56 个 include 条目均代表独立正式发表成果。",
+      "result": "pass"
+    },
+    {
+      "name": "known_failure_compatibility",
+      "note": "跨行 title evidence、字符串 conflicts、显式 manifest adjudication 与单篇 checkpoint retry 均在正式 run 中通过并留痕。",
+      "result": "pass"
+    },
+    {
+      "name": "soft_state_boundary",
+      "note": "157 个 semantic warning 均为 descriptive phrase、裸缩写或候选谓词等软质量信号；未发现来源丢失、结构不可解析或 bundle 哈希错误。",
+      "result": "pass"
+    }
+  ],
+  "distribution": {
+    "keywords": {
+      "max": 64,
+      "median": 8,
+      "p95": 16
+    },
+    "semantic_warnings": {
+      "max": 34,
+      "median": 2,
+      "p95": 8
+    },
+    "triples": {
+      "max": 119,
+      "median": 24.5,
+      "p95": 45
+    }
+  },
+  "entry_count": 56,
+  "hard_failures": [],
+  "manifest_sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a",
+  "mechanical_audit": "validation/formal-summary.json",
+  "passed": true,
+  "run_lock_sha256": "bd7dc4b6e166e8e94c5717bc6fccb86d4da2b430b6be4fb58498f0085304851a",
+  "sampling": {
+    "checkpoint_and_regression": [
+      "2018-kagome-chenxi",
+      "2025-adtn-nn-compression",
+      "2026-cpb-chaos-ml"
+    ],
+    "chronological": [
+      "2010-distorted-kagome",
+      "2020-gtnc",
+      "2026-icomputing-qml-orthogonality"
+    ],
+    "distribution_outlier": [
+      "2024-wang-eth-inhomogeneous"
+    ]
+  },
+  "schema": "wikigraph.e1.semantic-audit.v1",
+  "soft_findings": [
+    {
+      "assessment": "语义槽包含较多同义改写和细粒度重复，可能放大单篇论文在图中的局部度数；Wiki 核心导航与三个 source locators 完整，未构成硬失败。",
+      "decision": "保留冻结 bundle，避免看到结果后选择性重采样；Phase G 同时报告原始轨迹与去除该页贡献的敏感性诊断，并检查该步的度数、membership churn 与 query utility 是否异常。",
+      "entry_id": "2024-wang-eth-inhomogeneous",
+      "evidence": {
+        "keyword_count": 64,
+        "keyword_p95": 16,
+        "triple_count": 119,
+        "triple_p95": 45,
+        "warning_count": 34,
+        "warning_p95": 8
+      },
+      "issue": "semantic_redundancy_and_density_outlier"
+    }
+  ]
+}
