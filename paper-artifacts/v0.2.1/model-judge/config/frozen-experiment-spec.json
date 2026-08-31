@@ -1,0 +1,113 @@
+{
+  "schema": "asks-e2b-agent-audit-spec-v1",
+  "status": "preregistered-before-judge-calls",
+  "frozen_at": "2026-08-31",
+  "seed": 20260831,
+  "corpus": {
+    "papers": 56,
+    "final_hubs": 18,
+    "e1_run": "bd7dc4b6e166",
+    "graph_state": "G056"
+  },
+  "input_locks": [
+    {
+      "path": "projects/ASKS/experiments/e1-chronological-56/config/manifest-frozen.json",
+      "sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a"
+    },
+    {
+      "path": "projects/ASKS/experiments/e2-physh-alignment/inputs/hub_paper_incidence.csv",
+      "sha256": "f3343fd07a0ee1f47eab8e5ce7502956f1f2d1513ba267f26ffcdee7da79c364"
+    },
+    {
+      "path": "paper-artifacts/v0.2.0/metrics/paper_to_hub.csv",
+      "sha256": "0a865e7f44a0decbf5b2710edc532ad59adaa35ee607421b680404e48b5657ac"
+    },
+    {
+      "path": "paper-artifacts/v0.2.0/metrics/hub_summary.csv",
+      "sha256": "51b2e44be1900c5c11d2c4d591f08bacc06837515cc15a97bdad1884306e3633"
+    },
+    {
+      "path": ".scripts/read_paper.py",
+      "sha256": "7561b83dc3209ad6cebf061898b646cb1f69c774e773b62fd81a4d9d3308bec0"
+    }
+  ],
+  "evidence": {
+    "fields": ["title", "abstract"],
+    "abstract_extractor": ".scripts/read_paper.py:extract_sections",
+    "minimum_abstract_characters": 120,
+    "maximum_abstract_characters": 2400,
+    "private_directory": "private_inputs",
+    "release_complete_abstracts": false
+  },
+  "judges": [
+    {
+      "judge_id": "gpt56sol",
+      "model": "AWS-GPT-5.6-Sol",
+      "family": "GPT"
+    },
+    {
+      "judge_id": "claude48",
+      "model": "AWS-Claude-Opus-4.8",
+      "family": "Claude"
+    }
+  ],
+  "api": {
+    "base_env": "E2B_API_BASE",
+    "key_env": "E2B_API_KEY",
+    "base_fallback_env": "LLM_API_BASE",
+    "key_fallback_env": "LLM_API_KEY",
+    "temperature": 0,
+    "max_tokens": 6000,
+    "timeout_seconds": 180,
+    "retries": 2,
+    "tools": false,
+    "search": false
+  },
+  "time_strata": [
+    [2010, 2018],
+    [2019, 2021],
+    [2022, 2026]
+  ],
+  "membership_task": {
+    "maximum_positive_papers_per_hub": 4,
+    "negative_must_not_support_hub": true,
+    "match_time_stratum": true,
+    "match_macro_domain_when_possible": true,
+    "score_true": 1.0,
+    "score_tie": 0.5,
+    "score_control": 0.0
+  },
+  "set_task": {
+    "minimum_supporting_papers": 3,
+    "papers_per_set": 3,
+    "role": "secondary"
+  },
+  "primary_endpoint": {
+    "name": "Q_agent_membership",
+    "aggregation": "mean judges within Hub, then unweighted mean across 18 Hubs",
+    "null": 0.5,
+    "test": "exact one-sided sign flip over 18 Hub deviations",
+    "alpha": 0.05
+  },
+  "confirmatory_gate": {
+    "primary_p_less_than": 0.05,
+    "each_judge_score_greater_than": 0.5,
+    "maximum_absolute_position_choice_difference": 0.15,
+    "required_hubs_per_judge": 18
+  },
+  "release_boundary": {
+    "include": [
+      "protocol and config",
+      "trial identities without abstracts",
+      "normalized judge outputs without source quotations",
+      "metrics and validation records"
+    ],
+    "exclude": [
+      "Raw papers",
+      "complete abstracts",
+      "API credentials",
+      "full prompts containing abstracts",
+      "production graph state"
+    ]
+  }
+}

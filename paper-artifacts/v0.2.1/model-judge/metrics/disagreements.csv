@@ -1,0 +1,9 @@
+trial_id,gpt56sol,claude48,hub_id
+M-H01-02,control,tie,academic/wiki/hubs/Heisenberg 反铁磁模型
+M-H02-03,control,true,academic/wiki/hubs/PEPS 与 iPEPS 更新方法
+M-H08-04,control,tie,academic/wiki/hubs/关联长度与最近邻关联诊断
+M-H12-04,true,tie,academic/wiki/hubs/张量重正化群及可微变体
+M-H15-01,true,control,academic/wiki/hubs/纠缠熵与纠缠谱诊断
+M-H15-03,true,tie,academic/wiki/hubs/纠缠熵与纠缠谱诊断
+M-H16-04,control,tie,academic/wiki/hubs/量子与变分蒙特卡洛方法
+M-H17-03,true,tie,academic/wiki/hubs/量子格点模型的晶格几何

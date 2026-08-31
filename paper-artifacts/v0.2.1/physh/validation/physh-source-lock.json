@@ -1,0 +1,41 @@
+{
+  "commit": "ee0e529b792c00dad76c38601a6530f4e28fd9cb",
+  "files": [
+    {
+      "local_path": "cache/physh/ground_truth.jsonl.gz",
+      "sha256": "31efa78e69cfe1c1ebd14f6c1a2e3f5f70494921cb1a347891e7d8ad5d3ae0b5",
+      "size": 13508976,
+      "upstream_path": "benchmark/ground_truth.jsonl.gz"
+    },
+    {
+      "local_path": "cache/physh/concepts.json",
+      "sha256": "c59658459d8a7ccb1b106aa717e81b4e3c9d75e7c5cd47d881bfe25327a2ab86",
+      "size": 497825,
+      "upstream_path": "taxonomy/concepts.json"
+    },
+    {
+      "local_path": "cache/physh/facets.json",
+      "sha256": "32281b106a91d7a77b3125191b6987f07f5c738e5632b57d33bc309afe536a3f",
+      "size": 302,
+      "upstream_path": "taxonomy/facets.json"
+    },
+    {
+      "local_path": "cache/physh/DATA_LICENSE",
+      "sha256": "32c7243527add61cad1276e8858d47a32467bed3632a2999179060339e84e3c4",
+      "size": 1676,
+      "upstream_path": "DATA_LICENSE"
+    },
+    {
+      "local_path": "cache/physh/NOTICE",
+      "sha256": "7195408857e66e27ed477410a4d9200cd087e7d345a6f849a3551bfe5f77d8ad",
+      "size": 2712,
+      "upstream_path": "NOTICE"
+    }
+  ],
+  "label_license": "CC-BY-4.0",
+  "repository": "https://github.com/Ma-Lab-Cal/aps-physh",
+  "retrieved_at": "2026-08-30T13:03:09.567842+00:00",
+  "schema": "asks-e2-physh-source-lock-v1",
+  "status": "pass",
+  "taxonomy_license": "MIT"
+}

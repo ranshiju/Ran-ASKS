@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.2.0
+> Current release: v0.2.1
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -53,7 +53,8 @@ immutable Git tag and GitHub Release.
 
 | Manuscript | Ran-ASKS version | Paper artifact | Status |
 | --- | --- | --- | --- |
-| Initial arXiv submission | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | The arXiv identifier and immutable release link will be added after posting |
+| Initial arXiv submission | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | Frozen arXiv v1 boundary |
+| Post-arXiv submission manuscript | `v0.2.1` | [`1.1.0`](paper-artifacts/v0.2.1/) | Adds the external audits; arXiv v1 remains unchanged |
 
 The manuscript formulates *scientific knowledge compilation* and presents a
 worked chronological demonstration on 56 formally published papers from one
@@ -64,7 +65,7 @@ repository. A sanitized, frozen export of the isolated demonstration is
 included so that readers can inspect the compiled Wiki, Graph, Hubs, and
 reported measurements without receiving the source PDFs or personal state.
 
-### Frozen paper artifact
+### Frozen paper artifacts
 
 [`paper-artifacts/v0.2.0/`](paper-artifacts/v0.2.0/) contains paper artifact
 `1.0.0`: 56 compiled paper Wiki pages, 18 Hub pages, a portable final Graph
@@ -82,6 +83,20 @@ Verify it locally with:
 
 ```bash
 python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
+```
+
+[`paper-artifacts/v0.2.1/`](paper-artifacts/v0.2.1/) contains the additive
+paper audit artifact `1.1.0`. It publishes the frozen PhySH semantic-alignment
+audit and blinded cross-model navigation audit used by the post-arXiv
+submission manuscript. The release-safe package includes protocols, trial and
+control identities without abstracts, normalized model-judge outputs, metrics,
+statistical code, validation records, Figure 5 data, and checksums. It excludes
+source PDFs, complete abstracts, credentials, and private knowledge-base state.
+
+Verify the audit extension with:
+
+```bash
+python3 paper-artifacts/v0.2.1/verify.py
 ```
 
 ## How it works
@@ -231,6 +246,10 @@ PolyForm Noncommercial is not an OSI-approved open-source license because it
 restricts commercial use. The term "public release" in this repository refers
 to source visibility, not OSI open-source status.
 
-The frozen paper data and compiled Wiki/Graph artifact are separately licensed
-under `CC BY-NC 4.0`; see
-[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md).
+The frozen paper data, compiled Wiki/Graph artifact, and ASKS-owned audit data
+are separately licensed under `CC BY-NC 4.0`; see
+[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md)
+and
+[`paper-artifacts/v0.2.1/LICENSE-DATA.md`](paper-artifacts/v0.2.1/LICENSE-DATA.md).
+The PhySH labels and their direct derivatives retain CC BY 4.0, as documented
+in [`paper-artifacts/v0.2.1/LICENSE-PHYSH.md`](paper-artifacts/v0.2.1/LICENSE-PHYSH.md).

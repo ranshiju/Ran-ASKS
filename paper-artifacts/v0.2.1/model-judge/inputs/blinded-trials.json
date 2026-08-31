@@ -1,0 +1,547 @@
+{
+  "hubs": [
+    {
+      "hub_id": "academic/wiki/hubs/Heisenberg 反铁磁模型",
+      "hub_index": 1,
+      "hub_label": "Heisenberg 反铁磁模型",
+      "membership_trials": [
+        {
+          "option_A": "D035",
+          "option_B": "D022",
+          "trial_id": "M-H01-01"
+        },
+        {
+          "option_A": "D039",
+          "option_B": "D054",
+          "trial_id": "M-H01-02"
+        },
+        {
+          "option_A": "D030",
+          "option_B": "D023",
+          "trial_id": "M-H01-03"
+        },
+        {
+          "option_A": "D008",
+          "option_B": "D019",
+          "trial_id": "M-H01-04"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D035",
+          "D039",
+          "D023"
+        ],
+        "set_B": [
+          "D022",
+          "D054",
+          "D030"
+        ],
+        "trial_id": "S-H01"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/PEPS 与 iPEPS 更新方法",
+      "hub_index": 2,
+      "hub_label": "PEPS 与 iPEPS 更新方法",
+      "membership_trials": [
+        {
+          "option_A": "D021",
+          "option_B": "D026",
+          "trial_id": "M-H02-01"
+        },
+        {
+          "option_A": "D007",
+          "option_B": "D009",
+          "trial_id": "M-H02-02"
+        },
+        {
+          "option_A": "D019",
+          "option_B": "D003",
+          "trial_id": "M-H02-03"
+        },
+        {
+          "option_A": "D024",
+          "option_B": "D036",
+          "trial_id": "M-H02-04"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D026",
+          "D007",
+          "D003"
+        ],
+        "set_B": [
+          "D021",
+          "D009",
+          "D019"
+        ],
+        "trial_id": "S-H02"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/PEPS/PESS 表示及高维推广",
+      "hub_index": 3,
+      "hub_label": "PEPS/PESS 表示及高维推广",
+      "membership_trials": [
+        {
+          "option_A": "D034",
+          "option_B": "D026",
+          "trial_id": "M-H03-01"
+        },
+        {
+          "option_A": "D030",
+          "option_B": "D023",
+          "trial_id": "M-H03-02"
+        },
+        {
+          "option_A": "D021",
+          "option_B": "D036",
+          "trial_id": "M-H03-03"
+        },
+        {
+          "option_A": "D054",
+          "option_B": "D040",
+          "trial_id": "M-H03-04"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D034",
+          "D023",
+          "D021"
+        ],
+        "set_B": [
+          "D026",
+          "D030",
+          "D036"
+        ],
+        "trial_id": "S-H03"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/msQFM 及其编码方案",
+      "hub_index": 4,
+      "hub_label": "msQFM 及其编码方案",
+      "membership_trials": [
+        {
+          "option_A": "D056",
+          "option_B": "D054",
+          "trial_id": "M-H04-01"
+        },
+        {
+          "option_A": "D053",
+          "option_B": "D052",
+          "trial_id": "M-H04-02"
+        }
+      ],
+      "set_trial": null
+    },
+    {
+      "hub_id": "academic/wiki/hubs/一维量子自旋链与基态",
+      "hub_index": 5,
+      "hub_label": "一维量子自旋链与基态",
+      "membership_trials": [
+        {
+          "option_A": "D030",
+          "option_B": "D031",
+          "trial_id": "M-H05-01"
+        }
+      ],
+      "set_trial": null
+    },
+    {
+      "hub_id": "academic/wiki/hubs/二维量子多体系统与临界性",
+      "hub_index": 6,
+      "hub_label": "二维量子多体系统与临界性",
+      "membership_trials": [
+        {
+          "option_A": "D006",
+          "option_B": "D004",
+          "trial_id": "M-H06-01"
+        },
+        {
+          "option_A": "D012",
+          "option_B": "D013",
+          "trial_id": "M-H06-02"
+        }
+      ],
+      "set_trial": null
+    },
+    {
+      "hub_id": "academic/wiki/hubs/价键固体与价键晶体",
+      "hub_index": 7,
+      "hub_label": "价键固体与价键晶体",
+      "membership_trials": [
+        {
+          "option_A": "D042",
+          "option_B": "D046",
+          "trial_id": "M-H07-01"
+        },
+        {
+          "option_A": "D001",
+          "option_B": "D012",
+          "trial_id": "M-H07-02"
+        },
+        {
+          "option_A": "D010",
+          "option_B": "D017",
+          "trial_id": "M-H07-03"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D042",
+          "D012",
+          "D017"
+        ],
+        "set_B": [
+          "D046",
+          "D001",
+          "D010"
+        ],
+        "trial_id": "S-H07"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/关联长度与最近邻关联诊断",
+      "hub_index": 8,
+      "hub_label": "关联长度与最近邻关联诊断",
+      "membership_trials": [
+        {
+          "option_A": "D053",
+          "option_B": "D049",
+          "trial_id": "M-H08-01"
+        },
+        {
+          "option_A": "D022",
+          "option_B": "D020",
+          "trial_id": "M-H08-02"
+        },
+        {
+          "option_A": "D055",
+          "option_B": "D038",
+          "trial_id": "M-H08-03"
+        },
+        {
+          "option_A": "D012",
+          "option_B": "D010",
+          "trial_id": "M-H08-04"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D049",
+          "D020",
+          "D055"
+        ],
+        "set_B": [
+          "D053",
+          "D022",
+          "D038"
+        ],
+        "trial_id": "S-H08"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/多参考 Hartree–Fock 与耦合簇方法",
+      "hub_index": 9,
+      "hub_label": "多参考 Hartree–Fock 与耦合簇方法",
+      "membership_trials": [
+        {
+          "option_A": "D024",
+          "option_B": "D036",
+          "trial_id": "M-H09-01"
+        }
+      ],
+      "set_trial": null
+    },
+    {
+      "hub_id": "academic/wiki/hubs/局域与双体纠缠熵及面积律",
+      "hub_index": 10,
+      "hub_label": "局域与双体纠缠熵及面积律",
+      "membership_trials": [
+        {
+          "option_A": "D026",
+          "option_B": "D037",
+          "trial_id": "M-H10-01"
+        },
+        {
+          "option_A": "D014",
+          "option_B": "D001",
+          "trial_id": "M-H10-02"
+        },
+        {
+          "option_A": "D034",
+          "option_B": "D029",
+          "trial_id": "M-H10-03"
+        },
+        {
+          "option_A": "D003",
+          "option_B": "D007",
+          "trial_id": "M-H10-04"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D037",
+          "D014",
+          "D029"
+        ],
+        "set_B": [
+          "D026",
+          "D001",
+          "D034"
+        ],
+        "trial_id": "S-H10"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/张量网络方法与机器学习",
+      "hub_index": 11,
+      "hub_label": "张量网络方法与机器学习",
+      "membership_trials": [
+        {
+          "option_A": "D017",
+          "option_B": "D014",
+          "trial_id": "M-H11-01"
+        },
+        {
+          "option_A": "D043",
+          "option_B": "D050",
+          "trial_id": "M-H11-02"
+        }
+      ],
+      "set_trial": null
+    },
+    {
+      "hub_id": "academic/wiki/hubs/张量重正化群及可微变体",
+      "hub_index": 12,
+      "hub_label": "张量重正化群及可微变体",
+      "membership_trials": [
+        {
+          "option_A": "D001",
+          "option_B": "D012",
+          "trial_id": "M-H12-01"
+        },
+        {
+          "option_A": "D025",
+          "option_B": "D020",
+          "trial_id": "M-H12-02"
+        },
+        {
+          "option_A": "D037",
+          "option_B": "D034",
+          "trial_id": "M-H12-03"
+        },
+        {
+          "option_A": "D002",
+          "option_B": "D006",
+          "trial_id": "M-H12-04"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D001",
+          "D025",
+          "D034"
+        ],
+        "set_B": [
+          "D012",
+          "D020",
+          "D037"
+        ],
+        "trial_id": "S-H12"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断",
+      "hub_index": 13,
+      "hub_label": "拓扑纠缠熵与 Rényi 诊断",
+      "membership_trials": [
+        {
+          "option_A": "D028",
+          "option_B": "D022",
+          "trial_id": "M-H13-01"
+        },
+        {
+          "option_A": "D038",
+          "option_B": "D045",
+          "trial_id": "M-H13-02"
+        }
+      ],
+      "set_trial": null
+    },
+    {
+      "hub_id": "academic/wiki/hubs/神经网络求解电子薛定谔方程",
+      "hub_index": 14,
+      "hub_label": "神经网络求解电子薛定谔方程",
+      "membership_trials": [
+        {
+          "option_A": "D036",
+          "option_B": "D029",
+          "trial_id": "M-H14-01"
+        },
+        {
+          "option_A": "D026",
+          "option_B": "D024",
+          "trial_id": "M-H14-02"
+        }
+      ],
+      "set_trial": null
+    },
+    {
+      "hub_id": "academic/wiki/hubs/纠缠熵与纠缠谱诊断",
+      "hub_index": 15,
+      "hub_label": "纠缠熵与纠缠谱诊断",
+      "membership_trials": [
+        {
+          "option_A": "D014",
+          "option_B": "D012",
+          "trial_id": "M-H15-01"
+        },
+        {
+          "option_A": "D047",
+          "option_B": "D042",
+          "trial_id": "M-H15-02"
+        },
+        {
+          "option_A": "D004",
+          "option_B": "D009",
+          "trial_id": "M-H15-03"
+        },
+        {
+          "option_A": "D021",
+          "option_B": "D029",
+          "trial_id": "M-H15-04"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D012",
+          "D042",
+          "D004"
+        ],
+        "set_B": [
+          "D014",
+          "D047",
+          "D009"
+        ],
+        "trial_id": "S-H15"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/量子与变分蒙特卡洛方法",
+      "hub_index": 16,
+      "hub_label": "量子与变分蒙特卡洛方法",
+      "membership_trials": [
+        {
+          "option_A": "D004",
+          "option_B": "D008",
+          "trial_id": "M-H16-01"
+        },
+        {
+          "option_A": "D010",
+          "option_B": "D013",
+          "trial_id": "M-H16-02"
+        },
+        {
+          "option_A": "D024",
+          "option_B": "D036",
+          "trial_id": "M-H16-03"
+        },
+        {
+          "option_A": "D019",
+          "option_B": "D005",
+          "trial_id": "M-H16-04"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D004",
+          "D013",
+          "D024"
+        ],
+        "set_B": [
+          "D008",
+          "D010",
+          "D036"
+        ],
+        "trial_id": "S-H16"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/量子格点模型的晶格几何",
+      "hub_index": 17,
+      "hub_label": "量子格点模型的晶格几何",
+      "membership_trials": [
+        {
+          "option_A": "D014",
+          "option_B": "D017",
+          "trial_id": "M-H17-01"
+        },
+        {
+          "option_A": "D023",
+          "option_B": "D022",
+          "trial_id": "M-H17-02"
+        },
+        {
+          "option_A": "D019",
+          "option_B": "D007",
+          "trial_id": "M-H17-03"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D017",
+          "D022",
+          "D007"
+        ],
+        "set_B": [
+          "D014",
+          "D023",
+          "D019"
+        ],
+        "trial_id": "S-H17"
+      }
+    },
+    {
+      "hub_id": "academic/wiki/hubs/量子自旋模型与自旋液体",
+      "hub_index": 18,
+      "hub_label": "量子自旋模型与自旋液体",
+      "membership_trials": [
+        {
+          "option_A": "D014",
+          "option_B": "D013",
+          "trial_id": "M-H18-01"
+        },
+        {
+          "option_A": "D012",
+          "option_B": "D001",
+          "trial_id": "M-H18-02"
+        },
+        {
+          "option_A": "D030",
+          "option_B": "D028",
+          "trial_id": "M-H18-03"
+        }
+      ],
+      "set_trial": {
+        "set_A": [
+          "D013",
+          "D001",
+          "D028"
+        ],
+        "set_B": [
+          "D014",
+          "D012",
+          "D030"
+        ],
+        "trial_id": "S-H18"
+      }
+    }
+  ],
+  "schema": "asks-e2b-blinded-trials-v1",
+  "seed": 20260831
+}

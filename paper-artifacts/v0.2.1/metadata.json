@@ -1,0 +1,45 @@
+{
+  "artifact_id": "ran-asks-post-arxiv-external-audits",
+  "artifact_version": "1.1.0",
+  "artifact_kind": "additive-audit-extension",
+  "asks_release_version": "0.2.1",
+  "base_artifact": {
+    "artifact_version": "1.0.0",
+    "asks_release_version": "0.2.0",
+    "path": "../v0.2.0",
+    "corpus_manifest_sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a",
+    "source_run_id": "bd7dc4b6e166"
+  },
+  "paper_title": "LLMs Interpret, Embeddings Organize, Graphs Emerge: Agent-Driven Compilation of Scientific Knowledge",
+  "manuscript_boundary": {
+    "arxiv_v1_unchanged": true,
+    "submission_working_version_includes_audits": true
+  },
+  "physh_audit": {
+    "labeled_papers": 26,
+    "eligible_hubs": 11,
+    "permutations": 10000,
+    "primary_observed": 0.1870107774548857,
+    "primary_null_mean": 0.14728293935039213,
+    "primary_one_sided_p": 0.14758524147585242
+  },
+  "model_judge_audit": {
+    "models": ["AWS-GPT-5.6-Sol", "AWS-Claude-Opus-4.8"],
+    "hubs": 18,
+    "membership_trials_per_judge": 53,
+    "primary_display_name": "Q_nav",
+    "primary_frozen_field": "Q_agent_membership",
+    "primary_score": 0.7743055555555556,
+    "primary_exact_one_sided_p": 0.00064849853515625,
+    "exact_agreement": 0.8490566037735849,
+    "tie_aware_agreement": 0.9622641509433962,
+    "cohens_kappa": 0.6558441558441559
+  },
+  "release_boundary": {
+    "complete_abstracts_distributed": false,
+    "source_pdfs_distributed": false,
+    "credentials_distributed": false,
+    "production_graph_distributed": false
+  },
+  "schema": "ran-asks.paper-audit-artifact.v1"
+}

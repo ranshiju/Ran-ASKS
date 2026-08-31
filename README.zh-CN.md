@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前发布版本: v0.2.0
+> 当前发布版本: v0.2.1
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -46,7 +46,8 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 
 | 论文版本 | Ran-ASKS 版本 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
-| 首次 arXiv 投稿 | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | arXiv 标识符和不可变 Release 链接将在发布后补入仓库级引用信息 |
+| 首次 arXiv 投稿 | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | 冻结的 arXiv v1 边界 |
+| arXiv 后的投稿工作稿 | `v0.2.1` | [`1.1.0`](paper-artifacts/v0.2.1/) | 增加外部审计；arXiv v1 保持不变 |
 
 论文提出了“科学知识编译”，并以一个研究计划中正式发表的 56 篇论文进行按时间
 顺序的展示。编译后的图给出了一个来源可追溯的作者研究画像，其中持续存在的
@@ -70,6 +71,18 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 
 ```bash
 python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
+```
+
+[`paper-artifacts/v0.2.1/`](paper-artifacts/v0.2.1/) 是增量论文审计产物
+`1.1.0`，公开 arXiv 后投稿工作稿使用的冻结 PhySH 语义对齐审计和盲法跨模型
+导航审计。经过脱敏的发布包包括协议、不含摘要的试题与对照身份、规范化模型评价
+输出、指标、统计代码、验证记录、Figure 5 数据和校验和。来源 PDF、完整摘要、
+凭据与私人知识库状态均不发布。
+
+可以使用以下命令验证审计扩展：
+
+```bash
+python3 paper-artifacts/v0.2.1/verify.py
 ```
 
 ## 工作原理
@@ -198,5 +211,9 @@ Ran-ASKS 以
 由于限制商业使用，PolyForm Noncommercial 不是 OSI 批准的开源许可证。本仓库
 中的“公开发布”仅表示源代码可见，并不表示符合 OSI 对开源软件的定义。
 
-冻结论文数据以及编译后的 Wiki/图数据产物单独使用 `CC BY-NC 4.0` 许可，参见
-[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md)。
+冻结论文数据、编译后的 Wiki/图数据产物以及 ASKS 自有审计数据单独使用
+`CC BY-NC 4.0` 许可，参见
+[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md)
+和 [`paper-artifacts/v0.2.1/LICENSE-DATA.md`](paper-artifacts/v0.2.1/LICENSE-DATA.md)。
+PhySH 标签及其直接派生数据保留 CC BY 4.0，详见
+[`paper-artifacts/v0.2.1/LICENSE-PHYSH.md`](paper-artifacts/v0.2.1/LICENSE-PHYSH.md)。

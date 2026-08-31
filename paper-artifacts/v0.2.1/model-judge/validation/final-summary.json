@@ -1,0 +1,64 @@
+{
+  "checks": {
+    "hubs": true,
+    "judge_checkpoints": true,
+    "papers": true,
+    "primary_hubs": true,
+    "private_abstracts_excluded": true
+  },
+  "frozen_at": "2026-08-31T01:43:35.213898+00:00",
+  "models": [
+    {
+      "family": "GPT",
+      "judge_id": "gpt56sol",
+      "model": "AWS-GPT-5.6-Sol"
+    },
+    {
+      "family": "Claude",
+      "judge_id": "claude48",
+      "model": "AWS-Claude-Opus-4.8"
+    }
+  ],
+  "primary_result": {
+    "agreement": {
+      "cohens_kappa": 0.6558441558441559,
+      "exact": 0.8490566037735849,
+      "tie_aware": 0.9622641509433962
+    },
+    "confirmatory_gate": {
+      "complete_hub_coverage": true,
+      "each_judge_direction_positive": true,
+      "passed": true,
+      "position_bias_within_limit": true,
+      "primary_p": true
+    },
+    "endpoint": "Q_agent_membership",
+    "exact_one_sided_p": 0.00064849853515625,
+    "hubs": 18,
+    "judges": 2,
+    "membership_trials_per_judge": 53,
+    "null": 0.5,
+    "observed_minus_null": 0.2743055555555556,
+    "schema": "asks-e2b-primary-result-v1",
+    "scope": "Blinded evidence-bounded model-judge audit of semantic fit and navigation usefulness.",
+    "score": 0.7743055555555556,
+    "sign_flips": 262144
+  },
+  "release_scope": {
+    "exclude": [
+      "Raw papers",
+      "complete abstracts",
+      "API credentials",
+      "full prompts containing abstracts",
+      "production graph state"
+    ],
+    "include": [
+      "protocol and config",
+      "trial identities without abstracts",
+      "normalized judge outputs without source quotations",
+      "metrics and validation records"
+    ]
+  },
+  "schema": "asks-e2b-final-summary-v1",
+  "status": "frozen"
+}

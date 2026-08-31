@@ -1,0 +1,2 @@
+# Frozen CSV outputs retain their byte-exact newline encoding and source hashes.
+*.csv binary

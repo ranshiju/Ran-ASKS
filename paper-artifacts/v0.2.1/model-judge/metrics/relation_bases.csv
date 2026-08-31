@@ -1,0 +1,13 @@
+judge_id,relation_basis,count
+gpt56sol,application,25
+gpt56sol,cross_field_bridge,20
+gpt56sol,method,41
+gpt56sol,physical_system,18
+gpt56sol,property,25
+gpt56sol,research_problem,38
+claude48,application,9
+claude48,cross_field_bridge,16
+claude48,method,40
+claude48,physical_system,29
+claude48,property,28
+claude48,research_problem,23

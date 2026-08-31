@@ -1,0 +1,62 @@
+NOTICE
+
+This repository accompanies the paper
+"A Unified Subject Map for 130 Years of Physics" (2026), by
+Khoa Nguyen, Pragyan Pandey, Sophie Li, and Eric Y. Ma. The
+contact author is Eric Y. Ma (eric.y.ma@berkeley.edu). The
+canonical repository is https://github.com/Ma-Lab-Cal/aps-physh.
+
+Use of APS bibliographic metadata
+---------------------------------
+
+The Digital Object Identifiers (DOIs) and article titles distributed under
+`runs/`, in `benchmark/ground_truth.jsonl.gz`, and in
+`embedding/umap_default_coordinates.csv.gz` are
+bibliographic metadata for articles published in the journals of the
+American Physical Society (APS). They are included here with the Society's
+permission for the purpose of accompanying this paper.
+
+The American Physical Society retains all rights to the underlying article
+text. This release does NOT include abstracts, full text, references, or
+any other portion of APS-copyrighted content. Only DOIs, titles,
+classification predictions produced by the pipeline described in the paper,
+existing APS PhySH labels for labeled articles, and derived UMAP coordinates
+are distributed.
+
+Any reuse must:
+  - acknowledge the American Physical Society as the source of the
+    bibliographic metadata (DOIs and titles) and PhySH labels, and
+  - cite the accompanying paper for the classification predictions and
+    method, per `CITATION.cff`.
+
+PhySH classification scheme
+---------------------------
+
+The Physics Subject Headings (PhySH) classification scheme used here was
+developed and is maintained by the American Physical Society. The taxonomy
+mapping files distributed under `taxonomy/` reflect PhySH labels observed in
+APS metadata through 2025.
+
+APS metadata access
+-------------------
+
+This repository does not redistribute the full APS metadata corpus. APS
+open-access metadata can be accessed through https://harvest.aps.org without
+a key. Full access to the Harvest API typically requires a separate agreement
+with APS, usually by IP address. To initiate that process, contact
+customercare@aps.org.
+
+Licenses applied
+----------------
+
+  - Code, documentation, taxonomy mapping files, benchmark evaluator,
+    plotting style, and example inputs: MIT License (see `LICENSE`).
+  - Per-paper classification, ground-truth label, and DOI/title data under
+    `runs/`, `benchmark/ground_truth.jsonl.gz`, and
+    `embedding/umap_default_coordinates.csv.gz`:
+    Creative Commons Attribution 4.0 International (see `DATA_LICENSE`),
+    subject to the attribution conditions described above.
+
+If you have questions about the data release or wish to obtain APS metadata
+beyond what is provided here (for example, abstracts), please contact the
+American Physical Society directly.

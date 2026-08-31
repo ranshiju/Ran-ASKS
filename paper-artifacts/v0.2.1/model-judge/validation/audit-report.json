@@ -1,0 +1,36 @@
+{
+  "checked_at": "2026-08-31T01:27:49.141900+00:00",
+  "final_hubs": 18,
+  "locked_inputs": [
+    {
+      "path": "projects/ASKS/experiments/e1-chronological-56/config/manifest-frozen.json",
+      "sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a",
+      "size": 78363
+    },
+    {
+      "path": "projects/ASKS/experiments/e2-physh-alignment/inputs/hub_paper_incidence.csv",
+      "sha256": "f3343fd07a0ee1f47eab8e5ce7502956f1f2d1513ba267f26ffcdee7da79c364",
+      "size": 22760
+    },
+    {
+      "path": "paper-artifacts/v0.2.0/metrics/paper_to_hub.csv",
+      "sha256": "0a865e7f44a0decbf5b2710edc532ad59adaa35ee607421b680404e48b5657ac",
+      "size": 17591
+    },
+    {
+      "path": "paper-artifacts/v0.2.0/metrics/hub_summary.csv",
+      "sha256": "51b2e44be1900c5c11d2c4d591f08bacc06837515cc15a97bdad1884306e3633",
+      "size": 2442
+    },
+    {
+      "path": ".scripts/read_paper.py",
+      "sha256": "7561b83dc3209ad6cebf061898b646cb1f69c774e773b62fd81a4d9d3308bec0",
+      "size": 12878
+    }
+  ],
+  "raw_manifest_digest": "38260c3b49aa2ad7f1565918216d2d828833bdd58163617c07b7c27ce3067a68",
+  "raw_modified": false,
+  "raw_papers": 56,
+  "schema": "asks-e2b-audit-report-v1",
+  "status": "pass"
+}

@@ -1,0 +1,71 @@
+{
+  "schema": "asks-e2-physh-alignment-spec-v1",
+  "status": "protocol_frozen_before_primary_analysis",
+  "created_at": "2026-08-30",
+  "manuscript_boundary": {
+    "arxiv_v1_directory": "projects/ASKS/manu/v21",
+    "arxiv_v1_pdf": "projects/ASKS/manu/v21/arxiv v1.pdf",
+    "modify_v21": false
+  },
+  "asks_inputs": {
+    "manifest": "projects/ASKS/experiments/e1-chronological-56/config/manifest-frozen.json",
+    "manifest_sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a",
+    "run_id": "bd7dc4b6e166",
+    "fusion_report_count": 56,
+    "final_snapshot": "projects/ASKS/experiments/e1-chronological-56/runs/bd7dc4b6e166/snapshots/G056.jsonl",
+    "final_snapshot_sha256": "87e7a3894d85a1a501e5f626a807a2546920e5ee9226fab5c525fc2b1c4e7175",
+    "released_edges": "paper-artifacts/v0.2.0/graph/edges.csv",
+    "released_edges_sha256": "187ddb65bc68546f080094324bac08ae3ea8ba421620241c1bcc6d82292c42bd",
+    "hub_summary": "paper-artifacts/v0.2.0/metrics/hub_summary.csv",
+    "hub_summary_sha256": "51b2e44be1900c5c11d2c4d591f08bacc06837515cc15a97bdad1884306e3633",
+    "paper_to_hub": "paper-artifacts/v0.2.0/metrics/paper_to_hub.csv",
+    "paper_to_hub_sha256": "0a865e7f44a0decbf5b2710edc532ad59adaa35ee607421b680404e48b5657ac"
+  },
+  "physh_inputs": {
+    "paper": "Nguyen et al., A Unified Subject Map for 130 Years of Physics, arXiv:2606.14043",
+    "repository": "https://github.com/Ma-Lab-Cal/aps-physh",
+    "commit": "ee0e529b792c00dad76c38601a6530f4e28fd9cb",
+    "gold_path": "benchmark/ground_truth.jsonl.gz",
+    "gold_sha256": "31efa78e69cfe1c1ebd14f6c1a2e3f5f70494921cb1a347891e7d8ad5d3ae0b5",
+    "gold_license": "CC-BY-4.0",
+    "concepts_path": "taxonomy/concepts.json",
+    "concepts_sha256": "c59658459d8a7ccb1b106aa717e81b4e3c9d75e7c5cd47d881bfe25327a2ab86",
+    "concepts_license": "MIT",
+    "facets_path": "taxonomy/facets.json",
+    "facets_sha256": "32281b106a91d7a77b3125191b6987f07f5c738e5632b57d33bc309afe536a3f",
+    "facets_license": "MIT",
+    "data_license_sha256": "32c7243527add61cad1276e8858d47a32467bed3632a2999179060339e84e3c4",
+    "notice_sha256": "7195408857e66e27ed477410a4d9200cd087e7d345a6f849a3551bfe5f77d8ad",
+    "exclude_model_generated_runs": true
+  },
+  "acceptance_counts": {
+    "manifest_papers": 56,
+    "aps_doi_papers": 37,
+    "official_gold_matches": 26,
+    "final_hubs": 18,
+    "eligible_hubs_min_two_gold_papers": 11
+  },
+  "primary_analysis": {
+    "paper_similarity": "exact_set_f1",
+    "hub_aggregation": "unweighted_mean_of_within_hub_pair_means",
+    "minimum_gold_papers_per_hub": 2,
+    "null": "permute_complete_label_profiles_within_time_strata_over_fixed_hub_paper_incidence",
+    "time_strata": [
+      [2016, 2018],
+      [2019, 2021],
+      [2022, 2025]
+    ],
+    "permutations_total_B": 10000,
+    "permutation_chunk_size": 500,
+    "master_seed": 20260830,
+    "alternative": "greater",
+    "primary_endpoint": "Q_concept_exact"
+  },
+  "secondary_analyses": [
+    "discipline_exact_set_f1",
+    "facet_exact_set_f1",
+    "hub_facet_profiles",
+    "primary_hub_mapping_sensitivity",
+    "optional_soft_concept_similarity_sensitivity"
+  ]
+}

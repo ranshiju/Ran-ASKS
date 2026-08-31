@@ -1,0 +1,49 @@
+{
+  "checks": {
+    "eligible_hubs": true,
+    "final_hubs": true,
+    "manifest_papers": true,
+    "official_gold_matches": true,
+    "permutations": true
+  },
+  "excluded": [
+    "full upstream APS gold cache",
+    "source PDFs and parsed Raw text",
+    "production graph state"
+  ],
+  "frozen_at": "2026-08-30T13:39:06.779719+00:00",
+  "primary_result": {
+    "analysis_digest": "97707c7cd536d3e48376731db9bcaa776971a6d7e904ba7e4639edc5eb9e93f2",
+    "difference": 0.03972783810449357,
+    "eligible_hubs": 11,
+    "endpoint": "Q_concept_exact",
+    "label_source": "APS-assigned PhySH gold",
+    "null_mean": 0.14728293935039213,
+    "null_q025": 0.08425470062192113,
+    "null_q975": 0.22006411721711636,
+    "observed": 0.1870107774548857,
+    "official_gold_papers": 26,
+    "permutation_p_greater": 0.14758524147585242,
+    "permutations_B": 10000,
+    "schema": "asks-e2-primary-result-v1",
+    "scope": "External semantic alignment of the final approximate navigation structure on the officially labeled subset.",
+    "standardized_difference": 1.1164903219549904,
+    "time_strata": [
+      [
+        2016,
+        2018
+      ],
+      [
+        2019,
+        2021
+      ],
+      [
+        2022,
+        2025
+      ]
+    ]
+  },
+  "release_scope": "Release-safe E2 protocol, matched CC BY 4.0 labels, exact Hub-paper incidence, metrics, permutation outputs, figure data, and validation records.",
+  "schema": "asks-e2-final-summary-v1",
+  "status": "frozen"
+}

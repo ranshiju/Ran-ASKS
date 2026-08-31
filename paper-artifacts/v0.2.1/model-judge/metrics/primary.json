@@ -1,0 +1,25 @@
+{
+  "agreement": {
+    "cohens_kappa": 0.6558441558441559,
+    "exact": 0.8490566037735849,
+    "tie_aware": 0.9622641509433962
+  },
+  "confirmatory_gate": {
+    "complete_hub_coverage": true,
+    "each_judge_direction_positive": true,
+    "passed": true,
+    "position_bias_within_limit": true,
+    "primary_p": true
+  },
+  "endpoint": "Q_agent_membership",
+  "exact_one_sided_p": 0.00064849853515625,
+  "hubs": 18,
+  "judges": 2,
+  "membership_trials_per_judge": 53,
+  "null": 0.5,
+  "observed_minus_null": 0.2743055555555556,
+  "schema": "asks-e2b-primary-result-v1",
+  "scope": "Blinded evidence-bounded model-judge audit of semantic fit and navigation usefulness.",
+  "score": 0.7743055555555556,
+  "sign_flips": 262144
+}

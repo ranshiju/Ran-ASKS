@@ -1,0 +1,3 @@
+judge_id,model,membership_hub_macro_score,membership_exact_p,membership_trials,set_score,set_trials,choice_A,choice_B,choice_tie,absolute_position_choice_difference
+gpt56sol,AWS-GPT-5.6-Sol,0.775462962962963,0.0007171630859375,53,0.9090909090909091,11,23,27,3,0.07547169811320753
+claude48,AWS-Claude-Opus-4.8,0.7731481481481481,0.00115966796875,53,0.6363636363636364,11,19,25,9,0.11320754716981135

@@ -1,0 +1,36 @@
+{
+  "arxiv_v1_pdf": "projects/ASKS/manu/v21/arxiv v1.pdf",
+  "arxiv_v1_pdf_sha256": "00c77fc3878a58dd07c1b55650336060e3d409cddfc0772e28c3279563562805",
+  "checked_at": "2026-08-30T13:02:57.214966+00:00",
+  "files": [
+    {
+      "path": "projects/ASKS/experiments/e1-chronological-56/config/manifest-frozen.json",
+      "sha256": "394f176e8e21bc31b1f986b831568c0ab4ef2771f4485b2fd2a081124165068a",
+      "size": 78363
+    },
+    {
+      "path": "projects/ASKS/experiments/e1-chronological-56/runs/bd7dc4b6e166/snapshots/G056.jsonl",
+      "sha256": "87e7a3894d85a1a501e5f626a807a2546920e5ee9226fab5c525fc2b1c4e7175",
+      "size": 1730573
+    },
+    {
+      "path": "paper-artifacts/v0.2.0/graph/edges.csv",
+      "sha256": "187ddb65bc68546f080094324bac08ae3ea8ba421620241c1bcc6d82292c42bd",
+      "size": 334690
+    },
+    {
+      "path": "paper-artifacts/v0.2.0/metrics/hub_summary.csv",
+      "sha256": "51b2e44be1900c5c11d2c4d591f08bacc06837515cc15a97bdad1884306e3633",
+      "size": 2442
+    },
+    {
+      "path": "paper-artifacts/v0.2.0/metrics/paper_to_hub.csv",
+      "sha256": "0a865e7f44a0decbf5b2710edc532ad59adaa35ee607421b680404e48b5657ac",
+      "size": 17591
+    }
+  ],
+  "fusion_report_count": 56,
+  "fusion_reports_digest": "981df312a19dbb2ca15ccdea054dd35f185e10942ca5dffbb68af0427bf09250",
+  "schema": "asks-e2-audit-v1",
+  "status": "pass"
+}

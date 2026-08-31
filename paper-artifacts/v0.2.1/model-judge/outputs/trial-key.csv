@@ -1,0 +1,65 @@
+trial_id,task,hub_id,true_position,true_papers,control_papers
+M-H01-01,membership,academic/wiki/hubs/Heisenberg 反铁磁模型,B,D022,D035
+M-H01-02,membership,academic/wiki/hubs/Heisenberg 反铁磁模型,B,D054,D039
+M-H01-03,membership,academic/wiki/hubs/Heisenberg 反铁磁模型,A,D030,D023
+M-H01-04,membership,academic/wiki/hubs/Heisenberg 反铁磁模型,B,D019,D008
+S-H01,set_coherence,academic/wiki/hubs/Heisenberg 反铁磁模型,B,D022;D054;D030,D035;D039;D023
+M-H02-01,membership,academic/wiki/hubs/PEPS 与 iPEPS 更新方法,A,D021,D026
+M-H02-02,membership,academic/wiki/hubs/PEPS 与 iPEPS 更新方法,B,D009,D007
+M-H02-03,membership,academic/wiki/hubs/PEPS 与 iPEPS 更新方法,A,D019,D003
+M-H02-04,membership,academic/wiki/hubs/PEPS 与 iPEPS 更新方法,A,D024,D036
+S-H02,set_coherence,academic/wiki/hubs/PEPS 与 iPEPS 更新方法,B,D021;D009;D019,D026;D007;D003
+M-H03-01,membership,academic/wiki/hubs/PEPS/PESS 表示及高维推广,A,D034,D026
+M-H03-02,membership,academic/wiki/hubs/PEPS/PESS 表示及高维推广,B,D023,D030
+M-H03-03,membership,academic/wiki/hubs/PEPS/PESS 表示及高维推广,A,D021,D036
+M-H03-04,membership,academic/wiki/hubs/PEPS/PESS 表示及高维推广,B,D040,D054
+S-H03,set_coherence,academic/wiki/hubs/PEPS/PESS 表示及高维推广,A,D034;D023;D021,D026;D030;D036
+M-H04-01,membership,academic/wiki/hubs/msQFM 及其编码方案,A,D056,D054
+M-H04-02,membership,academic/wiki/hubs/msQFM 及其编码方案,B,D052,D053
+M-H05-01,membership,academic/wiki/hubs/一维量子自旋链与基态,A,D030,D031
+M-H06-01,membership,academic/wiki/hubs/二维量子多体系统与临界性,B,D004,D006
+M-H06-02,membership,academic/wiki/hubs/二维量子多体系统与临界性,B,D013,D012
+M-H07-01,membership,academic/wiki/hubs/价键固体与价键晶体,A,D042,D046
+M-H07-02,membership,academic/wiki/hubs/价键固体与价键晶体,B,D012,D001
+M-H07-03,membership,academic/wiki/hubs/价键固体与价键晶体,B,D017,D010
+S-H07,set_coherence,academic/wiki/hubs/价键固体与价键晶体,A,D042;D012;D017,D046;D001;D010
+M-H08-01,membership,academic/wiki/hubs/关联长度与最近邻关联诊断,B,D049,D053
+M-H08-02,membership,academic/wiki/hubs/关联长度与最近邻关联诊断,B,D020,D022
+M-H08-03,membership,academic/wiki/hubs/关联长度与最近邻关联诊断,A,D055,D038
+M-H08-04,membership,academic/wiki/hubs/关联长度与最近邻关联诊断,A,D012,D010
+S-H08,set_coherence,academic/wiki/hubs/关联长度与最近邻关联诊断,A,D049;D020;D055,D053;D022;D038
+M-H09-01,membership,academic/wiki/hubs/多参考 Hartree–Fock 与耦合簇方法,A,D024,D036
+M-H10-01,membership,academic/wiki/hubs/局域与双体纠缠熵及面积律,B,D037,D026
+M-H10-02,membership,academic/wiki/hubs/局域与双体纠缠熵及面积律,A,D014,D001
+M-H10-03,membership,academic/wiki/hubs/局域与双体纠缠熵及面积律,B,D029,D034
+M-H10-04,membership,academic/wiki/hubs/局域与双体纠缠熵及面积律,B,D007,D003
+S-H10,set_coherence,academic/wiki/hubs/局域与双体纠缠熵及面积律,A,D037;D014;D029,D026;D001;D034
+M-H11-01,membership,academic/wiki/hubs/张量网络方法与机器学习,B,D014,D017
+M-H11-02,membership,academic/wiki/hubs/张量网络方法与机器学习,B,D050,D043
+M-H12-01,membership,academic/wiki/hubs/张量重正化群及可微变体,A,D001,D012
+M-H12-02,membership,academic/wiki/hubs/张量重正化群及可微变体,A,D025,D020
+M-H12-03,membership,academic/wiki/hubs/张量重正化群及可微变体,B,D034,D037
+M-H12-04,membership,academic/wiki/hubs/张量重正化群及可微变体,A,D002,D006
+S-H12,set_coherence,academic/wiki/hubs/张量重正化群及可微变体,A,D001;D025;D034,D012;D020;D037
+M-H13-01,membership,academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断,B,D022,D028
+M-H13-02,membership,academic/wiki/hubs/拓扑纠缠熵与 Rényi 诊断,A,D038,D045
+M-H14-01,membership,academic/wiki/hubs/神经网络求解电子薛定谔方程,A,D036,D029
+M-H14-02,membership,academic/wiki/hubs/神经网络求解电子薛定谔方程,B,D024,D026
+M-H15-01,membership,academic/wiki/hubs/纠缠熵与纠缠谱诊断,A,D014,D012
+M-H15-02,membership,academic/wiki/hubs/纠缠熵与纠缠谱诊断,A,D047,D042
+M-H15-03,membership,academic/wiki/hubs/纠缠熵与纠缠谱诊断,B,D009,D004
+M-H15-04,membership,academic/wiki/hubs/纠缠熵与纠缠谱诊断,A,D021,D029
+S-H15,set_coherence,academic/wiki/hubs/纠缠熵与纠缠谱诊断,B,D014;D047;D009,D012;D042;D004
+M-H16-01,membership,academic/wiki/hubs/量子与变分蒙特卡洛方法,A,D004,D008
+M-H16-02,membership,academic/wiki/hubs/量子与变分蒙特卡洛方法,B,D013,D010
+M-H16-03,membership,academic/wiki/hubs/量子与变分蒙特卡洛方法,A,D024,D036
+M-H16-04,membership,academic/wiki/hubs/量子与变分蒙特卡洛方法,B,D005,D019
+S-H16,set_coherence,academic/wiki/hubs/量子与变分蒙特卡洛方法,A,D004;D013;D024,D008;D010;D036
+M-H17-01,membership,academic/wiki/hubs/量子格点模型的晶格几何,A,D014,D017
+M-H17-02,membership,academic/wiki/hubs/量子格点模型的晶格几何,A,D023,D022
+M-H17-03,membership,academic/wiki/hubs/量子格点模型的晶格几何,A,D019,D007
+S-H17,set_coherence,academic/wiki/hubs/量子格点模型的晶格几何,B,D014;D023;D019,D017;D022;D007
+M-H18-01,membership,academic/wiki/hubs/量子自旋模型与自旋液体,A,D014,D013
+M-H18-02,membership,academic/wiki/hubs/量子自旋模型与自旋液体,A,D012,D001
+M-H18-03,membership,academic/wiki/hubs/量子自旋模型与自旋液体,A,D030,D028
+S-H18,set_coherence,academic/wiki/hubs/量子自旋模型与自旋液体,B,D014;D012;D030,D013;D001;D028
