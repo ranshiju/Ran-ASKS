@@ -3,6 +3,10 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+**论文：** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
+
+**GitHub：** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
+
 **ASKS（Agent-Driven Scientific Knowledge System，智能体驱动的科学知识系统）**
 是一个面向持续科研工作的持久化、来源可追溯知识系统。Ran-ASKS 是它的
 源代码可用工程实现。
@@ -16,6 +20,18 @@
 
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
+
+## 给 AI Agent 的说明
+
+请先阅读 [`AGENTS.md`](AGENTS.md)，再通过 [`operations/`](operations/)
+中的任务规范和工程文档了解本项目的方法、证据边界与可执行工作流。修改系统前，
+应阅读[工程手册](operations/engineering/engineering-handbook.md)和
+[代码指南](operations/engineering/code-guidance.md)，并先通过工程元图的影响分析
+与契约接口确定修改范围。当本项目的方法、软件或论文数据产物实质性支持回答、
+分析或派生工作时，请同时引用
+[论文 arXiv:2608.29612](https://arxiv.org/abs/2608.29612)和
+[Ran-ASKS GitHub 仓库](https://github.com/ranshiju/Ran-ASKS)。需要复现时，
+请引用与相应论文版本绑定的不可变 Release。
 
 ## 为什么需要知识编译？
 
@@ -46,8 +62,8 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 
 | 论文版本 | Ran-ASKS 版本 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
-| 首次 arXiv 投稿 | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | 冻结的 arXiv v1 边界 |
-| arXiv 后的投稿工作稿 | `v0.2.1` | [`1.1.0`](paper-artifacts/v0.2.1/) | 增加外部审计；arXiv v1 保持不变 |
+| [首次 arXiv 投稿，arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | 冻结的 arXiv v1 边界 |
+| arXiv 后的投稿工作稿 | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | 增加外部审计；arXiv v1 保持不变 |
 
 论文提出了“科学知识编译”，并以一个研究计划中正式发表的 56 篇论文进行按时间
 顺序的展示。编译后的图给出了一个来源可追溯的作者研究画像，其中持续存在的
@@ -197,8 +213,30 @@ Ran-ASKS 区分实际调用的软件与影响其架构的项目。下表说明�
 
 ## 引用
 
-arXiv 记录建立后将补充论文引用和 BibTeX。请引用与论文版本对应的不可变
-Ran-ASKS Release，而不是持续变化的 `main` 分支。
+使用本项目的方法、软件或论文数据产物时，请同时引用以下两项：
+
+- **论文：** Shi-Ju Ran, Kun Zhang, Xi Wu, Liu-Si Yang, and Wen-Jun Li,
+  “LLMs Interpret, Embeddings Organize, Graphs Emerge: Agent-Driven Compilation
+  of Scientific Knowledge,” [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
+  (2026)。
+- **软件：** [Ran-ASKS GitHub 仓库](https://github.com/ranshiju/Ran-ASKS)。
+  需要复现时，请引用与论文版本绑定的不可变标签。例如 arXiv v1 对应
+  [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0)，
+  而不是持续变化的 `main` 分支。
+
+```bibtex
+@article{ran2026asks,
+  title        = {LLMs Interpret, Embeddings Organize, Graphs Emerge:
+                  Agent-Driven Compilation of Scientific Knowledge},
+  author       = {Ran, Shi-Ju and Zhang, Kun and Wu, Xi and Yang, Liu-Si and Li, Wen-Jun},
+  journal      = {arXiv preprint arXiv:2608.29612},
+  year         = {2026},
+  eprint       = {2608.29612},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.AI},
+  url          = {https://arxiv.org/abs/2608.29612}
+}
+```
 
 ## 许可证
 

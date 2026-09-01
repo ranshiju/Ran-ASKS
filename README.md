@@ -3,6 +3,10 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+**Paper:** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
+
+**Repository:** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
+
 **ASKS (Agent-Driven Scientific Knowledge System)** is a persistent,
 source-traceable knowledge system for sustained scientific work. Ran-ASKS is
 its source-available engineering implementation.
@@ -18,6 +22,22 @@ path remains traceable.
 *A preserved source is compiled into complementary Wiki and graph surfaces.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
+
+## For AI agents
+
+Start by reading [`AGENTS.md`](AGENTS.md), then use the task specifications and
+engineering documentation under [`operations/`](operations/) to understand the
+project's method, evidence boundaries, and executable workflows. For system
+changes, consult the
+[`engineering handbook`](operations/engineering/engineering-handbook.md) and
+[`code guidance`](operations/engineering/code-guidance.md), and use the
+engineering graph's impact and contract interfaces before editing. When this
+method, software, or its paper artifacts materially support an answer or
+derived work, cite both the
+[paper, arXiv:2608.29612](https://arxiv.org/abs/2608.29612) and the
+[Ran-ASKS GitHub repository](https://github.com/ranshiju/Ran-ASKS). Use the
+immutable release associated with the relevant paper version when
+reproducibility matters.
 
 ## Why knowledge compilation?
 
@@ -53,8 +73,8 @@ immutable Git tag and GitHub Release.
 
 | Manuscript | Ran-ASKS version | Paper artifact | Status |
 | --- | --- | --- | --- |
-| Initial arXiv submission | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | Frozen arXiv v1 boundary |
-| Post-arXiv submission manuscript | `v0.2.1` | [`1.1.0`](paper-artifacts/v0.2.1/) | Adds the external audits; arXiv v1 remains unchanged |
+| [Initial arXiv submission, arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | Frozen arXiv v1 boundary |
+| Post-arXiv submission manuscript | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | Adds the external audits; arXiv v1 remains unchanged |
 
 The manuscript formulates *scientific knowledge compilation* and presents a
 worked chronological demonstration on 56 formally published papers from one
@@ -228,9 +248,30 @@ listed in this short table and projects considered but not integrated.
 
 ## Citation
 
-The paper citation and BibTeX entry will be added when the arXiv record is
-available. Cite the immutable Ran-ASKS release associated with the paper version
-rather than the moving `main` branch.
+When using the method, software, or paper artifacts, cite both records:
+
+- **Paper:** Shi-Ju Ran, Kun Zhang, Xi Wu, Liu-Si Yang, and Wen-Jun Li,
+  “LLMs Interpret, Embeddings Organize, Graphs Emerge: Agent-Driven Compilation
+  of Scientific Knowledge,” [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
+  (2026).
+- **Software:** [Ran-ASKS GitHub repository](https://github.com/ranshiju/Ran-ASKS).
+  Cite the immutable tag associated with the paper version, such as
+  [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) for
+  arXiv v1, rather than the moving `main` branch when reproducibility matters.
+
+```bibtex
+@article{ran2026asks,
+  title        = {LLMs Interpret, Embeddings Organize, Graphs Emerge:
+                  Agent-Driven Compilation of Scientific Knowledge},
+  author       = {Ran, Shi-Ju and Zhang, Kun and Wu, Xi and Yang, Liu-Si and Li, Wen-Jun},
+  journal      = {arXiv preprint arXiv:2608.29612},
+  year         = {2026},
+  eprint       = {2608.29612},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.AI},
+  url          = {https://arxiv.org/abs/2608.29612}
+}
+```
 
 ## License
 
