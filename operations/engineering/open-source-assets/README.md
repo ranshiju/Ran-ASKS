@@ -1,6 +1,17 @@
-# Ran-ASKS
+# Ran-ASKS: Agent-Driven Scientific Knowledge System
 
 [English](README.md) | [简体中文](README.zh-CN.md)
+
+**Paper:** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
+
+**Repository:** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
+
+**General-reader introduction (Chinese PDF):** [ASKS Chinese introduction, 2026-09-01 edition](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+([version scope](docs/introduction/README.md))
+
+The paper develops the academic ideas, methodology, and supporting evidence.
+The Chinese PDF is a more accessible, use-oriented project introduction for
+general readers who want to understand what ASKS does and how to approach it.
 
 **ASKS (Agent-Driven Scientific Knowledge System)** is a persistent,
 source-traceable knowledge system for sustained scientific work. Ran-ASKS is
@@ -17,6 +28,22 @@ path remains traceable.
 *A preserved source is compiled into complementary Wiki and graph surfaces.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
+
+## For AI agents
+
+Start by reading [`AGENTS.md`](AGENTS.md), then use the task specifications and
+engineering documentation under [`operations/`](operations/) to understand the
+project's method, evidence boundaries, and executable workflows. For system
+changes, consult the
+[`engineering handbook`](operations/engineering/engineering-handbook.md) and
+[`code guidance`](operations/engineering/code-guidance.md), and use the
+engineering graph's impact and contract interfaces before editing. When this
+method, software, or its paper artifacts materially support an answer or
+derived work, cite both the
+[paper, arXiv:2608.29612](https://arxiv.org/abs/2608.29612) and the
+[Ran-ASKS GitHub repository](https://github.com/ranshiju/Ran-ASKS). Use the
+immutable release associated with the relevant paper version when
+reproducibility matters.
 
 ## Why knowledge compilation?
 
@@ -52,7 +79,15 @@ immutable Git tag and GitHub Release.
 
 | Manuscript | Ran-ASKS version | Paper artifact | Status |
 | --- | --- | --- | --- |
-| Initial arXiv submission | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | The arXiv identifier and immutable release link will be added after posting |
+| [Initial arXiv submission, arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | Frozen arXiv v1 boundary |
+| Post-arXiv submission manuscript | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | Adds the external audits; arXiv v1 remains unchanged |
+
+The dated [Chinese introduction](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+is a reader-facing project and outreach document published with `v0.2.2`. It covers the `v0.2.0`
+core demonstration, the `v0.2.1` external audits, and a clearly marked
+post-arXiv order-reconstruction result. It is not a new arXiv version or a
+replacement for either frozen paper artifact. See the
+[version-scope note](docs/introduction/README.md).
 
 The manuscript formulates *scientific knowledge compilation* and presents a
 worked chronological demonstration on 56 formally published papers from one
@@ -63,7 +98,7 @@ repository. A sanitized, frozen export of the isolated demonstration is
 included so that readers can inspect the compiled Wiki, Graph, Hubs, and
 reported measurements without receiving the source PDFs or personal state.
 
-### Frozen paper artifact
+### Frozen paper artifacts
 
 [`paper-artifacts/v0.2.0/`](paper-artifacts/v0.2.0/) contains paper artifact
 `1.0.0`: 56 compiled paper Wiki pages, 18 Hub pages, a portable final Graph
@@ -81,6 +116,20 @@ Verify it locally with:
 
 ```bash
 python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
+```
+
+[`paper-artifacts/v0.2.1/`](paper-artifacts/v0.2.1/) contains the additive
+paper audit artifact `1.1.0`. It publishes the frozen PhySH semantic-alignment
+audit and blinded cross-model navigation audit used by the post-arXiv
+submission manuscript. The release-safe package includes protocols, trial and
+control identities without abstracts, normalized model-judge outputs, metrics,
+statistical code, validation records, Figure 5 data, and checksums. It excludes
+source PDFs, complete abstracts, credentials, and private knowledge-base state.
+
+Verify the audit extension with:
+
+```bash
+python3 paper-artifacts/v0.2.1/verify.py
 ```
 
 ## How it works
@@ -212,9 +261,30 @@ listed in this short table and projects considered but not integrated.
 
 ## Citation
 
-The paper citation and BibTeX entry will be added when the arXiv record is
-available. Cite the immutable Ran-ASKS release associated with the paper version
-rather than the moving `main` branch.
+When using the method, software, or paper artifacts, cite both records:
+
+- **Paper:** Shi-Ju Ran, Kun Zhang, Xi Wu, Liu-Si Yang, and Wen-Jun Li,
+  “LLMs Interpret, Embeddings Organize, Graphs Emerge: Agent-Driven Compilation
+  of Scientific Knowledge,” [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
+  (2026).
+- **Software:** [Ran-ASKS GitHub repository](https://github.com/ranshiju/Ran-ASKS).
+  Cite the immutable tag associated with the paper version, such as
+  [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) for
+  arXiv v1, rather than the moving `main` branch when reproducibility matters.
+
+```bibtex
+@article{ran2026asks,
+  title        = {LLMs Interpret, Embeddings Organize, Graphs Emerge:
+                  Agent-Driven Compilation of Scientific Knowledge},
+  author       = {Ran, Shi-Ju and Zhang, Kun and Wu, Xi and Yang, Liu-Si and Li, Wen-Jun},
+  journal      = {arXiv preprint arXiv:2608.29612},
+  year         = {2026},
+  eprint       = {2608.29612},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.AI},
+  url          = {https://arxiv.org/abs/2608.29612}
+}
+```
 
 ## License
 
@@ -230,6 +300,10 @@ PolyForm Noncommercial is not an OSI-approved open-source license because it
 restricts commercial use. The term "public release" in this repository refers
 to source visibility, not OSI open-source status.
 
-The frozen paper data and compiled Wiki/Graph artifact are separately licensed
-under `CC BY-NC 4.0`; see
-[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md).
+The frozen paper data, compiled Wiki/Graph artifact, and ASKS-owned audit data
+are separately licensed under `CC BY-NC 4.0`; see
+[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md)
+and
+[`paper-artifacts/v0.2.1/LICENSE-DATA.md`](paper-artifacts/v0.2.1/LICENSE-DATA.md).
+The PhySH labels and their direct derivatives retain CC BY 4.0, as documented
+in [`paper-artifacts/v0.2.1/LICENSE-PHYSH.md`](paper-artifacts/v0.2.1/LICENSE-PHYSH.md).

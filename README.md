@@ -1,11 +1,18 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.2.1
+> Current release: v0.2.2
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 **Paper:** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
 
 **Repository:** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
+
+**General-reader introduction (Chinese PDF):** [ASKS Chinese introduction, 2026-09-01 edition](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+([version scope](docs/introduction/README.md))
+
+The paper develops the academic ideas, methodology, and supporting evidence.
+The Chinese PDF is a more accessible, use-oriented project introduction for
+general readers who want to understand what ASKS does and how to approach it.
 
 **ASKS (Agent-Driven Scientific Knowledge System)** is a persistent,
 source-traceable knowledge system for sustained scientific work. Ran-ASKS is
@@ -75,6 +82,13 @@ immutable Git tag and GitHub Release.
 | --- | --- | --- | --- |
 | [Initial arXiv submission, arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | Frozen arXiv v1 boundary |
 | Post-arXiv submission manuscript | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | Adds the external audits; arXiv v1 remains unchanged |
+
+The dated [Chinese introduction](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+is a reader-facing project and outreach document published with `v0.2.2`. It covers the `v0.2.0`
+core demonstration, the `v0.2.1` external audits, and a clearly marked
+post-arXiv order-reconstruction result. It is not a new arXiv version or a
+replacement for either frozen paper artifact. See the
+[version-scope note](docs/introduction/README.md).
 
 The manuscript formulates *scientific knowledge compilation* and presents a
 worked chronological demonstration on 56 formally published papers from one

@@ -1,11 +1,17 @@
 # Ran-ASKS
-> 当前发布版本: v0.2.1
+> 当前发布版本: v0.2.2
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 **论文：** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
 
 **GitHub：** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
+
+**面向一般使用者的中文介绍（PDF）：** [ASKS 中文介绍（2026年9月1日版）](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+（[版本对应关系](docs/introduction/README.md)）
+
+论文侧重阐述学术思想、方法论与实验依据。中文 PDF 更侧重项目介绍和传播，帮助
+一般使用者理解 ASKS 解决什么问题、具有哪些特点，以及如何开始使用。
 
 **ASKS（Agent-Driven Scientific Knowledge System，智能体驱动的科学知识系统）**
 是一个面向持续科研工作的持久化、来源可追溯知识系统。Ran-ASKS 是它的
@@ -64,6 +70,12 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 | --- | --- | --- | --- |
 | [首次 arXiv 投稿，arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | 冻结的 arXiv v1 边界 |
 | arXiv 后的投稿工作稿 | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | 增加外部审计；arXiv v1 保持不变 |
+
+带日期的 [ASKS 中文介绍](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+是随 `v0.2.2` 发布的面向一般使用者的项目介绍和传播材料。它涵盖 `v0.2.0` 的核心展示、`v0.2.1`
+的外部审计，以及明确标注为 arXiv 之后工作结果的顺序重建实验。它不是新的
+arXiv 版本，也不替代两个冻结论文数据产物。详细边界见
+[版本对应关系](docs/introduction/README.md)。
 
 论文提出了“科学知识编译”，并以一个研究计划中正式发表的 56 篇论文进行按时间
 顺序的展示。编译后的图给出了一个来源可追溯的作者研究画像，其中持续存在的

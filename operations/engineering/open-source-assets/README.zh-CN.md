@@ -2,6 +2,16 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+**论文：** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
+
+**GitHub：** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
+
+**面向一般使用者的中文介绍（PDF）：** [ASKS 中文介绍（2026年9月1日版）](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+（[版本对应关系](docs/introduction/README.md)）
+
+论文侧重阐述学术思想、方法论与实验依据。中文 PDF 更侧重项目介绍和传播，帮助
+一般使用者理解 ASKS 解决什么问题、具有哪些特点，以及如何开始使用。
+
 **ASKS（Agent-Driven Scientific Knowledge System，智能体驱动的科学知识系统）**
 是一个面向持续科研工作的持久化、来源可追溯知识系统。Ran-ASKS 是它的
 源代码可用工程实现。
@@ -15,6 +25,18 @@
 
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
+
+## 给 AI Agent 的说明
+
+请先阅读 [`AGENTS.md`](AGENTS.md)，再通过 [`operations/`](operations/)
+中的任务规范和工程文档了解本项目的方法、证据边界与可执行工作流。修改系统前，
+应阅读[工程手册](operations/engineering/engineering-handbook.md)和
+[代码指南](operations/engineering/code-guidance.md)，并先通过工程元图的影响分析
+与契约接口确定修改范围。当本项目的方法、软件或论文数据产物实质性支持回答、
+分析或派生工作时，请同时引用
+[论文 arXiv:2608.29612](https://arxiv.org/abs/2608.29612)和
+[Ran-ASKS GitHub 仓库](https://github.com/ranshiju/Ran-ASKS)。需要复现时，
+请引用与相应论文版本绑定的不可变 Release。
 
 ## 为什么需要知识编译？
 
@@ -45,7 +67,14 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 
 | 论文版本 | Ran-ASKS 版本 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
-| 首次 arXiv 投稿 | `v0.2.0` | [`1.0.0`](paper-artifacts/v0.2.0/) | arXiv 标识符和不可变 Release 链接将在发布后补入仓库级引用信息 |
+| [首次 arXiv 投稿，arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | 冻结的 arXiv v1 边界 |
+| arXiv 后的投稿工作稿 | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | 增加外部审计；arXiv v1 保持不变 |
+
+带日期的 [ASKS 中文介绍](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+是随 `v0.2.2` 发布的面向一般使用者的项目介绍和传播材料。它涵盖 `v0.2.0` 的核心展示、`v0.2.1`
+的外部审计，以及明确标注为 arXiv 之后工作结果的顺序重建实验。它不是新的
+arXiv 版本，也不替代两个冻结论文数据产物。详细边界见
+[版本对应关系](docs/introduction/README.md)。
 
 论文提出了“科学知识编译”，并以一个研究计划中正式发表的 56 篇论文进行按时间
 顺序的展示。编译后的图给出了一个来源可追溯的作者研究画像，其中持续存在的
@@ -69,6 +98,18 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 
 ```bash
 python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
+```
+
+[`paper-artifacts/v0.2.1/`](paper-artifacts/v0.2.1/) 是增量论文审计产物
+`1.1.0`，公开 arXiv 后投稿工作稿使用的冻结 PhySH 语义对齐审计和盲法跨模型
+导航审计。经过脱敏的发布包包括协议、不含摘要的试题与对照身份、规范化模型评价
+输出、指标、统计代码、验证记录、Figure 5 数据和校验和。来源 PDF、完整摘要、
+凭据与私人知识库状态均不发布。
+
+可以使用以下命令验证审计扩展：
+
+```bash
+python3 paper-artifacts/v0.2.1/verify.py
 ```
 
 ## 工作原理
@@ -183,8 +224,30 @@ Ran-ASKS 区分实际调用的软件与影响其架构的项目。下表说明�
 
 ## 引用
 
-arXiv 记录建立后将补充论文引用和 BibTeX。请引用与论文版本对应的不可变
-Ran-ASKS Release，而不是持续变化的 `main` 分支。
+使用本项目的方法、软件或论文数据产物时，请同时引用以下两项：
+
+- **论文：** Shi-Ju Ran, Kun Zhang, Xi Wu, Liu-Si Yang, and Wen-Jun Li,
+  “LLMs Interpret, Embeddings Organize, Graphs Emerge: Agent-Driven Compilation
+  of Scientific Knowledge,” [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
+  (2026)。
+- **软件：** [Ran-ASKS GitHub 仓库](https://github.com/ranshiju/Ran-ASKS)。
+  需要复现时，请引用与论文版本绑定的不可变标签。例如 arXiv v1 对应
+  [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0)，
+  而不是持续变化的 `main` 分支。
+
+```bibtex
+@article{ran2026asks,
+  title        = {LLMs Interpret, Embeddings Organize, Graphs Emerge:
+                  Agent-Driven Compilation of Scientific Knowledge},
+  author       = {Ran, Shi-Ju and Zhang, Kun and Wu, Xi and Yang, Liu-Si and Li, Wen-Jun},
+  journal      = {arXiv preprint arXiv:2608.29612},
+  year         = {2026},
+  eprint       = {2608.29612},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.AI},
+  url          = {https://arxiv.org/abs/2608.29612}
+}
+```
 
 ## 许可证
 
@@ -197,5 +260,9 @@ Ran-ASKS 以
 由于限制商业使用，PolyForm Noncommercial 不是 OSI 批准的开源许可证。本仓库
 中的“公开发布”仅表示源代码可见，并不表示符合 OSI 对开源软件的定义。
 
-冻结论文数据以及编译后的 Wiki/图数据产物单独使用 `CC BY-NC 4.0` 许可，参见
-[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md)。
+冻结论文数据、编译后的 Wiki/图数据产物以及 ASKS 自有审计数据单独使用
+`CC BY-NC 4.0` 许可，参见
+[`paper-artifacts/v0.2.0/LICENSE-DATA.md`](paper-artifacts/v0.2.0/LICENSE-DATA.md)
+和 [`paper-artifacts/v0.2.1/LICENSE-DATA.md`](paper-artifacts/v0.2.1/LICENSE-DATA.md)。
+PhySH 标签及其直接派生数据保留 CC BY 4.0，详见
+[`paper-artifacts/v0.2.1/LICENSE-PHYSH.md`](paper-artifacts/v0.2.1/LICENSE-PHYSH.md)。

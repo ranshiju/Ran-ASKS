@@ -26,6 +26,16 @@ def main() -> None:
         assert "Public release verified" in verified.stdout
         assert (destination / "README.md").is_file()
         assert (destination / "README.zh-CN.md").is_file()
+        introduction = destination / "docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf"
+        assert introduction.is_file()
+        assert introduction.stat().st_size > 100_000
+        assert (destination / "docs/introduction/README.md").is_file()
+        assert "docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf" in (
+            destination / "README.md"
+        ).read_text(encoding="utf-8")
+        assert "docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf" in (
+            destination / "README.zh-CN.md"
+        ).read_text(encoding="utf-8")
         assert (destination / "THIRD_PARTY_NOTICES.md").is_file()
         assert (destination / "VERSION").is_file()
         assert (destination / "VERSION").read_text(encoding="utf-8").strip() == expected_version
@@ -63,7 +73,13 @@ def main() -> None:
         )
         assert artifact_check.returncode == 0, artifact_check.stdout + artifact_check.stderr
         assert not any((destination / "paper-artifacts").rglob("*.db"))
-        assert not any((destination / "paper-artifacts").rglob("*.pdf"))
+        artifact_pdfs = {
+            path.relative_to(destination).as_posix()
+            for path in (destination / "paper-artifacts").rglob("*.pdf")
+        }
+        assert artifact_pdfs <= {
+            "paper-artifacts/v0.2.1/figures/figure5-external-audit-evidence.pdf"
+        }
         assert (destination / "academic/raw/.gitkeep").is_file()
         assert (destination / "academic/frontier/.gitkeep").is_file()
         assert not (destination / "academic/raw/example.pdf").exists()

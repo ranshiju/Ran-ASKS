@@ -35,6 +35,8 @@ public_assets:
   README.zh-CN.md: operations/engineering/open-source-assets/README.zh-CN.md
   THIRD_PARTY_NOTICES.md: operations/engineering/open-source-assets/THIRD_PARTY_NOTICES.md
   docs/assets/scientific-knowledge-compilation.png: operations/engineering/open-source-assets/docs/assets/scientific-knowledge-compilation.png
+  docs/introduction/README.md: operations/engineering/open-source-assets/docs/introduction/README.md
+  docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf: operations/engineering/open-source-assets/docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf
   config.yaml: operations/engineering/open-source-assets/config.yaml
   .gitignore: operations/engineering/open-source-assets/.gitignore
   DATA_POLICY.md: operations/engineering/open-source-assets/DATA_POLICY.md
