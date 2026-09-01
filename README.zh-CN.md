@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前发布版本: v0.2.2
+> 当前发布版本: v0.2.3
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -72,7 +72,8 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 | arXiv 后的投稿工作稿 | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | 增加外部审计；arXiv v1 保持不变 |
 
 带日期的 [ASKS 中文介绍](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
-是随 `v0.2.2` 发布的面向一般使用者的项目介绍和传播材料。它涵盖 `v0.2.0` 的核心展示、`v0.2.1`
+是面向一般使用者的项目介绍和传播材料。其内容版首次随 `v0.2.2` 发布，`v0.2.3`
+替换为用户重新生成的正确 PDF，内容范围不变。它涵盖 `v0.2.0` 的核心展示、`v0.2.1`
 的外部审计，以及明确标注为 arXiv 之后工作结果的顺序重建实验。它不是新的
 arXiv 版本，也不替代两个冻结论文数据产物。详细边界见
 [版本对应关系](docs/introduction/README.md)。

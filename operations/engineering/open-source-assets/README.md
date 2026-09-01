@@ -83,7 +83,9 @@ immutable Git tag and GitHub Release.
 | Post-arXiv submission manuscript | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | Adds the external audits; arXiv v1 remains unchanged |
 
 The dated [Chinese introduction](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
-is a reader-facing project and outreach document published with `v0.2.2`. It covers the `v0.2.0`
+is a reader-facing project and outreach document. Its content edition was first
+published with `v0.2.2`; `v0.2.3` replaces the PDF with the corrected
+user-produced rendering without changing its scope. It covers the `v0.2.0`
 core demonstration, the `v0.2.1` external audits, and a clearly marked
 post-arXiv order-reconstruction result. It is not a new arXiv version or a
 replacement for either frozen paper artifact. See the

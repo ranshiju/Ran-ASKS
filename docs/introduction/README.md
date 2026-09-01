@@ -4,8 +4,10 @@ The dated PDF in this directory is a reader-facing project and outreach
 document for general users. It explains the problem ASKS addresses, the roles
 of its main knowledge surfaces, its engineering characteristics, and how to
 start using it. The paper remains the academic source for the project's ideas,
-methodology, and supporting evidence. The PDF was published with the
-documentation-only Ran-ASKS `v0.2.2` release.
+methodology, and supporting evidence. The content edition was first published
+with the documentation-only Ran-ASKS `v0.2.2` release. Ran-ASKS `v0.2.3`
+replaces the PDF with the corrected user-produced rendering without changing
+the content or version scope below.
 
 | Content described in the PDF | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
@@ -21,8 +23,9 @@ artifact directories linked from the repository README.
 
 本目录中的 PDF 是面向一般使用者的 ASKS 项目介绍和传播材料，重点说明系统解决
 什么问题、主要知识界面的作用、工程特点和基本使用方式。论文仍是阐述项目学术
-思想、方法论与实验依据的正式来源。该 PDF 随仅更新文档的 Ran-ASKS `v0.2.2`
-发布。
+思想、方法论与实验依据的正式来源。该内容版首次随仅更新文档的 Ran-ASKS
+`v0.2.2` 发布。Ran-ASKS `v0.2.3` 将 PDF 替换为用户重新生成的正确版本，下面
+列出的内容和版本范围保持不变。
 
 | PDF 涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
