@@ -150,6 +150,18 @@ def slugify(text: str) -> str:
     return text or "paper"
 
 
+def identifier_slug(text: str) -> str:
+    """Prefer the established ASCII slug, with a stable Unicode fallback."""
+    ascii_slug = slugify(text)
+    has_cjk = bool(re.search(r"[\u3400-\u9fff\uf900-\ufaff]", text))
+    if (ascii_slug != "paper" and not has_cjk) or not text.strip():
+        return ascii_slug
+    normalized = normalize("NFKC", text).lower().replace("'", "").replace("\u2019", "")
+    unicode_slug = re.sub(r"[^\w]+", "-", normalized, flags=re.UNICODE)
+    unicode_slug = unicode_slug.replace("_", "-").strip("-")
+    return unicode_slug[:48] or "paper"
+
+
 def inbox_pdf_paths() -> list[Path]:
     """返回 inbox 中待摄入的 PDF，按路径稳定排序。"""
     inbox = REPO / "inbox"
@@ -378,7 +390,7 @@ def detect_raw_relationship(state: dict, dup_graph: list) -> dict:
 def title_to_slug(title: str) -> str:
     words = re.split(r"\s+", title.lower())
     significant = [w for w in words if w and w not in STOP_WORDS]
-    return slugify(" ".join(significant[:4]))
+    return identifier_slug(" ".join(significant[:4]))
 
 
 def generate_paper_id(md_text: str, arxiv_id: str = "", year_hint: str = "",
@@ -397,7 +409,7 @@ def generate_paper_id(md_text: str, arxiv_id: str = "", year_hint: str = "",
     surname = "paper"
     if authors:
         parts = authors[0].split()
-        surname = slugify(parts[-1]) if parts else "paper"
+        surname = identifier_slug(parts[-1]) if parts else "paper"
     slug = title_to_slug(title)
     year_part = year or "0000"
     return f"{surname}-{year_part}-{slug}"
@@ -725,6 +737,19 @@ def _unique_nonempty(values: list) -> list:
     return result
 
 
+def _first_page_venue_candidates(evidence_lines) -> list[str]:
+    """保留 ACL 类首页证据中的完整 venue 原文，供书目预审选择。"""
+    candidates = []
+    for line in evidence_lines or []:
+        match = re.search(
+            r"\b(?:Proceedings|Findings)\s+of\s+.+?(?=,\s*(?:pages?\b|pp\.?\b)|$)",
+            str(line), re.I,
+        )
+        if match:
+            candidates.append(match.group(0).strip(" ."))
+    return _unique_nonempty(candidates)
+
+
 def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> dict:
     """从 PDF 近端证据与 MinerU 文本生成书目候选，供 LLM 只做选择/否定。
 
@@ -741,7 +766,9 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
         "title": _unique_nonempty([bibliography.get("title"), extract_title_from_md(md_text)]),
         "authors": _unique_nonempty(pdf_authors + [str(author) for author in md_authors]),
         "year": _unique_nonempty([bibliography.get("year"), extract_year_from_md(md_text)]),
-        "venue": _unique_nonempty([bibliography.get("venue")]),
+        "venue": _unique_nonempty(
+            [bibliography.get("venue")] + _first_page_venue_candidates(first_page_evidence)
+        ),
         "doi": _unique_nonempty([bibliography.get("doi"), extract_doi(md_text)]),
         "arxiv_id": _unique_nonempty([bibliography.get("arxiv_id"), extract_arxiv_id(md_text)]),
         "evidence": bibliography.get("evidence") or {},
@@ -822,8 +849,15 @@ def _bibliographic_evidence_text(lines: list[str]) -> str:
 
 
 def _bibliographic_evidence_contains(value: str, locator: str, md_text: str) -> bool:
-    """Allow a candidate promotion only when its declared paper.md line contains it."""
-    match = re.fullmatch(r"paper\.md#L(\d+)(?:-L?(\d+))?", str(locator or "").strip())
+    """Accept only when one explicitly declared paper.md line range contains the value."""
+    locator_text = str(locator or "").strip()
+    locator_parts = re.split(r"\s*[,;]\s*", locator_text)
+    if len(locator_parts) > 1:
+        return all(locator_parts) and any(
+            _bibliographic_evidence_contains(value, part, md_text)
+            for part in locator_parts
+        )
+    match = re.fullmatch(r"paper\.md#L(\d+)(?:-L?(\d+))?", locator_text)
     if not match or not md_text:
         return False
     lines = md_text.splitlines()
@@ -935,7 +969,12 @@ def validate_bibliographic_review(
             author, authors.get("evidence", ""), md_text,
         )
     }
-    unknown_rejected = rejected - author_candidates
+    unknown_rejected = {
+        fragment for fragment in rejected - author_candidates
+        if not _bibliographic_evidence_contains(
+            fragment, authors.get("evidence", ""), md_text,
+        )
+    }
     if unknown_authors:
         errors.append("authors 包含程序候选之外的值: " + ", ".join(sorted(unknown_authors)))
     if unknown_rejected:
@@ -1033,7 +1072,8 @@ def merge_bibliographic_review(bibliography: dict | None, review: dict) -> dict:
     return merged
 
 
-def review_bibliographic_metadata(bibliography: dict | None, md_text: str) -> dict:
+def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
+                                  transaction_id: str = "") -> dict:
     """在 paper.md 落盘后、persist 前执行轻量书目预审。
 
     返回字典中的 status：
@@ -1050,6 +1090,7 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str) -> di
         max_tokens=1800,
         retries=1,
         operation=BIBLIOGRAPHIC_REVIEW_OPERATION,
+        transaction_id=transaction_id,
         system="你是受程序约束的论文书目预审组件，只裁决程序候选并输出 JSON。",
     )
     if result.get("status") == "agent_required":
@@ -1104,18 +1145,26 @@ def _bibliographic_review_draft_path(state: dict) -> Path:
 
 
 def _resume_bibliographic_review(state: dict) -> bool:
-    """读取 agent 写入的书目预审草稿并锁定书目；未就绪返回 False。"""
+    """离线重校验已有 review 或读取 agent 草稿；未就绪返回 False。"""
     review_state = state.get("bibliographic_review") or {}
-    if state.get("status") != "agent_required" or review_state.get("status") != "agent_required":
-        return False
-    draft_path = _bibliographic_review_draft_path(state)
-    if not draft_path.is_file():
-        return False
-    try:
-        review = json.loads(draft_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        state["errors"] = [f"书目预审草稿读取失败: {exc}"]
-        return False
+    stored_validation_error = (
+        state.get("status") == "bibliographic_review_required"
+        and review_state.get("status") == "validation_error"
+        and isinstance(review_state.get("review"), dict)
+    )
+    if stored_validation_error:
+        review = review_state["review"]
+    else:
+        if state.get("status") != "agent_required" or review_state.get("status") != "agent_required":
+            return False
+        draft_path = _bibliographic_review_draft_path(state)
+        if not draft_path.is_file():
+            return False
+        try:
+            review = json.loads(draft_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            state["errors"] = [f"书目预审草稿读取失败: {exc}"]
+            return False
     if not bibliographic_review_schema(review):
         state["errors"] = ["书目预审草稿不符合 JSON schema"]
         return False
@@ -1135,6 +1184,7 @@ def _resume_bibliographic_review(state: dict) -> bool:
     state["bibliographic_meta"] = merge_bibliographic_review(state.get("bibliographic_meta"), review)
     persist_bibliographic_metadata(REPO / state["extract_dir"], state["bibliographic_meta"])
     state["bibliographic_review"] = {"status": "ok", "review": review, "candidates": candidates}
+    state["bibliographic_review_required"] = False
     state["status"] = "write_wiki"
     state["agent_required"] = False
     state["agent_prompt"] = ""
@@ -1273,7 +1323,8 @@ def step_extract(state: dict) -> tuple[bool, str]:
     state["engine"] = engine
     md_text = paper_md.read_text(encoding="utf-8")
     ic.record_llm_call(state, "bibliographic_review")
-    review_result = review_bibliographic_metadata(state.get("bibliographic_meta"), md_text)
+    review_result = review_bibliographic_metadata(
+        state.get("bibliographic_meta"), md_text, state.get("transaction_id", ""))
     if review_result.get("status") == "agent_required":
         draft_rel = str(extract_dir.relative_to(REPO) / "bibliographic-review.json")
         state["agent_required"] = True
@@ -1520,6 +1571,8 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
 
     只输出 wiki（<<<WIKI>>>），不产语义槽。对话历史存入 state 供第二阶段续接。
     """
+    if state.pop("_skip_wiki_for_slots_resume", False):
+        return (True, "") if state.get("wiki_content") else (False, "无 wiki_content，无法恢复 slots 阶段")
     extract_dir = REPO / state["extract_dir"]
     paper_md = extract_dir / "paper.md"
     md_text = paper_md.read_text(encoding="utf-8")
@@ -1547,23 +1600,38 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     skeleton = apply_bibliographic_frontmatter(
         skeleton_path.read_text(encoding="utf-8"), state.get("bibliographic_meta"))
     skeleton_path.write_text(skeleton, encoding="utf-8")
-    # 构建 prompt（重试时附带错误）
+    # agent handoff 的合并输出写入事务目录；resume 只消费该文件。
     errors = state.get("wiki_errors", []) if state.get("wiki_retry", 0) > 0 else None
-    is_agent = ingest_mode() == "agent"
-    if is_agent:
-        prompt = build_agent_wiki_slots_prompt(paper_md, skeleton, errors)
+    agent_output = extract_dir / "agent-wiki-slots.txt"
+    resumed_agent_output = bool(state.get("_awaiting_agent_wiki_slots"))
+    is_agent = ingest_mode() == "agent" or resumed_agent_output
+    if resumed_agent_output:
+        if not agent_output.is_file():
+            state["agent_required"] = True
+            return False, f"agent 输出尚未写入: {agent_output.relative_to(REPO)}"
+        text = agent_output.read_text(encoding="utf-8")
     else:
-        prompt = build_wiki_prompt(md_text, skeleton, errors, paper_md)
-    # 调用 LLM（第一阶段）
-    result = call_text(prompt, max_tokens=32768, retries=1, operation="ingest_wiki_write",
-                       system="你是受程序约束的知识库摄入组件，基于论文定向摘要撰写 wiki 页面。")
-    if result.get("status") == "agent_required":
-        state["agent_required"] = True
-        state["agent_prompt"] = result.get("prompt", "")
-        return False, "需要 agent 接管（INGEST_BACKEND=agent）"
-    if not result.get("ok"):
-        return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
-    text = result.get("text", "")
+        prompt = (build_agent_wiki_slots_prompt(paper_md, skeleton, errors) if is_agent
+                  else build_wiki_prompt(md_text, skeleton, errors, paper_md))
+        result = call_text(prompt, max_tokens=32768, retries=1, operation="ingest_wiki_write",
+                           reasoning_context={
+                               "document_kind": "paper",
+                               "input_chars": len(md_text),
+                               "retry": state.get("wiki_retry", 0),
+                               "validation_errors": errors or [],
+                           },
+                           transaction_id=state.get("transaction_id", ""),
+                           system="你是受程序约束的知识库摄入组件，基于论文定向摘要撰写 wiki 页面。")
+        if result.get("status") == "agent_required":
+            state["_awaiting_agent_wiki_slots"] = True
+            state["pre_handoff_status"] = "write_wiki"
+            state["agent_required"] = True
+            state["agent_prompt"] = result.get("prompt", "")
+            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            return False, "需要 agent 接管（INGEST_BACKEND=agent）"
+        if not result.get("ok"):
+            return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
+        text = result.get("text", "")
     # META 交叉校验：LLM 读全文后反馈的元信息，与程序推导值比对
     meta = parse_meta_block(text)
     if meta:
@@ -1592,6 +1660,8 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     if not wiki_content:
         wiki_content = salvage_wiki_without_delimiter(text)
         if not wiki_content:
+            if resumed_agent_output:
+                state["agent_required"] = True
             return False, "LLM 输出缺少 <<<WIKI>>> 段"
         state["wiki_delimiter_salvaged"] = True
     wiki_content = apply_bibliographic_frontmatter(
@@ -1608,6 +1678,11 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         slots_content = parse_delimited(text, SLOTS_DELIMITER)
         if slots_content:
             state["slots_content"] = slots_content
+    if resumed_agent_output:
+        state.pop("_awaiting_agent_wiki_slots", None)
+        state["agent_required"] = False
+        state["agent_prompt"] = ""
+        state.pop("agent_write_to", None)
     return True, ""
 
 
@@ -1625,23 +1700,49 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
         return False, "无 wiki_content，需先完成第一阶段"
     # 构建单轮 prompt（build_slots_prompt 已把 wiki 放进 prompt，不带 paper.md）
     errors = state.get("slots_errors", []) if state.get("slots_retry", 0) > 0 else None
-    prompt = build_slots_prompt(wiki_content, errors)
-    result = call_text(prompt, max_tokens=32768, retries=1, operation="ingest_wiki_write",
-                       system="你是受程序约束的知识库摄入组件，基于 wiki 页面抽取语义槽。")
-    if result.get("status") == "agent_required":
-        state["agent_required"] = True
-        state["agent_prompt"] = result.get("prompt", "")
-        return False, "需要 agent 接管（INGEST_BACKEND=agent）"
-    if not result.get("ok"):
-        return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
-    text = result.get("text", "")
+    agent_output = REPO / state["extract_dir"] / "agent-slots.txt"
+    resumed_agent_output = bool(state.get("_awaiting_agent_slots"))
+    if resumed_agent_output:
+        if not agent_output.is_file():
+            state["agent_required"] = True
+            return False, f"agent 输出尚未写入: {agent_output.relative_to(REPO)}"
+        text = agent_output.read_text(encoding="utf-8")
+    else:
+        prompt = build_slots_prompt(wiki_content, errors)
+        result = call_text(prompt, max_tokens=32768, retries=1, operation="ingest_semantic_extract",
+                           reasoning_context={
+                               "document_kind": "paper",
+                               "input_chars": len(wiki_content),
+                               "retry": state.get("slots_retry", 0),
+                               "validation_errors": errors or [],
+                               "failure_kind": "semantic" if errors else "",
+                           },
+                           transaction_id=state.get("transaction_id", ""),
+                           system="你是受程序约束的知识库摄入组件，基于 wiki 页面抽取语义槽。")
+        if result.get("status") == "agent_required":
+            state["_awaiting_agent_slots"] = True
+            state["pre_handoff_status"] = "write_slots"
+            state["agent_required"] = True
+            state["agent_prompt"] = result.get("prompt", "")
+            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            return False, "需要 agent 接管（INGEST_BACKEND=agent）"
+        if not result.get("ok"):
+            return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
+        text = result.get("text", "")
     slots_content = parse_delimited(text, SLOTS_DELIMITER)
     if not slots_content:
         slots_content = salvage_slots_without_delimiter(text)
         if not slots_content:
+            if resumed_agent_output:
+                state["agent_required"] = True
             return False, "LLM 输出缺少 <<<SLOTS>>> 段"
         state["slots_delimiter_salvaged"] = True
     state["slots_content"] = slots_content
+    if resumed_agent_output:
+        state.pop("_awaiting_agent_slots", None)
+        state["agent_required"] = False
+        state["agent_prompt"] = ""
+        state.pop("agent_write_to", None)
     return True, ""
 
 
@@ -1969,6 +2070,7 @@ def _repair_once(state: dict, warnings: list[dict], operation: str, is_second_pa
         pass
     prompt = _build_repair_prompt(warnings, venue_hint, is_second_pass)
     result = call_text(prompt, max_tokens=600, retries=1, operation=operation,
+                       transaction_id=state.get("transaction_id", ""),
                        system="你是语义槽修复组件，只输出修正后的行，不解释。")
     if result.get("status") == "agent_required":
         state["agent_required"] = True
@@ -2293,6 +2395,9 @@ def resume_after_semantic_fix(state: dict) -> bool:
     """Load a hand-fixed semantic file and resume from commit validation."""
     if state.get("status") != "agent_required":
         return False
+    if (state.get("_awaiting_agent_wiki_slots") or state.get("_awaiting_agent_slots")
+            or (state.get("bibliographic_review") or {}).get("status") == "agent_required"):
+        return False
     semantic_path = REPO / state.get("semantic_path", "")
     if not semantic_path.is_file():
         return False
@@ -2302,6 +2407,31 @@ def resume_after_semantic_fix(state: dict) -> bool:
     state["errors"] = []
     # 恢复到 handoff 前阶段：落位后(graph_ready)handoff 不重跑落位
     state["status"] = state.get("pre_handoff_status", "finalize")
+    return True
+
+
+def resume_after_agent_generation(state: dict) -> bool:
+    """Resume a wiki/slots handoff only after its declared output exists."""
+    if state.get("status") != "agent_required":
+        return False
+    if state.get("_awaiting_agent_wiki_slots"):
+        expected = REPO / state.get("agent_write_to", "")
+        resume_status = "write_wiki"
+    elif state.get("_awaiting_agent_slots"):
+        expected = REPO / state.get("agent_write_to", "")
+        resume_status = "write_slots"
+    else:
+        return False
+    if not expected.is_file():
+        state["errors"] = [f"agent 输出尚未写入: {state.get('agent_write_to', '')}"]
+        return False
+    state["status"] = state.get("pre_handoff_status") or resume_status
+    if resume_status == "write_slots":
+        # run_prepare 的循环入口仍是 write_wiki；用一次性标记跳过生成并直接进入 slots。
+        state["status"] = "write_wiki"
+        state["_skip_wiki_for_slots_resume"] = True
+    state["agent_required"] = False
+    state["errors"] = []
     return True
 
 
@@ -2321,6 +2451,13 @@ def run_prepare(state: dict) -> dict:
     避免部分论文已入图、部分卡在 warning 的半提交中间态。单篇（--pdf/--resume）由 run_one
     串联 prepare+commit，行为与原 run_pipeline 等价。
     """
+    # agent wiki/slots 生成交接只恢复到精确阶段，输出由对应 step 消费。
+    if state["status"] == "agent_required" and (
+            state.get("_awaiting_agent_wiki_slots") or state.get("_awaiting_agent_slots")):
+        if not resume_after_agent_generation(state):
+            inbox_state.save(state["transaction_id"], state)
+            return state
+        inbox_state.save(state["transaction_id"], state)
     # 恢复或手工修复后，任何会写入最终目录/图谱的阶段都必须重新通过语义校验。
     if state["status"] in {"finalize", "update_graph", "validate_graph", "finalize_tail", "graph_ready"}:
         validation_errors = ic.validate_before_commit(state, step_validate_semantics, NON_BLOCKING_ISSUES)
@@ -2329,7 +2466,10 @@ def run_prepare(state: dict) -> dict:
             inbox_state.save(state["transaction_id"], state)
             return state
     # agent 模式 3.2 书目预审交接收回
-    if state["status"] == "agent_required" and (state.get("bibliographic_review") or {}).get("status") == "agent_required":
+    review_status = (state.get("bibliographic_review") or {}).get("status")
+    if ((state["status"] == "agent_required" and review_status == "agent_required")
+            or (state["status"] == "bibliographic_review_required"
+                and review_status == "validation_error")):
         if not _resume_bibliographic_review(state):
             inbox_state.save(state["transaction_id"], state)
             return state
@@ -2525,6 +2665,7 @@ PAPER_COMMIT_SPEC = {
     "cleanup_after": "validate_graph",
     "skip_source_cleanup_if": "from_raw",
     "rollback_fn": None,
+    "retry_graph_with_clean": True,
     "finalize_tail_failure": "warn",
     "max_retries": MAX_RETRIES,
     "non_blocking_issues": NON_BLOCKING_ISSUES,
@@ -2740,6 +2881,10 @@ def _run_phase(state: dict, verbose: bool, fn) -> dict:
 
 def run_one(state: dict, verbose: bool) -> dict:
     """执行一个事务全流程（prepare+commit），隔离 quiet 模式进度日志。"""
+    # graph validation 失败会留下 failed + resume_from=graph_ready；直接交给
+    # commit 状态机恢复，避免 run_prepare 的阶段白名单吞掉恢复请求。
+    if state.get("status") == "failed" and state.get("resume_from") == "graph_ready":
+        return _run_phase(state, verbose, run_commit)
     state = _run_phase(state, verbose, run_prepare)
     if state["status"] == "graph_ready":
         state = _run_phase(state, verbose, run_commit)
@@ -2778,6 +2923,7 @@ def print_result(state: dict) -> None:
             "status": "agent_required",
             "message": message,
             "prompt": state.get("agent_prompt", ""),
+            "write_to": state.get("agent_write_to", "") or review_path,
             "pipeline_plan": PIPELINE_PLAN_AGENT,
             "transaction_id": state["transaction_id"],
         }

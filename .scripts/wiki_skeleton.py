@@ -179,7 +179,12 @@ def extract_authors_from_text(text):
             continue
         if re.search(r'\b(Abstract|摘要)\b', line, re.I):
             break
+        leading_sup = bool(re.match(r'^<sup\b[^>]*>.*?</sup>', line, re.I))
         line = re.sub(r'<sup\b[^>]*>.*?</sup>', '', line, flags=re.I)
+        if collected and leading_sup and re.search(
+                r"\b(?:" + "|".join(re.escape(cue) for cue in institution_cues) + r")\b",
+                line, re.I):
+            break
         if collected and re.match(r"^(?:" + "|".join(re.escape(cue) for cue in institution_cues) + r")\b", line, re.I):
             break
         line = re.sub(r'\b([A-Z])\s+([a-zÀ-ÿ]{2,})\b', r'\1\2', line)

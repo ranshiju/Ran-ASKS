@@ -135,12 +135,46 @@ def test_reasoning_profile_mapping_and_validation():
         raise AssertionError("invalid reasoning profile must fail")
 
 
+def test_adaptive_reasoning_only_escalates_semantic_retry():
+    initial = llm_structured.reasoning_decision(
+        {}, "ingest_wiki_write", context={"document_kind": "paper", "retry": 0})
+    structural = llm_structured.reasoning_decision(
+        {}, "ingest_wiki_write", context={
+            "document_kind": "paper", "retry": 1,
+            "validation_errors": ["frontmatter 格式错误"],
+        })
+    semantic = llm_structured.reasoning_decision(
+        {}, "ingest_wiki_write", context={
+            "document_kind": "paper", "retry": 1,
+            "validation_errors": ["研究方向定位没有精确 Raw locator 脚注"],
+        })
+    slots = llm_structured.reasoning_decision(
+        {}, "ingest_semantic_extract", context={
+            "document_kind": "ordinary", "retry": 1,
+            "failure_kind": "semantic", "validation_errors": ["谓词不合法"],
+        })
+    assert initial["profile"] == "standard"
+    assert structural["profile"] == "standard"
+    assert structural["error_class"] == "structural"
+    assert semantic["profile"] == "deep"
+    assert semantic["error_class"] == "semantic"
+    assert slots["profile"] == "deep"
+    configured = llm_structured.reasoning_decision(
+        {"LLM_REASONING_INGEST_WIKI_WRITE": "fast"},
+        "ingest_wiki_write", context={"retry": 1, "failure_kind": "semantic"})
+    assert configured["profile"] == "fast"
+    assert configured["reason"].startswith("operation_config:")
+
+
 def test_reasoning_request_options_require_explicit_provider_config():
     assert llm_structured.reasoning_request_options({}, "fast") == {}
     assert llm_structured.reasoning_request_options({"LLM_REASONING_FIELD": "reasoning_effort"}, "fast") == {}
     assert llm_structured.reasoning_request_options({
         "LLM_REASONING_FIELD": "reasoning_effort", "LLM_REASONING_EFFORT_FAST": "low",
     }, "fast") == {"reasoning_effort": "low"}
+    assert llm_structured.reasoning_request_options({
+        "LLM_REASONING_FIELD": "reasoning_effort", "LLM_REASONING_EFFORT_FAST": "none",
+    }, "fast") == {}
 
 
 def test_specialist_schema_failure_falls_back_to_primary_without_agent(monkeypatch=None):
@@ -182,7 +216,7 @@ def test_specialist_schema_failure_falls_back_to_primary_without_agent(monkeypat
     assert [item["model"] for item in result["history"]] == ["MiniMax-M3", "DeepSeek-V3.2"]
 
 
-def test_reasoning_profile_caps_request_and_records_audit_fields():
+def test_reasoning_profile_preserves_call_budget_and_records_audit_fields():
     config = {
         "INGEST_BACKEND": "api",
         "LLM_API_BASE": "https://primary.example", "LLM_API_KEY": "primary-key", "LLM_MODEL": "DeepSeek-V3.2",
@@ -209,17 +243,130 @@ def test_reasoning_profile_caps_request_and_records_audit_fields():
     llm_structured.urllib.request.urlopen = urlopen
     try:
         result = llm_structured.call_json(
-            "test", api_ingest.keyword_schema(["known"]), max_tokens=800, retries=2, operation="ingest_api_keywords",
+            "test", api_ingest.keyword_schema(["known"]), max_tokens=4000, retries=2, operation="ingest_api_keywords",
         )
     finally:
         llm_structured.load_env, llm_structured.urllib.request.urlopen = original_load_env, original_urlopen
     assert result["ok"]
     assert result["reasoning_profile"] == "fast"
-    assert result["max_tokens"] == 800
+    assert result["reasoning_reason"].startswith("adaptive_initial:")
+    assert result["provider_reasoning_effort"] == "low"
+    assert result["max_tokens"] == 4000
     assert captured == [{
         "model": "DeepSeek-V3.2", "messages": [{"role": "system", "content": "你是受程序约束的知识库组件，只输出要求的 JSON。"}, {"role": "user", "content": "test"}],
-        "temperature": 0, "max_tokens": 800, "reasoning_effort": "low",
+        "temperature": 0, "max_tokens": 4000, "reasoning_effort": "low",
     }]
+
+
+def test_reasoning_exhaustion_carries_low_effort_into_model_fallback():
+    config = {
+        "INGEST_BACKEND": "api",
+        "LLM_API_BASE": "https://primary.example", "LLM_API_KEY": "primary-key",
+        "LLM_MODEL": "GLM-primary",
+        "INGEST_GENERATION_API_BASE": "https://generation.example",
+        "INGEST_GENERATION_API_KEY": "generation-key",
+        "INGEST_GENERATION_MODEL": "GLM-generation",
+        "LLM_REASONING_FIELD": "reasoning_effort",
+        "LLM_REASONING_EFFORT_FAST": "low",
+        "LLM_REASONING_EFFORT_DEEP": "high",
+    }
+    captured = []
+    responses = iter([
+        {"choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+         "usage": {"completion_tokens": 120,
+                   "completion_tokens_details": {"reasoning_tokens": 120}}},
+        {"choices": [{"message": {"content": '{"answer":4}'}, "finish_reason": "stop"}],
+         "usage": {"total_tokens": 12}},
+    ])
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def read(self):
+            return json.dumps(self.payload).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    def urlopen(request, **_kwargs):
+        captured.append(json.loads(request.data))
+        return Response(next(responses))
+
+    original_load_env, original_urlopen = llm_structured.load_env, llm_structured.urllib.request.urlopen
+    llm_structured.load_env = lambda: config
+    llm_structured.urllib.request.urlopen = urlopen
+    try:
+        result = llm_structured.call_json(
+            "test", lambda obj: isinstance(obj, dict) and obj.get("answer") == 4,
+            max_tokens=120, retries=0, operation="ingest_proposition", reasoning="deep",
+        )
+    finally:
+        llm_structured.load_env, llm_structured.urllib.request.urlopen = original_load_env, original_urlopen
+    assert result["ok"] and result["fallback_used"]
+    assert [payload["reasoning_effort"] for payload in captured] == ["high", "low"]
+    assert [item["provider_reasoning_effort"] for item in result["history"]] == ["high", "low"]
+
+
+def test_call_text_uses_supplied_conversation_messages():
+    config = {
+        "INGEST_BACKEND": "api",
+        "LLM_API_BASE": "https://primary.example",
+        "LLM_API_KEY": "primary-key",
+        "LLM_MODEL": "DeepSeek-V3.2",
+    }
+    captured = []
+    logged = []
+    conversation = [
+        {"role": "system", "content": "bounded ingest worker"},
+        {"role": "user", "content": "source document"},
+        {"role": "assistant", "content": "draft"},
+        {"role": "user", "content": "repair only the reported error"},
+    ]
+
+    class Response:
+        def read(self):
+            return json.dumps({
+                "choices": [{"message": {"content": "repaired draft"}, "finish_reason": "stop"}],
+                "usage": {"total_tokens": 4},
+            }).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    def urlopen(request, **_kwargs):
+        captured.append(json.loads(request.data))
+        return Response()
+
+    def log_event(operation, result, prompt, output_text="", transaction_id=""):
+        logged.append((operation, prompt, output_text, transaction_id))
+
+    original_load_env = llm_structured.load_env
+    original_urlopen = llm_structured.urllib.request.urlopen
+    original_log_event = llm_structured._log_event
+    llm_structured.load_env = lambda: config
+    llm_structured.urllib.request.urlopen = urlopen
+    llm_structured._log_event = log_event
+    try:
+        result = llm_structured.call_text(
+            "audit label", messages=conversation, max_tokens=800, retries=0,
+            operation="ingest_wiki_write", transaction_id="txn-conversation",
+        )
+    finally:
+        llm_structured.load_env = original_load_env
+        llm_structured.urllib.request.urlopen = original_urlopen
+        llm_structured._log_event = original_log_event
+
+    assert result["ok"]
+    assert captured[0]["messages"] == conversation
+    assert logged[-1][1] == json.dumps(conversation, ensure_ascii=False, sort_keys=True)
+    assert logged[-1][3] == "txn-conversation"
 
 
 def test_reasoning_exhausted_detects_length_with_high_reasoning_share():
@@ -400,8 +547,12 @@ def main():
     test_specialist_profiles_precede_primary_when_complete()
     test_proposition_profile_prefers_dedicated_then_generation_then_primary()
     test_reasoning_profile_mapping_and_validation()
+    test_adaptive_reasoning_only_escalates_semantic_retry()
     test_reasoning_request_options_require_explicit_provider_config()
+    test_reasoning_profile_preserves_call_budget_and_records_audit_fields()
+    test_reasoning_exhaustion_carries_low_effort_into_model_fallback()
     test_reasoning_exhausted_detects_length_with_high_reasoning_share()
+    test_call_text_uses_supplied_conversation_messages()
     test_specialist_schema_failure_falls_back_to_primary_without_agent()
     test_cost_metrics_count_api_without_agent_fallback()
     test_cost_metrics_do_not_cross_count_separate_operations()

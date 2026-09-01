@@ -20,6 +20,10 @@ include:
   - operations/engineering/code-guidance.md
 exclude:
   - "**/.DS_Store"
+  - .scripts/e1_experiment.py
+  - .scripts/e1_order_robustness.py
+  - .scripts/test_e1_experiment.py
+  - .scripts/test_e1_order_robustness.py
   - .scripts/__pycache__/**
   - .scripts/embed_cache/**
   - .scripts/citation-templates/unmatched.log
@@ -33,6 +37,7 @@ exclude:
 public_assets:
   README.md: operations/engineering/open-source-assets/README.md
   README.zh-CN.md: operations/engineering/open-source-assets/README.zh-CN.md
+  CHANGELOG.md: operations/engineering/open-source-assets/CHANGELOG.md
   THIRD_PARTY_NOTICES.md: operations/engineering/open-source-assets/THIRD_PARTY_NOTICES.md
   docs/assets/scientific-knowledge-compilation.png: operations/engineering/open-source-assets/docs/assets/scientific-knowledge-compilation.png
   docs/introduction/README.md: operations/engineering/open-source-assets/docs/introduction/README.md

@@ -1,11 +1,13 @@
 # Ran-ASKS
-> 当前发布版本: v0.2.3
+> 当前发布版本: v0.2.4
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 **论文：** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
 
 **GitHub：** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
+
+**项目更新日志：** [CHANGELOG.md](CHANGELOG.md)
 
 **面向一般使用者的中文介绍（PDF）：** [ASKS 中文介绍（2026年9月1日版）](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
 （[版本对应关系](docs/introduction/README.md)）
@@ -159,6 +161,10 @@ python3 .scripts/engineering_graph.py validate
 只有需要模型的工作流才需要在 `.env` 中配置模型后端。随后阅读 `AGENTS.md`：
 它是项目运行契约，负责识别请求类型、保护 Raw 层并派发对应工作流。例如，可以
 使用以下命令查看查询任务的派发结果：
+
+摄入 PDF 时，如果希望获得高质量 Markdown，特别是更好地保留公式，建议在
+`.env` 中配置免费的 [MinerU API token](https://mineru.net/apiManage/token)：
+`MINERU_API_TOKEN=<你的 token>`。
 
 ```bash
 python3 .scripts/route.py --task query --query-stage start

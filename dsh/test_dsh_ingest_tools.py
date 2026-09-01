@@ -48,6 +48,10 @@ def test_guard_allows_inbox_files():
     assert guard.on_pre_execute(ToolExecution(
         name="ingest_document_file", arguments={"file": "inbox/d.docx"})) is None
     assert guard.on_pre_execute(ToolExecution(
+        name="ingest_document_file", arguments={
+            "file": "inbox/editorial.docx", "subproject": "academic",
+            "document_type": "editorial"})) is None
+    assert guard.on_pre_execute(ToolExecution(
         name="re_ingest_raw", arguments={"raw": "academic/raw/references/x/paper.md"})) is None
 
 
@@ -57,6 +61,28 @@ def test_guard_denies_unsafe_files():
         decision = guard.on_pre_execute(ToolExecution(name="ingest_inbox_run_file", arguments=args))
         assert decision is not None
         assert decision.kind == "deny"
+
+
+def test_guard_requires_academic_document_type():
+    guard = IngestGuard()
+    for document_type in (None, "reference", ""):
+        args = {"file": "inbox/d.docx", "subproject": "academic"}
+        if document_type is not None:
+            args["document_type"] = document_type
+        decision = guard.on_pre_execute(ToolExecution(
+            name="ingest_document_file", arguments=args))
+        assert decision is not None and decision.kind == "deny"
+    decision = guard.on_pre_execute(ToolExecution(
+        name="ingest_document_file", arguments={
+            "file": "inbox/d.docx", "subproject": "admin", "document_type": "editorial"}))
+    assert decision is not None and decision.kind == "deny"
+
+
+def test_document_tool_schema_accepts_academic_type():
+    tool = next(t for t in build_ingest_tools() if t.name == "ingest_document_file")
+    properties = tool.input_schema["properties"]
+    assert "academic" in properties["subproject"]["description"]
+    assert properties["document_type"]["enum"] == ["editorial", "academic-reference"]
 
 
 def test_guard_validates_resume_txn():
@@ -125,6 +151,27 @@ def test_classify_error_categories():
     assert _classify_error(1, "something unexpected", "") == "unknown"
 
 
+def test_classify_error_prefers_structured_bibliographic_failure_over_pdf_name():
+    from dsh.ingest_tools import _classify_error
+    payload = json.dumps({
+        "status": "failed",
+        "errors": ["书目预审候选校验失败: rejected 包含未出现在作者候选项中的片段"],
+        "transaction_id": "cccf-pdf",
+    }, ensure_ascii=False)
+    stdout = f"processing inbox/cccf.pdf\n{payload}"
+    assert _classify_error(1, "", stdout) == "semantic_failed"
+
+
+def test_classify_error_honors_explicit_structured_category():
+    from dsh.ingest_tools import _classify_error
+    payload = json.dumps({
+        "status": "failed",
+        "error_category": "graph_failed",
+        "errors": ["PDF report attached"],
+    })
+    assert _classify_error(1, "", payload) == "graph_failed"
+
+
 def test_error_output_includes_category():
     from dsh.ingest_tools import _ingest_call
     # _ingest_call with nonexistent script will produce non-zero return
@@ -137,6 +184,8 @@ def main():
     test_ingest_tool_names()
     test_guard_allows_inbox_files()
     test_guard_denies_unsafe_files()
+    test_guard_requires_academic_document_type()
+    test_document_tool_schema_accepts_academic_type()
     test_guard_validates_resume_txn()
     test_ingest_loop_has_guard_and_tools()
     test_ingest_loop_convenience_methods()
@@ -148,6 +197,8 @@ def main():
     test_run_inbox_empty()
     test_run_paper_pdf_denied_becomes_failed()
     test_classify_error_categories()
+    test_classify_error_prefers_structured_bibliographic_failure_over_pdf_name()
+    test_classify_error_honors_explicit_structured_category()
     test_error_output_includes_category()
     print("dsh ingest tools regression: PASS")
 

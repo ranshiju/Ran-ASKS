@@ -18,25 +18,71 @@ sys.path.insert(0, str(SCRIPTS))
 from dsh.harness import ToolDefinition
 
 
-def _classify_error(returncode: int, stderr: str, stdout: str) -> str:
-    """按 stderr/stdout 模式分类错误，供 DSH 层决策（重试/handoff）。
+_ERROR_CATEGORIES = {
+    "api_timeout", "extraction_failed", "semantic_failed", "graph_failed", "unknown",
+}
 
-    分类优先级：api_timeout > extraction_failed > semantic_failed > graph_failed > unknown。
-    api_timeout 是唯一可自动重试类别；其余交 agent 或用户处理。
-    """
-    text = f"{stderr}\n{stdout}".lower()
+
+def _json_objects(text: str) -> list[dict]:
+    """Decode complete JSON objects embedded in quiet/progress output."""
+    decoder = json.JSONDecoder()
+    objects = []
+    cursor = 0
+    while cursor < len(text):
+        start = text.find("{", cursor)
+        if start < 0:
+            break
+        try:
+            value, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            cursor = start + 1
+            continue
+        if isinstance(value, dict):
+            objects.append(value)
+        cursor = end
+    return objects
+
+
+def _classify_error_text(text: str) -> str:
+    text = text.lower()
     if any(p in text for p in ("timeout", "timed out", "timeoutexpired",
                                "connection timeout", "read timeout", "api timeout")):
         return "api_timeout"
-    if any(p in text for p in ("extract", "mineru", "ocr", "pdf", "empty content",
-                               "no text", "blank", "scanned")):
-        return "extraction_failed"
-    if any(p in text for p in ("semantic", "slot", "wiki", "validate", "repair",
-                               "agent_required", "handoff")):
+    if any(p in text for p in ("bibliographic", "书目", "预审", "semantic", "slot",
+                               "wiki validation", "wiki 校验", "agent_required", "handoff")):
         return "semantic_failed"
     if any(p in text for p in ("graph", "sqlite", "edge", "keyword", "hub")):
         return "graph_failed"
+    if any(p in text for p in ("extract failed", "extraction failed", "提取失败",
+                               "mineru failed", "ocr failed", "empty content",
+                               "no extracted text", "no text extracted", "scanned document")):
+        return "extraction_failed"
     return "unknown"
+
+
+def _classify_error(returncode: int, stderr: str, stdout: str) -> str:
+    """Prefer structured terminal state; use narrow text patterns as fallback."""
+    combined = f"{stderr}\n{stdout}"
+    for payload in reversed(_json_objects(combined)):
+        status = str(payload.get("status", "")).strip().lower()
+        if not status:
+            continue
+        explicit = str(payload.get("error_category") or payload.get("category") or "").strip()
+        if explicit in _ERROR_CATEGORIES:
+            return explicit
+        if status in _ERROR_CATEGORIES:
+            return status
+        if status in {"agent_required", "bibliographic_review_required", "type_mismatch"}:
+            return "semantic_failed"
+        errors = payload.get("errors", [])
+        if isinstance(errors, str):
+            errors = [errors]
+        structured = _classify_error_text("\n".join(str(item) for item in errors))
+        if structured != "unknown":
+            return structured
+        if status in {"failed", "error", "validation_failed"}:
+            return "unknown"
+    return _classify_error_text(combined)
 
 
 def _ingest_call(args: list[str], timeout: int = 1800) -> str:
@@ -108,13 +154,16 @@ def build_ingest_tools() -> list[ToolDefinition]:
         ),
         ToolDefinition(
             name="ingest_document_file",
-            description="摄入 inbox 下通用文档（ingest_document.py --file）",
+            description="摄入 inbox 下通用文档；academic 必须显式指定 editorial 或 academic-reference",
             input_schema={"type": "object", "properties": {
                 "file": {"type": "string", "description": "inbox/ 下文档路径"},
-                "subproject": {"type": "string", "description": "admin/teaching/business"}},
+                "subproject": {"type": "string", "description": "academic/admin/teaching/business"},
+                "document_type": {"type": "string", "enum": ["editorial", "academic-reference"],
+                                  "description": "academic 非论文类型"}},
                 "required": ["file"]},
             execute_fn=lambda args: _ingest_call(["ingest_document.py", "--file", args.get("file", "")]
-                + (["--subproject", args["subproject"]] if args.get("subproject") else [])),
+                + (["--subproject", args["subproject"]] if args.get("subproject") else [])
+                + (["--document-type", args["document_type"]] if args.get("document_type") else [])),
         ),
         ToolDefinition(
             name="re_ingest_raw",

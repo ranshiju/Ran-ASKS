@@ -13,9 +13,10 @@
 | `raw/works/books/` | 专著、教材(md + PDF) | |
 | `raw/works/patents/` | 专利(md + 证书 PDF) | 证书类 PDF 原样归档,不提取 md |
 | `raw/works/software/` | 软著(md + 证书 PDF) | 同上 |
-| `raw/works/editorials/` | 综述、editorial、观点论文 | |
+| `raw/works/editorials/` | 自有专题导言、editorial、观点文章 | 非论文通用文档类型为 `editorial` |
 | `raw/works/proceedings/` | 会议书、会议卷 | |
 | `raw/references/` | **他人参考论文**(md + PDF 同位) | 与自己成果隔离;命名同 `author-year-slug` |
+| `raw/reference-documents/` | 学术参考文档（非论文） | 报告、说明、资料汇编等；类型为 `academic-reference`，不得与他人论文混放 |
 
 **命名规则**:PDF 与 md 同名(`<stem>.pdf` ↔ `<stem>.md`),共处同一目录。PDF 命名以 md 名为准(中文 PDF→拼音),保证可追溯配对。历史 `raw/papers/`(自己论文)与 `raw/achievements/<year>/`(PDF 按年散存)已于 2026-07-18 统一迁入 `raw/works/`。
 
@@ -47,9 +48,13 @@
 | 文献综述 | `review` | `wiki/reviews/` | 按主题组织的综述 |
 | 审稿写作指南 | `review-guide` | `wiki/review-guides/` | 审稿意见范文、风格指南、审稿模板 |
 | 网页资料 | `web-reference` | `wiki/web-references/` | 网页来源的学术参考资料 |
+| 专题导言 | `editorial` | `wiki/editorials/` | 对应新摄入 `raw/works/editorials/`；仅强信号可自动分类 |
+| 学术参考文档 | `academic-reference` | `wiki/references/` | 对应新摄入 `raw/reference-documents/`，不表示论文摘要 |
 | 会议纪要 | `conference-summary` | `wiki/conferences/` | 学术会议、研讨会记录（命名见 `operations/shared-conventions.md`） |
 | 研究讨论 | `discussion` | `wiki/discussions/` | 与 AI 协作的学术讨论（规范见 `operations/DISCUSSION.md`） |
 | 科研项目 | `research-project` | `wiki/<项目目录>/` | 科研项目协议书、任务书、工作计划、项目总览（按项目建子目录，如 `wiki/中科大科研项目/`） |
+
+`academic` 非论文摄入不得回退到 `admin`。自动分类只接受专题导言、特邀编辑、本期专题等强 editorial 信号；其余文档返回 `classification_required`，由调用方显式选择 `editorial` 或 `academic-reference` 后再进入事务。存量误存 Raw 保持原位，只能通过单独迁移计划调整 Wiki/图归属。
 
 
 ### people 页定位

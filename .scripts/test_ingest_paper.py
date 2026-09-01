@@ -25,6 +25,80 @@ def test_paper_id_prefers_pdf_bibliographic_year_over_citation_year():
     assert pid == "thorne-2018-fever-large-scale-dataset", f"got {pid}"
 
 
+def test_chinese_paper_id_uses_stable_unicode_components():
+    pid = module.generate_paper_id(
+        "# CCCF专题导言初排版\n\n张鹏\n",
+        year_hint="2023",
+        title_hint="CCCF专题导言初排版",
+        authors_hint=["张鹏"],
+    )
+    assert pid == "张鹏-2023-cccf专题导言初排版", f"got {pid}"
+    assert pid != "paper-2023-paper"
+
+
+def test_agent_wiki_handoff_resumes_from_declared_output():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract_dir = root / "temp" / "inbox-extract" / "agent-wiki"
+        extract_dir.mkdir(parents=True)
+        (extract_dir / "paper.md").write_text("# Test Paper\n\n张鹏\n", encoding="utf-8")
+        (extract_dir / "skeleton.md").write_text("---\ntitle: Test Paper\n---\n", encoding="utf-8")
+        agent_output = extract_dir / "agent-wiki-slots.txt"
+        agent_output.write_text(
+            "<<<WIKI>>>\n---\ntitle: Test Paper\ntype: paper-summary\n"
+            "sources:\n  - placeholder\nsource_type: paper\ndate: 2023\nstatus: final\n---\n"
+            "## Navigation\n\n## Content\n\n正文。\n"
+            "<<<SLOTS>>>\n三元组:\n本论文 | 涉及 | 测试主题\n",
+            encoding="utf-8",
+        )
+        state = {
+            "transaction_id": "agent-wiki",
+            "status": "agent_required",
+            "pre_handoff_status": "write_wiki",
+            "_awaiting_agent_wiki_slots": True,
+            "agent_required": True,
+            "agent_write_to": str(agent_output.relative_to(root)),
+            "extract_dir": str(extract_dir.relative_to(root)),
+            "paper_id": "张鹏-2023-test-paper",
+            "raw_dir": "academic/raw/references/张鹏-2023-test-paper",
+            "wiki_path": "academic/wiki/papers/张鹏-2023-test-paper",
+            "bibliographic_meta": {},
+            "wiki_retry": 0,
+        }
+        original_repo = module.REPO
+        original_call = module.call_text
+        try:
+            module.REPO = root
+            module.call_text = lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("resume must not call LLM"))
+            assert module.resume_after_agent_generation(state)
+            ok, msg = module.step_write_wiki(state)
+        finally:
+            module.REPO = original_repo
+            module.call_text = original_call
+        assert ok, msg
+        assert "Test Paper" in state["wiki_content"]
+        assert "测试主题" in state["slots_content"]
+        assert "_awaiting_agent_wiki_slots" not in state
+        assert not state["agent_required"]
+
+
+def test_agent_required_result_includes_write_to():
+    import contextlib
+    import io
+    state = {
+        "status": "agent_required",
+        "transaction_id": "agent-output-contract",
+        "agent_prompt": "prompt",
+        "agent_write_to": "temp/inbox-extract/t/agent-wiki-slots.txt",
+    }
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        module.print_result(state)
+    payload = __import__("json").loads(output.getvalue())
+    assert payload["write_to"] == state["agent_write_to"]
+
+
 def test_extract_pdf_bibliography_reads_metadata_and_first_page_footer():
     import fitz
     with tempfile.TemporaryDirectory() as directory:
@@ -81,6 +155,30 @@ def test_extract_pdf_bibliography_reads_published_conference_venue():
     assert result["year"] == "2025"
     assert result["venue"] == "ICLR 2025"
     assert result["evidence"]["venue"] == "pdf_first_page"
+
+
+def test_bibliographic_candidates_include_full_acl_first_page_venues():
+    cases = [
+        (
+            "Findings of the Association for Computational Linguistics: ACL 2024, pages 11375-11388",
+            "",
+            "Findings of the Association for Computational Linguistics: ACL 2024",
+        ),
+        (
+            "Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics "
+            "(Volume 1: Long Papers), pages 6036-6063",
+            "the 63rd Annual Meeting of the Association for Computational Linguistics "
+            "(Volume 1: Long Papers)",
+            "Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics "
+            "(Volume 1: Long Papers)",
+        ),
+    ]
+    for evidence, canonical_venue, expected in cases:
+        candidates = module.build_bibliographic_candidates({
+            "venue": canonical_venue,
+            "first_page_evidence": [evidence],
+        }, "# Test paper\n")
+        assert expected in candidates["venue"], candidates["venue"]
 
 
 def test_extract_pdf_bibliography_reads_iop_wrapper_second_page_header():
@@ -225,6 +323,84 @@ DOI: 10.1103/PhysRevB.84.100406
     }
     errors = module.validate_bibliographic_review(review, candidates)
     assert any("authors" in error and "候选之外" in error for error in errors)
+
+
+def test_validate_bibliographic_review_accepts_evidence_bound_affiliation_rejections():
+    affiliation = "Foundation Model Research Center, Institute of Automation, CAS"
+    md_text = f"# Paper\n\nAlice, Bob\n\n{affiliation}\n"
+    candidates = {
+        "title": ["Paper"], "authors": ["Alice", "Bob"], "year": [],
+        "venue": [], "doi": [], "arxiv_id": [],
+    }
+    review = {
+        "doc_type": "paper", "review_status": "clean",
+        "bibliographic": {
+            "title": {"value": "Paper", "evidence": "paper.md#L1", "status": "confirmed"},
+            "authors": {
+                "value": ["Alice", "Bob"], "evidence": "paper.md#L3, paper.md#L5",
+                "rejected": [affiliation], "status": "confirmed",
+            },
+            "year": {"value": "", "evidence": "", "kind": "unknown", "status": "ambiguous"},
+            "venue": {"value": "", "evidence": "", "status": "ambiguous"},
+            "doi": {"value": "", "evidence": "", "status": "ambiguous"},
+            "arxiv_id": {"value": "", "evidence": "", "status": "ambiguous"},
+        },
+        "conflicts": [], "review_notes": [],
+    }
+    assert module.validate_bibliographic_review(review, candidates, md_text) == []
+    review["bibliographic"]["authors"]["rejected"] = ["Invented Institute"]
+    errors = module.validate_bibliographic_review(review, candidates, md_text)
+    assert any("rejected 包含" in error for error in errors)
+
+
+def test_resume_stored_bibliographic_validation_error_without_model_call():
+    affiliation = "Foundation Model Research Center, Institute of Automation, CAS"
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        extract_dir = root / "temp/inbox-extract/txn"
+        extract_dir.mkdir(parents=True)
+        (extract_dir / "paper.md").write_text(
+            f"# Paper\n\nAlice, Bob\n\n{affiliation}\n", encoding="utf-8",
+        )
+        candidates = {
+            "title": ["Paper"], "authors": ["Alice", "Bob"], "year": ["2025"],
+            "venue": [], "doi": [], "arxiv_id": [],
+        }
+        review = {
+            "doc_type": "paper", "review_status": "clean",
+            "bibliographic": {
+                "title": {"value": "Paper", "evidence": "paper.md#L1", "status": "confirmed"},
+                "authors": {
+                    "value": ["Alice", "Bob"], "evidence": "paper.md#L3, paper.md#L5",
+                    "rejected": [affiliation], "status": "confirmed",
+                },
+                "year": {"value": "2025", "evidence": "candidate", "kind": "published", "status": "confirmed"},
+                "venue": {"value": "", "evidence": "", "status": "ambiguous"},
+                "doi": {"value": "", "evidence": "", "status": "ambiguous"},
+                "arxiv_id": {"value": "", "evidence": "", "status": "ambiguous"},
+            },
+            "conflicts": [], "review_notes": [],
+        }
+        state = {
+            "status": "bibliographic_review_required",
+            "extract_dir": "temp/inbox-extract/txn",
+            "bibliographic_meta": {},
+            "bibliographic_review_required": True,
+            "bibliographic_review": {
+                "status": "validation_error", "review": review, "candidates": candidates,
+            },
+            "errors": ["old validation error"],
+        }
+        old_repo = module.REPO
+        module.REPO = root
+        try:
+            assert module._resume_bibliographic_review(state)
+        finally:
+            module.REPO = old_repo
+        assert state["status"] == "write_wiki"
+        assert state["bibliographic_review"]["status"] == "ok"
+        assert state["bibliographic_review_required"] is False
+        assert state["errors"] == []
 
 
 def test_validate_bibliographic_review_accepts_superscript_equivalent_title():
@@ -475,7 +651,16 @@ def test_paper_id_no_year():
 
 def test_ensure_unique_disambiguates():
     existing = "frias-perez-2022-light-cone-tensor-network"
-    unique = module.ensure_unique_paper_id(existing)
+    original_repo = module.REPO
+    with tempfile.TemporaryDirectory() as directory:
+        module.REPO = Path(directory)
+        page = module.REPO / "academic" / "wiki" / "papers" / f"{existing}.md"
+        page.parent.mkdir(parents=True)
+        page.write_text("# Existing\n", encoding="utf-8")
+        try:
+            unique = module.ensure_unique_paper_id(existing)
+        finally:
+            module.REPO = original_repo
     assert unique == existing + "-2", f"got {unique}"
 
 
@@ -613,6 +798,36 @@ def test_build_slots_prompt_references_wiki():
     assert "主要研究" in prompt
     assert "不得从“关联/构造/表示”自行推导“基于”" in prompt
     assert "研究对象、模型维度、实验设置和适用场景不得标为局限性" in prompt
+
+
+def test_paper_slots_retry_passes_semantic_reasoning_context():
+    captured = {}
+
+    def fake_call(_prompt, **kwargs):
+        captured.update(kwargs)
+        return {"ok": True, "status": "ok", "text": (
+            "<<<SLOTS>>>\n三元组:\n本论文 | 核心方法 | 张量网络\n")}
+
+    with tempfile.TemporaryDirectory() as directory:
+        original_repo, original_call = module.REPO, module.call_text
+        module.REPO = Path(directory)
+        module.call_text = fake_call
+        try:
+            state = {
+                "extract_dir": "temp/reasoning-paper",
+                "wiki_content": "# Paper\n\n## Content\n\n正文。",
+                "slots_retry": 1,
+                "slots_errors": ["谓词不合法"],
+                "transaction_id": "reasoning-paper",
+            }
+            success, message = module.step_write_slots(state)
+        finally:
+            module.REPO, module.call_text = original_repo, original_call
+    assert success, message
+    assert captured["operation"] == "ingest_semantic_extract"
+    assert captured["reasoning_context"]["document_kind"] == "paper"
+    assert captured["reasoning_context"]["failure_kind"] == "semantic"
+    assert captured["reasoning_context"]["retry"] == 1
 
 
 def test_predicate_candidate_validation():
@@ -947,10 +1162,29 @@ def test_resume_after_semantic_fix_restores_pre_handoff_status():
             assert module.resume_after_semantic_fix(state)
         finally:
             module.REPO = original_repo
-    assert state["status"] == "graph_ready"
+            assert state["status"] == "graph_ready"
     assert state["slots_content"] == "三元组:\n本论文 | 研究关键词 | 修正概念\n"
     assert not state["agent_required"]
     assert state["errors"] == []
+
+
+def test_run_one_dispatches_failed_graph_retry_directly_to_commit():
+    state = {
+        "transaction_id": "graph-retry",
+        "status": "failed",
+        "resume_from": "graph_ready",
+    }
+    calls = []
+    original_run_phase = module._run_phase
+    try:
+        module._run_phase = lambda current, verbose, fn: calls.append(fn.__name__) or {
+            **current, "status": "completed",
+        }
+        result = module.run_one(state, False)
+    finally:
+        module._run_phase = original_run_phase
+    assert result["status"] == "completed"
+    assert calls == ["run_commit"]
 
 
 def test_create_raw_relationship_edge_ensures_missing_raw_nodes():
@@ -1180,13 +1414,23 @@ def test_handoff_to_agent_includes_full_warnings():
 
 
 def test_validate_transaction_reports_warnings():
+    import graph_lib as gl
     sem = "期刊:\nPRX Quantum\n三元组:\n本论文 | 核心创新点 | 首次将DMRG方法系统性应用于基态能量计算\n"
     with tempfile.TemporaryDirectory() as directory:
         sp = Path(directory) / "semantic.txt"
         sp.write_text(sem, encoding="utf-8")
+        graph_path = Path(directory) / "graph.db"
+        conn = sqlite3.connect(graph_path)
+        gl.init_schema(conn)
+        conn.close()
+        original_graph_db = gl.GRAPH_DB
         state = {"semantic_path": str(sp), "wiki_path": "academic/wiki/papers/v",
                  "transaction_id": "txn-v", "paper_id": "v"}
-        report = module.validate_transaction(state)
+        try:
+            gl.GRAPH_DB = graph_path
+            report = module.validate_transaction(state)
+        finally:
+            gl.GRAPH_DB = original_graph_db
     # proposition 改革：descriptive_phrase(object) 与 bare_abbreviation 均非阻断 → status=pass
     # 语义 warnings 仍上报（blocking=False）；确定性书目字段不进入语义 warning。
     assert report["status"] == "pass", f"全非阻断应 pass，got {report['status']}"
@@ -1224,7 +1468,7 @@ def test_validate_before_commit_proposition_object_is_nonblocking():
     handoff 机制由 test_stop_for_semantic_errors_preserves_resume_context /
     test_handoff_to_agent_includes_full_warnings 单独覆盖。
     """
-    sem = "期刊:\nPRX Quantum\n三元组:\n本论文 | 核心创新点 | 首次将DMRG方法系统性应用于基态能量计算\n"
+    sem = "期刊:\n物理学期刊\n三元组:\n本论文 | 核心创新点 | 首次将密度矩阵重整化群方法系统性应用于基态能量计算\n"
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         (root / "semantic.txt").write_text(sem, encoding="utf-8")
@@ -1648,15 +1892,26 @@ def test_reingest_state_has_reingest_flag():
 
 
 def main():
+    import graph_lib as gl
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
-    for test in tests:
+    original_graph_db = gl.GRAPH_DB
+    with tempfile.TemporaryDirectory() as directory:
+        graph_path = Path(directory) / "graph.db"
+        conn = sqlite3.connect(graph_path)
+        gl.init_schema(conn)
+        conn.close()
+        gl.GRAPH_DB = graph_path
         try:
-            test()
-            passed += 1
-        except AssertionError as exc:
-            print(f"FAIL {test.__name__}: {exc}")
-            return 1
+            for test in tests:
+                try:
+                    test()
+                    passed += 1
+                except AssertionError as exc:
+                    print(f"FAIL {test.__name__}: {exc}")
+                    return 1
+        finally:
+            gl.GRAPH_DB = original_graph_db
     print(f"ingest_paper regression: {passed}/{len(tests)} PASS")
     return 0
 

@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import graph_ingest
 import ingest_check
+import ingest_pipeline
 import wiki_skeleton
 from wiki_skeleton import extract_authors_from_text
 
@@ -80,6 +81,18 @@ Joint Quantum Institute and Department of Physics, University of Maryland
         "Djamil Lakhdar-Hamina", "Xingxin Liu", "Richard Barney", "Sarah H. Miller",
         "Alaina M. Green", "Norbert M. Linke", "Victor Galitski",
     ]
+
+
+def test_numbered_affiliation_does_not_become_author():
+    raw = """# Not All Contexts Are Equal
+
+Ruotong Pan<sup>1,2</sup>, Boxi Cao<sup>1,2</sup>, Hongyu Lin<sup>1</sup>
+
+<sup>1</sup>Chinese Information Processing Laboratory, Institute of Software, Chinese Academy of Sciences
+
+## Abstract
+"""
+    assert extract_authors_from_text(raw) == ["Ruotong Pan", "Boxi Cao", "Hongyu Lin"]
 
 
 def test_email_author_rows_scan_full_block_without_affiliation_fragments():
@@ -1001,11 +1014,212 @@ def test_raw_original_and_locator_companion_share_node_and_wiki_source_edge():
         }
 
 
+def test_agent_slots_resume_does_not_rewrite_wiki():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        write_to = root / "temp" / "agent-slots.txt"
+        write_to.parent.mkdir(parents=True)
+        write_to.write_text("三元组:\n本文件 | 涉及 | 测试主题\n", encoding="utf-8")
+        state = {
+            "transaction_id": "agent-slots-resume",
+            "status": "agent_required",
+            "pre_handoff_status": "write_slots",
+            "_awaiting_agent_slots": True,
+            "agent_required": True,
+            "agent_write_to": str(write_to.relative_to(root)),
+            "wiki_content": "existing wiki",
+            "errors": [],
+        }
+        calls = []
+
+        def write_wiki(_state):
+            calls.append("write_wiki")
+            return False, "must not run"
+
+        def write_slots(current):
+            calls.append("write_slots")
+            current.pop("_awaiting_agent_slots", None)
+            current["slots_content"] = write_to.read_text(encoding="utf-8")
+            return True, ""
+
+        steps = {
+            "dedup_check": lambda _state: (False, ""),
+            "preprocess": lambda _state: (True, ""),
+            "write_wiki": write_wiki,
+            "validate_wiki": lambda _state: [],
+            "write_slots": write_slots,
+            "validate_semantics": lambda _state: ([], []),
+            "repair_slots": lambda _state, _warnings: (True, ""),
+            "finalize": lambda _state: (True, ""),
+            "update_graph": lambda current: (current.setdefault("graph_report", {"edges_added": 1}) is not None, ""),
+            "validate_graph": lambda _state: [],
+            "finalize_tail": lambda _state: (True, ""),
+        }
+        spec = {"script_name": "test_driver.py", "steps": steps, "normalize_slots": lambda text: text,
+                "completion_label_key": None, "max_retries": 3}
+        original_repo = ingest_pipeline.REPO
+        original_save = ingest_pipeline._save
+        original_fill = ingest_pipeline.ic.step_fill_semantics
+        original_completion = ingest_pipeline.ic.validate_completion
+        try:
+            ingest_pipeline.REPO = root
+            ingest_pipeline._save = lambda _state: None
+
+            def fill_semantics(current, repo, normalize):
+                current["semantic_path"] = "temp/final-semantic.txt"
+                return True, ""
+
+            ingest_pipeline.ic.step_fill_semantics = fill_semantics
+            ingest_pipeline.ic.validate_completion = lambda _state, _repo: []
+            result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+        finally:
+            ingest_pipeline.REPO = original_repo
+            ingest_pipeline._save = original_save
+            ingest_pipeline.ic.step_fill_semantics = original_fill
+            ingest_pipeline.ic.validate_completion = original_completion
+        assert result["status"] == "completed"
+        assert calls == ["write_slots"]
+
+
+def test_update_graph_failure_rolls_back_and_exposes_resume_point():
+    state = {
+        "transaction_id": "update-graph-failure",
+        "status": "update_graph",
+        "errors": [],
+    }
+    rollback_calls = []
+    steps = {
+        "validate_semantics": lambda _state: ([], []),
+        "update_graph": lambda _state: (False, "graph write failed"),
+    }
+    spec = {
+        "script_name": "test_driver.py",
+        "steps": steps,
+        "rollback_fn": lambda current: rollback_calls.append(current["transaction_id"]) or
+        ["wiki", "raw companion", "graph snapshot"],
+    }
+    original_save = ingest_pipeline._save
+    original_validate = ingest_pipeline.ic.validate_before_commit
+    try:
+        ingest_pipeline._save = lambda _state: None
+        ingest_pipeline.ic.validate_before_commit = lambda *_args, **_kwargs: []
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+        ingest_pipeline.ic.validate_before_commit = original_validate
+    assert rollback_calls == ["update-graph-failure"]
+    assert result["status"] == "failed"
+    assert result["resume_from"] == "finalize"
+    assert "raw companion" in result["errors"][1]
+
+
+def test_graph_validation_failure_exposes_clean_graph_retry_point():
+    state = {
+        "transaction_id": "graph-validation-failure",
+        "status": "validate_graph",
+        "errors": [],
+    }
+    spec = {
+        "script_name": "test_driver.py",
+        "steps": {
+            "validate_semantics": lambda _state: ([], []),
+            "validate_graph": lambda _state: ["venue mismatch"],
+        },
+        "retry_graph_with_clean": True,
+    }
+    original_save = ingest_pipeline._save
+    try:
+        ingest_pipeline._save = lambda _state: None
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+    assert result["status"] == "failed"
+    assert result["resume_from"] == "graph_ready"
+    assert result["reingest"] is True
+
+
+def test_wiki_validation_retry_budget_hands_off_without_third_full_rewrite():
+    state = {
+        "transaction_id": "wiki-retry-budget",
+        "status": "write_wiki",
+        "extract_dir": "temp/inbox-extract/wiki-retry-budget",
+        "errors": [],
+    }
+    calls = []
+
+    def write_wiki(current):
+        calls.append("write")
+        current["wiki_content"] = "invalid wiki"
+        return True, ""
+
+    spec = {
+        "script_name": "test_driver.py",
+        "steps": {
+            "write_wiki": write_wiki,
+            "validate_wiki": lambda _state: ["缺少 ## Content 段"],
+        },
+        "max_retries": 3,
+        "max_wiki_validation_retries": 1,
+    }
+    original_save = ingest_pipeline._save
+    try:
+        ingest_pipeline._save = lambda _state: None
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+    assert calls == ["write", "write"], "初次 + 1 次定向重写后必须停止"
+    assert result["status"] == "agent_required"
+    assert result["write_to"] if "write_to" in result else result["agent_write_to"].endswith("wiki.md")
+    assert "缺少 ## Content" in result["agent_prompt"]
+
+
+def test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff():
+    state = {
+        "transaction_id": "semantic-hard-retry-budget",
+        "status": "write_slots",
+        "extract_dir": "temp/inbox-extract/semantic-hard-retry-budget",
+        "wiki_content": "valid wiki",
+        "errors": [],
+    }
+    calls = []
+
+    def write_slots(current):
+        calls.append(list(current.get("slots_errors", [])))
+        current["slots_content"] = "invalid slots"
+        return True, ""
+
+    spec = {
+        "script_name": "test_driver.py",
+        "steps": {
+            "write_slots": write_slots,
+            "validate_semantics": lambda _state: (["三元组格式错误"], []),
+        },
+        "normalize_slots": lambda text: text,
+        "max_retries": 3,
+        "max_semantic_hard_retries": 1,
+    }
+    original_save = ingest_pipeline._save
+    original_fill = ingest_pipeline.ic.step_fill_semantics
+    try:
+        ingest_pipeline._save = lambda _state: None
+        ingest_pipeline.ic.step_fill_semantics = lambda *_args, **_kwargs: (True, "")
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+        ingest_pipeline.ic.step_fill_semantics = original_fill
+
+    assert len(calls) == 2, "初次生成后只允许一次定向重写"
+    assert calls[1] == ["三元组格式错误"]
+    assert result["semantic_hard_retry"] == 1
+    assert result["status"] == "agent_required"
+
+
 def main():
     test_nature_author_block()
     test_blank_after_author_block_stops_abstract_words()
     test_affiliation_does_not_become_author()
     test_multiword_affiliation_does_not_leave_prefix_as_author()
+    test_numbered_affiliation_does_not_become_author()
     test_email_author_rows_scan_full_block_without_affiliation_fragments()
     test_conference_skeleton_raw_lookup()
     test_conference_skeleton_contract()
@@ -1036,12 +1250,17 @@ def main():
     test_ensure_keyword_connectivity()
     test_locator_aware_page_adds_optional_wiki_section_locator_only()
     test_raw_original_and_locator_companion_share_node_and_wiki_source_edge()
+    test_agent_slots_resume_does_not_rewrite_wiki()
     test_bare_abbreviation_resolved_to_keyword_no_warning()
     test_bare_abbreviation_resolve_miss_keeps_warning()
     test_resolve_abbreviations_list_reports_unresolved_warnings()
     test_cleanup_orphans_removes_dangling_aliases_and_edges()
     test_sync_keyword_appends_to_hub_dedup()
     test_resolve_abbreviation_todo_finds_full_name_node()
+    test_update_graph_failure_rolls_back_and_exposes_resume_point()
+    test_graph_validation_failure_exposes_clean_graph_retry_point()
+    test_wiki_validation_retry_budget_hands_off_without_third_full_rewrite()
+    test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff()
     print("ingest pipeline regression: PASS")
 
 
@@ -1056,6 +1275,8 @@ def test_cleanup_orphans_removes_dangling_aliases_and_edges():
         graph_ingest.gl.ensure_node(conn, "academic/raw/temp", "Temp", "raw")
         conn.execute("INSERT INTO aliases (alias, node_path) VALUES (?, ?)",
                      ("临时别名", "academic/raw/temp"))
+        conn.execute("INSERT INTO aliases (alias, node_path) VALUES (?, ?)",
+                     ("the", "page"))
         conn.execute("INSERT INTO edges (subject, predicate, object, confidence, source, is_sr) "
                      "VALUES (?,?,?,?,?,?)",
                      ("page", "引用", "academic/raw/temp", "[可追溯]", "", 0))
@@ -1066,7 +1287,9 @@ def test_cleanup_orphans_removes_dangling_aliases_and_edges():
         conn.execute("PRAGMA foreign_keys=ON")
         conn.commit()
         cleaned = graph_ingest.cleanup_orphan_references(conn)
+        assert cleaned["invalid_aliases"] == 1
         assert cleaned["orphan_aliases"] == 1
+        assert conn.execute("SELECT COUNT(*) FROM aliases WHERE alias='the'").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM aliases WHERE alias='临时别名'").fetchone()[0] == 0
         conn.close()
 

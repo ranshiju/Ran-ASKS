@@ -7,11 +7,11 @@
 
 ## 用途
 
-`inbox/` 暂存待分类和摄入的新文件。用户放入后，LLM 自动判断归类并执行摄入。
+`inbox/` 暂存待分类和摄入的新文件。统一入口先由程序评分归类；仅边界样本在实际执行时由受限 API LLM 复核。
 
 ## 工作流程
 
-> **代码驱动优先**：论文 PDF → `ingest_paper.py`；会议纪要 .txt → `ingest_meeting.py`；行政/教学/商业文档 → `ingest_document.py`（详见 `memory/playbooks/index.md` 对应条目）。以下步骤仅用于 **playbook 未命中** 的文件（如非标准格式、需手动判断归档位置的文件）。
+> **代码驱动优先**：论文 PDF → `ingest_paper.py`；会议纪要 .txt → `ingest_meeting.py`；学术非论文及行政/教学/商业文档 → `ingest_document.py`（详见 `memory/playbooks/index.md` 对应条目）。PDF/TXT 边界分数只在 `--run` 时调用 API 复核，API 不一致或证据不足则在事务前停止。`academic` 非论文必须分类为 `editorial` 或 `academic-reference`，不确定时停在 `classification_required`，不得回退到 `admin`。
 
 1. 用户触发处理（"处理 inbox""整理 inbox"等）
 2. **只读分流（必经）**：先运行 `python3 .scripts/inbox_plan.py --output temp/inbox-plan.json`。仅当 manifest 标记 `batch_eligible: true` 时才可按 batch 路由；否则每个普通文件都按 `create` 路由。`facts-pending.md` 仅在有事实条目时归档。
@@ -20,12 +20,12 @@
    - `.txt` 会议纪要：直接是文本（仍传 `source-kind=meeting` 派发会议预处理与建边规则）
    - `.docx`：`ingest_document.py` 提取文本入临时区
    - `.md`：直接读
-4. **单遍阅读 + 判断 + 撰写同时完成**：LLM 只读临时区全文一次，同时产出：
+4. **有界分类 + 单遍语义生成**：边界分类器最多读取 8,000 字符，只返回类型复核；放行后语义 Worker 读取所需上下文并产出：
    - **子项目**（academic / admin / teaching / business）、页面类型、最终 ID、最终 raw 路径、最终 wiki 路径
    - `long_document_plan` 评估拆页（仅长文触发）
    - 受目标 Schema 约束的 wiki 内容，`sources` **直接填最终 raw 路径**（前置决策，不留占位、不做后置替换）
    - wiki 暂写到临时区
-   - 不为分类单独读全文，也不为 wiki 重读全文；一次阅读完成理解、归类、命名和编码
+   - 分类器不读全文、不生成知识产物；高置信度文件跳过分类器。Wiki/子图生成复用同一语义上下文，不因分类再次读取全文
 5. **清单化落位**：每个 inbox 文件使用独立临时目录 `temp/inbox-extract/<tmp-id>/`，并在该目录写入 `manifest.json`：
    - 固定结构：`{"raw_files":["paper.pdf","paper.md","source.yaml"],"wiki_file":"wiki.md"}`；`raw_files` 只能列出需归档的原始实体和允许的同源提取产物，禁止列入 `corrected.*`、实体解析 JSON、提示词、草稿或其他派生文件
    - 调用：`python3 .scripts/inbox_finalize.py --paper-id <id> --raw-dir <最终raw目录> --wiki-path <最终wiki路径> --extract-dir temp/inbox-extract/<tmp-id>`；`--manifest` 仅在文件不叫 `manifest.json` 时传入。目标是已有共享容器目录（如 `raw/conferences/YYYY/`）时，显式加 `--allow-existing-raw-dir`；脚本仍拒绝 manifest 中任一同名 raw 文件或 wiki 文件冲突。
@@ -50,7 +50,7 @@
 ## 约束
 
 - `inbox/` 仅作中转，不作为长期存储
-- **避免重复全文阅读**：全文只读一次（临时区文本），分类、命名、wiki 编码复用同一次理解；不先做只用于分类的全文阅读，也不为 wiki 重读全文
+- **避免重复全文阅读**：边界分类只读有限摘录；全文/定向上下文只进入语义生成，不为类型复核单独读取全文，也不为 Wiki/子图反复重读全文
 - **前置决策**：`sources` 在撰写时直接填最终 raw 路径，不留占位、不做后置替换
 - **清空前必须确认摄入成功**（步骤 5），避免过早清空致原始文件丢失无法追溯
 - 不属于四个子项目的文件，告知用户另行处理

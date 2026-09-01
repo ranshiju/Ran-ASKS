@@ -28,7 +28,7 @@
 | SQLite | `tool` | 直接依赖 | `.scripts/graph_lib.py`, `graph.db` | 图数据库存储引擎 | 2026-06 | <https://www.sqlite.org/> | Python 内置 `sqlite3` 接口；单文件数据库 |
 | PyYAML | `tool` | 直接依赖 | 多处配置文件 | YAML 配置解析（`yaml.safe_load`） | 2026-06 | <https://github.com/yaml/pyyaml> | MIT |
 | Semantica | `architecture` | 架构借鉴 | `operations/config/graph-schema.yaml`, `.scripts/graph_validate.py`, provenance 与 `temporal_facts` 机制 | 借鉴声明式图约束、可追溯记录和时间有效性，保留 ASKS 的单一图源与 Raw 证据边界 | 2026-08-23 | <https://github.com/semantica-agi/semantica> | MIT；借鉴范围见 ADR-005，不引入 RDF/OWL 运行时 |
-| python-pptx | `tool` | 直接依赖 | `.scripts/visual_to_editable_ppt.py`, `projects/ForBetterScience/manu/v9/figures/update_fig3_pptx.py` 及后续稿件版本 | 写入原生文本框、线段、自选图形、自由曲线和 Open XML PowerPoint 对象 | 2026-08-29 | <https://github.com/scanny/python-pptx> | MIT；复杂区域仍按工具契约允许可追踪位图 fallback |
+| python-pptx | `tool` | 直接依赖 | `.scripts/visual_to_editable_ppt.py`, `projects/ASKS/manu/v9/figures/update_fig3_pptx.py` 及后续稿件版本 | 写入原生文本框、线段、自选图形、自由曲线和 Open XML PowerPoint 对象 | 2026-08-29 | <https://github.com/scanny/python-pptx> | MIT；复杂区域仍按工具契约允许可追踪位图 fallback |
 
 ## 待定 / 远期参考
 

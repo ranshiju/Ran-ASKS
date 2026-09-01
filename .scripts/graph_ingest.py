@@ -296,19 +296,30 @@ def cleanup_ghost_hubs(conn):
 
 
 def cleanup_orphan_references(conn):
-    """图健康前置检查：清理孤儿 alias（指向已删节点）+ 孤儿边（引用已删节点）。
+    """图健康前置检查：清理无效 alias、孤儿 alias 与孤儿边。
 
     防止上一篇摄入/回滚遗留的脏数据阻塞下一篇的外键约束（FK constraint failed）。
     幂等，每次摄入前清扫。返回清理计数 dict。
     """
-    cleaned = {"orphan_aliases": 0, "orphan_edges": 0, "fk_violations": 0}
-    # 1. 孤儿 alias：node_path 不在 nodes 表（含 NULL/空）
+    cleaned = {
+        "invalid_aliases": 0, "orphan_aliases": 0,
+        "orphan_edges": 0, "fk_violations": 0,
+    }
+    # 1. 历史名称拆解可能留下 ``the`` 等无身份信息 alias。
+    for row in conn.execute("SELECT alias, node_path FROM aliases").fetchall():
+        if gl.is_resolvable_alias(row["alias"]):
+            continue
+        cleaned["invalid_aliases"] += conn.execute(
+            "DELETE FROM aliases WHERE alias=? AND node_path=?",
+            (row["alias"], row["node_path"]),
+        ).rowcount
+    # 2. 孤儿 alias：node_path 不在 nodes 表（含 NULL/空）
     cur = conn.execute(
         "DELETE FROM aliases WHERE node_path IS NULL OR node_path = '' "
         "OR node_path NOT IN (SELECT path FROM nodes)"
     )
     cleaned["orphan_aliases"] = cur.rowcount
-    # 2. 孤儿边：subject/object 不在 nodes 表（FK 违规）
+    # 3. 孤儿边：subject/object 不在 nodes 表（FK 违规）
     violations = conn.execute("PRAGMA foreign_key_check").fetchall()
     cleaned["fk_violations"] = len(violations)
     for table, rowid, *_ in violations:
@@ -2273,11 +2284,12 @@ def cmd_cleanup_ghosts(args):
 
 
 def cmd_cleanup_orphans(args):
-    """清理孤儿 alias（指向已删节点）+ 孤儿边（引用已删节点）+ FK 违规。"""
+    """清理无效/孤儿 alias、孤儿边与 FK 违规。"""
     conn = getattr(args, 'db', None) and gl.connect(args.db) or gl.connect()
     cleaned = cleanup_orphan_references(conn)
     conn.close()
     print(json.dumps({
+        "invalid_aliases": cleaned["invalid_aliases"],
         "orphan_aliases": cleaned["orphan_aliases"],
         "orphan_edges": cleaned["orphan_edges"],
         "fk_violations": cleaned["fk_violations"],

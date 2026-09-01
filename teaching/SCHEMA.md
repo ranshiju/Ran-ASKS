@@ -26,6 +26,8 @@ title: "课程/知识点名称"
 type: course | topic | lecture | assessment | pedagogy
 sources:
   - raw/courses/filename.md
+date: YYYY-MM-DD            # 来源日期；无可证日期时写 null
+# date_status: unknown      # 仅 date: null 时必填；不得用 created 代替来源日期
 course: "所属课程名称"
 semester: "2025-2026-1"
 # (v4,2026-07-25) tags/keywords/aliases/abbreviations 字段已删,并入 graph.db(aliases 表)/邻接覆盖

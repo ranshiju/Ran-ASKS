@@ -16,6 +16,7 @@ REPO = Path(__file__).resolve().parent.parent.parent
 
 _TXN_RE = re.compile(r"^\d{8}-\d{6}-\d+-[A-Za-z0-9_-]+$")
 _ALLOWED_FILE_TOOLS = {"ingest_inbox_run_file", "ingest_paper_pdf", "ingest_meeting_txt", "ingest_document_file"}
+_ACADEMIC_DOCUMENT_TYPES = {"editorial", "academic-reference"}
 
 
 class IngestGuard:
@@ -39,6 +40,17 @@ class IngestGuard:
                 resolved.relative_to((REPO / "inbox").resolve())
             except ValueError:
                 return PreToolDecision(kind="deny", reason=f"{key} 必须位于 inbox/: {raw}")
+            if exec_ctx.name == "ingest_document_file":
+                subproject = (args.get("subproject") or "admin").strip()
+                document_type = (args.get("document_type") or "").strip()
+                if subproject == "academic" and document_type not in _ACADEMIC_DOCUMENT_TYPES:
+                    return PreToolDecision(
+                        kind="deny",
+                        reason="academic 文档必须指定 document_type=editorial|academic-reference",
+                    )
+                if subproject != "academic" and document_type:
+                    return PreToolDecision(
+                        kind="deny", reason="document_type 仅用于 academic 文档")
             return None
 
         if exec_ctx.name == "re_ingest_raw":

@@ -16,10 +16,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 ASKS_RELEASE_VERSION = "0.2.0"
 ARTIFACT_VERSION = "1.0.0"
-DEFAULT_EXPERIMENT = REPO / "projects/ForBetterScience/experiments/e1-chronological-56"
+DEFAULT_EXPERIMENT = REPO / "projects/ASKS/experiments/e1-chronological-56"
 DEFAULT_RUN = DEFAULT_EXPERIMENT / "runs/bd7dc4b6e166"
 DEFAULT_MANUSCRIPT_METRICS = (
-    REPO / "projects/ForBetterScience/manu/v16/figures/manuscript-derived-metrics.json"
+    REPO / "projects/ASKS/manu/v16/figures/manuscript-derived-metrics.json"
 )
 DEFAULT_OUTPUT = REPO / f"paper-artifacts/v{ASKS_RELEASE_VERSION}"
 GENERATED_DIRS = ("config", "corpus", "graph", "metrics", "validation", "wiki")
@@ -41,7 +41,7 @@ FORBIDDEN_CONTENT = (
     re.compile(r"/(?:Users)/[^/\\]+/", re.IGNORECASE),
     re.compile(r"[A-Za-z]:\\(?:Users)\\[^\\]+\\", re.IGNORECASE),
     re.compile(r"SynologyDrive", re.IGNORECASE),
-    re.compile(r"projects/ForBetterScience/experiments", re.IGNORECASE),
+    re.compile(r"projects/(?:ASKS|ForBetterScience)/experiments", re.IGNORECASE),
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\b(?:api[_-]?key|authorization|bearer)\s*[:=]", re.IGNORECASE),
 )
@@ -78,10 +78,10 @@ def sha256_file(path: Path) -> str:
 def sanitize_artifact_path(text: str) -> str:
     text = text.replace("\x0c", r"\f")
     patterns = (
-        r"projects/ForBetterScience/experiments/e1-chronological-56/"
+        r"projects/(?:ASKS|ForBetterScience)/experiments/e1-chronological-56/"
         r"runs/[0-9a-f]+/local-artifacts/",
-        r"projects/ForBetterScience/experiments/e1-chronological-56/local-artifacts/",
-        r"projects/ForBetterScience/experiments/e1-chronological/local-artifacts/",
+        r"projects/(?:ASKS|ForBetterScience)/experiments/e1-chronological-56/local-artifacts/",
+        r"projects/(?:ASKS|ForBetterScience)/experiments/e1-chronological/local-artifacts/",
     )
     for pattern in patterns:
         text = re.sub(pattern, "raw-not-distributed/", text)

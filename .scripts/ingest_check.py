@@ -272,6 +272,9 @@ def check_file(path, rel_paths, basenames):
     required = REQUIRED_HUB if fm_type in HUB_TYPES else REQUIRED
     for k in required:
         v = fm.get(k)
+        if (k == "date" and k in fm and fm.get("date_status") == "unknown"
+                and v in (None, "")):
+            continue
         if v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, list) and len(v) == 0):
             errors.append(f"frontmatter: 必填字段缺失 '{k}'")
     # hub 是编译聚合页(无直接 raw 来源),confidence 语义不适用→跳过其软必填
@@ -293,7 +296,13 @@ def check_file(path, rel_paths, basenames):
     status_enum = status_enum_for(path)
     if "status" in fm and fm["status"] not in status_enum:
         errors.append(f"frontmatter: status 非法值 '{fm['status']}',合法: {sorted(status_enum)} (域: {domain_of(path) or '未知'})")
-    if "date" in fm:
+    date_status = fm.get("date_status")
+    if date_status not in (None, "unknown"):
+        errors.append(f"frontmatter: date_status 非法值 '{date_status}'，合法: unknown")
+    if date_status == "unknown":
+        if fm.get("date") not in (None, ""):
+            errors.append("frontmatter: date_status 为 unknown 时 date 必须为 null")
+    elif "date" in fm:
         date_value = str(fm["date"])
         if not valid_partial_date(date_value):
             errors.append(f"frontmatter: 日期格式非法 '{date_value}'，应为有效 YYYY、YYYY-MM 或 YYYY-MM-DD")
@@ -561,16 +570,38 @@ def check_coverage_anchors(path, fm, body):
         wiki_words = set(re.findall(r'[A-Za-z]{3,}', wiki_title.lower()))
         if raw_words and wiki_words and not (raw_words & wiki_words):
             warns.append(f"覆盖度: raw标题与wiki title无共同词(raw='{raw_title[:50]}')")
-    try:
-        from wiki_skeleton import extract_authors_from_text
-        raw_authors = extract_authors_from_text(raw_text)
-    except Exception:
-        raw_authors = []
+    raw_authors = []
+    locked_authors_available = False
+    source_yaml = raw_path.parent / "source.yaml"
+    if source_yaml.is_file():
+        try:
+            source_data = yaml.safe_load(source_yaml.read_text(encoding="utf-8")) or {}
+            bibliography = source_data.get("bibliographic") or {}
+            review = bibliography.get("review") or {}
+            locked_authors = bibliography.get("authors")
+            if review.get("locked") is True and isinstance(locked_authors, list):
+                locked_authors_available = True
+                raw_authors = [str(name).strip() for name in locked_authors if str(name).strip()]
+        except Exception:
+            pass
+    if not locked_authors_available:
+        try:
+            from wiki_skeleton import extract_authors_from_text
+            raw_authors = extract_authors_from_text(raw_text)
+        except Exception:
+            raw_authors = []
     wiki_authors = fm.get('authors', [])
     if not isinstance(wiki_authors, list):
         wiki_authors = [wiki_authors]
-    if raw_authors and wiki_authors and len(wiki_authors) < len(raw_authors):
-        warns.append(f"覆盖度: wiki authors({len(wiki_authors)})少于raw({len(raw_authors)}),检查是否漏作者")
+    def author_key(value):
+        return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value)).casefold()
+    wiki_author_keys = {author_key(name) for name in wiki_authors if author_key(name)}
+    missing_authors = [
+        str(name).strip() for name in raw_authors
+        if author_key(name) and author_key(name) not in wiki_author_keys
+    ]
+    if missing_authors and wiki_authors:
+        warns.append("覆盖度: wiki authors 缺少raw书目作者: " + ", ".join(missing_authors))
     return warns
 
 
@@ -716,17 +747,49 @@ def graph_checks(path):
             graph_authors = []
             for predicate in ("作者", "第一作者", "通讯作者"):
                 graph_authors.extend(metadata_values(predicate, incoming=True))
+            graph_authors = list(dict.fromkeys(graph_authors))
             labels = [label for _node, label in graph_authors]
             bad_labels = [label for label in labels if placeholder.search(label.replace(" ", ""))]
             if bad_labels:
                 errors.append(f"graph: 作者元数据含占位符节点 {sorted(set(bad_labels))}")
-            expected_keys = {re.sub(r"\W+", "", name).casefold() for name in expected_authors}
-            actual_keys = {re.sub(r"\W+", "", name).casefold() for name in labels
-                           if not placeholder.search(name.replace(" ", ""))}
-            if expected_keys and expected_keys != actual_keys:
+
+            def author_key(value):
+                return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value)).casefold()
+
+            table_names = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            identity_records = []
+            for node_path, label in graph_authors:
+                if placeholder.search(label.replace(" ", "")):
+                    continue
+                identities = {label, Path(node_path).name}
+                if "aliases" in table_names:
+                    identities.update(
+                        str(row[0]) for row in conn.execute(
+                            "SELECT alias FROM aliases WHERE node_path=?", (node_path,)
+                        )
+                    )
+                identity_records.append((label, {
+                    key for value in identities if (key := author_key(value))
+                }))
+            expected_by_key = {author_key(name): name for name in expected_authors if author_key(name)}
+            missing_keys = {
+                key for key in expected_by_key
+                if not any(key in identities for _label, identities in identity_records)
+            }
+            expected_keys = set(expected_by_key)
+            extra_labels = {
+                label for label, identities in identity_records
+                if identities.isdisjoint(expected_keys)
+            }
+            if expected_keys and (missing_keys or extra_labels):
                 errors.append(
                     f"graph: 作者集合与 wiki frontmatter 不一致 "
-                    f"(missing={sorted(expected_keys - actual_keys)}, extra={sorted(actual_keys - expected_keys)})"
+                    f"(missing={sorted(expected_by_key[key] for key in missing_keys)}, "
+                    f"extra={sorted(extra_labels)})"
                 )
 
             venues = metadata_values("发表于")

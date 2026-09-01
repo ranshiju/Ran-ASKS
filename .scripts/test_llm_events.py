@@ -3,7 +3,7 @@
 
 验证点：
 - _log_event 写入 temp/llm-events/YYYY-MM-DD.jsonl
-- 事件字段齐全（ts/operation/mode/.../prompt_hash/prompt_len/output_hash/output_len）
+- 事件字段齐全（ts/transaction_id/operation/.../prompt_hash/prompt_len/output_hash/output_len）
 - 不含明文 prompt/output（只有 hash + length）
 - 写盘失败静默降级，不抛异常
 - agent 模式 handoff 也记事件
@@ -27,7 +27,8 @@ spec.loader.exec_module(module)
 EVENTS_DIR = REPO / "temp" / "llm-events"
 
 REQUIRED_FIELDS = {
-    "ts", "operation", "mode", "model", "profile", "reasoning_profile",
+    "ts", "transaction_id", "operation", "mode", "model", "profile", "reasoning_profile",
+    "reasoning_reason", "reasoning_error_class", "provider_reasoning_effort",
     "attempt", "status", "latency_sec", "finish_reason", "usage",
     "prompt_hash", "prompt_len", "output_hash", "output_len", "error",
 }
@@ -51,12 +52,13 @@ def test_log_event_writes_jsonl():
                                   "profile": "p1", "reasoning_profile": "fast", "attempt": 1,
                                   "latency_sec": 0.5, "finish_reason": "stop", "usage": {"total_tokens": 100},
                                   "error": ""},
-                      "secret-prompt-content", "secret-output-content")
+                      "secret-prompt-content", "secret-output-content", "txn-test")
     events = _read_today_events()
     assert events, "无事件写入"
     last = events[-1]
     assert REQUIRED_FIELDS <= set(last), f"缺字段: {REQUIRED_FIELDS - set(last)}"
     assert last["operation"] == "test_op"
+    assert last["transaction_id"] == "txn-test"
     assert last["mode"] == "api"
     assert last["status"] == "ok"
 

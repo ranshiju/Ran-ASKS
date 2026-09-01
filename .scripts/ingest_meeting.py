@@ -357,6 +357,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
                                         state["meeting_id"], date_str,
                                         sources_path, full_date, today, errors)
     result = call_text(prompt, max_tokens=4096, retries=1, operation="ingest_wiki_write",
+                       transaction_id=state.get("transaction_id", ""),
                        system="你是受程序约束的知识库摄入组件，基于会议纪要撰写 wiki 页面。")
     if result.get("status") == "agent_required":
         state["agent_required"] = True
@@ -505,6 +506,7 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
     errors = state.get("slots_errors", []) if state.get("slots_retry", 0) > 0 else None
     prompt = build_meeting_slots_prompt(wiki_content, entity_info, errors)
     result = call_text(prompt, max_tokens=4096, retries=1, operation="ingest_wiki_write",
+                       transaction_id=state.get("transaction_id", ""),
                        system="你是受程序约束的知识库摄入组件，基于 wiki 页面抽取语义槽。")
     if result.get("status") == "agent_required":
         state["agent_required"] = True

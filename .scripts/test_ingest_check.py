@@ -98,6 +98,53 @@ def test_graph_checks_rejects_cross_layer_metadata_without_requiring_locator():
         assert not any("evidence locator" in error for error in errors)
 
 
+def test_graph_checks_accepts_author_titles_paths_and_aliases_as_one_identity():
+    import sqlite3
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory).resolve()
+        page = repo / "academic/wiki/papers/test.md"
+        page.parent.mkdir(parents=True)
+        page.write_text(
+            "---\ntitle: Test\ntype: paper-summary\n"
+            "authors: [Shi-Ju Ran, Gang Su]\n"
+            "venue: Journal\n---\n## Navigation\nX\n## Content\nX\n",
+            encoding="utf-8",
+        )
+        db = repo / "cross-domain/graph.db"
+        db.parent.mkdir()
+        conn = sqlite3.connect(db)
+        conn.executescript("""
+            CREATE TABLE nodes (path TEXT PRIMARY KEY, title TEXT, type TEXT);
+            CREATE TABLE edges (subject TEXT, predicate TEXT, object TEXT, source TEXT);
+            CREATE TABLE aliases (alias TEXT, node_path TEXT,
+                                  PRIMARY KEY(alias, node_path));
+        """)
+        conn.executemany("INSERT INTO nodes VALUES (?,?,?)", [
+            ("academic/wiki/papers/test", "Test", "paper-summary"),
+            ("academic/wiki/authors/cnu-ran-shiju", "冉仕举", "person"),
+            ("academic/wiki/authors/su-gang", "苏刚", "person"),
+            ("journal", "Journal", "venue"),
+        ])
+        conn.executemany("INSERT INTO aliases VALUES (?,?)", [
+            ("Shi-Ju Ran", "academic/wiki/authors/cnu-ran-shiju"),
+            ("Gang Su", "academic/wiki/authors/su-gang"),
+        ])
+        conn.executemany("INSERT INTO edges VALUES (?,?,?,?)", [
+            ("academic/wiki/authors/cnu-ran-shiju", "第一作者", "academic/wiki/papers/test", "raw"),
+            ("academic/wiki/authors/su-gang", "作者", "academic/wiki/papers/test", "raw"),
+            ("academic/wiki/papers/test", "发表于", "journal", "raw"),
+        ])
+        conn.commit()
+        conn.close()
+        old_repo = ingest_check.REPO
+        ingest_check.REPO = repo
+        try:
+            errors, _warnings = ingest_check.graph_checks(page)
+        finally:
+            ingest_check.REPO = old_repo
+        assert not errors
+
+
 def check(text, rel="academic/wiki/papers/test.md"):
     with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8", delete=False) as f:
         f.write(text)
@@ -182,6 +229,50 @@ def test_bibliographic_consistency_uses_published_year_and_aps_doi():
     assert any("Phys. Rev. B 88, 035103" in error for error in errors)
 
 
+def test_coverage_anchors_prefer_locked_bibliographic_authors():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory).resolve()
+        raw_dir = repo / "academic/raw/references/demo"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "paper.md").write_text(
+            "# Demo\n\nAlice Example, Bob Example\n\n"
+            "CAS Key Laboratory of Network Data, ICT, CAS\n",
+            encoding="utf-8",
+        )
+        (raw_dir / "source.yaml").write_text(
+            "bibliographic:\n"
+            "  authors: [Alice Example, Bob Example]\n"
+            "  review:\n"
+            "    locked: true\n",
+            encoding="utf-8",
+        )
+        page = repo / "academic/wiki/papers/demo.md"
+        page.parent.mkdir(parents=True)
+        fm = {
+            "type": "paper-summary",
+            "sources": ["academic/raw/references/demo/paper.md"],
+            "title": "Demo",
+            "authors": ["Alice Example", "Bob Example"],
+        }
+        old_repo = ingest_check.REPO
+        ingest_check.REPO = repo
+        try:
+            warns = ingest_check.check_coverage_anchors(page, fm, "")
+            assert not any("authors" in warning for warning in warns), warns
+            fm["authors"] = ["Alice Example"]
+            warns = ingest_check.check_coverage_anchors(page, fm, "")
+            assert any("Bob Example" in warning for warning in warns), warns
+            assert not any("CAS Key" in warning or "ICT" in warning for warning in warns), warns
+            (raw_dir / "source.yaml").write_text(
+                "bibliographic:\n  authors: []\n  review:\n    locked: true\n",
+                encoding="utf-8",
+            )
+            warns = ingest_check.check_coverage_anchors(page, fm, "")
+            assert not any("authors" in warning for warning in warns), warns
+        finally:
+            ingest_check.REPO = old_repo
+
+
 def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
     with tempfile.TemporaryDirectory() as directory:
         repo = Path(directory).resolve()
@@ -220,6 +311,7 @@ def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
 def main():
     test_graph_checks_with_isolated_database()
     test_graph_checks_rejects_cross_layer_metadata_without_requiring_locator()
+    test_graph_checks_accepts_author_titles_paths_and_aliases_as_one_identity()
     valid = """---
 title: Test
 type: paper-summary
@@ -237,6 +329,18 @@ y
 """
     errors, _ = check(valid)
     assert not errors
+
+    unknown_date = valid.replace("date: 2024", "date: null\ndate_status: unknown")
+    errors, _ = check(unknown_date)
+    assert not errors
+
+    inconsistent_unknown = valid.replace("date: 2024", "date: 2024\ndate_status: unknown")
+    errors, _ = check(inconsistent_unknown)
+    assert any("date_status 为 unknown" in item for item in errors)
+
+    missing_unknown = valid.replace("date: 2024", "date_status: unknown")
+    errors, _ = check(missing_unknown)
+    assert any("必填字段缺失 'date'" in item for item in errors)
 
     bad_path = """---
 title: Test
@@ -285,6 +389,7 @@ y
 
     test_extract_engine_warns_on_non_mineru()
     test_bibliographic_consistency_uses_published_year_and_aps_doi()
+    test_coverage_anchors_prefer_locked_bibliographic_authors()
     test_locator_aware_page_runs_only_minimal_closed_loop_checks()
     print("ingest check regression: PASS")
 

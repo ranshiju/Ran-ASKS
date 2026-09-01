@@ -26,6 +26,20 @@ def main() -> None:
         assert "Public release verified" in verified.stdout
         assert (destination / "README.md").is_file()
         assert (destination / "README.zh-CN.md").is_file()
+        assert (destination / "CHANGELOG.md").is_file()
+        changelog = (destination / "CHANGELOG.md").read_text(encoding="utf-8")
+        assert f"## [{expected_version}]" in changelog
+        assert "[CHANGELOG.md](CHANGELOG.md)" in (
+            destination / "README.md"
+        ).read_text(encoding="utf-8")
+        assert "[CHANGELOG.md](CHANGELOG.md)" in (
+            destination / "README.zh-CN.md"
+        ).read_text(encoding="utf-8")
+        assert "MINERU_API_TOKEN=" in (destination / ".env.example").read_text(encoding="utf-8")
+        assert "MINERU_API_TOKEN" in (destination / "README.md").read_text(encoding="utf-8")
+        assert "MINERU_API_TOKEN" in (
+            destination / "README.zh-CN.md"
+        ).read_text(encoding="utf-8")
         introduction = destination / "docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf"
         assert introduction.is_file()
         assert introduction.stat().st_size > 100_000
@@ -53,8 +67,10 @@ def main() -> None:
             destination / "README.md"
         ).read_text(encoding="utf-8")
         assert (destination / ".scripts/route.py").is_file()
-        assert (destination / ".scripts/e1_experiment.py").is_file()
-        assert (destination / ".scripts/test_e1_experiment.py").is_file()
+        assert not (destination / ".scripts/e1_experiment.py").exists()
+        assert not (destination / ".scripts/e1_order_robustness.py").exists()
+        assert not (destination / ".scripts/test_e1_experiment.py").exists()
+        assert not (destination / ".scripts/test_e1_order_robustness.py").exists()
         assert (destination / "operations/QUERY.md").is_file()
         assert (destination / "agents/writer/AGENT.md").is_file()
         assert (destination / "dsh/agent_loop.py").is_file()
@@ -72,6 +88,16 @@ def main() -> None:
             cwd=destination, text=True, capture_output=True,
         )
         assert artifact_check.returncode == 0, artifact_check.stdout + artifact_check.stderr
+        assert (destination / "paper-artifacts/v0.2.1/metadata.json").is_file()
+        audit_artifact_check = subprocess.run(
+            [sys.executable, "verify.py"],
+            cwd=destination / "paper-artifacts/v0.2.1",
+            text=True,
+            capture_output=True,
+        )
+        assert audit_artifact_check.returncode == 0, (
+            audit_artifact_check.stdout + audit_artifact_check.stderr
+        )
         assert not any((destination / "paper-artifacts").rglob("*.db"))
         artifact_pdfs = {
             path.relative_to(destination).as_posix()
@@ -91,6 +117,7 @@ def main() -> None:
         assert "e1_experiment_workspace:" not in graph_text
         assert "e1_experiment_plan:" not in graph_text
         assert "e1_analysis:" not in graph_text
+        assert "path: projects/ASKS" not in graph_text
         assert "path: projects/ForBetterScience" not in graph_text
         graph_check = subprocess.run(
             [sys.executable, ".scripts/engineering_graph.py", "validate"],
@@ -104,6 +131,16 @@ def main() -> None:
         ignored = run("verify", str(destination), expected=1)
         assert "release file ignored by destination .gitignore" in ignored.stderr
         gitignore.write_text(original_gitignore, encoding="utf-8")
+
+        changelog_path = destination / "CHANGELOG.md"
+        original_changelog = changelog_path.read_text(encoding="utf-8")
+        changelog_path.write_text(
+            original_changelog.replace(f"## [{expected_version}]", "## [9.9.9]", 1),
+            encoding="utf-8",
+        )
+        stale_changelog = run("verify", str(destination), expected=1)
+        assert "CHANGELOG.md missing current release heading" in stale_changelog.stderr
+        changelog_path.write_text(original_changelog, encoding="utf-8")
 
         (destination / "academic/raw/leak.txt").write_text("private", encoding="utf-8")
         failed = run("verify", str(destination), expected=1)

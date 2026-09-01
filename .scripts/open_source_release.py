@@ -262,6 +262,11 @@ def verify(destination: Path) -> int:
                 readme_text = readme_path.read_text(encoding="utf-8", errors="ignore")
                 if badge.lower() not in readme_text.lower():
                     failures.append(f"{name} missing release badge: {badge}")
+        changelog_path = destination / "CHANGELOG.md"
+        if changelog_path.is_file():
+            changelog_text = changelog_path.read_text(encoding="utf-8", errors="ignore")
+            if not re.search(rf"^## \[{re.escape(version)}\](?:\s|$)", changelog_text, re.M):
+                failures.append(f"CHANGELOG.md missing current release heading: [{version}]")
     for path in sorted(expected - actual):
         failures.append(f"missing expected file: {path}")
     for path in sorted(actual - expected):

@@ -493,6 +493,8 @@ def build_name_index(conn):
         "JOIN nodes n ON a.node_path = n.path "
         "WHERE COALESCE(n.entity_subtype, '') != 'proposition'"
     ):
+        if not is_resolvable_alias(r["alias"]):
+            continue
         alias_idx.setdefault(r["alias"], []).append(r["node_path"])
     return title_idx, alias_idx, suffix_idx
 
@@ -544,6 +546,18 @@ def _normalize_name_for_match(name):
     return abbr, stripped.lower() if stripped else None
 
 
+_NON_IDENTITY_ALIASES = frozenset({
+    "a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "or",
+    "the", "to", "with",
+})
+
+
+def is_resolvable_alias(alias):
+    """Whether an alias carries enough identity information for exact reuse."""
+    value = str(alias or "").strip().casefold()
+    return bool(value) and value not in _NON_IDENTITY_ALIASES
+
+
 def decompose_name_to_aliases(name):
     """把拼接概念名（如「矩阵乘积态matrix product state(MPS)」）拆为多形态 alias。
     返回 [缩写, 中文, 英文全称] 去重列表（不含 name 本身）。
@@ -560,16 +574,18 @@ def decompose_name_to_aliases(name):
     chinese_match = re.findall(r'[\u4e00-\u9fff]+', no_paren)
     if chinese_match:
         out.append(''.join(chinese_match))
-    english_match = re.findall(r'[A-Za-z]{3,}[A-Za-z\s\-]*', no_paren)
-    if english_match:
-        en = english_match[0].strip()
-        if en:
+    # 只有双语拼接名或显式缩写才拆英文全称。纯英文长标题/会议名中的年份会
+    # 截断旧正则并产生 ``the`` 一类伪 alias，进而把不同实体错误归并。
+    if chinese_match or m:
+        en = re.sub(r'[\u4e00-\u9fff]+', '', no_paren)
+        en = re.sub(r'^[\s:：/\-]+|[\s:：/\-]+$', '', en)
+        if re.search(r'[A-Za-z]{3,}', en):
             out.append(en)
     # 去重保序，排除 name 本身
     seen = set()
     result = []
     for x in out:
-        if x and x != name and x not in seen:
+        if is_resolvable_alias(x) and x != name and x not in seen:
             seen.add(x)
             result.append(x)
     return result
@@ -582,22 +598,8 @@ def extract_keyword_id(full_name):
     s = full_name.strip()
     if len(s) <= 15:
         return s
-    # 缩写：括号内 ≥2 连续大写字母
-    abbr = None
-    m = re.search(r'[\(（]([A-Z]{2,}[A-Za-z0-9\-]*)[\)）]', s)
-    if m:
-        abbr = m.group(1)
-    # 去括号内容
-    no_paren = re.sub(r'[\(（][^\)）]*[\)）]', '', s).strip()
-    # 中文
-    chinese_match = re.findall(r'[\u4e00-\u9fff]+', no_paren)
-    chinese = ''.join(chinese_match) if chinese_match else None
-    # 英文（≥3 字符，排除裸缩写如 CP）
-    english_match = re.findall(r'[A-Za-z]{3,}[A-Za-z\s\-]*', no_paren)
-    english = english_match[0].strip() if english_match else None
-    candidates = [c for c in [abbr, chinese, english] if c]
-    if not candidates:
-        return s
+    # 复用 alias 拆解规则：纯英文长标题若无显式缩写，不再被年份截成首词。
+    candidates = [s, *decompose_name_to_aliases(s)]
     return min(candidates, key=len)
 
 
@@ -766,7 +768,7 @@ def insert_aliases(conn, node_path, aliases):
     conflicts = []
     for alias in aliases:
         alias = alias.strip()
-        if not alias:
+        if not is_resolvable_alias(alias):
             continue
         existing_paths = [row["node_path"] for row in conn.execute(
             "SELECT node_path FROM aliases WHERE alias=?", (alias,)

@@ -54,7 +54,8 @@ type: policy | procedure | decision | meeting-summary | timeline-entry | timelin
 sources:
   - raw/policies/filename.md
 source_type: official-doc | speech-recognition | ocr | web | discussion
-date: YYYY-MM-DD
+date: YYYY-MM-DD            # 来源日期；无可证日期时写 null
+# date_status: unknown      # 仅 date: null 时必填；不得用 created 代替来源日期
 url: "原始链接"            # 外部来源必填
 status: active | deprecated | draft | completed | confirmed | final   # 按 type 取值;版本演进用 deprecated(配合 superseded_by);expired 已废弃改用 deprecated
 superseded_by: "[[新版页面]]"   # 仅 status: deprecated 时填,指向替代页面

@@ -51,11 +51,29 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
     steps = spec["steps"]
     txn = state["transaction_id"]
 
-    # 手工修复 semantic.txt 后 resume：agent_required 状态需真正恢复推进
+    # A failed post-finalize transaction may be resumed after the temp artifact is repaired.
+    if state.get("status") == "failed" and state.get("resume_from"):
+        state["status"] = state.pop("resume_from")
+        state["errors"] = []
+        _save(state)
+
+    # agent 生成结果与手工 semantic 修复使用不同恢复点，避免 slots 交接重跑 wiki。
     if state["status"] == "agent_required":
         resume_cmd = _resume_cmd(spec, txn)
         semantic_path = REPO / state.get("semantic_path", "")
-        if semantic_path.is_file():
+        awaiting_wiki = state.get("_awaiting_agent_wiki", False)
+        awaiting_slots = state.get("_awaiting_agent_slots", False)
+        awaiting_wiki_slots = state.get("_awaiting_agent_wiki_slots", False)
+        if awaiting_wiki or awaiting_slots or awaiting_wiki_slots:
+            write_to = REPO / state.get("agent_write_to", "")
+            if not write_to.is_file():
+                state["errors"] = [f"agent 输出尚未写入: {state.get('agent_write_to', '')}"]
+                _save(state)
+                return state
+            state["status"] = "write_wiki" if awaiting_wiki or awaiting_wiki_slots else "write_slots"
+            state.pop("agent_required", None)
+            state["errors"] = []
+        elif semantic_path.is_file():
             validation_errors = ic.validate_before_commit(
                 state, steps["validate_semantics"], spec.get("non_blocking_issues", ()))
             if validation_errors:
@@ -63,11 +81,14 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                                     steps["validate_semantics"], resume_cmd)
                 _save(state)
                 return state
-            state["status"] = "finalize"
+            resume_status = state.get("pre_handoff_status", "")
+            state["status"] = resume_status if resume_status in {
+                "finalize", "update_graph", "validate_graph", "finalize_tail", "graph_ready"
+            } else "finalize"
             state.pop("agent_required", None)
             state["errors"] = []
         else:
-            state["status"] = "write_wiki"
+            state["status"] = state.get("pre_handoff_status") or "write_wiki"
             state.pop("agent_required", None)
             state["errors"] = []
         _save(state)
@@ -110,43 +131,62 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         _save(state)
 
     # 3.3-3.6 两阶段循环
-    if state["status"] == "write_wiki":
+    if state["status"] in {"write_wiki", "write_slots"}:
         state.setdefault("wiki_retry", 0)
         state.setdefault("slots_retry", 0)
     max_retries = spec.get("max_retries", 3)
-    while state["status"] == "write_wiki" and \
+    while state["status"] in {"write_wiki", "write_slots"} and \
             (state.get("wiki_retry", 0) + state.get("slots_retry", 0)) <= max_retries:
         # 第一阶段：写 wiki
-        if state.get("wiki_retry", 0) == 0 and not state.get("wiki_content"):
-            progress("\n[3.3a] 撰写 wiki（调用LLM）...", flush=True)
-        elif state.get("wiki_retry", 0) > 0:
-            progress(f"\n[3.3a] 撰写 wiki（重试第{state['wiki_retry']}/{max_retries}次）...", flush=True)
-        ic.record_llm_call(state, "write_wiki")
-        success, msg = steps["write_wiki"](state)
-        if state.get("agent_required"):
-            state["status"] = "agent_required"
+        if state["status"] == "write_wiki":
+            if state.get("wiki_retry", 0) == 0 and not state.get("wiki_content"):
+                progress("\n[3.3a] 撰写 wiki（调用LLM）...", flush=True)
+            elif state.get("wiki_retry", 0) > 0:
+                progress(f"\n[3.3a] 撰写 wiki（重试第{state['wiki_retry']}/{max_retries}次）...", flush=True)
+            ic.record_llm_call(state, "write_wiki")
+            success, msg = steps["write_wiki"](state)
+            if state.get("agent_required"):
+                state["pre_handoff_status"] = "write_wiki"
+                state["status"] = "agent_required"
+                _save(state)
+                return state
+            if state.get("type_mismatch"):
+                state["status"] = "type_mismatch"
+                state["errors"] = [msg]
+                _save(state)
+                return state
+            if not success:
+                state["wiki_retry"] += 1
+                state["errors"] = [msg]
+                progress(f"  ↳ 失败: {msg}", flush=True)
+                _save(state)
+                continue
+            progress("[3.4] wiki结构校验...", flush=True, end=" ")
+            wiki_errors = steps["validate_wiki"](state)
+            progress("通过" if not wiki_errors else f"{len(wiki_errors)}个错误", flush=True)
+            if wiki_errors:
+                state["wiki_errors"] = wiki_errors
+                state["wiki_retry"] += 1
+                validation_retry_limit = spec.get("max_wiki_validation_retries", max_retries)
+                if state["wiki_retry"] > validation_retry_limit:
+                    wiki_path = Path(state.get("extract_dir", "")) / "wiki.md"
+                    state["status"] = "agent_required"
+                    state["pre_handoff_status"] = "write_wiki"
+                    state["agent_required"] = True
+                    state["_awaiting_agent_wiki"] = True
+                    state["agent_write_to"] = str(wiki_path)
+                    state["agent_prompt"] = (
+                        "API wiki 已达格式重写上限。只修复 write_to 现有草稿的下列问题，"
+                        "保留已核对的事实内容与 Raw 证据：\n- " + "\n- ".join(wiki_errors)
+                    )
+                    state["errors"] = wiki_errors
+                    _save(state)
+                    return state
+                state["wiki_content"] = ""
+                _save(state)
+                continue
+            state["status"] = "write_slots"
             _save(state)
-            return state
-        if state.get("type_mismatch"):
-            state["status"] = "type_mismatch"
-            state["errors"] = [msg]
-            _save(state)
-            return state
-        if not success:
-            state["wiki_retry"] += 1
-            state["errors"] = [msg]
-            progress(f"  ↳ 失败: {msg}", flush=True)
-            _save(state)
-            continue
-        progress("[3.4] wiki结构校验...", flush=True, end=" ")
-        wiki_errors = steps["validate_wiki"](state)
-        progress("通过" if not wiki_errors else f"{len(wiki_errors)}个错误", flush=True)
-        if wiki_errors:
-            state["wiki_errors"] = wiki_errors
-            state["wiki_retry"] += 1
-            state["wiki_content"] = ""
-            _save(state)
-            continue
         # 第二阶段：写语义槽
         if state.get("slots_retry", 0) == 0:
             progress("[3.3b] 抽取语义槽（续接对话）...", flush=True, end=" ")
@@ -155,6 +195,7 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         ic.record_llm_call(state, "write_slots")
         success, msg = steps["write_slots"](state)
         if state.get("agent_required"):
+            state["pre_handoff_status"] = "write_slots"
             state["status"] = "agent_required"
             _save(state)
             return state
@@ -197,6 +238,19 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             break
         # 结构错误早停
         if sem_hard:
+            semantic_retry_limit = spec.get("max_semantic_hard_retries", 0)
+            semantic_retries = state.get("semantic_hard_retry", 0)
+            if semantic_retries < semantic_retry_limit and \
+                    state.get("slots_retry", 0) + state.get("wiki_retry", 0) < max_retries:
+                state["semantic_hard_retry"] = semantic_retries + 1
+                state["slots_retry"] = state.get("slots_retry", 0) + 1
+                state["slots_errors"] = sem_hard
+                state["slots_content"] = ""
+                state["errors"] = sem_hard
+                state["status"] = "write_slots"
+                progress("  ↳ 语义槽硬错误，启动一次受限定向重写", flush=True)
+                _save(state)
+                continue
             progress(f"  ↳ 语义槽结构错误 {len(sem_hard)} 个，停止重复生成并交接修复", flush=True)
             ic.stop_for_semantic_errors(state, sem_hard,
                 _resume_cmd(spec, txn), slot_warnings)
@@ -213,7 +267,7 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             _save(state)
             return state
     else:
-        if state["status"] == "write_wiki":
+        if state["status"] in {"write_wiki", "write_slots"}:
             state["status"] = "failed"
             state["errors"] = ["修复循环超过最大重试次数", *state.get("errors", [])]
             _save(state)
@@ -238,7 +292,16 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         success, msg = steps["update_graph"](state)
         if not success:
             state["status"] = "failed"
-            state["errors"] = [msg]
+            if spec.get("rollback_fn"):
+                rolled = spec["rollback_fn"](state)
+                state["resume_from"] = "finalize"
+                state["errors"] = [msg, f"已回滚落位: {', '.join(rolled)}"]
+            elif spec.get("retry_graph_with_clean"):
+                state["resume_from"] = "graph_ready"
+                state["reingest"] = True
+                state["errors"] = [msg]
+            else:
+                state["errors"] = [msg]
             _save(state)
             return state
         report = state.get("graph_report", {})
@@ -255,10 +318,14 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             if spec.get("rollback_fn"):
                 rolled = spec["rollback_fn"](state)
                 state["status"] = "failed"
+                state["resume_from"] = "finalize"
                 state["errors"] = graph_errors + [f"已回滚落位: {', '.join(rolled)}"]
             else:
                 state["status"] = "failed"
                 state["errors"] = graph_errors
+                if spec.get("retry_graph_with_clean"):
+                    state["resume_from"] = "graph_ready"
+                    state["reingest"] = True
             _save(state)
             return state
         progress("PASS", flush=True)

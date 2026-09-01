@@ -34,6 +34,15 @@ python3 .scripts/visual_qa.py path/to/slides.pptx --profile slides --determinist
 
 `raw/`、`inbox/`、`private/`、`sources/` 和 `source-local/` 路径，以及 `profile=paper` 的论文/稿件 PDF，默认禁止远程上传，只执行本地检查并返回部分完成。确认材料允许发送给远程服务后，调用方才可显式传入 `--allow-remote`。API key 不进入 receipt。图件 PDF 可显式使用 `--profile figure`，但路径保护仍优先。
 
+## 模型选择与候选验证
+
+`operations/config/llm-models.yaml` 将视觉模型分为三类：已进入本地契约的默认/回退模型、OCR 或文档版面专项候选，以及尚未确认图像输入能力的通用模型。这些字段只用于人工选择和配置审计，不是运行时白名单。
+
+- 不得根据模型名称或版本号推定它支持图像输入。
+- OCR/VL 专项模型可用于文字与版面辅助检查，但未经通用页面质检对照前不取代默认视觉 QA 模型。
+- 通用模型晋级为候选前，先用无敏感信息的合成图像验证图像输入、严格 JSON 输出、超时和错误语义。
+- 候选模型只有在固定页面集上与当前默认模型完成盲测，并验证缺陷召回、误报、结构化输出稳定性和成本/延迟后，才能提升为默认或回退模型。
+
 ## Receipt 与断点续做
 
 默认输出位于：

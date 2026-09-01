@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""ingest_document.py 通用文档摄入（admin/teaching/business）回归测试。"""
+"""ingest_document.py 通用文档摄入回归测试。"""
 import importlib.util
+import json
+import re
+import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,11 +16,15 @@ spec.loader.exec_module(module)
 
 
 def test_domain_config_keys():
-    """三个域都有完整配置。"""
-    for domain in ("admin", "teaching", "business"):
+    """四个域都有完整配置。"""
+    for domain in ("academic", "admin", "teaching", "business"):
         cfg = module.DOMAIN_CONFIG[domain]
         assert "page_types" in cfg, f"{domain} missing page_types"
-        assert "type_to_subdir" in cfg, f"{domain} missing type_to_subdir"
+        if domain == "academic":
+            assert "raw_type_to_subdir" in cfg
+            assert "wiki_type_to_subdir" in cfg
+        else:
+            assert "type_to_subdir" in cfg, f"{domain} missing type_to_subdir"
         assert "kw_predicates" in cfg, f"{domain} missing kw_predicates"
         assert "nav_predicates" in cfg, f"{domain} missing nav_predicates"
         assert "subject_pronoun" in cfg, f"{domain} missing subject_pronoun"
@@ -47,6 +55,75 @@ def test_get_subdir_business():
     assert module.get_subdir("competitor", "business") == "competitors"
     assert module.get_subdir("contract", "business") == "contracts"
     assert module.get_subdir("unknown", "business") == "references"  # fallback
+
+
+def test_academic_subdirs_are_explicit_and_separate():
+    assert module.get_raw_subdir("editorial", "academic") == "works/editorials"
+    assert module.get_wiki_subdir("editorial", "academic") == "editorials"
+    assert module.get_raw_subdir("academic-reference", "academic") == "reference-documents"
+    assert module.get_wiki_subdir("academic-reference", "academic") == "references"
+    assert module.get_raw_subdir("unknown", "academic") is None
+    assert module.get_wiki_subdir("unknown", "academic") is None
+
+
+def test_academic_prompt_is_locked_to_explicit_type():
+    prompt = module.build_doc_wiki_prompt(
+        "专题导言", "test-id", "", "academic", document_type="editorial")
+    assert "页面类型（editorial）" in prompt
+    assert "academic-reference）" not in prompt
+
+
+def test_academic_agent_wiki_maps_raw_and_wiki_separately():
+    import shutil
+    extract_dir = module.REPO / "temp" / "inbox-extract" / "test-academic-editorial"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    wiki_content = (
+        "---\ntitle: 专题导言\ntype: editorial\nsources:\n  - memory://placeholder\n"
+        "source_type: official-doc\ndate: null\ndate_status: unknown\nstatus: final\n"
+        "created: 2026-09-01\nupdated: 2026-09-01\n---\n"
+        "## Navigation\n\n导航。\n## Content\n\n内容。\n"
+    )
+    (extract_dir / "wiki.md").write_text(wiki_content, encoding="utf-8")
+    state = {
+        "extract_dir": str(extract_dir.relative_to(module.REPO)),
+        "admin_id": "undated-editorial",
+        "date_str": "",
+        "subproject": "academic",
+        "document_type": "editorial",
+        "source_filename": "editorial.pdf",
+        "locator_source_filename": "editorial.md",
+        "_awaiting_agent_wiki": True,
+    }
+    try:
+        ok, message = module.step_write_wiki(state)
+        assert ok, message
+        assert state["raw_dir"] == "academic/raw/works/editorials"
+        assert state["wiki_path"] == "academic/wiki/editorials/undated-editorial"
+        assert "academic/raw/works/editorials/editorial.md" in state["wiki_content"]
+    finally:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
+
+def test_academic_missing_type_stops_before_transaction_and_raw_write():
+    inbox_file = module.REPO / "inbox" / "test-academic-ambiguous.md"
+    raw_target = module.REPO / "academic" / "raw" / "reference-documents" / inbox_file.name
+    state_dir = module.REPO / "temp" / "inbox-state"
+    before_states = set(state_dir.glob("*.json")) if state_dir.exists() else set()
+    assert not raw_target.exists()
+    inbox_file.write_text("# 学术背景资料\n\n没有可确定的文档类型。\n", encoding="utf-8")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(inbox_file.relative_to(module.REPO)),
+             "--subproject", "academic"],
+            cwd=module.REPO, capture_output=True, text=True, check=True,
+        )
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "classification_required"
+        after_states = set(state_dir.glob("*.json")) if state_dir.exists() else set()
+        assert after_states == before_states
+        assert not raw_target.exists()
+    finally:
+        inbox_file.unlink(missing_ok=True)
 
 
 def test_build_doc_wiki_prompt_admin():
@@ -277,27 +354,24 @@ def test_agent_mode_wiki_roundtrip():
         "---\n## Navigation\n\n测试。\n## Content\n\n内容。\n"
     )
     (extract_dir / "wiki.md").write_text(wiki_content, encoding="utf-8")
+    (extract_dir / "doc.md").write_text("测试依据。\n", encoding="utf-8")
     state = {
         "extract_dir": "temp/inbox-extract/test-agent-wiki",
         "admin_id": "20260701-test",
+        "date_str": "2026-07-01",
         "subproject": "admin",
         "source_filename": "test.docx",
         "locator_source_filename": "test.md",
         "_awaiting_agent_wiki": True,
     }
-    expected_wiki = (
-        "---\n"
-        'title: "测试"\n'
-        "type: policy\n"
-        'sources:\n  - "admin/raw/policies/test.md"\n'
-        "source_type: official-doc\n"
-        "date: 2026-07-01\n"
-        "---\n## Navigation\n\n测试。\n## Content\n\n内容。\n"
-    )
     try:
         success, msg = module.step_write_wiki(state)
         assert success, f"should succeed: {msg}"
-        assert state["wiki_content"] == expected_wiki
+        fm_text = re.match(r"^---\n(.*?)\n---", state["wiki_content"], re.S).group(1)
+        fm = module.yaml.safe_load(fm_text)
+        assert fm["sources"] == ["admin/raw/policies/test.md"]
+        assert fm["date"] == "2026-07-01"
+        assert fm["created"] == fm["updated"] == state["ingested_on"]
         assert "_awaiting_agent_wiki" not in state
         assert state["wiki_path"].startswith("admin/wiki/")
     finally:
@@ -326,6 +400,52 @@ def test_agent_mode_slots_roundtrip():
         shutil.rmtree(extract_dir, ignore_errors=True)
 
 
+def test_short_api_document_combines_wiki_and_slots_in_one_call():
+    import shutil
+    extract_dir = module.REPO / "temp" / "inbox-extract" / "test-api-combined-document"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    (extract_dir / "doc.md").write_text("# 测试政策\n\n政策明确支持人才培养。\n", encoding="utf-8")
+    output = (
+        "<<<META>>>\ndoc_date: 2026-09-01\ntitle: 测试政策\ndoc_type: document\n<<</META>>>\n"
+        "<<<WIKI>>>\n---\ntitle: 测试政策\ntype: policy\nstatus: confirmed\n---\n"
+        "# 测试政策\n\n## Navigation\n\n本政策支持人才培养。 <RAW#L3>\n\n"
+        "## Content\n\n### 支持事项\n\n明确支持人才培养。 <RAW#L3>\n"
+        "<<<SLOTS>>>\n三元组:\n本文件 | 涉及 | 人才培养\n"
+    )
+    calls = []
+
+    def fake_call(prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        return {"ok": True, "status": "ok", "text": output}
+
+    state = {
+        "extract_dir": str(extract_dir.relative_to(module.REPO)),
+        "date_str": "2026-09-01",
+        "subproject": "admin",
+        "source_filename": "test-policy.docx",
+        "locator_source_filename": "test-policy.md",
+    }
+    original_mode, original_call = module.ingest_mode, module.call_text
+    module.ingest_mode = lambda: "api"
+    module.call_text = fake_call
+    try:
+        success, message = module.step_write_wiki(state)
+    finally:
+        module.ingest_mode, module.call_text = original_mode, original_call
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
+    assert success, message
+    assert len(calls) == 1
+    assert "<<<SLOTS>>>" in calls[0][0]
+    reasoning_context = calls[0][1]["reasoning_context"]
+    assert reasoning_context["document_kind"] == "ordinary"
+    assert reasoning_context["retry"] == 0
+    assert reasoning_context["input_chars"] > 0
+    assert state["slots_content"].startswith("三元组:")
+    assert state["semantic_worker"] == "combined-api"
+    assert "admin/raw/policies/test-policy.md" in state["wiki_content"]
+
+
 def test_agent_required_output_has_write_to():
     """agent_required 状态包含 write_to 字段。"""
     state = {
@@ -338,11 +458,132 @@ def test_agent_required_output_has_write_to():
     assert state["agent_write_to"].endswith("wiki.md")
 
 
+def test_unknown_source_date_is_not_replaced_with_ingestion_date():
+    assert module.extract_admin_date("undated.pdf", "正文没有来源日期。") == ""
+    assert module.generate_admin_id("undated.pdf", "专题导言", "") == "undated-专题导言"
+    wiki = (
+        "---\ntitle: 专题导言\ntype: reference\n"
+        "sources:\n  - admin/raw/references/undated.md\n"
+        "source_type: official-doc\ndate: 2026-09-01\nstatus: final\n"
+        "created: 2026-09-01\nupdated: 2026-09-01\n---\n"
+        "## Navigation\n\n导航。\n## Content\n\n正文。\n"
+    )
+    patched = module.apply_source_date_frontmatter(wiki, "")
+    assert "date: null\ndate_status: unknown" in patched
+    assert "date: 2026-09-01" not in patched
+    errors = module.step_validate_wiki({"wiki_content": patched, "subproject": "admin"})
+    assert not errors, errors
+
+
+def test_normalize_document_wiki_compiles_mechanical_contract():
+    weak_output = (
+        "---\ntitle: 导师培训\ntype: policy\nsources: guessed.md\n"
+        "source_type: official-doc\ndate: null\nstatus: draft\n"
+        "effective_from: null\neffective_to: null\ncreated: null\nupdated: null\n---\n\n"
+        "# 导师培训\n\n## Navigation\n\n导航。 <RAW#L1>\n\n"
+        "## 背景\n\n正文事实。 <RAW#L3>\n"
+    )
+    normalized, repairs = module.normalize_document_wiki(
+        weak_output,
+        correct_sources="admin/raw/policies/policy.md",
+        source_date="",
+        doc_text="导航依据\n\n正文依据\n",
+        created_at="2026-09-01",
+    )
+    assert "## Content" in normalized
+    fm = module.yaml.safe_load(re.match(r"^---\n(.*?)\n---", normalized, re.S).group(1))
+    assert fm["sources"] == ["admin/raw/policies/policy.md"]
+    assert fm["date"] is None and fm["date_status"] == "unknown"
+    assert fm["created"] == "2026-09-01" and fm["updated"] == "2026-09-01"
+    assert "effective_from" not in normalized and "effective_to" not in normalized
+    assert "[^r1]" in normalized and "[^r3]" in normalized
+    assert "[^r1]: admin/raw/policies/policy.md#L1" in normalized
+    assert "[^r3]: admin/raw/policies/policy.md#L3" in normalized
+    assert {"sources", "created", "updated", "content_heading", "source_footnotes"} <= set(repairs)
+
+
+def test_sqlite_snapshot_restores_exact_graph_state():
+    import sqlite3
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        graph = root / "graph.db"
+        snapshot = root / "before.db"
+        with sqlite3.connect(graph) as conn:
+            conn.execute("CREATE TABLE nodes(path TEXT PRIMARY KEY)")
+            conn.execute("INSERT INTO nodes VALUES ('before')")
+        module.backup_sqlite_database(graph, snapshot)
+        with sqlite3.connect(graph) as conn:
+            conn.execute("DELETE FROM nodes")
+            conn.execute("INSERT INTO nodes VALUES ('after')")
+        module.restore_sqlite_database(snapshot, graph)
+        with sqlite3.connect(graph) as conn:
+            values = [row[0] for row in conn.execute("SELECT path FROM nodes")]
+        assert values == ["before"]
+
+
+def test_rollback_removes_manifest_companion_restores_graph_and_marks_receipt():
+    import shutil
+    token = "test-document-rollback"
+    root = module.REPO / "temp" / token
+    extract = root / "extract"
+    raw_dir = root / "raw"
+    wiki = root / "wiki" / "page.md"
+    graph = root / "graph.db"
+    snapshot = extract / "graph-before.sqlite"
+    receipt = root / "receipt.json"
+    extract.mkdir(parents=True, exist_ok=True)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    wiki.parent.mkdir(parents=True, exist_ok=True)
+    wiki.write_text("wiki", encoding="utf-8")
+    for name in ("policy.docx", "policy.md"):
+        (raw_dir / name).write_text(name, encoding="utf-8")
+    (extract / "manifest.json").write_text(json.dumps({
+        "raw_files": ["policy.docx", "policy.md"], "wiki_file": "wiki.md"
+    }), encoding="utf-8")
+    with sqlite3.connect(graph) as conn:
+        conn.execute("CREATE TABLE nodes(path TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO nodes VALUES ('before')")
+    module.backup_sqlite_database(graph, snapshot)
+    with sqlite3.connect(graph) as conn:
+        conn.execute("DELETE FROM nodes")
+        conn.execute("INSERT INTO nodes VALUES ('after')")
+    receipt.write_text(json.dumps({"status": "committed"}), encoding="utf-8")
+    state = {
+        "wiki_path": str(wiki.with_suffix("").relative_to(module.REPO)),
+        "raw_dir": str(raw_dir.relative_to(module.REPO)),
+        "source_filename": "policy.docx",
+        "locator_source_filename": "policy.md",
+        "extract_dir": str(extract.relative_to(module.REPO)),
+        "graph_snapshot": str(snapshot.relative_to(module.REPO)),
+        "graph_db_path": str(graph),
+        "receipt": str(receipt.relative_to(module.REPO)),
+    }
+    original_trash = module.trash_util.trash_path
+    module.trash_util.trash_path = lambda path: Path(path).unlink()
+    try:
+        rolled = module.rollback_committed(state)
+        assert not wiki.exists()
+        assert not (raw_dir / "policy.docx").exists()
+        assert not (raw_dir / "policy.md").exists()
+        with sqlite3.connect(graph) as conn:
+            assert [row[0] for row in conn.execute("SELECT path FROM nodes")] == ["before"]
+        assert json.loads(receipt.read_text(encoding="utf-8"))["status"] == "rolled_back"
+        assert any("policy.md" in item for item in rolled)
+    finally:
+        module.trash_util.trash_path = original_trash
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     test_domain_config_keys()
     test_get_subdir_admin()
     test_get_subdir_teaching()
     test_get_subdir_business()
+    test_academic_subdirs_are_explicit_and_separate()
+    test_academic_prompt_is_locked_to_explicit_type()
+    test_academic_agent_wiki_maps_raw_and_wiki_separately()
+    test_academic_missing_type_stops_before_transaction_and_raw_write()
     test_build_doc_wiki_prompt_admin()
     test_build_doc_wiki_prompt_teaching()
     test_build_doc_wiki_prompt_business()
@@ -357,10 +598,15 @@ def main():
     test_admin_wrapper_compat()
     test_agent_mode_wiki_roundtrip()
     test_agent_mode_slots_roundtrip()
+    test_short_api_document_combines_wiki_and_slots_in_one_call()
     test_agent_required_output_has_write_to()
+    test_unknown_source_date_is_not_replaced_with_ingestion_date()
+    test_normalize_document_wiki_compiles_mechanical_contract()
+    test_sqlite_snapshot_restores_exact_graph_state()
+    test_rollback_removes_manifest_companion_restores_graph_and_marks_receipt()
     test_preprocess_binary_creates_raw_companion()
     test_preprocess_native_text_uses_original()
-    test_preprocess_text_pdf_uses_native_pages()
+    test_preprocess_text_pdf_creates_line_locator_companion()
     test_finalize_lands_original_and_companion_together()
     test_build_source_context_document_keeps_short_full()
     test_build_source_context_document_reduces_by_heading()
@@ -425,8 +671,8 @@ def test_preprocess_native_text_uses_original():
         shutil.rmtree(module.REPO / state["extract_dir"], ignore_errors=True)
 
 
-def test_preprocess_text_pdf_uses_native_pages():
-    """有文本层 PDF 直接使用 page locator，不生成 raw companion。"""
+def test_preprocess_text_pdf_creates_line_locator_companion():
+    """PDF prompt 使用 RAW#Lx，因此文本层 PDF 也需 Markdown companion。"""
     import fitz
     import shutil
     state, root = _locator_test_state("report", ".pdf")
@@ -440,10 +686,11 @@ def test_preprocess_text_pdf_uses_native_pages():
     try:
         ok, msg = module.step_preprocess(state)
         assert ok, msg
-        assert state["raw_locator_kind"] == "page"
-        assert state["locator_source_filename"] == "report.pdf"
-        assert module._manifest_raw_files(state) == ["report.pdf"]
-        assert not (module.REPO / state["extract_dir"] / "report.md").exists()
+        assert state["raw_locator_kind"] == "companion"
+        assert state["locator_source_filename"] == "report.md"
+        assert module._manifest_raw_files(state) == ["report.pdf", "report.md"]
+        companion = module.REPO / state["extract_dir"] / "report.md"
+        assert companion.read_text(encoding="utf-8") == "native pdf text\n"
     finally:
         module.extract_doc_text = original_extract
         shutil.rmtree(root, ignore_errors=True)

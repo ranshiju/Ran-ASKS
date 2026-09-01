@@ -72,7 +72,7 @@ nodes:
   schemas:
     path: <domain>/SCHEMA.md
     kind: spec-family
-    role: domain-contract
+    role: domain-contract-including-explicit-academic-non-paper-types-and-paths
   route:
     path: .scripts/route.py
     kind: router
@@ -88,7 +88,7 @@ nodes:
   llm_structured:
     path: .scripts/llm_structured.py
     kind: implementation
-    role: budgeted-structured-api-client-with-specialist-fallback-and-terminal-empty-output-recovery
+    role: adaptive-reasoning-structured-api-client-with-independent-output-budget-multiturn-messages-specialist-fallback-and-low-effort-empty-output-recovery
   llm_model_catalog:
     path: operations/config/llm-models.yaml
     kind: config
@@ -212,7 +212,7 @@ nodes:
   dsh_agent_loop:
     path: dsh/agent_loop.py
     kind: implementation
-    role: dsh-turn-step-driver-loop-with-api-timeout-retry
+    role: dsh-turn-step-driver-loop-with-api-timeout-retry-and-explicit-academic-document-type-forwarding
   dsh_guards:
     path: dsh/guards/
     kind: implementation
@@ -284,7 +284,7 @@ nodes:
   ingest_pipeline:
     path: .scripts/ingest_pipeline.py
     kind: implementation
-    role: shared-ingest-driver-spec-driven
+    role: shared-ingest-driver-spec-driven-with-bounded-wiki-and-opt-in-semantic-retries-resumable-exact-rollback
   ingest_check:
     path: .scripts/ingest_check.py
     kind: validator
@@ -333,14 +333,6 @@ nodes:
     path: .scripts/graph_dump.py
     kind: diagnostic
     role: graph-audit-snapshot
-  e1_experiment:
-    path: .scripts/e1_experiment.py
-    kind: implementation
-    role: dual-locked-isolated-fresh-local-compilation-chronological-graph-fusion-observation-and-validated-main-kb-promotion
-  e1_experiment_test:
-    path: .scripts/test_e1_experiment.py
-    kind: test
-    role: e1-manifest-isolation-metrics-snapshot-and-promotion-guard-regression
   graph_visualize:
     path: .scripts/graph_visualize.py
     kind: diagnostic
@@ -489,7 +481,7 @@ nodes:
   ingest_document:
     path: .scripts/ingest_document.py
     kind: implementation
-    role: code-driven-general-document-ingest-orchestrator
+    role: code-driven-general-document-ingest-with-bounded-combined-api-worker-explicit-classification-deterministic-wiki-mechanics-and-graph-snapshot-rollback
   re_ingest:
     path: .scripts/re_ingest.py
     kind: implementation
@@ -513,7 +505,7 @@ nodes:
   ingest_inbox:
     path: .scripts/ingest_inbox.py
     kind: implementation
-    role: unified-inbox-intake-with-compact-stdout-degraded-status-propagation-and-full-report-persistence
+    role: unified-inbox-intake-with-scored-local-classification-boundary-only-api-review-success-scoped-maintenance-and-auditable-reporting
   ingest_document_test:
     path: .scripts/test_ingest_document.py
     kind: test
@@ -803,27 +795,6 @@ edges:
 - - graph_ingest
   - uses
   - hub_semantics
-- - e1_experiment
-  - uses
-  - extractor
-- - e1_experiment
-  - uses
-  - ingest_paper
-- - e1_experiment
-  - uses
-  - graph_ingest
-- - e1_experiment
-  - uses
-  - hub_semantics
-- - e1_experiment
-  - uses
-  - graph_lib
-- - e1_experiment
-  - uses
-  - graph_validate
-- - e1_experiment
-  - tested_by
-  - e1_experiment_test
 - - graph_delta
   - uses
   - graph_lib
@@ -1674,46 +1645,25 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
-  e1_experiment:
-    preconditions:
-    - manifest 明确区分 publication/work、canonical PDF、related/supplementary/non-paper 与 legacy-extraction-fallback；目录条目数不得直接当论文数
-    - Phase L run-lock 冻结 manifest、source、extractor、LLM 与 local compiler；Phase G fusion-lock 另行绑定 Phase-L run-lock/audit/全部 verified bundle、graph/Hub code、embedding、阈值、隔离路径与 Agent gate，依赖当前 G_t 的 attach plan 不进入 local artifact freeze
-    - Phase-G 代码或阈值变化只使 fusion-lock 与既有 G0..Gt 失效，不使已由 Phase-L run-lock 和 bundle 哈希冻结的 local artifacts 失效，也不得因此重调已冻结语料的 LLM
-    - 实验 workspace、graph DB、Wiki、临时目录和 embedding cache 与生产派生状态物理隔离；raw 仅只读
-    - 每篇每阶段使用原子 checkpoint；completed 仅在产物哈希复验通过时可跳过，fusion 只从最高连续 validated snapshot 恢复
-    - raw 是事实证据层；Wiki/graph 以可回溯的知识结构与导航为目标，近似命名、粒度和 membership 为 soft state，来源丢失、结构不可解析、关键事实捏造和明显误导导航才是硬错误
-    - Hub lifecycle 候选必须经完整 Agent gate；缺 gate checkpoint 为 agent_required，gate 哈希忽略三位小数以下 embedding 抖动但不忽略成员或候选结构变化；显式 reject 可按 step-independent candidate signature 跨步骤复用，只有成员与完整候选结构不变时生效，结构变化必须重新 gate
-    - formal graph、fusion ledger、embedding cache、derived Hub pages、gate inputs 与 G0..GN 全部位于 runs/<phase-l-run-lock-prefix>/，init/fuse 每次入口复验 fusion-lock；G0 receipt 与后续 snapshot 均带逐文件 SHA-256
-    - shakedown 与 formal 使用不同 ledger/artifact root；formal 仅可按 run-lock 逐文件哈希引用 fresh extraction，不得复用 shakedown bibliography/Wiki/semantics/bundle
-    - 冻结 manifest 的显式 adjudication_note/date evidence 可作为前置 Agent gate 应用于对应书目冲突，但必须记录 from/to/evidence normalization；无显式裁决不得静默覆盖
-    - Phase-L 编译代码变化使旧 run-lock 失效时，先以全部已保存 bibliography/Wiki/semantics 调用结果离线回放当前 schema、wrapper 与 validator；仅 Phase-G 代码变化时跑 graph/Hub 回归并冻结新 fusion-lock，不重跑 Phase L
-    writes:
-    - projects/ForBetterScience/experiments/e1-chronological/ 下的候选/冻结 manifest、run-lock、fusion-lock、shakedown local artifacts、run-specific formal artifacts、G0..GN 快照、observer logs、metrics 与 figures
-    - 仅显式 promote-main 且 frozen artifact、逐篇校验、生产备份与前置哈希均通过时，受控更新对应生产 Wiki 与 cross-domain/graph.db
-    forbidden:
-    - 修改 academic/raw/works/papers 或以新 extraction 覆盖任何 raw 派生文件
-    - 默认调用 re_ingest.py 复用旧 paper.md 代替 fresh PDF extraction
-    - 将书籍封面、版权页、supplementary 或同一 publication 的不同版本静默计为独立 work
-    - 在 local compilation 阶段读取生产 graph 或提前冻结依赖 G_t 的 identity/Hub decision
-    - 通过临时替换、删除或清空生产 graph.db/Wiki 运行实验
-    - 未冻结/复验 fusion-lock、Phase-L run-lock/audit/bundle 哈希漂移、未通过 shakedown 或运行中配置漂移时继续正式 N-step fusion
-    - 未经显式 promote-main、无逐篇备份或校验失败时更新主知识库
-    - 将旧 running/failed 状态当 completed 跳过，或从非连续 snapshot 恢复 chronological fusion
-    verify:
-    - python3 .scripts/test_e1_experiment.py
-    - python3 .scripts/engineering_graph.py validate
   ingest_inbox:
     preconditions:
     - 底层摄入 stdout 可同时包含进度文本、图报告嵌套 JSON 与最终工作流 JSON
+    - PDF/TXT 先由程序返回 type/score/threshold/markers/confidence；仅 PDF 2/3 分、TXT 1/2 分在 --run 时调用 ingest_type_review
+    - API 分类复核只有中/高置信度同意程序类型时放行；不一致、ambiguous、low 或 API 失败均在事务前返回 classification_required
+    - academic 域的非论文文档仅在专题导言/特邀编辑/本期专题等强信号命中时自动分类为 editorial；其余必须显式分类，不得回退到 admin
+    - 全库缩写/人物/Hub 收尾只在本次至少一个文件 completed/duplicate_found 时执行；全 classification_required/全失败直接返回紧凑终态
     writes:
     - temp/inbox-dsh/*.jsonl
-    - cross-domain/ingest-reports/*.json
+    - cross-domain/ingest-reports/*.json（含 program classification 与 boundary API review）
     forbidden:
     - --run 时把底层完整 stdout、逐节点 Hub 候选或完整 graph_report 再打印给 Agent；这些诊断只进入持久化报告/DSH log
     - 持久化报告缺失 graph_report 等底层已返回诊断，或紧凑 stdout 不返回 report_path
     - 将 Hub/page 等领域对象的 active/current/retired 状态误判为摄入工作流状态
+    - 用全库维护候选的 agent_required 覆盖当前文件的 completed/classification_required 终态；维护诊断只进持久化 report
     - 在存在多个 JSON 对象时选择最终工作流结果之前的嵌套 status 对象
     - receipt 已 committed 且最终工作流为 completed 时汇总为 failed
+    - academic 非论文文档未取得合法分类时继续调用摄入工具、预处理或写入任何 raw/wiki/graph.db
+    - 对高置信度分类或 dry-run 调用 API 分类器，或让 API 复核静默改写程序路由
     verify:
     - python3 .scripts/test_ingest_inbox_dispatch.py
     - python3 dsh/test_dsh_ingest_tools.py
@@ -1793,8 +1743,10 @@ script_contracts:
   open_source_release:
     preconditions:
     - 根目录 VERSION 已按 MAJOR.MINOR.PATCH 更新；白名单 manifest 已覆盖本期公开文件
+    - 根目录 CHANGELOG.md 由公开资产生成，且最新版本标题与 VERSION 一致
     - 中英文 README 公开资产均存在，包含双向语言入口
     - 公开 capability 的 required 节点均存在于 allowlisted 目标树；active projects/.project 路径只保留在私有工程图
+    - 已发布的冻结 paper-artifacts 版本全部保留，并分别通过其声明的版本化验证器
     writes:
     - 指定目标公开树（绝不能写入 REPO 自身）
     - 目标树中的 operations/engineering/graph.yaml 确定性投影，仅保留公开路径闭包
@@ -1802,6 +1754,7 @@ script_contracts:
     - 手工向生成公开树补入业务文件
     - 将 active projects/.project 节点、依赖边、验证命令或脚本契约复制到公开工程图
     - VERSION 缺失、非 semver，或 README release badge 与 VERSION 不一致时仍验证通过
+    - CHANGELOG.md 缺失当前 VERSION 标题时仍验证通过
     - 只更新英文 README 的版本标记，造成中英文版本信息漂移
     - 目标 `.gitignore` 隐藏白名单文件，导致生成树通过但 Git 提交缺件
     - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
@@ -1904,6 +1857,7 @@ script_contracts:
     - 漏把第一作者标为 person，或节点 identity 复用后不补确定性 person/proposition subtype
     - 把 Raw/LLM surface mention 因字符串恰等于既有 nodes.path 而直接当作 canonical ID；只有程序显式标记的 canonical endpoint 可无条件按 path 复用
     - 将同名异义的 ambiguous mention 偷偷复用、创建同名碰撞节点或写入对应知识边；上下文不足时必须软 abstain 并跳过该边
+    - 将纯英文长标题按年份/卷号截成停用词 alias 或 keyword ID，或让停用词 alias 参与身份解析
     - 绕过 GraphDelta 硬结构检查直接融合语义边，或因软 query probe 未满分阻断摄入
     - 为保证连通性把命题内部概念自动提升为论文级研究关键词；仅报告 navigation_connectivity_candidates
     - 从 proposition 片段创建新 concept 节点，或因精确名/alias 未命中、命中歧义而告警；这些情况必须静默跳过
@@ -1982,10 +1936,13 @@ script_contracts:
   ingest_check:
     preconditions:
     - 页面已写入；页面 sources 可解析时允许只读相邻 source.yaml 进行确定性书目一致性检查；使用 --graph 前已完成图写入
+    - 'date 通常为有效 YYYY/YYYY-MM/YYYY-MM-DD；来源确实无可证日期时允许显式 date: null + date_status: unknown，created/updated 仍须为完整日期'
+    - paper-summary 作者覆盖优先以 source.yaml 中 review.locked=true 的 bibliographic.authors 为 raw 锚点；仅在锁定作者不可用时回退 paper.md 机械提取
     writes: []
     forbidden:
     - 将 WARN 静默留给未来 Lint
     - 对 paper-summary 忽略 source.yaml 中 published year/DOI venue 与 wiki frontmatter 的确定性冲突
+    - 已有锁定 bibliographic.authors 时仍用 paper.md affiliation 碎片推高 raw 作者数并产生假 WARN
     - 使用 --graph 时忽略作者集合、venue、占位符元数据、方向 Hub 唯一性、Raw 文档包节点或 Wiki→来源→Raw 直连缺失
     - 因本页知识边未填写 locator 或 edge_evidence 而报错/告警；只检查已填写 locator 的可解析性
     verify:
@@ -2024,19 +1981,23 @@ script_contracts:
     preconditions:
     - 调用方已提供 Schema 约束、模型配置和可审计输入
     - 推理档位仅在 fast/standard/deep/xdeep 枚举内；provider reasoning 参数仅在显式配置时透传
+    - 摄入自适应策略按 operation 选择初始档；只有确定性校验标记为 semantic 的重试才升一级，structural 重试不升档
+    - 推理档位与调用方 max_tokens/retries 完全解耦；长输出不得因低推理档位被截断
     - 长文本调用用 call_text（镜像 call_json 但跳过 JSON 解析，agent_handoff 行为一致）
+    - call_text 传 messages 时必须原样使用完整会话历史；受限重试只追加一条纠错 user 消息，不得退回 system+prompt 单轮请求
+    - 摄入调用必须把 transaction_id 写入 LLM 事件；messages 模式的 input hash/length 覆盖完整序列化会话而非标签 prompt
     - ingest_proposition 仅作兼容 operation 保留 call_json Schema + fast 档；默认论文 3.6c 不再调用
     - ingest_bibliographic_review 使用 call_json Schema + fast 档，仅做候选裁决与版本含义识别；不得绕过调用方的候选边界
-    - fast 档允许调用方为短结构化任务显式申请一次重试；空输出且 finish_reason=length 时下一尝试必须禁用 reasoning 并扩大输出预算
+    - 空输出且 finish_reason=length 时下一尝试必须切到已配置的 fast/low effort 并扩大输出预算；不得以省略字段冒充禁用默认思考
     writes:
     - 仅输出调用方指定的结构化响应或草稿文件
-    - temp/llm-events/YYYY-MM-DD.jsonl（调用事件轨迹，只存 hash+length，不存明文 prompt/output）
+    - temp/llm-events/YYYY-MM-DD.jsonl（调用事件轨迹，含选择原因/错误类别/实际 effort，只存 hash+length，不存明文 prompt/output）
     forbidden:
     - 绕过调用方的证据边界直接写 raw/wiki/graph.db
     - 在配置缺失时静默降级模型或格式
-    - 用推理档位提高调用方的 max_tokens 或重试预算
+    - 用推理档位改写调用方的 max_tokens 或重试预算
     - 假定所有 OpenAI-compatible 服务端支持同一 reasoning 字段
-    - 在已经没有后续尝试时仍返回“下轮扩容/下轮禁用思考参数”的误导性错误
+    - 在已经没有后续尝试时仍返回“下轮扩容/下轮降低推理强度”的误导性错误
     verify:
     - python3 .scripts/test_api_ingest.py
     - python3 .scripts/test_prompt_audit.py
@@ -2046,15 +2007,18 @@ script_contracts:
   ingest_paper:
     preconditions:
     - inbox 学术 PDF；INGEST_BACKEND=api 时全自动，agent 时 3.2 书目预审与 3.3 wiki 撰写输出 agent_required 交接
+    - agent 书目、wiki+slots 与独立 slots 交接均返回明确 write_to；resume 只消费对应输出并恢复到 pre_handoff_status，不重跑已完成阶段
     - paper.md 生成后、persist_bibliographic_metadata 前执行 ingest_bibliographic_review 轻量预审；输入仅 PDF metadata、标题邻域与发表证据行
     - 书目预审只裁决 PDF metadata 与 paper.md 机械提取的程序候选；机构/实验室/大学等 affiliation 只能进入 authors.rejected
     - 书目 fields 必须有精确定位 evidence；无法裁决时对应 status=ambiguous 且 review_status=manual_required，禁止继续落位
     - 预审锁定 state.bibliographic_meta 后，paper-id、skeleton、wiki frontmatter 与 graph 机械作者边只消费该结果，不再从 paper.md 二次解析
     - API wiki 撰写以摘要、定理、结论确定性抽取的证据包锚定；定理/等式/性能结论保留对象、条件和比较基准
     - 预审前读取 PDF metadata 与第一页发表页脚；同一证据行含 received/published 时 published year 优先；有近端 year/venue/DOI 证据时必须回填 skeleton/wiki
+    - 首页证据中的完整 Proceedings of ... 或 Findings of ... venue 原文必须进入候选集合，即使规范化 venue 为空或省略 Proceedings/Findings 前缀
     - APS DOI 采用确定性 journal/volume/article 映射补齐 venue，不允许从摘要或参考文献猜测本篇 venue
     - conflicts 可保存结构化对象或描述性字符串审计项；title/venue 的错误 evidence 只在 paper.md 前 160 行存在唯一精确命中时机械重定位，窗口最多连续 4 行且 normalization 留痕，多处命中仍硬阻断
     - 缺失或断行的 SLOTS wrapper 仅在去除包装后正文全部为完整三元组时容错，随后仍须通过完整 semantic parser/validator
+    - paper-id 的拉丁文本保持 ASCII slug；作者或标题只有中文等非 ASCII 文本时使用稳定 Unicode slug，禁止退化为 paper-YYYY-paper
     writes:
     - temp/inbox-extract/<txn>/ paper.md/manifest.json/语义槽与 wiki 草稿
     - temp 事务 source.yaml.bibliographic（随 raw 原子落位）
@@ -2073,6 +2037,7 @@ script_contracts:
     - 把 warning 当失败回 3.3 全量重写（应走 3.6b 局部修复）
     - 用 paper.md 正文首个引用年份覆盖已有 PDF metadata/第一页发表年份
     - 首页明确写有 Published as a conference paper at <venue> <year> 时只提取年份而丢失 venue
+    - 因规范化 venue 截短而拒绝首页证据中可精确提取的 Proceedings of ... 或 Findings of ... 完整值
     - 让 LLM 覆盖程序已确定性填入的 date/venue
     - 要求弱 LLM 生成 evidence JSON、source locator 或确定性书目边；语义模型只输出短三元组
     - 默认调用 proposition 专用 LLM 把完整命题拆成原子三元组；3.6c 只登记稀疏程序编译状态，不增加 LLM 负担
@@ -2084,21 +2049,35 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_document:
     preconditions:
-    - inbox 通用文档（.docx/.doc/.pptx/.txt/.pdf）；--subproject 指定域(admin/teaching/business)
+    - inbox 通用文档（.docx/.doc/.pptx/.txt/.pdf）；--subproject 指定域(academic/admin/teaching/business)
+    - academic 域必须显式提供 document_type=editorial|academic-reference；缺失或非法时返回 classification_required，且在建立事务、预处理与落位前终止
+    - academic/editorial 分别写 raw/works/editorials 与 wiki/editorials；academic-reference 分别写 raw/reference-documents 与 wiki/references，不与论文 raw/references 混用
+    - wiki prompt 使用提取文本的 RAW#Lx 行号时，PDF 与其他无原生行定位格式必须生成同名 Markdown locator companion；原始文件仍随同落位
+    - API LLM 只负责 title/type/status、语义正文与直接 RAW handle；sources/source_type/date/created/updated、空时态字段、Content 标题与 Sources 脚注表由程序确定性编译
+    - API 模式下不超过 30000 字符的通用文档由单次受限 Worker 同时产出 wiki 与候选语义槽；更长文档使用缩减上下文的 wiki→slots 两阶段路径
+    - 合并 Worker 的 wiki 与语义槽仍分别经过 3.4/3.6 校验；语义槽硬错误最多基于已校验 wiki 定向重写 1 次
+    - '来源日期只取文件名或原文明确日期；无法确定时写 date: null + date_status: unknown，created/updated 单独记录摄入日，ID 使用 undated 前缀'
     writes:
     - temp/inbox-extract/<txn>/ doc.md/manifest.json/语义槽与 wiki 草稿
     - 最终 raw/wiki 经 inbox_finalize 原子落位
     - cross-domain/graph.db 经 graph_ingest
+    - temp/inbox-extract/<txn>/graph-before.sqlite 作为落位后图失败的事务级精确回滚快照
     - <subproject>/wiki/log.md 与 index.md 与派生目录
     forbidden:
     - agent 全程监控正常摄入（默认 quiet，仅读最终 JSON）
     - 对学术论文 PDF 使用（走 ingest_paper.py）
+    - 将 academic 通用文档静默映射到 admin，或把未知 academic 类型回退到 references
     - 绕过 3.4/3.6/3.8 校验闭环
     - 硬错误不回 3.3 而静默继续
     - 把 warning 当失败回 3.3 全量重写（应走 3.6b 局部修复）
+    - 将摄入当天日期冒充文档来源日期或用于 undated 文档 ID
+    - wiki 结构校验失败后连续做超过 1 次全文 API 重写；超限必须保留当前草稿与精确错误转 agent_required
+    - 语义槽硬错误连续做超过 1 次 API 定向重写；超限必须保留产物与精确错误转 agent_required
+    - graph write/validate 失败时遗留 companion、新建图节点、related target 修改或 committed receipt；必须恢复 manifest 全文件与 graph snapshot
     verify:
     - python3 .scripts/test_ingest_document.py
     - python3 .scripts/test_ingest_admin.py
+    - python3 .scripts/test_ingest_pipeline.py
     - python3 .scripts/engineering_graph.py validate
   query_orchestrate:
     preconditions: []
@@ -2145,6 +2124,8 @@ script_contracts:
     preconditions:
     - DSH 摄入工具只经子进程调用 ingest_inbox/ingest_paper/ingest_meeting/ingest_document/re_ingest
     - 保持底层脚本 quiet JSON、独立事务与返回码分支；DSH 不重写摄入状态机
+    - 错误分类优先解析 stdout/stderr 的结构化终态 status/error_category/errors；仅在结构化终态缺失时使用窄关键词兜底
+    - ingest_document_file 允许 academic 子项目，但 academic 必须同时传 document_type=editorial|academic-reference
     writes:
     - 不直接写 raw/wiki/graph.db
     - session log 记录 tool/call 与 tool/result；不作为事实源
@@ -2152,6 +2133,8 @@ script_contracts:
     - 绕过 --dry-run/--run 分支直接执行摄入
     - 在 DSH 层删除 inbox 源文件或修改事务 JSON
     - 把 DSH session log 当作 raw 证据或图边来源
+    - 因错误文本包含普通文件扩展名 PDF 或宽泛 extract 字样而覆盖结构化的书目/语义校验失败类别
+    - 在 DSH 层替 academic 推断默认文档类型或回退到 admin
     verify:
     - python3 dsh/test_dsh_ingest_tools.py
     - python3 .scripts/engineering_graph.py validate

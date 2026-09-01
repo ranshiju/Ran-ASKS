@@ -398,10 +398,13 @@ class IngestAgentLoop:
             args["subproject"] = subproject
         return self._execute("ingest_meeting_txt", args)
 
-    def ingest_document(self, file: str, subproject: str | None = None) -> str:
+    def ingest_document(self, file: str, subproject: str | None = None,
+                        document_type: str | None = None) -> str:
         args = {"file": file}
         if subproject:
             args["subproject"] = subproject
+        if document_type:
+            args["document_type"] = document_type
         return self._execute("ingest_document_file", args)
 
     def re_ingest_raw(self, raw: str) -> str:

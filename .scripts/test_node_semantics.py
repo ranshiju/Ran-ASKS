@@ -79,6 +79,20 @@ def test_bilingual_name_reuses_unique_decomposed_title():
     assert result["match_mode"] == "unique_decomposed_title_or_alias"
 
 
+def test_pure_english_venue_does_not_decompose_to_stopword():
+    old_venue = "the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)"
+    new_venue = "the 2024 Conference on Empirical Methods in Natural Language Processing"
+    assert gl.decompose_name_to_aliases(old_venue) == []
+    assert gl.extract_keyword_id(old_venue) == old_venue
+    assert gl.decompose_name_to_aliases(new_venue) == []
+
+    conn = make_db()
+    add_node(conn, "the", old_venue)
+    conn.execute("INSERT INTO aliases(alias,node_path) VALUES (?,?)", ("the", "the"))
+    result = ns.resolve_node(conn, new_venue, node_types=["entity"])
+    assert result["decision"] == "unmatched"
+
+
 def test_bilingual_name_component_conflict_is_ambiguous():
     conn = make_db()
     add_node(conn, "rag-cn", "检索增强生成")

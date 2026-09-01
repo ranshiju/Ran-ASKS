@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ingest_inbox.py — inbox 统一摄入入口：纯 Python 分流，零 LLM 类型判断。
+"""ingest_inbox.py — inbox 统一摄入入口：程序分流 + 边界样本 API 复核。
 
 扫描 inbox/ 下的文件，按扩展名+内容关键词分类，分发到对应摄入脚本：
   - PDF + 学术特征（Abstract/References/arXiv/DOI）→ ingest_paper.py
@@ -7,8 +7,8 @@
   - .txt + 会议特征（会议/参会/元宝会议助手/时间戳）→ ingest_meeting.py
   - .txt 非会议 / .docx / .doc / .pptx / .md → ingest_document.py
 
-分类纯 Python（pymupdf 读 PDF 前2页 + 关键词匹配），不调 LLM。
-各脚本内部已有合并 LLM 调用（agent 模式一次输出 wiki+slots），不重复阅读。
+分类先由 Python 完成（pymupdf 前2页 + 关键词评分）；仅边界分数在 --run 时
+调用一次受限 API 分类器复核。高置信度文件和 dry-run 不增加 LLM 调用。
 
 用法：
   python3 .scripts/ingest_inbox.py                    # 扫描+分类，打印分流表（dry run）
@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -28,9 +29,34 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
+ACADEMIC_EDITORIAL_MARKERS = (
+    "专题导言", "特邀编辑", "本期专题", "编者按", "guest editorial", "guest editor",
+)
+
+ACADEMIC_PDF_PATTERNS = (
+    ("abstract", r"\bAbstract\b|摘要"),
+    ("references", r"\bReferences\b|参考文献"),
+    ("arxiv", r"arxiv[:\s]?\d{4}\.\d{4,5}|\b\d{4}\.\d{4,5}\b"),
+    ("doi", r"\bDOI\b|doi\.org"),
+    ("keywords", r"\bKeywords\b|关键词"),
+    ("introduction", r"\bIntroduction\b|引言|\d+\.\s+Introduction"),
+    ("affiliation", r"[Uu]niversity|[Ii]nstitute|[Dd]epartment|[Ll]aboratory"),
+    ("citation", r"\[\d+\]|\([A-Z]\w+\s+et\s+al\."),
+    ("latex", r"\$.*?\$"),
+    ("journal", r"PACS|Phys\.\s*Rev|Rev\.\s*Mod\.\s*Phys"),
+)
+
+MEETING_TXT_PATTERNS = (
+    ("meeting", r"会议"), ("attendee", r"参会"), ("minutes", r"纪要"),
+    ("assistant", r"元宝会议助手|腾讯会议|飞书"),
+    ("timestamp", r"\(\d{2}:\d{2}\)"), ("report", r"汇报"),
+    ("discussion", r"讨论"),
+)
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 import ingest_common as ic
+from llm_structured import call_json
 INBOX = REPO / "inbox"
 SKIP_FILES = {".gitkeep", ".DS_Store", "facts-pending.md"}
 
@@ -79,89 +105,191 @@ def _is_academic_by_metadata(path: Path) -> bool:
         return False
 
 
-def is_academic_pdf(path: Path) -> bool:
-    """检查 PDF 是否为学术论文：读前几页（短篇全读），按学术特征评分。
+def _matched_markers(text: str, patterns: tuple[tuple[str, str], ...]) -> list[str]:
+    return [name for name, pattern in patterns if re.search(pattern, text, re.IGNORECASE)]
 
-    特征（每个 +1）：Abstract/摘要、References/参考文献、arXiv ID、DOI、
-    Keywords/关键词、Introduction/引言、University/Institute/Department、
-    引用模式 [1] 或 (Author et al.)、LaTeX 公式 $、
-    PACS 编号、Phys. Rev. / Rev. Mod. Phys. 期刊标识。
-    """
-    text = read_pdf_text(path, max_pages=2)
-    if not text or len(text) < 200:
-        return _is_academic_by_metadata(path)
-    # 文本提取质量低（自定义字体/旧式 dvips PDF 常见乱码），回退元数据判断
-    if _text_quality(text) < 0.5:
-        return _is_academic_by_metadata(path)
-    score = 0
-    patterns = [
-        r"\bAbstract\b", r"摘要", r"\bReferences\b", r"参考文献",
-        r"arxiv[:\s]?\d{4}\.\d{4,5}", r"\b\d{4}\.\d{4,5}\b",
-        r"\bDOI\b", r"doi\.org", r"\bKeywords\b", r"关键词",
-        r"\bIntroduction\b", r"引言", r"\d+\.\s+Introduction",
-        r"[Uu]niversity|[Ii]nstitute|[Dd]epartment|[Ll]aboratory",
-        r"\[\d+\]", r"\([A-Z]\w+\s+et\s+al\.", r"\$.*?\$",
-        r"PACS", r"Phys\.\s*Rev", r"Rev\.\s*Mod\.\s*Phys",
-    ]
-    for pat in patterns:
-        if re.search(pat, text, re.IGNORECASE):
-            score += 1
-    return score >= 3
+
+def classify_file_details(path: Path) -> dict:
+    """返回确定性类型、得分、命中标记及是否需要 API 边界复核。"""
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        text = read_pdf_text(path, max_pages=2)
+        quality = _text_quality(text)
+        if not text or len(text) < 200 or quality < 0.5:
+            metadata_hit = _is_academic_by_metadata(path)
+            return {
+                "file_type": "paper" if metadata_hit else "document",
+                "score": 3 if metadata_hit else 0,
+                "threshold": 3,
+                "markers": ["academic_pdf_metadata"] if metadata_hit else [],
+                "confidence": "high" if metadata_hit else "unreviewable",
+                "needs_api_review": False,
+                "review_text": "",
+            }
+        markers = _matched_markers(text, ACADEMIC_PDF_PATTERNS)
+        score = len(markers)
+        return {
+            "file_type": "paper" if score >= 3 else "document",
+            "score": score,
+            "threshold": 3,
+            "markers": markers,
+            "confidence": "low" if score in {2, 3} else "high",
+            "needs_api_review": score in {2, 3},
+            "review_text": text[:8000],
+        }
+    if suffix == ".txt":
+        try:
+            text = path.read_text(encoding="utf-8")[:8000]
+        except (OSError, UnicodeError):
+            text = ""
+        markers = _matched_markers(text, MEETING_TXT_PATTERNS)
+        score = len(markers)
+        return {
+            "file_type": "meeting" if score >= 2 else "document",
+            "score": score,
+            "threshold": 2,
+            "markers": markers,
+            "confidence": "low" if score in {1, 2} else "high",
+            "needs_api_review": bool(text) and score in {1, 2},
+            "review_text": text,
+        }
+    return {
+        "file_type": "document", "score": None, "threshold": None,
+        "markers": [f"extension:{suffix or 'none'}"], "confidence": "high",
+        "needs_api_review": False, "review_text": "",
+    }
+
+
+def is_academic_pdf(path: Path) -> bool:
+    return classify_file_details(path)["file_type"] == "paper"
 
 
 def is_meeting_txt(path: Path) -> bool:
-    """检查 .txt 是否为会议纪要：按会议特征评分。
-
-    特征（每个 +1）：会议/参会/纪要、元宝会议助手/腾讯会议/飞书、
-    时间戳 (MM:SS)、汇报、讨论。
-    """
-    try:
-        text = path.read_text(encoding="utf-8")[:3000]
-    except Exception:
-        return False
-    if not text:
-        return False
-    score = 0
-    patterns = [
-        "会议", "参会", "纪要", "元宝会议助手", "腾讯会议", "飞书",
-        r"\(\d{2}:\d{2}\)", "汇报", "讨论",
-    ]
-    for pat in patterns:
-        if re.search(pat, text):
-            score += 1
-    return score >= 2
+    return classify_file_details(path)["file_type"] == "meeting"
 
 
 def classify_file(path: Path) -> str:
-    """返回文件类型：'paper' / 'meeting' / 'document'。"""
+    """兼容入口：返回 'paper' / 'meeting' / 'document'。"""
+    return classify_file_details(path)["file_type"]
+
+
+def classification_review_schema(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if value.get("doc_type") not in {"paper", "meeting", "document", "ambiguous"}:
+        return False
+    if value.get("confidence") not in {"high", "medium", "low"}:
+        return False
+    reasons = value.get("reasons")
+    evidence = value.get("evidence_quotes")
+    return (isinstance(reasons, list) and 1 <= len(reasons) <= 4
+            and all(isinstance(item, str) and item.strip() for item in reasons)
+            and isinstance(evidence, list) and len(evidence) <= 4
+            and all(isinstance(item, str) for item in evidence))
+
+
+def review_low_confidence_classification(path: Path, decision: dict) -> dict:
+    """用受限 API 分类器复核边界样本；不读知识库、不写任何持久层。"""
+    allowed = "paper|document" if path.suffix.lower() == ".pdf" else "meeting|document"
+    prompt = f"""你是受程序约束的文档类型复核组件。只判断来源类型，不生成 Wiki 或三元组。
+
+[来源格式]
+{path.suffix.lower()}
+
+[程序判断]
+type={decision['file_type']}
+score={decision['score']}
+threshold={decision['threshold']}
+markers={json.dumps(decision['markers'], ensure_ascii=False)}
+
+[有限正文]
+{decision.get('review_text', '')}
+
+[要求]
+1. doc_type 只能为 {allowed}|ambiguous。
+2. 只依据有限正文中的明确结构信号；不得用文件名或常识臆测。
+3. 证据不足就返回 ambiguous，不要勉强同意程序。
+4. evidence_quotes 只复制正文中的短原句，最多 4 条。
+5. 只输出 JSON：
+{{"doc_type":"...","confidence":"high|medium|low","reasons":["..."],"evidence_quotes":["..."]}}"""
+    review_id = "classify-" + hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:12]
+    result = call_json(
+        prompt, classification_review_schema, max_tokens=600, retries=1,
+        operation="ingest_type_review", reasoning="fast", transaction_id=review_id,
+        system="你是文档类型复核组件，只输出符合契约的 JSON。",
+    )
+    if not result.get("ok"):
+        return {"status": "review_error", "error": result.get("error", "API 分类复核失败"),
+                "classification_transaction_id": review_id}
+    review = dict(result.get("parsed") or {})
+    review["status"] = "ok"
+    review["classification_transaction_id"] = review_id
+    return review
+
+
+def reconcile_classification(decision: dict, review: dict) -> tuple[bool, str]:
+    """只有 API 中高置信度同意程序类型时放行。"""
+    if review.get("status") != "ok":
+        return False, f"API 分类复核失败: {review.get('error', 'unknown')}"
+    api_type = review.get("doc_type")
+    if api_type == "ambiguous":
+        return False, "API 分类复核认为证据不足（ambiguous）"
+    if api_type != decision.get("file_type"):
+        return False, f"程序/API 类型不一致: {decision.get('file_type')} != {api_type}"
+    if review.get("confidence") == "low":
+        return False, "API 分类复核置信度仍为 low"
+    return True, ""
+
+
+def classify_academic_document(path: Path) -> str | None:
+    """只用强信号自动识别 academic 非论文文档；不确定时要求人工分类。"""
+    text = path.stem
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        return "paper" if is_academic_pdf(path) else "document"
-    if suffix == ".txt":
-        return "meeting" if is_meeting_txt(path) else "document"
-    return "document"
+        text += "\n" + read_pdf_text(path, max_pages=3)
+    elif suffix in {".txt", ".md"}:
+        try:
+            text += "\n" + path.read_text(encoding="utf-8")[:20000]
+        except (OSError, UnicodeError):
+            pass
+    lowered = text.lower()
+    if any(marker in lowered for marker in ACADEMIC_EDITORIAL_MARKERS):
+        return "editorial"
+    if re.search(r"\beditorial\b", lowered):
+        return "editorial"
+    return None
 
 
-def dispatch_command(file_type: str, rel_path: str, subproject: str) -> list[str]:
-    """返回对应类型的分发命令。document 不接受 academic 域,自动映射到 admin。"""
+def dispatch_command(file_type: str, rel_path: str, subproject: str,
+                     document_type: str | None = None) -> list[str]:
+    """返回对应类型的分发命令；academic 文档必须已有显式分类。"""
     if file_type == "paper":
         return [sys.executable, str(REPO / ".scripts/ingest_paper.py"), "--pdf", rel_path]
     if file_type == "meeting":
         return [sys.executable, str(REPO / ".scripts/ingest_meeting.py"),
                 "--txt", rel_path, "--subproject", subproject]
-    doc_subproject = "admin" if subproject == "academic" else subproject
-    return [sys.executable, str(REPO / ".scripts/ingest_document.py"),
-            "--file", rel_path, "--subproject", doc_subproject]
+    if subproject == "academic" and not document_type:
+        raise ValueError("classification_required: academic 文档缺少 document_type")
+    command = [sys.executable, str(REPO / ".scripts/ingest_document.py"),
+               "--file", rel_path, "--subproject", subproject]
+    if document_type:
+        command.extend(["--document-type", document_type])
+    return command
 
 
-def dsi_tool(file_type: str, rel_path: str, subproject: str) -> tuple[str, dict]:
+def dsi_tool(file_type: str, rel_path: str, subproject: str,
+             document_type: str | None = None) -> tuple[str, dict]:
     """返回 DSH ingest tool 名与参数，替代直接 subprocess dispatch。"""
     if file_type == "paper":
         return "ingest_paper_pdf", {"pdf": rel_path}
     if file_type == "meeting":
         return "ingest_meeting_txt", {"file": rel_path, "subproject": subproject}
-    doc_subproject = "admin" if subproject == "academic" else subproject
-    return "ingest_document_file", {"file": rel_path, "subproject": doc_subproject}
+    if subproject == "academic" and not document_type:
+        raise ValueError("classification_required: academic 文档缺少 document_type")
+    args = {"file": rel_path, "subproject": subproject}
+    if document_type:
+        args["document_type"] = document_type
+    return "ingest_document_file", args
 
 
 def scan_inbox() -> list[Path]:
@@ -488,20 +616,36 @@ def _auto_create_hubs(session_id: str) -> dict:
     }
 
 
+def _run_post_ingest_maintenance(results: list[dict], session_id: str) -> tuple[dict, dict, dict]:
+    """Only scan global backlogs when this run actually changed the knowledge base."""
+    if not any(item.get("ok") for item in results):
+        skipped = {"status": "skipped", "reason": "no_successful_files"}
+        return skipped, skipped.copy(), skipped.copy()
+
+    abbr_summary = _auto_resolve_abbreviations()
+    abbr_summary["scope"] = "global_backlog_after_ingest"
+    people_summary = ic.detect_people_page_candidates(REPO)
+    try:
+        from build_people_pages import build_pending_people
+        people_summary["auto_built"] = build_pending_people()
+    except Exception as exc:
+        people_summary["auto_built"] = {"error": str(exc)}
+    return abbr_summary, people_summary, _auto_create_hubs(session_id)
+
+
 def _compact_summary(report: dict, report_path: Path) -> dict:
     """构造给 Agent 的稳定小结果；完整逐文件诊断只保留在 report。"""
     item_statuses = {item.get("status") for item in report["files"]}
     if "failed" in item_statuses or "error" in item_statuses:
         status = "failed"
+    elif "classification_required" in item_statuses:
+        status = "classification_required"
     elif "agent_required" in item_statuses:
         status = "agent_required"
     elif "partial" in item_statuses or report["skipped"]:
         status = "partial"
     else:
         status = "completed"
-    hub_auto = report.get("hub_auto_create", {})
-    if status == "completed" and hub_auto.get("status") == "agent_required":
-        status = "agent_required"
     files = []
     for item in report["files"]:
         compact = {"file": item.get("file"), "status": item.get("status", "unknown")}
@@ -519,18 +663,11 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
         "report_path": str(report_path.relative_to(REPO)),
         "files": files,
     }
-    hub_auto = report.get("hub_auto_create", {})
-    if hub_auto.get("status") == "agent_required":
-        compact["hub_auto_create"] = {
-            "status": "agent_required",
-            "candidates_file": hub_auto.get("candidates_file", ""),
-            "eligible_count": hub_auto.get("eligible_count", 0),
-        }
     return compact
 
 
 def main():
-    ap = argparse.ArgumentParser(description="inbox 统一摄入入口：纯 Python 分流")
+    ap = argparse.ArgumentParser(description="inbox 统一摄入入口：程序分流 + 边界 API 复核")
     ap.add_argument("--file", help="指定单个文件（不扫描 inbox 全部）")
     ap.add_argument("--run", action="store_true", help="实际执行分发（默认 dry run）")
     ap.add_argument("--subproject", default="academic",
@@ -564,13 +701,36 @@ def main():
         print(f"{'文件':<40} {'类型':<10} {'分发':<20}")
         print("-" * 75)
     classified = []
+    academic_document_types: dict[str, str | None] = {}
+    classification_details: dict[str, dict] = {}
+    classification_reviews: dict[str, dict] = {}
+    classification_blocks: dict[str, str] = {}
     for f in files:
         rel = str(f.relative_to(REPO))
-        ftype = classify_file(f)
+        decision = classify_file_details(f)
+        ftype = decision["file_type"]
+        classification_details[rel] = {
+            key: value for key, value in decision.items() if key != "review_text"
+        }
+        if args.run and decision.get("needs_api_review"):
+            review = review_low_confidence_classification(f, decision)
+            classification_reviews[rel] = review
+            confirmed, reason = reconcile_classification(decision, review)
+            if not confirmed:
+                classification_blocks[rel] = reason
+        document_type = None
+        if ftype == "document" and args.subproject == "academic":
+            document_type = classify_academic_document(f)
+            academic_document_types[rel] = document_type
         script = {"paper": "ingest_paper.py", "meeting": "ingest_meeting.py",
                   "document": "ingest_document.py"}[ftype]
         if not args.run:
-            print(f"{f.name:<40} {ftype:<10} {script:<20}")
+            display_type = (f"document:{document_type}" if document_type else
+                            "classification_required" if ftype == "document" and args.subproject == "academic"
+                            else ftype)
+            if decision.get("needs_api_review"):
+                display_type = f"{display_type}?({decision['score']}/{decision['threshold']})"
+            print(f"{f.name:<40} {display_type:<24} {script:<20}")
         classified.append((f, ftype, rel))
 
     if not args.run:
@@ -592,6 +752,7 @@ def main():
     results = []
     tool_outputs = []
     paper_batch = (not args.file and len(classified) > 1 and
+                   not classification_blocks and
                    all(ftype == "paper" for _, ftype, _ in classified))
     if paper_batch:
         content = loop.execute("ingest_paper_inbox", {})
@@ -606,7 +767,46 @@ def main():
                             "status": "failed", "reason": reason})
     else:
         for f, ftype, rel in classified:
-            tool_name, tool_args = dsi_tool(ftype, rel, args.subproject)
+            if rel in classification_blocks:
+                review = classification_reviews.get(rel, {})
+                entry = {
+                    "file": f.name,
+                    "type": ftype,
+                    "ok": False,
+                    "skipped": True,
+                    "status": "classification_required",
+                    "reason": classification_blocks[rel],
+                    "program_classification": classification_details.get(rel, {}),
+                    "api_classification": review,
+                }
+                results.append(entry)
+                loop.session_log.append("ingest/skip", {
+                    "file": rel,
+                    "status": "classification_required",
+                    "reason": entry["reason"],
+                    "program_classification": entry["program_classification"],
+                    "api_classification": review,
+                })
+                continue
+            document_type = academic_document_types.get(rel)
+            if ftype == "document" and args.subproject == "academic" and not document_type:
+                entry = {
+                    "file": f.name,
+                    "type": ftype,
+                    "ok": False,
+                    "skipped": True,
+                    "status": "classification_required",
+                    "reason": "academic 非论文文档缺少强分类信号；请显式选择 editorial 或 academic-reference",
+                }
+                results.append(entry)
+                loop.session_log.append("ingest/skip", {
+                    "file": rel,
+                    "status": "classification_required",
+                    "reason": entry["reason"],
+                })
+                continue
+            tool_name, tool_args = dsi_tool(
+                ftype, rel, args.subproject, document_type=document_type)
             content = loop.execute(tool_name, tool_args)
             tool_outputs.append({"file": f.name, "tool": tool_name, "output": content})
             # 优先使用 DSH 解析出的结构化结果；失败/拒绝时回退字符串判定
@@ -625,6 +825,10 @@ def main():
                         if parsed.get(key) is not None:
                             entry[key] = parsed[key]
                     results.append(entry)
+                elif parsed_status == "classification_required":
+                    reason = (parsed.get("errors") or ["需要显式分类"])[0]
+                    results.append({"file": f.name, "type": ftype, "ok": False,
+                                    "skipped": True, "status": parsed_status, "reason": reason})
                 elif parsed_status in {"agent_required", "failed", "partial"}:
                     if parsed_status == "agent_required":
                         reason = "agent 接管"
@@ -649,21 +853,9 @@ def main():
     dsh_log = dsh_dir / f"{loop.session_log.session_id}.jsonl"
     dsh_log.write_text(loop.session_log.to_jsonl() + "\n", encoding="utf-8")
 
-    # 轻量自动消解：新摄入可能带来新 alias/raw 定义，消解积压的裸缩写
-    abbr_summary = _auto_resolve_abbreviations()
-    abbr_summary["scope"] = "global_backlog_after_ingest"
-
-    # 人物页面候选检测：达标的 person entity 记入 people-pending.jsonl
-    people_summary = ic.detect_people_page_candidates(REPO)
-    # 自动建立极简 people page：达标人物即建页，不再积压 pending 队列
-    try:
-        from build_people_pages import build_pending_people
-        people_summary["auto_built"] = build_pending_people()
-    except Exception as exc:
-        people_summary["auto_built"] = {"error": str(exc)}
-
-    # Hub 自动创建检查：达标候选触发 agent 处理，不达标静默进 backlog
-    hub_summary = _auto_create_hubs(loop.session_log.session_id)
+    # 只有本次真正摄入成功才扫描全局 backlog。分类闸门/全失败必须快速返回。
+    abbr_summary, people_summary, hub_summary = _run_post_ingest_maintenance(
+        results, loop.session_log.session_id)
 
     # 摄入报告持久化：复盘用（引擎选择、逐文件状态、建图统计）
     report_dir = REPO / "cross-domain" / "ingest-reports"
@@ -680,6 +872,8 @@ def main():
         "failed": len([r for r in results if not r["ok"] and not r.get("skipped")]),
         "skipped": len([r for r in results if r.get("skipped")]),
         "files": results,
+        "classification_decisions": classification_details,
+        "classification_reviews": classification_reviews,
         "plan_notes": plan_notes,
         "tool_outputs": tool_outputs,
         "auto_resolve_abbreviations": abbr_summary,

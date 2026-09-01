@@ -26,7 +26,8 @@ type: plan | research | competitor | strategy | project | meeting-summary | cont
 sources:
   - raw/plans/filename.md
 source_type: official-doc | speech-recognition | ocr | web | discussion
-date: YYYY-MM-DD
+date: YYYY-MM-DD            # 来源日期；无可证日期时写 null
+# date_status: unknown      # 仅 date: null 时必填；不得用 created 代替来源日期
 status: active | completed | archived | draft
 domain: "行业/领域"
 # (v4,2026-07-25) tags/keywords/aliases/abbreviations 字段已删,并入 graph.db(aliases 表)/邻接覆盖

@@ -1,11 +1,13 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.2.3
+> Current release: v0.2.4
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 **Paper:** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
 
 **Repository:** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
+
+**Project updates:** [CHANGELOG.md](CHANGELOG.md)
 
 **General-reader introduction (Chinese PDF):** [ASKS Chinese introduction, 2026-09-01 edition](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
 ([version scope](docs/introduction/README.md))
@@ -188,6 +190,11 @@ Configure model backends in `.env` only for workflows that need them. Then read
 `AGENTS.md`: it is the operating contract that classifies a request, protects
 the Raw layer, and dispatches the relevant workflow. For example, the query
 dispatcher can be inspected with:
+
+For PDF ingestion, especially papers with equations, configure a free
+[MinerU API token](https://mineru.net/apiManage/token) as `MINERU_API_TOKEN` in
+`.env`. This is strongly recommended when high-quality Markdown and formula
+preservation matter.
 
 ```bash
 python3 .scripts/route.py --task query --query-stage start
