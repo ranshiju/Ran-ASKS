@@ -118,6 +118,54 @@ def test_structured_parse():
     assert loop._parse_structured("inbox/ 无待摄入文件") is None
 
 
+def test_structured_parse_preserves_top_level_batch_envelope():
+    loop = IngestAgentLoop()
+    payload = {
+        "status": "partial",
+        "phase": "paper_batch",
+        "items": [{
+            "file": "review.pdf",
+            "status": "bibliographic_review_required",
+            "transaction_id": "txn-review",
+        }],
+    }
+    parsed = loop._parse_structured("progress\n" + json.dumps(payload) + "\ndone")
+    assert parsed == payload
+    assert parsed["items"][0]["status"] == "bibliographic_review_required"
+
+
+def test_bibliographic_review_status_and_fields_are_preserved():
+    loop = IngestAgentLoop()
+    payload = {
+        "status": "bibliographic_review_required",
+        "transaction_id": "txn-review",
+        "errors": ["authors 候选校验失败"],
+        "retryable": False,
+        "next_action": "repair_bibliographic_review_then_resume",
+    }
+    loop.last_structured = payload
+    status, handoff = loop._status_from_last()
+    assert status == "bibliographic_review_required"
+    assert handoff == payload
+
+
+def test_completed_file_preserves_actionable_maintenance_handoff():
+    loop = IngestAgentLoop()
+    maintenance = {
+        "status": "agent_required",
+        "receipt_path": "temp/inbox-maintenance/session.json",
+        "actions": [{"component": "abbreviations", "next_action": "agent_review"}],
+        "components": {"abbreviations": {"status": "agent_required"}},
+        "errors": [],
+    }
+    loop.last_structured = {"status": "completed", "maintenance": maintenance}
+    result = loop._make_turn_result("done", "completed")
+    assert result.status == "completed"
+    assert result.handoff == {
+        "status": "completed", "file_status": "completed", "maintenance": maintenance,
+    }
+
+
 def test_dispatch_loop():
     assert isinstance(dispatch_loop("摄入 inbox"), IngestAgentLoop)
     assert isinstance(dispatch_loop("DSH 查询 量子多体系统"), AgentLoop)
@@ -190,6 +238,9 @@ def main():
     test_ingest_loop_has_guard_and_tools()
     test_ingest_loop_convenience_methods()
     test_structured_parse()
+    test_structured_parse_preserves_top_level_batch_envelope()
+    test_bibliographic_review_status_and_fields_are_preserved()
+    test_completed_file_preserves_actionable_maintenance_handoff()
     test_structured_parse_deep_nested()
     test_structured_parse_prefers_status()
     test_structured_parse_ignores_nested_domain_status()

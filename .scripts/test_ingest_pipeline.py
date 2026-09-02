@@ -580,6 +580,39 @@ def test_metadata_venue_abbreviation_does_not_warn():
         conn.close()
 
 
+def test_deterministic_venue_metadata_sets_subtype_on_create_and_reuse():
+    with tempfile.TemporaryDirectory() as directory:
+        db_path = Path(directory) / "graph.db"
+        conn = graph_ingest.gl.connect(db_path)
+        graph_ingest.gl.init_schema(conn)
+        page = "academic/wiki/papers/page"
+        graph_ingest.gl.ensure_node(conn, page, "Page", "page")
+        graph_ingest.gl.ensure_node(conn, "Phys. Rev. B", "Phys. Rev. B", "entity")
+        triples = [
+            {"subject": page, "predicate": "发表于", "object": "Phys. Rev. B"},
+            {"subject": page, "predicate": "发表于", "object": "ICLR"},
+        ]
+        attach_plan = {"decisions": [
+            {"mention": "Phys. Rev. B", "action": "reuse_deterministic_metadata",
+             "target": "Phys. Rev. B", "metadata_kind": "venue"},
+            {"mention": "ICLR", "action": "create_deterministic_metadata",
+             "target": "ICLR", "metadata_kind": "venue"},
+        ]}
+
+        graph_ingest.add_knowledge_edges(conn, page, triples, attach_plan=attach_plan)
+
+        rows = conn.execute(
+            "SELECT path,entity_subtype FROM nodes WHERE path IN ('Phys. Rev. B','ICLR')"
+        ).fetchall()
+        assert {row["path"]: row["entity_subtype"] for row in rows} == {
+            "Phys. Rev. B": "venue", "ICLR": "venue",
+        }
+        assert conn.execute(
+            "SELECT COUNT(*) FROM node_origins WHERE origin_page=?", (page,)
+        ).fetchone()[0] == 2
+        conn.close()
+
+
 def test_first_author_reuse_upgrades_person_subtype():
     """第一作者复用旧裸 entity 时仍须补 person subtype，避免进入 Hub membership。"""
     with tempfile.TemporaryDirectory() as directory:
@@ -1214,6 +1247,59 @@ def test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff():
     assert result["status"] == "agent_required"
 
 
+def test_resume_post_maintenance_uses_unified_inbox_tail():
+    import sys
+    from types import ModuleType
+    import ingest_common as ic
+
+    calls = []
+    fake = ModuleType("ingest_inbox")
+    fake.run_post_ingest_maintenance = lambda results, session_id: calls.append(
+        (results, session_id)
+    ) or {"status": "agent_required", "receipt_path": "temp/receipt.json"}
+    fake.compact_maintenance = lambda envelope: {
+        "status": envelope["status"], "receipt_path": envelope["receipt_path"]
+    }
+    previous = sys.modules.get("ingest_inbox")
+    sys.modules["ingest_inbox"] = fake
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            inbox = repo / "inbox"
+            inbox.mkdir()
+            pending = inbox / "next-paper.pdf"
+            pending.write_bytes(b"pending")
+            state = {
+                "status": "completed", "transaction_id": "txn-1",
+                "source_filename": "paper.pdf", "repo": str(repo),
+            }
+            deferred = ic.run_resume_post_maintenance(state)
+            assert deferred["status"] == "deferred"
+            assert deferred["reason"] == "pending_inbox_files"
+            assert deferred["pending_count"] == 1
+            assert calls == []
+
+            pending.unlink()
+            maintenance = ic.run_resume_post_maintenance(state)
+            assert maintenance == {
+                "status": "agent_required", "receipt_path": "temp/receipt.json"
+            }
+            assert calls == [([{"file": "paper.pdf", "ok": True, "status": "completed"}],
+                              "resume-txn-1")]
+            assert ic.run_resume_post_maintenance({"status": "failed"}) is None
+            fake.run_post_ingest_maintenance = lambda *_args: (_ for _ in ()).throw(
+                RuntimeError("maintenance unavailable")
+            )
+            failed_maintenance = ic.run_resume_post_maintenance(state)
+            assert failed_maintenance["status"] == "error"
+            assert "maintenance unavailable" in failed_maintenance["errors"][0]
+    finally:
+        if previous is None:
+            sys.modules.pop("ingest_inbox", None)
+        else:
+            sys.modules["ingest_inbox"] = previous
+
+
 def main():
     test_nature_author_block()
     test_blank_after_author_block_stops_abstract_words()
@@ -1239,6 +1325,7 @@ def main():
     test_add_knowledge_edges_skips_citation_fragment()
     test_add_knowledge_edges_warns_free_edge_bare_abbreviation()
     test_metadata_venue_abbreviation_does_not_warn()
+    test_deterministic_venue_metadata_sets_subtype_on_create_and_reuse()
     test_first_author_reuse_upgrades_person_subtype()
     test_fallback_single_hit_direction_not_promoted()
     test_free_edge_bare_abbreviation_report_accurate()
@@ -1261,6 +1348,7 @@ def main():
     test_graph_validation_failure_exposes_clean_graph_retry_point()
     test_wiki_validation_retry_budget_hands_off_without_third_full_rewrite()
     test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff()
+    test_resume_post_maintenance_uses_unified_inbox_tail()
     print("ingest pipeline regression: PASS")
 
 

@@ -335,7 +335,7 @@ def cleanup_orphan_references(conn):
     return cleaned
 
 def clean_page_edges(conn, page: str) -> dict:
-    """re-ingest:撤销本页贡献的直接边和间接派生边。
+    """re-ingest:撤销本页贡献的边，并回收可证明由摄入管理的孤儿节点。
 
     新摄入用 edge_origins 精确追踪；历史边没有 lineage 时，以本页 raw source
     为保守后备。共享语义边只移除本页 evidence/origin，仍有其他来源则保留。
@@ -347,6 +347,10 @@ def clean_page_edges(conn, page: str) -> dict:
         "SELECT edge_id, source FROM edge_origins WHERE origin_page=?", (page,)
     ))
     origin_ids = {row[0] for row in origin_rows}
+    node_origin_rows = list(conn.execute(
+        "SELECT node_path FROM node_origins WHERE origin_page=?", (page,)
+    ))
+    node_candidates = {row[0] for row in node_origin_rows}
 
     fm = gl.read_frontmatter(page)
     raw_sources = set()
@@ -371,6 +375,9 @@ def clean_page_edges(conn, page: str) -> dict:
 
     target_ids = direct_ids | origin_ids | legacy_ids
     conn.execute("DELETE FROM edge_origins WHERE origin_page=?", (page,))
+    node_origins_removed = conn.execute(
+        "DELETE FROM node_origins WHERE origin_page=?", (page,)
+    ).rowcount
 
     removed_evidence = 0
     for edge_id, source in origin_rows:
@@ -412,12 +419,42 @@ def clean_page_edges(conn, page: str) -> dict:
     temporal = conn.execute(
         "DELETE FROM temporal_facts WHERE subject=? OR object=?", (page, page)
     ).rowcount
+    managed_nodes_removed = 0
+    for node_path in node_candidates:
+        managed = conn.execute(
+            "SELECT 1 FROM managed_nodes WHERE node_path=?", (node_path,)
+        ).fetchone()
+        if not managed:
+            continue
+        has_origin = conn.execute(
+            "SELECT 1 FROM node_origins WHERE node_path=? LIMIT 1", (node_path,)
+        ).fetchone()
+        has_edge = conn.execute(
+            "SELECT 1 FROM edges WHERE subject=? OR object=? LIMIT 1", (node_path, node_path)
+        ).fetchone()
+        has_temporal = conn.execute(
+            "SELECT 1 FROM temporal_facts WHERE subject=? OR object=? LIMIT 1",
+            (node_path, node_path),
+        ).fetchone()
+        node = conn.execute(
+            "SELECT type FROM nodes WHERE path=?", (node_path,)
+        ).fetchone()
+        if has_origin or has_edge or has_temporal or not node or node[0] != "entity":
+            continue
+        conn.execute("DELETE FROM aliases WHERE node_path=?", (node_path,))
+        conn.execute("DELETE FROM node_origins WHERE node_path=?", (node_path,))
+        conn.execute("DELETE FROM managed_nodes WHERE node_path=?", (node_path,))
+        managed_nodes_removed += conn.execute(
+            "DELETE FROM nodes WHERE path=?", (node_path,)
+        ).rowcount
     conn.commit()
     return {
         "edges_removed": edges_removed,
         "lineage_edges_removed": lineage_edges_removed,
         "edge_evidence_removed": removed_evidence,
         "temporal_facts_removed": temporal,
+        "node_origins_removed": node_origins_removed,
+        "managed_nodes_removed": managed_nodes_removed,
     }
 
 
@@ -850,20 +887,32 @@ def parse_semantic_text(text, page_path):
         venue = next((canonical_venue_name(item) for item in sections.get("期刊", [])
                       if canonical_venue_name(item)), "")
     if venue:
-        triples.append({"subject": page_path, "predicate": "发表于", "object": venue})
+        triples.append({
+            "subject": page_path, "predicate": "发表于", "object": venue,
+            "object_metadata_kind": "venue",
+        })
 
     authors = _frontmatter_authors(fm)
     if authors:
-        triples.append({"subject": authors[0], "predicate": "第一作者", "object": page_path})
+        triples.append({
+            "subject": authors[0], "predicate": "第一作者", "object": page_path,
+            "subject_metadata_kind": "person",
+        })
         corresponding.add(authors[0])
         for name in authors[1:]:
-            triples.append({"subject": name, "predicate": "作者", "object": page_path})
+            triples.append({
+                "subject": name, "predicate": "作者", "object": page_path,
+                "subject_metadata_kind": "person",
+            })
         author_keys = {re.sub(r"\s+", "", name).casefold(): name for name in authors}
         for item in sections.get("通讯作者", []):
             key = re.sub(r"\s+", "", item).casefold()
             name = author_keys.get(key)
             if name and name != authors[0]:
-                triples.append({"subject": name, "predicate": "通讯作者", "object": page_path})
+                triples.append({
+                    "subject": name, "predicate": "通讯作者", "object": page_path,
+                    "subject_metadata_kind": "person",
+                })
                 corresponding.add(name)
     else:
         for item in sections.get("第一作者", []):
@@ -1762,6 +1811,7 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
     new_keywords = {}
     propositions = []  # (prop_path,完整 prop_text)
     flat = []
+    created_node_paths = set()
     resolve_hits = nodes_created = 0
     resolve_ambig = len(skipped_ambiguous_mentions)
     for t in normalized_triples:
@@ -1773,10 +1823,18 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
             if not name:
                 continue
             decision = planned.get(name)
+            metadata_subtype = str((decision or {}).get("metadata_kind") or "").strip()
             if decision and decision["action"].startswith("reuse"):
                 target = decision["target"]
                 t[key] = target
-                if is_person_reference(t, key):
+                if metadata_subtype in {"person", "venue", "institution"}:
+                    conn.execute(
+                        "UPDATE nodes SET entity_subtype=? "
+                        "WHERE path=? AND type='entity' AND "
+                        "COALESCE(entity_subtype,'') IN ('','keyword','concept')",
+                        (metadata_subtype, target),
+                    )
+                elif is_person_reference(t, key):
                     conn.execute(
                         "UPDATE nodes SET entity_subtype='person' "
                         "WHERE path=? AND type='entity' AND "
@@ -1827,10 +1885,15 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                 t[key] = resolved
                 resolve_hits += 1
             else:
-                subtype = "person" if is_person_reference(t, key) else None
+                subtype = (
+                    metadata_subtype
+                    if metadata_subtype in {"person", "venue", "institution"}
+                    else ("person" if is_person_reference(t, key) else None)
+                )
                 if subtype:
                     # 人物节点直接用原名
-                   gl.ensure_node(conn, name, name, "entity", entity_subtype=subtype)
+                    gl.ensure_node(conn, name, name, "entity", entity_subtype=subtype)
+                    created_node_paths.add(name)
                 elif _is_proposition_slot(name, t, key):
                     # proposition 节点：用 extract_descriptive_id 算 path（替换内嵌概念为 ID）
                     prop_path = gl.extract_descriptive_id(name, concept_map, abbr_map)
@@ -1839,7 +1902,10 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                     ).fetchone()
                     if existing_title and existing_title[0] != name:
                         prop_path = name
+                    path_existed = gl.node_exists(conn, prop_path)
                     _ensure_entity_node(conn, name, prop_path, "proposition", title_idx, alias_idx, t, key)
+                    if not path_existed:
+                        created_node_paths.add(t[key])
                 else:
                     # keyword 节点
                     keyword_id = gl.extract_keyword_id(name)
@@ -1849,7 +1915,10 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                         ).fetchone()
                         if existing_title and existing_title[0] != name:
                             keyword_id = name
+                    path_existed = gl.node_exists(conn, keyword_id)
                     _ensure_entity_node(conn, name, keyword_id, "keyword", title_idx, alias_idx, t, key)
+                    if not path_existed:
+                        created_node_paths.add(t[key])
                     new_keywords[name] = t[key]
                 if ambig:
                     resolve_ambig += 1
@@ -1857,6 +1926,16 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                     nodes_created += 1
             if not _is_proposition_slot(name, t, key):
                 concept_map[name] = t[key]
+        origin_source = str(t.get("source") or page_source_note or "")
+        for endpoint in {t.get("subject", ""), t.get("object", "")}:
+            row = conn.execute(
+                "SELECT type FROM nodes WHERE path=?", (endpoint,)
+            ).fetchone()
+            if row and row[0] == "entity":
+                gl.add_node_origin(
+                    conn, endpoint, page_path, origin_source,
+                    managed=endpoint in created_node_paths,
+                )
         if t.get("predicate") in (PROPOSITION_PREDICATES | {"决策"}) \
                 and _is_proposition_slot(obj_raw, t, "object"):
             propositions.append((t["object"], obj_raw))
@@ -1987,7 +2066,13 @@ def merge_nodes(conn, src_node, tgt_node):
             "INSERT OR IGNORE INTO aliases(alias,node_path) VALUES (?,?)",
             (row["alias"], tgt_node),
         )
+    for row in list(conn.execute(
+        "SELECT origin_page,source FROM node_origins WHERE node_path=?", (src_node,)
+    )):
+        gl.add_node_origin(conn, tgt_node, row["origin_page"], row["source"])
     conn.execute("DELETE FROM aliases WHERE node_path=?", (src_node,))
+    conn.execute("DELETE FROM node_origins WHERE node_path=?", (src_node,))
+    conn.execute("DELETE FROM managed_nodes WHERE node_path=?", (src_node,))
     conn.execute("DELETE FROM nodes WHERE path=?", (src_node,))
     return dup_count
 

@@ -102,15 +102,33 @@ def outdated_items() -> list[dict]:
     return items
 
 
+def page_ingest_version(paper_id: str) -> int | None:
+    """Return the stored page pipeline version without mutating graph state."""
+    import graph_lib as gl
+    conn = gl.connect()
+    try:
+        row = conn.execute(
+            "SELECT ingest_version FROM nodes WHERE path=? AND type='page'",
+            (f"academic/wiki/papers/{paper_id}",),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+    finally:
+        conn.close()
+
+
 def new_state_for_reingest(paper_id: str, raw_md_rel: str) -> dict:
     """为 re-ingest 构建状态：跳过 dedup + extract，从 write_wiki 开始。"""
     txn = "reingest-" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + paper_id[:30]
     extract_dir = TEMP_REINGEST / txn
     extract_dir.mkdir(parents=True, exist_ok=True)
     # 复制 raw paper.md 到 extract_dir（step_write_wiki 从此读取）
-    shutil.copy2(REPO / raw_md_rel, extract_dir / "paper.md")
+    raw_md_path = REPO / raw_md_rel
+    shutil.copy2(raw_md_path, extract_dir / "paper.md")
     # raw_dir 取 raw paper.md 的真实父目录（works/references 均可，不再硬编码 references）
     raw_dir = str((REPO / raw_md_rel).parent.relative_to(REPO))
+    md_text = raw_md_path.read_text(encoding="utf-8")
+    bibliography, corrections = ip.repair_archived_bibliography(
+        ip.load_bibliographic_metadata(raw_md_path.parent), md_text)
     return {
         "transaction_id": txn,
         "status": "write_wiki",
@@ -119,7 +137,8 @@ def new_state_for_reingest(paper_id: str, raw_md_rel: str) -> dict:
         "raw_dir": raw_dir,
         "wiki_path": f"academic/wiki/papers/{paper_id}",
         "paper_id": paper_id,
-        "bibliographic_meta": ip.load_bibliographic_metadata((REPO / raw_md_rel).parent),
+        "bibliographic_meta": bibliography,
+        "bibliographic_corrections": corrections,
         "reingest": True,
         "retry_count": 0,
         "errors": [],
@@ -161,6 +180,7 @@ def commit_wiki_and_graph(state: dict) -> dict:
     # 备份旧 wiki 到 extract_dir（安全回滚点）
     if wiki_path.exists():
         backup_path = REPO / "temp" / "inbox-state" / f"{state['transaction_id']}-wiki-old.md"
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(wiki_path, backup_path)
         state["wiki_backup"] = str(backup_path.relative_to(REPO))
     os.replace(new_wiki, wiki_path)
@@ -168,7 +188,17 @@ def commit_wiki_and_graph(state: dict) -> dict:
 
     # 2. 清旧图边 + 重建（复用 ic.step_update_graph，clean=True）
     progress("[3.7] 写图边（graph_ingest --clean）...", flush=True, end=" ")
-    ic.step_update_graph(state, REPO, clean=True)
+    graph_ok, graph_msg = ic.step_update_graph(state, REPO, clean=True)
+    if not graph_ok:
+        backup = REPO / str(state.get("wiki_backup") or "")
+        if state.get("wiki_backup") and backup.is_file():
+            shutil.copy2(backup, wiki_path)
+            state["wiki_restored"] = True
+        state["status"] = "failed"
+        state["errors"] = [graph_msg or "graph update failed"]
+        inbox_state.save(state["transaction_id"], state)
+        return state
+    ip._record_graph_quality_warnings(state)
     report = state.get("graph_report") or {}
     edges = report.get("edges_added", "?")
     removed = report.get("cleaned_page", "") and report.get("edges_removed", 0)
@@ -278,6 +308,9 @@ def resume_reingest(txn_id: str, verbose: bool) -> int:
         "transaction_id": txn_id,
         "errors": state.get("errors", []),
         "edges_added": (state.get("graph_report") or {}).get("edges_added"),
+        "quality_status": "degraded" if state.get("quality_warnings") else "complete",
+        "quality_warnings": state.get("quality_warnings", []),
+        "bibliographic_corrections": state.get("bibliographic_corrections", []),
     }, ensure_ascii=False, indent=2))
     return 0 if state["status"] == "completed" else 1
 
@@ -291,6 +324,7 @@ def main() -> int:
     src.add_argument("--resume", help="恢复 agent_required 中断的事务 ID（走 clean commit）")
     parser.add_argument("--dry-run", action="store_true", help="仅列出清单，不执行")
     parser.add_argument("--verbose", action="store_true", help="进度打印到 stdout")
+    parser.add_argument("--force", action="store_true", help="即使页面已是当前管线版本仍重新生成")
     args = parser.parse_args()
 
     # resume：恢复 agent_required 中断的事务（走 re-ingest 自有 clean commit）
@@ -310,6 +344,21 @@ def main() -> int:
             print(json.dumps({"status": "error", "error": f"raw 不存在: {args.raw}"}))
             return 1
         paper_id = raw_path.parent.name
+        import graph_lib as gl
+        stored_version = page_ingest_version(paper_id)
+        if (not args.force and stored_version is not None
+                and stored_version >= gl.CURRENT_PIPELINE_VERSION):
+            print(json.dumps({
+                "status": "completed",
+                "items": [{
+                    "paper_id": paper_id,
+                    "status": "up_to_date",
+                    "ingest_version": stored_version,
+                    "current_pipeline_version": gl.CURRENT_PIPELINE_VERSION,
+                    "api_called": False,
+                }],
+            }, ensure_ascii=False, indent=2))
+            return 0
         items = [{
             "paper_id": paper_id,
             "raw_md": str(raw_path.relative_to(REPO)),
@@ -336,6 +385,9 @@ def main() -> int:
             "transaction_id": state["transaction_id"],
             "errors": state.get("errors", []),
             "edges_added": (state.get("graph_report") or {}).get("edges_added"),
+            "quality_status": "degraded" if state.get("quality_warnings") else "complete",
+            "quality_warnings": state.get("quality_warnings", []),
+            "bibliographic_corrections": state.get("bibliographic_corrections", []),
         })
         if state["status"] == "agent_required":
             print(json.dumps({

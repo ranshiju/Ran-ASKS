@@ -79,13 +79,13 @@ People page 没有画像时只是暂不参与 Hub，不得报错或告警。
 - `merges`：Scope + 成员原型过近的 Hub 对。
 - 各候选的代表节点、类型和分数，供 Agent 做语义判断。
 
-上述候选不产生 ERROR/WARN。单一 embedding 分数只能发现候选，不能证明 Hub 应创建、分裂或合并——但摄入末期对达标候选簇（cohesion≥0.6 且 members≥4）自动触发 agent 生成 title/Scope/parent 并 create_hub（见下文「自动建 Hub」），不达标候选静默进 backlog。split/merge 仍只产候选，不自动写生命周期。
+上述候选不产生 ERROR/WARN。单一 embedding 分数只能发现候选，不能证明 Hub 应创建、分裂或合并。统一 inbox 收尾对达标新 Hub 候选，以及成员超限且通过稳定二分闸的既存 Hub，自动触发主 Agent 定义 canonical 语义并调用受控写入口；不达标候选静默进 backlog。merge 仍只产候选，不自动写生命周期。
 
 ## 分裂
 
 代码按类型化成员 profile 做 K=2 二分聚类，生成稳定多簇候选与每簇代表成员（top-5）。节点数量只触发分析，不构成分裂依据。**成员级区分度闸**：两簇质心 cosine < 0.85（`SPLIT_DISTINCTION_THRESHOLD`）才有效；≥ 0.85 判为不可分。
 
-Agent 依据代表成员（揭示簇语义）+ 父 Hub Scope（子 Scope 须是父 Scope 的特化）为每子簇生成 title + Scope，写成 JSON plan 后 `split-apply --agent-confirmed` 运行三道验证闸：① Scope 区分度（两子 Scope cosine < 0.85）；② 路由探针（success ≥ 0.80, margin ≥ 0.03）；③ 通过后创建子 Hub + 迁移 membership。普通 ingest 不自动分裂。
+Agent 依据代表成员（揭示簇语义）+ 父 Hub Scope（子 Scope 须是父 Scope 的特化）为每子簇生成 title + Scope，写成 JSON plan 后 `split-apply --agent-confirmed` 运行三道验证闸：① Scope 区分度（两子 Scope cosine < 0.85）；② 路由探针（success ≥ 0.80, margin ≥ 0.03）；③ 通过后创建子 Hub + 迁移 membership。单文件底层 ingest 只产候选；统一 `ingest_inbox.py` 收尾把达标分裂候选交给主 Agent，并在同一摄入任务中执行该受控入口。
 
 ## 血亲机制
 
@@ -107,15 +107,24 @@ Hub 成员数 > 20（`HUB_MEMBER_LIMIT`）时 `dynamics_plan` 报告 `overloaded
 - 写或更新 title、Scope 和 parent。
 - 显式确认 split/merge。
 - 摄入末期 auto-create 触发时为达标候选簇生成 title/Scope/parent（不经 API LLM）。
+- 摄入末期 auto-split 触发时按候选簇代表成员生成子 Hub title/Scope，原样保留程序给出的 members，并调用 `split-apply --agent-confirmed`。
 
 API LLM 不决定成员、聚类、分裂、合并或 canonical Scope。普通成员变化不自动改 Scope。
 
 ## 操作入口
 
-```bash
-## 自动建 Hub
+## inbox 收尾自动维护
 
-摄入末期 `ingest_inbox.py` 调 `hub_semantics auto-create --check`，对全图 unassigned 普通节点跑 `dynamics_plan(apply_membership=True)` + `analyze_new_hubs`。候选簇 cohesion≥0.6 且 members≥4 为达标，写入 `temp/hub-auto-create/<session>.json` 并在摄入报告设 `hub_auto_create.status=agent_required`，触发 agent（强模型）为每簇生成 title/Scope/parent，写定义文件后调 `hub_semantics auto-create --apply <file>` 由 `create_hub(agent_confirmed=True)` 落盘并 apply membership。不达标候选静默进 backlog，全流程不向用户报告。
+摄入末期 `ingest_inbox.py` 汇总各成功文件的 `hub_dynamics.affected_nodes`，再调 `hub_semantics auto-create --check --node ...` 做增量规划：
+
+- unassigned 候选簇 cohesion≥0.6 且 members≥4 时写入 `temp/hub-auto-create/<session>.json`，主 Agent 生成 title/Scope/parent 后调用 `hub_semantics auto-create --apply <file>`。
+- canonical Hub 的 `聚类于` 成员数超过上限、尚无子 Hub，且 `analyze_split` 通过成员数量、小簇稳定性和质心区分度闸时，写入 `temp/hub-auto-split/<session>.json`。主 Agent 为每簇生成 title/Scope、原样使用候选 members，随后调用 `hub_semantics split-apply --parent <hub> --plan <file> --agent-confirmed`。
+- 已有子 Hub 的超限父 Hub 写入 `temp/hub-auto-redistribute/<session>.json`。handoff 必须列出每个子 Hub 的 canonical Scope readiness 与 blockers；任一子 Hub 缺正式 Scope 时禁止重分配。
+- 论文 canonical Scope 路由达到 floor 但 margin 不足时写入 `temp/hub-route-review/<session>.json`，只保留 canonical 候选交主 Agent 判断，不自动写方向边。
+- membership 先汇总并去重 profile、Scope 与 prototype 文本，再单次进入 embedding cache；provider 可按 batch 上限分块，但禁止逐节点串行请求 API。维护超过 120 秒返回可重试 `deferred`，不得改变文件摄入终态。
+- 紧凑摄入结果保留文件摄入终态，并另带有界的 `hub_maintenance` 交接摘要；维护候选不得把已完成文件改报为失败或 `agent_required`。
+
+不达标候选只计入 backlog，不向用户报告。canonical 定义仍只由主 Agent 确认，API LLM 不参与 Hub 生命周期决策。
 
 ```bash
 # 检查达标候选（纯代码，不创建 Hub）
@@ -125,6 +134,7 @@ python3 .scripts/hub_semantics.py auto-create --check
 python3 .scripts/hub_semantics.py auto-create --apply <definitions.json>
 ```
 
+```bash
 # 查看一个节点的类型化 profile
 python3 .scripts/hub_semantics.py profile <node-id>
 
@@ -156,6 +166,6 @@ python3 .scripts/hub_semantics.py merge --survivor <hub> --retired <hub> --scope
 
 ## 论文路由
 
-论文 Wiki 仍保留可 locate 的 `## 研究方向定位`。程序只比较该句与 active Hub Scope；top-1 同时达到 threshold 和 margin 才写 `论文 Wiki → 主要研究 → Hub`，边 locator 指向该句。
+论文 Wiki 仍保留可 locate 的 `## 研究方向定位`。程序只比较该句与 active、具有正式 `## Scope` 的 canonical Hub；legacy title 只用于候选诊断。canonical top-1 同时达到 floor 与 margin 才写 `论文 Wiki → 主要研究 → Hub`，边 locator 指向该句。达到 floor 但 margin 不足时必须 abstain 并生成 route-review handoff。
 
 这条边表达“论文的主要研究方向”，与可重建的 `普通节点 → 聚类于 → Hub` 不混用。

@@ -438,6 +438,9 @@ def _aps_venue_from_doi(doi, year=""):
 
 def _venue_key(value):
     value = re.sub(r"\s*\((?:19|20)\d{2}\)\s*$", "", str(value or "").strip())
+    value = re.sub(r"^(?:proceedings|findings)\s+of\s+", "", value, flags=re.I)
+    value = re.sub(r"^the\s+", "", value, flags=re.I)
+    value = re.sub(r"\s*,?\s*(?:pages?|pp\.)\s+\S+.*$", "", value, flags=re.I)
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
@@ -799,9 +802,9 @@ def graph_checks(path):
                 errors.append(f"graph: 期刊元数据含占位符节点 {sorted(set(bad_venues))}")
             expected_venue = str(fm.get("venue") or "").strip()
             if expected_venue:
-                norm_expected = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", expected_venue).casefold()
+                norm_expected = _venue_key(expected_venue)
                 matched = any(
-                    (norm := re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", label).casefold())
+                    (norm := _venue_key(label))
                     and (norm in norm_expected or norm_expected in norm)
                     for label in venue_labels if not placeholder.search(label.replace(" ", ""))
                 )

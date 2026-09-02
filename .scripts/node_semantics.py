@@ -199,7 +199,44 @@ def _decomposed_exact_candidates(
     conn, name: str, node_types: list[str] | None = None
 ) -> list[dict]:
     """用双语名分解结果精确查 title/alias；完整名称优先于缩写。"""
+    generic_components = {
+        "变换", "方法", "材料", "模型", "系统", "理论", "算法", "困难", "完全",
+        "困难问题", "完全问题",
+        "transformation", "method", "material", "model", "system", "theory", "algorithm",
+        "hard", "complete",
+    }
+    def is_identity_component(component: str) -> bool:
+        value = component.strip()
+        if value.casefold() in generic_components:
+            return False
+        # A lone title-case token inside a longer Chinese phrase (for example
+        # Majorana/Kitaev) is a mention, not a bilingual full-name equivalent.
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", value) and not re.fullmatch(
+            r"[A-Z]{2,}[A-Za-z0-9]*", value
+        ):
+            return False
+        return True
+
     components = gl.decompose_name_to_aliases(name)
+    without_parenthetical = re.sub(r"[(（][^)）]*[)）]\s*$", "", name).strip()
+    if (without_parenthetical != name
+            and re.search(r"[A-Za-z]", without_parenthetical)
+            and re.search(r"[\u3400-\u9fff]", without_parenthetical)):
+        components.insert(0, without_parenthetical)
+        complexity_variant = re.sub(
+            r"^([A-Z]{2,}[A-Za-z0-9-]*)困难问题$", r"\1难问题",
+            without_parenthetical,
+        )
+        if complexity_variant != without_parenthetical:
+            components.insert(1, complexity_variant)
+    english_tail = re.search(
+        r"([A-Za-z][A-Za-z0-9 .:/+&'\-]*[A-Za-z0-9])$", without_parenthetical
+    )
+    if english_tail:
+        bilingual_prefix = without_parenthetical[:english_tail.start()].strip()
+        if bilingual_prefix and re.search(r"[\u3400-\u9fff]", bilingual_prefix):
+            components.insert(0, bilingual_prefix)
+    components = list(dict.fromkeys(filter(is_identity_component, components)))
     if not components:
         return []
     long_forms = [item for item in components if not re.fullmatch(r"[A-Z]{2,}[A-Za-z0-9\-]*", item)]

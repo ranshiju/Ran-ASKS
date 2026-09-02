@@ -128,6 +128,29 @@ def test_merge_duplicate_edges_preserves_evidence():
         assert evidence == {"s1"}
 
 
+def test_targeted_orphan_cleanup_is_explicit_and_conservative():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = make_conn(directory)
+        gl.ensure_node(conn, "orphan", "Polluted title", "entity")
+        gl.insert_aliases(conn, "orphan", ["bad alias"])
+        gl.ensure_node(conn, "connected", "Connected", "entity")
+        gl.ensure_node(conn, "page", "Page", "page")
+        insert_edge(conn, "connected", "涉及", "page")
+        conn.commit()
+
+        dry = module.execute_targeted_orphans(conn, ["orphan", "connected", "page"], False)
+        assert [item["decision"] for item in dry] == ["remove", "blocked", "blocked"]
+        assert conn.execute("SELECT 1 FROM nodes WHERE path='orphan'").fetchone()
+
+        applied = module.execute_targeted_orphans(conn, ["orphan", "connected", "page"], True)
+        assert applied[0]["removed"] is True
+        assert not conn.execute("SELECT 1 FROM nodes WHERE path='orphan'").fetchone()
+        assert not conn.execute("SELECT 1 FROM aliases WHERE node_path='orphan'").fetchone()
+        assert conn.execute("SELECT 1 FROM nodes WHERE path='connected'").fetchone()
+        assert conn.execute("SELECT 1 FROM nodes WHERE path='page'").fetchone()
+        conn.close()
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
     for test in tests:

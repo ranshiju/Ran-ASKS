@@ -60,6 +60,10 @@ CHECKS = {
     "legacy_edge_confidence": "warn",
     "duplicate_semantic_edge": "warn",
     "dangling_temporal_fact_endpoint": "error",
+    "dangling_node_origin": "error",
+    "dangling_managed_node": "error",
+    "invalid_managed_node_type": "error",
+    "managed_node_missing_origin": "error",
     "invalid_temporal_date": "error",
     "inverted_temporal_window": "error",
 }
@@ -191,6 +195,39 @@ def validate_graph(conn, config: dict) -> dict:
             if len(findings["errors"]) < sample_limit:
                 _add(findings, "error", "inverted_temporal_window",
                      f"temporal_fact id={row['id']} valid_from={valid_from} > valid_until={valid_until}", row)
+
+    for row in conn.execute(
+        "SELECT o.node_path,o.origin_page,o.source FROM node_origins o "
+        "LEFT JOIN nodes n ON n.path=o.node_path WHERE n.path IS NULL"
+    ):
+        type_counts["dangling_node_origin"] += 1
+        if len(findings["errors"]) < sample_limit:
+            _add(findings, "error", "dangling_node_origin",
+                 f"node_origin 指向缺失节点: {row['node_path']}", row)
+
+    for row in conn.execute(
+        "SELECT m.node_path,m.created_origin_page,n.type FROM managed_nodes m "
+        "LEFT JOIN nodes n ON n.path=m.node_path"
+    ):
+        if row["type"] is None:
+            type_counts["dangling_managed_node"] += 1
+            if len(findings["errors"]) < sample_limit:
+                _add(findings, "error", "dangling_managed_node",
+                     f"managed_node 指向缺失节点: {row['node_path']}", row)
+            continue
+        if row["type"] != "entity":
+            type_counts["invalid_managed_node_type"] += 1
+            if len(findings["errors"]) < sample_limit:
+                _add(findings, "error", "invalid_managed_node_type",
+                     f"managed_node 不是 entity: {row['node_path']}", row)
+        if not conn.execute(
+            "SELECT 1 FROM node_origins WHERE node_path=? AND origin_page=? LIMIT 1",
+            (row["node_path"], row["created_origin_page"]),
+        ).fetchone():
+            type_counts["managed_node_missing_origin"] += 1
+            if len(findings["errors"]) < sample_limit:
+                _add(findings, "error", "managed_node_missing_origin",
+                     f"managed_node 缺少创建页 origin: {row['node_path']}", row)
 
     duplicate_rows = conn.execute(
         "SELECT subject, predicate, object, COALESCE(confidence,'') AS confidence, COUNT(*) AS n "

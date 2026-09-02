@@ -7,11 +7,11 @@
 
 ## 用途
 
-`inbox/` 暂存待分类和摄入的新文件。统一入口先由程序评分归类；仅边界样本在实际执行时由受限 API LLM 复核。
+`inbox/` 暂存待分类和摄入的新文件。统一入口先由程序评分归类；不确定样本在实际执行时由受限 API LLM 裁决，LLM 仍不确定时由用户兜底。
 
 ## 工作流程
 
-> **代码驱动优先**：论文 PDF → `ingest_paper.py`；会议纪要 .txt → `ingest_meeting.py`；学术非论文及行政/教学/商业文档 → `ingest_document.py`（详见 `memory/playbooks/index.md` 对应条目）。PDF/TXT 边界分数只在 `--run` 时调用 API 复核，API 不一致或证据不足则在事务前停止。`academic` 非论文必须分类为 `editorial` 或 `academic-reference`，不确定时停在 `classification_required`，不得回退到 `admin`。
+> **代码驱动优先**：论文 PDF → `ingest_paper.py`；会议纪要 .txt → `ingest_meeting.py`；学术非论文及行政/教学/商业文档 → `ingest_document.py`（详见 `memory/playbooks/index.md` 对应条目）。PDF/TXT 不确定分数只在 `--run` 时调用 API 裁决；中/高置信度具体类型可纠正程序初判，API 仍为 `ambiguous`、低置信或调用失败时才在事务前停止。`academic` 非论文必须分类为 `editorial` 或 `academic-reference`，不确定时停在 `classification_required`，不得回退到 `admin`。
 
 1. 用户触发处理（"处理 inbox""整理 inbox"等）
 2. **只读分流（必经）**：先运行 `python3 .scripts/inbox_plan.py --output temp/inbox-plan.json`。仅当 manifest 标记 `batch_eligible: true` 时才可按 batch 路由；否则每个普通文件都按 `create` 路由。`facts-pending.md` 仅在有事实条目时归档。
@@ -37,13 +37,16 @@
    - **ingest_check PASS**：wiki 页 `ERROR=0`
    - 三件任一缺失 → **不清空 inbox**，定位问题修复后重验；不得传 `--cleanup` 或删除 inbox 原始文件
    - 全部齐全 → 记录回执路径后进入步骤 6
+   - 成功后由统一收尾维护依次处理缩写、人物页和 Hub；直接 `--resume` 成功也必须走同一入口。若 inbox 仍有普通待摄入文件，入口返回 `maintenance.status=deferred`，由最后一个完成项执行一次全局维护，禁止每篇重复扫描。文件终态见 `status`/`file_status`，维护终态见 `maintenance.status`，完整回执写 `temp/inbox-maintenance/`。类型化缩写与 Hub canonical 候选由主 Agent 批量处理，不能用维护 handoff 覆盖文件成功终态。Hub membership 的 profile/Scope/prototype embedding 必须汇总去重后批量请求；路由 margin 不足写 `hub-route-review`，已有子 Hub 的超限父 Hub写 `hub-auto-redistribute` 并附 Scope readiness/blockers。120 秒维护超时只返回可重试 `deferred`。
 7. 清理：删除临时区 `temp/inbox-extract/`；清空 inbox 原始文件（保留 `facts-pending.md` 和 `.gitkeep`）。清理必须递归处理隐藏目录；成功/失败阶段写入 `temp/inbox-state/<transaction-id>.json`，以便恢复。
 
 **事务入口（批量/非标准场景）**：`.scripts/inbox_ingest.py plan` → 每项 `prepare` → `complete`。仅用于 `ingest_paper.py`/`ingest_document.py` 未覆盖的批量或非标准场景；常规单篇摄入走 playbook 代码驱动脚本。
 
 **全论文批量**：`ingest_paper.py --inbox` 保持 graph_ready 两阶段屏障。quiet 模式的 prepare 最多并发 2 项，以重叠 MinerU/LLM 等待；graph commit 始终按文件顺序串行，verbose 模式也保持串行以免进度输出交错。
 
-**论文语义故障处理**：`ingest_paper.py` 对结构性语义错误早停并返回 `agent_required`，保留已通过的 wiki 与语义槽文件；修正后以 `--resume <transaction-id>` 恢复，程序会在落位/写图前重新校验。弱 API 模型的 wiki 撰写会接收由摘要、定理和结论确定性组成的关键证据包，定理/等式/性能结论必须保留对象、条件和比较基准。完整命题不再交专用 LLM 原子化；程序只链接本页已确认概念或主图唯一精确 title/alias，无匹配/歧义静默保留裸 proposition，不算 degraded。语义边不得从“关联/构造/表示”自行推导“基于”等方向关系；只有作者明示的限制或近似代价可标为“局限性”。描述性对象与裸缩写属于 warning，优先走两级局部修复与复验，不回退整篇生成。未登记但格式合格的新谓词会记录为候选并自动治理，不自动成为正式契约。
+**论文书目预审**：DOI/arXiv 候选只从 PDF 元数据与 `paper.md` 前部身份区提取，遇到 References/Bibliography/参考文献标题立即截止，不得把正文引文当成本篇标识。`venue`/`doi`/`arxiv_id` 候选目录为空时，空值及 `ambiguous` 状态由程序直接编译，不把无事实可选的状态 bookkeeping 交给 Worker；目录非空时仍必须显式选择或标记歧义。
+
+**论文语义故障处理**：`ingest_paper.py` 对结构性语义错误早停并返回 `agent_required`，保留已通过的 wiki 与语义槽文件；修正后以 `--resume <transaction-id>` 恢复，程序会在落位/写图前重新校验。弱 API 模型的 wiki 撰写会接收由摘要、定理和结论确定性组成的关键证据包，定理/等式/性能结论必须保留对象、条件和比较基准。语义槽少于 4 条时只定向重抽一次 slots，不重写已通过校验的 Wiki，并保留两次中覆盖更高的一版；仍稀疏才以 `graph_semantic_coverage_sparse` 降级提交。完整命题不再交专用 LLM 原子化；程序只链接本页已确认概念或主图唯一精确 title/alias，无匹配/歧义静默保留裸 proposition，不算 degraded。语义边不得从“关联/构造/表示”自行推导“基于”等方向关系；只有作者明示的限制或近似代价可标为“局限性”。描述性对象与裸缩写属于 warning，优先走两级局部修复与复验，不回退整篇生成。未登记但格式合格的新谓词会记录为候选并自动治理，不自动成为正式契约。
 
 执行授权后应连续完成当前文件的“落位 → 巩固 → 校验 → 清理”；只有校验失败、目标冲突、需要用户确认的高风险实体或用户主动插话时才暂停。状态更新只报告已完成阶段与下一项阻塞，不把正常阶段切换当作暂停点。
 

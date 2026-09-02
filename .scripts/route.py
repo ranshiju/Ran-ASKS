@@ -208,8 +208,9 @@ ROUTES = {
     },
     "hub": {
         "file": "operations/HUB.md",
-        "sections": ["最小模型", "论文路由", "Agent 与代码职责",
-                     "Agent 生成定义后创建 Hub", "分裂", "合并", "兼容与迁移"],
+        "sections": ["最小模型", "成员归属", "Hub 动力学", "论文路由",
+                     "Agent 与代码职责", "inbox 收尾自动维护",
+                     "分裂", "合并", "兼容与迁移"],
     },
     "build": {
         "file": "operations/shared-conventions.md",

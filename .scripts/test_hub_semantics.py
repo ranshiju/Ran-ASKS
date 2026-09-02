@@ -204,6 +204,36 @@ def test_overlapping_membership_and_targeted_apply():
         ).fetchone()
 
 
+def test_membership_embeddings_are_batched_across_profiles():
+    conn = make_db()
+    with TempRepo() as root:
+        hub = "academic/wiki/hubs/q"
+        scope = "研究量子系统的状态、演化及其信息处理问题。"
+        add_hub(conn, root, hub, "量子系统", scope)
+        node_ids = ["concept-a", "concept-b", "concept-c"]
+        for node_id in node_ids:
+            gl.ensure_node(conn, node_id, node_id, "entity", entity_subtype="keyword")
+
+        calls = []
+        old_embed = hs._embed
+
+        def fake_embed(texts):
+            calls.append(list(texts))
+            return np.array([[1.0, 0.0] for _ in texts], dtype=float)
+
+        hs._embed = fake_embed
+        try:
+            plan = hs.plan_memberships(conn, node_ids)
+        finally:
+            hs._embed = old_embed
+
+        assert len(calls) == 1
+        assert len(calls[0]) == len(set(calls[0]))
+        assert set(node_ids).issubset(calls[0])
+        assert scope in calls[0]
+        assert all(item["memberships"] == [hub] for item in plan["nodes"])
+
+
 def test_membership_hysteresis_and_embedding_failure_preserve_edges():
     conn = make_db()
     with TempRepo() as root:
@@ -303,6 +333,115 @@ def test_auto_create_check_finds_eligible_and_apply_creates_hubs():
         ).fetchone()
 
 
+def test_auto_create_check_surfaces_stable_overload_split():
+    conn = make_db()
+    overloaded = [{
+            "hub": "academic/wiki/hubs/big",
+            "member_count": 21,
+            "limit": 20,
+            "children": [],
+            "action": "split_candidate",
+        }]
+    candidate = {
+        "decision": "agent_definition_required",
+        "hub": "academic/wiki/hubs/big",
+        "count": 21,
+        "clusters": [{"members": ["a"]}, {"members": ["b"]}],
+    }
+    old_plan = hs.plan_memberships
+    old_new_hubs = hs.analyze_new_hubs
+    old_overload = hs._check_hub_overload
+    old_analyze = hs.analyze_split
+    hs.plan_memberships = lambda _conn, _nodes=None: {"node_count": 0, "nodes": []}
+    hs.analyze_new_hubs = lambda _conn, _nodes=None: {"candidates": []}
+    hs._check_hub_overload = lambda _conn: overloaded
+    hs.analyze_split = lambda _conn, _hub: candidate
+    try:
+        check = hs.auto_create_check(conn)
+    finally:
+        hs.plan_memberships = old_plan
+        hs.analyze_new_hubs = old_new_hubs
+        hs._check_hub_overload = old_overload
+        hs.analyze_split = old_analyze
+    assert check["status"] == "agent_required"
+    assert check["eligible"] == []
+    assert len(check["split_candidates"]) == 1
+    assert check["split_candidates"][0]["trigger"] == "member_limit"
+    assert check["split_candidates"][0]["member_count"] == 21
+
+
+def test_auto_create_check_surfaces_existing_child_redistribution():
+    conn = make_db()
+    overloaded = [{
+        "hub": "academic/wiki/hubs/parent",
+        "member_count": 23,
+        "limit": 20,
+        "children": ["academic/wiki/hubs/child"],
+        "action": "redistribute",
+    }]
+    old_plan = hs.plan_memberships
+    old_new_hubs = hs.analyze_new_hubs
+    old_overload = hs._check_hub_overload
+    old_list_hubs = hs.list_hubs
+    hs.plan_memberships = lambda _conn, _nodes=None: {"node_count": 0, "nodes": []}
+    hs.analyze_new_hubs = lambda _conn, _nodes=None: {"candidates": []}
+    hs._check_hub_overload = lambda _conn: overloaded
+    hs.list_hubs = lambda _conn: [
+        hs.HubDefinition(
+            "academic/wiki/hubs/child", "Legacy child", "Legacy child", "",
+            "active", False, "legacy_title",
+        )
+    ]
+    try:
+        check = hs.auto_create_check(conn)
+    finally:
+        hs.plan_memberships = old_plan
+        hs.analyze_new_hubs = old_new_hubs
+        hs._check_hub_overload = old_overload
+        hs.list_hubs = old_list_hubs
+    assert check["status"] == "agent_required"
+    assert check["split_candidates"] == []
+    assert check["redistribution_candidates"] == [{
+        **overloaded[0],
+        "decision": "canonical_scope_required",
+        "trigger": "member_limit",
+        "ready_for_redistribution": False,
+        "child_scopes": [{
+            "path": "academic/wiki/hubs/child",
+            "title": "Legacy child",
+            "scope": "Legacy child",
+            "canonical": False,
+            "ready": False,
+        }],
+        "blockers": [{
+            "path": "academic/wiki/hubs/child",
+            "reason": "missing_canonical_scope",
+        }],
+        "agent_task": "define and validate missing child Hub scopes before redistribution",
+    }]
+
+
+def test_auto_create_check_is_incremental_and_read_only():
+    conn = make_db()
+    with TempRepo() as root:
+        hub = "academic/wiki/hubs/q"
+        add_hub(conn, root, hub, "量子系统", "研究量子系统的状态与演化问题。")
+        gl.ensure_node(conn, "affected", "量子态", "entity", entity_subtype="keyword")
+        gl.ensure_node(conn, "unrelated", "无关节点", "entity", entity_subtype="keyword")
+        old_embed = hs._embed
+        hs._embed = lambda texts: np.array([[1.0, 0.0] for _ in texts], dtype=float)
+        try:
+            check = hs.auto_create_check(conn, ["affected"])
+        finally:
+            hs._embed = old_embed
+        assert check["scope"] == "incremental"
+        assert check["affected_node_count"] == 1
+        assert check["membership_apply"] == {"applied": False, "reason": "check_read_only"}
+        assert not conn.execute(
+            "SELECT 1 FROM edges WHERE predicate=?", (hs.MEMBERSHIP_PREDICATE,)
+        ).fetchone()
+
+
 def test_refresh_after_ingest_is_local_and_membership_only():
     conn = make_db()
     with TempRepo() as root:
@@ -349,6 +488,23 @@ def test_scope_route_requires_canonical_scope_and_margin():
     assert result["node_id"] == "open"
 
 
+def test_scope_route_rejects_close_canonical_tie():
+    definitions = [
+        hs.HubDefinition("quantum-info", "量子信息", "研究量子计算、通信与模拟问题。", "", "active", True, "scope"),
+        hs.HubDefinition("many-body", "强关联电子系统", "研究量子多体系统、纠缠与数值模拟问题。", "", "active", True, "scope"),
+    ]
+    old_embed = hs._embed
+    hs._embed = lambda _texts: np.array([[1.0, 0.0], [0.61, 0.79], [0.60, 0.80]])
+    try:
+        result = hs.route_profile("量子多体系统中的量子模拟", definitions)
+    finally:
+        hs._embed = old_embed
+    assert result["decision"] == "candidates"
+    assert result["reason"] == "scope_margin_too_small"
+    assert result["node_id"] is None
+    assert result["margin"] < hs.ROUTE_MARGIN
+
+
 def test_legacy_title_is_candidate_not_canonical_identity():
     definitions = [
         hs.HubDefinition("legacy", "张量网络", "张量网络", "", "active", False, "legacy_title"),
@@ -360,7 +516,30 @@ def test_legacy_title_is_candidate_not_canonical_identity():
     finally:
         hs._embed = old_embed
     assert result["decision"] == "candidates"
+    assert result["reason"] == "no_canonical_scope"
     assert result["candidates"][0]["scope_mode"] == "legacy_title"
+
+
+def test_legacy_top_candidate_does_not_block_canonical_route():
+    definitions = [
+        hs.HubDefinition("legacy", "拓扑态", "拓扑态", "", "active", False, "legacy_title"),
+        hs.HubDefinition(
+            "canonical", "量子信息", "研究量子信息中的拓扑态、纠缠与计算问题。",
+            "", "active", True, "scope",
+        ),
+    ]
+    old_embed = hs._embed
+    hs._embed = lambda _texts: np.array([
+        [1.0, 0.0], [1.0, 0.0], [0.8, 0.6],
+    ])
+    try:
+        result = hs.route_profile("拓扑量子态", definitions)
+    finally:
+        hs._embed = old_embed
+    assert result["candidates"][0]["path"] == "legacy"
+    assert result["decision"] == "resolved"
+    assert result["node_id"] == "canonical"
+    assert result["reason"] == "scope_threshold_and_margin"
 
 
 def test_agent_confirmed_create_writes_scope_without_seeds_or_keywords():

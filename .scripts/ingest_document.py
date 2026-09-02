@@ -1023,26 +1023,12 @@ def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
     return ic.validate_semantics(state, REPO, _doc_allowed_predicates(state))
 
 
-def _build_repair_prompt(warnings: list[dict], is_second_pass: bool = False) -> str:
-    items = "\n".join(f"- {w['line']} → {w['reason']}" for w in warnings)
-    second_note = "\n[注意] 前次修复仍有残留，请更精准地修正。" if is_second_pass else ""
-    return f"""请修正以下语义槽中的问题，只输出修正后的行（保持 主体|谓词|客体 格式）：
-
-[问题]
-{items}
-{second_note}
-
-[要求]
-- descriptive_phrase：客体改为规范概念名/实体名，去除逗号、句号、描述性短语
-- bare_abbreviation：含英文缩写时写为「中文英文(缩写)」格式
-- duplicate_line：删除重复行
-只修正有问题的行，不改正确的行。输出修正后的完整行。"""
-
-
 def step_repair_slots(state: dict, warnings: list[dict]) -> tuple[bool, str]:
-    """3.6b 局部修复：两级降级链 → agent 兜底（委托 ingest_common）。"""
-    return ic.repair_slots(state, REPO, warnings, _build_repair_prompt,
-                          step_validate_semantics, non_blocking_issues=NON_BLOCKING_ISSUES)
+    """3.6b：机械修复优先，剩余问题最多一次结构化 Worker。"""
+    return ic.repair_slots(
+        state, REPO, warnings, step_validate_semantics,
+        non_blocking_issues=NON_BLOCKING_ISSUES,
+    )
 
 
 # ===== 落位（委托 ingest_common）=====
@@ -1172,6 +1158,7 @@ def main() -> None:
                         default="supplementary", help="关联类型（默认 supplementary 补充材料）")
     parser.add_argument("--verbose", action="store_true", help="进度打印到 stdout")
     args = parser.parse_args()
+    is_resume = bool(args.resume)
     if args.resume:
         state = inbox_state.load(args.resume)
         if not state:
@@ -1222,8 +1209,12 @@ def main() -> None:
         state["status"] = "failed"
         state["errors"] = [f"未预期异常: {type(exc).__name__}: {exc}"]
         inbox_state.save(state["transaction_id"], state)
+    if is_resume:
+        maintenance = ic.run_resume_post_maintenance(state)
+        if maintenance is not None:
+            state["maintenance"] = maintenance
     if state["status"] == "completed":
-        print(json.dumps({
+        payload = {
             "status": "completed",
             "admin_id": state.get("admin_id"),
             "raw_dir": state.get("raw_dir"),
@@ -1232,7 +1223,10 @@ def main() -> None:
             "wiki_path": state.get("wiki_path"),
             "graph_report": state.get("graph_report"),
             "transaction_id": state["transaction_id"],
-        }, ensure_ascii=False, indent=2))
+        }
+        if state.get("maintenance") is not None:
+            payload["maintenance"] = state["maintenance"]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif state["status"] == "duplicate_found":
         print(json.dumps({
             "status": "duplicate_found",

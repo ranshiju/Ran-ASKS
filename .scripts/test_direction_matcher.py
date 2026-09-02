@@ -59,6 +59,9 @@ def test_ensure_hub_seeds_supplements_from_keywords():
     import importlib.util
     from pathlib import Path
 
+    import embed_helper
+    import numpy as np
+
     SCRIPT = Path(__file__).with_name("hub_split.py")
     spec = importlib.util.spec_from_file_location("hub_split_test", SCRIPT)
     hs = importlib.util.module_from_spec(spec)
@@ -69,7 +72,14 @@ def test_ensure_hub_seeds_supplements_from_keywords():
     hub_rel = "academic/wiki/hubs/test-ensure-seeds"
     hub_file = REPO / (hub_rel + ".md")
 
+    original_embed_cached_batch = embed_helper.embed_cached_batch
+
+    def fake_embed_cached_batch(texts, cache_type="keyword"):
+        del cache_type
+        return np.array([[float(i + 1), 1.0] for i, _ in enumerate(texts)])
+
     try:
+        embed_helper.embed_cached_batch = fake_embed_cached_batch
         hub_file.parent.mkdir(parents=True, exist_ok=True)
         # hub with keywords but empty seeds
         hub_file.write_text(
@@ -95,6 +105,7 @@ def test_ensure_hub_seeds_supplements_from_keywords():
         re_read = hs._read_hub_seeds(hub_rel)
         assert re_read == seeds, "seeds not persisted to frontmatter"
     finally:
+        embed_helper.embed_cached_batch = original_embed_cached_batch
         if hub_file.exists():
             hub_file.unlink()
 
@@ -175,6 +186,9 @@ def test_split_hub_accepts_graph_node_path_without_suffix():
     import importlib.util
     from pathlib import Path
 
+    import embed_helper
+    import numpy as np
+
     script = Path(__file__).with_name("hub_split.py")
     spec = importlib.util.spec_from_file_location("hub_split_path_test", script)
     hs = importlib.util.module_from_spec(spec)
@@ -185,6 +199,7 @@ def test_split_hub_accepts_graph_node_path_without_suffix():
     original_threshold = hs.SPLIT_THRESHOLD
     original_parse = hs.parse_hub_keywords
     original_cluster = hs.cluster_hub_keywords
+    original_embed_cached_batch = embed_helper.embed_cached_batch
     try:
         hs.SPLIT_THRESHOLD = 2
 
@@ -197,6 +212,9 @@ def test_split_hub_accepts_graph_node_path_without_suffix():
             {"seeds": ["seed-a"], "keywords": ["keyword-a"]},
             {"seeds": ["seed-b"], "keywords": ["keyword-b"]},
         ]
+        embed_helper.embed_cached_batch = lambda texts, cache_type="keyword": np.array(
+            [[1.0, 0.0] if text.endswith("a") else [0.0, 1.0] for text in texts]
+        )
         report = hs.split_hub("academic/wiki/hubs/test-graph-path", dry_run=True)
         assert "skipped" not in report
         assert observed_paths == ["academic/wiki/hubs/test-graph-path.md"]
@@ -204,13 +222,33 @@ def test_split_hub_accepts_graph_node_path_without_suffix():
         hs.SPLIT_THRESHOLD = original_threshold
         hs.parse_hub_keywords = original_parse
         hs.cluster_hub_keywords = original_cluster
+        embed_helper.embed_cached_batch = original_embed_cached_batch
 
 
 def test_collect_all_hub_keywords_returns_list():
-    """collect_all_hub_keywords: 返回非空 list(知识库已有 keyword)。"""
-    kws = module.collect_all_hub_keywords()
+    """collect_all_hub_keywords: 从隔离的 hub fixture 返回去重 keyword。"""
+    import hub_split
+
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        hubs = repo / "academic/wiki/hubs"
+        hubs.mkdir(parents=True)
+        (hubs / "fixture.md").write_text(
+            "# fixture\n\n## 关键词\n\n- tensor network\n- 量子计算\n",
+            encoding="utf-8",
+        )
+        original_repo = module.REPO
+        original_hub_split_repo = hub_split.REPO
+        try:
+            module.REPO = repo
+            hub_split.REPO = repo
+            kws = module.collect_all_hub_keywords()
+        finally:
+            module.REPO = original_repo
+            hub_split.REPO = original_hub_split_repo
+
     assert isinstance(kws, list)
-    assert len(kws) > 0, "expected existing keywords, got empty"
+    assert set(kws) == {"tensor network", "量子计算"}
 
 
 def test_match_keyword_exact_match():

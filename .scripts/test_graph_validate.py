@@ -151,6 +151,34 @@ def test_temporal_fact_inverted_window_is_error():
         assert report["errors"]
 
 
+def test_node_lineage_contract_violations_are_errors():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = sqlite3.connect(Path(directory) / "graph.db")
+        conn.row_factory = sqlite3.Row
+        gl.init_schema(conn)
+        insert(conn, "academic/wiki/a", "page")
+        insert(conn, "entity-without-origin", "entity", "keyword")
+        conn.execute(
+            "INSERT INTO node_origins(node_path,origin_page,source) VALUES(?,?,?)",
+            ("missing", "academic/wiki/a", "raw/a#L1"),
+        )
+        conn.execute(
+            "INSERT INTO managed_nodes(node_path,created_origin_page) VALUES(?,?)",
+            ("academic/wiki/a", "academic/wiki/a"),
+        )
+        conn.execute(
+            "INSERT INTO managed_nodes(node_path,created_origin_page) VALUES(?,?)",
+            ("entity-without-origin", "academic/wiki/a"),
+        )
+        conn.commit()
+        report = module.validate_graph(conn, module.DEFAULTS)
+        conn.close()
+        assert report["counts"]["dangling_node_origin"] == 1
+        assert report["counts"]["invalid_managed_node_type"] == 1
+        assert report["counts"]["managed_node_missing_origin"] == 2
+        assert report["errors"]
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
     for test in tests:

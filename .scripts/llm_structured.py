@@ -69,6 +69,7 @@ REASONING_POLICIES = {
 }
 OPERATION_REASONING_PROFILES = {
     "ingest_type_review": "fast",
+    "ingest_relation_review": "fast",
     "ingest_api_keywords": "fast",
     "ingest_api_repair": "fast",
     "ingest_api_claims": "standard",
@@ -76,7 +77,6 @@ OPERATION_REASONING_PROFILES = {
     "ingest_wiki_repair": "fast",
     "ingest_semantic_extract": "standard",
     "ingest_semantic_fill": "fast",
-    "ingest_semantic_repair": "deep",
     # 命题拆分是短 JSON 抽取，不需要长链推理。
     "ingest_proposition": "fast",
     "ingest_bibliographic_review": "fast",
@@ -168,7 +168,6 @@ def load_env() -> dict[str, str]:
         "QUERY_BACKEND", "INGEST_BACKEND", "LLM_API_BASE", "LLM_API_KEY", "LLM_MODEL",
         "INGEST_KEYWORD_API_BASE", "INGEST_KEYWORD_API_KEY", "INGEST_KEYWORD_MODEL",
         "INGEST_REPAIR_API_BASE", "INGEST_REPAIR_API_KEY", "INGEST_REPAIR_MODEL",
-        "INGEST_REPAIR2_API_BASE", "INGEST_REPAIR2_API_KEY", "INGEST_REPAIR2_MODEL",
         "INGEST_GENERATION_API_BASE", "INGEST_GENERATION_API_KEY", "INGEST_GENERATION_MODEL",
         "INGEST_PROPOSITION_API_BASE", "INGEST_PROPOSITION_API_KEY", "INGEST_PROPOSITION_MODEL",
     }
@@ -215,8 +214,6 @@ def api_profiles(config: dict[str, str], operation: str) -> list[dict[str, str]]
         prefixes = ["INGEST_KEYWORD"]
     elif operation == "ingest_api_repair":
         prefixes = ["INGEST_REPAIR"]
-    elif operation == "ingest_semantic_repair":
-        prefixes = ["INGEST_REPAIR2"]
     elif operation in {"ingest_wiki_write", "ingest_wiki_repair"}:
         prefixes = ["INGEST_GENERATION"]
     elif operation == "ingest_proposition":

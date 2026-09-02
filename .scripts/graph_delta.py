@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from collections import deque
+import re
 from typing import Callable, Iterable
 
 import graph_lib as gl
@@ -25,6 +26,7 @@ class GraphDelta:
     deterministic_edges: int
     semantic_edges: int
     canonical_endpoints: list[str] = field(default_factory=list)
+    deterministic_metadata_endpoints: dict[str, str] = field(default_factory=dict)
     hard_errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -51,6 +53,8 @@ def _clean_edge(edge: dict, page: str) -> tuple[dict | None, str | None]:
     cleaned.update({"subject": subject, "predicate": predicate, "object": obj})
     cleaned["subject_is_canonical"] = bool(cleaned.get("subject_is_canonical"))
     cleaned["object_is_canonical"] = bool(cleaned.get("object_is_canonical"))
+    cleaned["subject_metadata_kind"] = str(cleaned.get("subject_metadata_kind") or "").strip()
+    cleaned["object_metadata_kind"] = str(cleaned.get("object_metadata_kind") or "").strip()
     cleaned["source"] = str(cleaned.get("source") or cleaned.get("locator") or "").strip()
     cleaned.pop("locator", None)
     return cleaned, None
@@ -118,9 +122,13 @@ def build_document_delta(
     raw_set = set(raw_packages)
     mentions = []
     endpoint_modes: dict[str, list[bool]] = {}
+    metadata_modes: dict[str, set[str]] = {}
     for edge in cleaned_triples:
         for role in ("subject", "object"):
             endpoint = edge[role]
+            metadata_kind = str(edge.get(f"{role}_metadata_kind") or "").strip()
+            if metadata_kind:
+                metadata_modes.setdefault(endpoint, set()).add(metadata_kind)
             if endpoint == page or endpoint in raw_set or endpoint in mentions:
                 if endpoint != page and endpoint not in raw_set:
                     endpoint_modes.setdefault(endpoint, []).append(
@@ -137,6 +145,10 @@ def build_document_delta(
         endpoint for endpoint in mentions
         if endpoint_modes.get(endpoint) and all(endpoint_modes[endpoint])
     ]
+    deterministic_metadata_endpoints = {
+        endpoint: next(iter(kinds))
+        for endpoint, kinds in metadata_modes.items() if len(kinds) == 1
+    }
 
     deterministic_triple_count = max(0, min(int(deterministic_triple_count), len(cleaned_triples)))
     return GraphDelta(
@@ -148,6 +160,7 @@ def build_document_delta(
         deterministic_edges=len(source_edges) + deterministic_triple_count,
         semantic_edges=len(cleaned_triples) - deterministic_triple_count,
         canonical_endpoints=canonical_endpoints,
+        deterministic_metadata_endpoints=deterministic_metadata_endpoints,
         hard_errors=hard_errors,
     )
 
@@ -190,6 +203,29 @@ def _mention_node_types(delta: GraphDelta, mention: str) -> list[str] | None:
     return ["entity"]
 
 
+def _venue_identity_key(value: str) -> str:
+    text = str(value or "").strip().casefold()
+    text = re.sub(r"^(?:proceedings|findings)\s+of\s+", "", text)
+    text = re.sub(r"^the\s+", "", text)
+    text = re.sub(r"\s*,?\s*(?:pages?|pp\.)\s+\S+.*$", "", text)
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text)
+
+
+def _deterministic_metadata_candidates(conn, mention: str, kind: str) -> list[str]:
+    if kind != "venue":
+        return []
+    key = _venue_identity_key(mention)
+    if not key:
+        return []
+    rows = conn.execute(
+        "SELECT path,title FROM nodes WHERE type='entity' AND COALESCE(entity_subtype,'') IN ('','venue')"
+    ).fetchall()
+    return sorted({
+        row["path"] for row in rows
+        if _venue_identity_key(row["title"] or row["path"]) == key
+    })
+
+
 def plan_attachment(conn, delta: GraphDelta) -> dict:
     """形成只读 attach plan；显式 ID 与 surface mention 使用不同解析入口。"""
     title_idx, alias_idx, suffix_idx = gl.build_name_index(conn)
@@ -198,6 +234,41 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
     ambiguous = []
     new_nodes = []
     for mention in delta.boundary_mentions:
+        metadata_kind = delta.deterministic_metadata_endpoints.get(mention)
+        if metadata_kind:
+            candidates = _exact_candidates(mention, title_idx, alias_idx, suffix_idx)
+            if not candidates:
+                candidates = _deterministic_metadata_candidates(conn, mention, metadata_kind)
+            if len(candidates) == 1:
+                target = candidates[0]
+                decisions.append({
+                    "mention": mention,
+                    "action": "reuse_deterministic_metadata",
+                    "target": target,
+                    "metadata_kind": metadata_kind,
+                    "candidate_count": 1,
+                })
+                merge_map[mention] = target
+            elif len(candidates) > 1:
+                item = {
+                    "mention": mention,
+                    "action": "abstain_ambiguous_metadata",
+                    "metadata_kind": metadata_kind,
+                    "candidates": candidates,
+                    "candidate_count": len(candidates),
+                }
+                decisions.append(item)
+                ambiguous.append(item)
+            else:
+                decisions.append({
+                    "mention": mention,
+                    "action": "create_deterministic_metadata",
+                    "target": mention,
+                    "metadata_kind": metadata_kind,
+                    "reason": "locked_frontmatter_metadata",
+                })
+                new_nodes.append(mention)
+            continue
         if mention in delta.canonical_endpoints:
             resolution = ns.resolve_node_id(conn, mention)
             if resolution.get("decision") == "resolved":

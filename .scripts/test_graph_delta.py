@@ -72,6 +72,43 @@ def test_exact_and_unique_alias_are_reused():
     assert plan["merge_map"]["Stable Alias"] == "academic/wiki/topics/alias-target"
 
 
+def test_locked_venue_uses_predicate_specific_identity_key():
+    conn = make_db()
+    existing = "the 2024 Conference on Empirical Methods in Natural Language Processing"
+    mention = "Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing"
+    add_node(conn, existing, existing)
+    delta = gd.build_document_delta(
+        "academic/wiki/papers/example",
+        {"title": "Example"},
+        [{
+            "subject": "本论文", "predicate": "发表于", "object": mention,
+            "object_metadata_kind": "venue",
+        }],
+        deterministic_triple_count=1,
+    )
+    plan = gd.plan_attachment(conn, delta)
+    assert plan["merge_map"][mention] == existing
+    assert plan["abstained"] == []
+    assert plan["decisions"][0]["action"] == "reuse_deterministic_metadata"
+
+
+def test_locked_venue_without_match_creates_local_metadata_node():
+    conn = make_db()
+    mention = "Proceedings of the Example Conference 2030"
+    delta = gd.build_document_delta(
+        "academic/wiki/papers/example",
+        {"title": "Example"},
+        [{
+            "subject": "本论文", "predicate": "发表于", "object": mention,
+            "object_metadata_kind": "venue",
+        }],
+        deterministic_triple_count=1,
+    )
+    plan = gd.plan_attachment(conn, delta)
+    assert mention in plan["new_nodes"]
+    assert plan["decisions"][0]["action"] == "create_deterministic_metadata"
+
+
 def test_bilingual_name_reuses_unique_decomposed_title():
     conn = make_db()
     add_node(conn, "rag", "检索增强生成")

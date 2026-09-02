@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ingest_paper.py 纯代码函数回归测试。"""
 import importlib.util
+import json
 import sqlite3
 import sys
 import tempfile
@@ -23,6 +24,11 @@ def test_paper_id_prefers_pdf_bibliographic_year_over_citation_year():
     md = "# FEVER: a Large-scale Dataset\n\nJames Thorne\n\nDagan et al. (2009) introduced NLI.\n"
     pid = module.generate_paper_id(md, year_hint="2018")
     assert pid == "thorne-2018-fever-large-scale-dataset", f"got {pid}"
+
+
+def test_extract_title_from_md_strips_aps_volume_header_prefix():
+    md = "# PHYSICAL REVIEW B 96, 195145 (2017) Machine learning topological states\n"
+    assert module.extract_title_from_md(md) == "Machine learning topological states"
 
 
 def test_chinese_paper_id_uses_stable_unicode_components():
@@ -157,6 +163,46 @@ def test_extract_pdf_bibliography_reads_published_conference_venue():
     assert result["evidence"]["venue"] == "pdf_first_page"
 
 
+def test_extract_pdf_bibliography_reads_iop_citation_venue():
+    import fitz
+    with tempfile.TemporaryDirectory() as directory:
+        pdf_path = Path(directory) / "paper.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text(
+            (72, 72),
+            "To cite this article: Antonio Acin et al 2018 New J. Phys. 20 080201",
+        )
+        doc.save(pdf_path)
+        doc.close()
+        result = module.extract_pdf_bibliography(pdf_path)
+    assert result["year"] == "2018"
+    assert result["venue"] == "New J. Phys. 20, 080201 (2018)"
+    assert result["evidence"]["venue"] == "pdf_first_page"
+
+
+def test_repeated_title_author_block_extends_candidates_and_quality_gate():
+    md = """# Roadmap Paper
+
+To cite this article: Alice Example et al 2024 New J. Phys. 20 123456
+
+# Roadmap Paper
+
+Alice Example<sup>1</sup>, Bob Builder<sup>2</sup> and Carol Researcher<sup>3</sup>
+
+Example University, Department of Physics
+"""
+    candidates = module.build_bibliographic_candidates(
+        {"title": "Roadmap Paper", "authors": ["Alice Example"], "year": "2024"},
+        md,
+    )
+    assert {"Alice Example", "Bob Builder", "Carol Researcher"}.issubset(candidates["authors"])
+    warnings = module.bibliographic_quality_warnings(
+        {"title": "Roadmap Paper", "authors": ["Alice Example"]}, md,
+    )
+    assert [item["issue"] for item in warnings] == ["bibliographic_authors_incomplete"]
+
+
 def test_bibliographic_candidates_include_full_acl_first_page_venues():
     cases = [
         (
@@ -179,6 +225,19 @@ def test_bibliographic_candidates_include_full_acl_first_page_venues():
             "first_page_evidence": [evidence],
         }, "# Test paper\n")
         assert expected in candidates["venue"], candidates["venue"]
+
+
+def test_bibliographic_candidates_exclude_reference_only_arxiv_id():
+    md_text = """# Paper without a preprint identifier
+
+Alice Example
+
+## References
+
+Related Work, arXiv:1701.07056.
+"""
+    candidates = module.build_bibliographic_candidates({}, md_text)
+    assert candidates["arxiv_id"] == []
 
 
 def test_extract_pdf_bibliography_reads_iop_wrapper_second_page_header():
@@ -279,6 +338,200 @@ DOI: 10.1103/PhysRevB.84.100406
     assert merged["authors"] == ["Johannes Reuther", "Ronny Thomale", "Simon Trebst"]
     assert "Institutfur Theorie" in merged["authors_rejected"]
     assert merged["review"]["locked"] is True
+
+
+def test_bibliographic_normalization_moves_external_affiliation_and_locks_ids():
+    review = {
+        "bibliographic": {
+            "authors": {
+                "value": ["Alice Example"],
+                "rejected": ["Example University"],
+            },
+        },
+        "review_notes": [],
+    }
+    candidates = {
+        "authors": ["Alice Example"],
+        "doi": ["10.1234/example"],
+        "arxiv_id": ["2401.01234"],
+    }
+    changes = module.normalize_bibliographic_review(review, candidates)
+    bib = review["bibliographic"]
+    assert bib["authors"]["rejected"] == []
+    assert "Example University" in review["review_notes"][0]
+    assert bib["doi"]["value"] == "10.1234/example"
+    assert bib["arxiv_id"]["value"] == "2401.01234"
+    assert len(changes) == 3
+
+
+def _candidate_id_decision(catalog, *, title_id=None):
+    fields = catalog["fields"]
+    only = lambda field: fields[field][0]["id"] if fields[field] else ""
+    selected_title = title_id or only("title")
+    return {
+        "protocol_version": module.BIBLIOGRAPHIC_DECISION_PROTOCOL,
+        "doc_type": "paper",
+        "review_status": "clean",
+        "selections": {
+            "title": {"candidate_id": selected_title, "status": "confirmed"},
+            "authors": {
+                "accepted_ids": [item["id"] for item in fields["authors"]],
+                "rejected_ids": [],
+                "status": "confirmed",
+            },
+            "year": {"candidate_id": only("year"), "kind": "published", "status": "confirmed"},
+            "venue": {
+                "candidate_id": only("venue"),
+                "status": "confirmed" if fields["venue"] else "ambiguous",
+            },
+            "doi": {
+                "candidate_id": only("doi"),
+                "status": "confirmed" if fields["doi"] else "ambiguous",
+            },
+            "arxiv_id": {
+                "candidate_id": only("arxiv_id"),
+                "status": "confirmed" if fields["arxiv_id"] else "ambiguous",
+            },
+        },
+        "conflicts": [],
+        "review_notes": [],
+    }
+
+
+def test_candidate_id_catalog_compiles_without_free_form_values():
+    bibliography = {
+        "title": "Stable Paper",
+        "authors": ["Alice Example", "Example University"],
+        "year": "2024",
+        "doi": "10.1234/stable",
+        "evidence": {"year": "pdf_first_page.published"},
+    }
+    candidates = {
+        "title": ["Stable Paper"],
+        "authors": ["Alice Example", "Example University"],
+        "year": ["2024"], "venue": [], "doi": ["10.1234/stable"], "arxiv_id": [],
+    }
+    catalog = module.build_bibliographic_candidate_catalog(
+        candidates, bibliography, "# Stable Paper\n\nAlice Example\n",
+    )
+    decision = _candidate_id_decision(catalog)
+    decision["selections"]["authors"]["accepted_ids"] = ["author-01"]
+    decision["selections"]["authors"]["rejected_ids"] = ["author-02"]
+    review = module.compile_bibliographic_decision(decision, catalog)
+    assert review["bibliographic"]["authors"]["value"] == ["Alice Example"]
+    assert review["bibliographic"]["authors"]["rejected"] == ["Example University"]
+    assert review["bibliographic"]["doi"]["value"] == "10.1234/stable"
+
+    invalid = _candidate_id_decision(catalog, title_id="title-99")
+    try:
+        module.compile_bibliographic_decision(invalid, catalog)
+    except ValueError as exc:
+        assert "未知 candidate_id" in str(exc)
+    else:
+        raise AssertionError("unknown candidate IDs must be rejected")
+
+
+def test_empty_optional_catalog_is_compiled_by_program():
+    candidates = {
+        "title": ["Stable Paper"], "authors": ["Alice Example"], "year": ["2024"],
+        "venue": [], "doi": [], "arxiv_id": [],
+    }
+    catalog = module.build_bibliographic_candidate_catalog(candidates, {}, "# Stable Paper\n")
+    decision = _candidate_id_decision(catalog)
+    for field in ("venue", "doi", "arxiv_id"):
+        decision["selections"][field]["status"] = "confirmed"
+    review = module.compile_bibliographic_decision(decision, catalog)
+    for field in ("venue", "doi", "arxiv_id"):
+        assert review["bibliographic"][field] == {
+            "value": "", "evidence": "", "status": "ambiguous",
+        }
+
+
+def test_empty_selection_with_candidates_still_requires_ambiguous_status():
+    candidates = {
+        "title": ["Stable Paper"], "authors": ["Alice Example"], "year": ["2024"],
+        "venue": ["ICLR 2024"], "doi": [], "arxiv_id": [],
+    }
+    catalog = module.build_bibliographic_candidate_catalog(candidates, {}, "# Stable Paper\n")
+    decision = _candidate_id_decision(catalog)
+    decision["selections"]["venue"] = {"candidate_id": "", "status": "confirmed"}
+    try:
+        module.compile_bibliographic_decision(decision, catalog)
+    except ValueError as exc:
+        assert "venue 未选择 candidate_id" in str(exc)
+    else:
+        raise AssertionError("non-empty candidate catalogs still require an explicit decision")
+
+
+def test_bibliographic_fast_path_skips_worker_call():
+    bibliography = {
+        "title": "Stable Paper", "authors": ["Alice Example"], "year": "2024",
+        "venue": "Journal", "doi": "10.1234/stable", "arxiv_id": "",
+        "evidence": {"year": "pdf_first_page.published"},
+    }
+    candidates = {
+        "doc_type": "paper", "title": ["Stable Paper"], "authors": ["Alice Example"],
+        "year": ["2024"], "venue": ["Journal"], "doi": ["10.1234/stable"],
+        "arxiv_id": [], "evidence": {}, "first_page_evidence": [],
+    }
+    originals = module.build_bibliographic_candidates, module.call_json
+    module.build_bibliographic_candidates = lambda *_args: candidates
+    module.call_json = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("deterministic fast path must not call worker"))
+    try:
+        result = module.review_bibliographic_metadata(
+            bibliography, "# Stable Paper\n\nAlice Example\n", "txn-fast")
+    finally:
+        module.build_bibliographic_candidates, module.call_json = originals
+    assert result["ok"] is True
+    assert result["worker"]["skipped"] is True
+    assert result["worker"]["skip_reason"] == "deterministic_fast_path"
+    assert result["worker"]["api_called"] is False
+
+
+def test_bibliographic_worker_cache_prevents_resume_recall():
+    with tempfile.TemporaryDirectory() as directory:
+        bibliography = {
+            "title": "Stable Paper", "authors": ["Alice Example"], "year": "2024",
+            "doi": "10.1234/stable", "evidence": {"year": "pdf_first_page.published"},
+        }
+        candidates = {
+            "doc_type": "paper", "title": ["Stable Paper", "Stable Paper Extended"],
+            "authors": ["Alice Example"], "year": ["2024"], "venue": [],
+            "doi": ["10.1234/stable"], "arxiv_id": [], "evidence": {},
+            "first_page_evidence": [],
+        }
+        original_repo = module.REPO
+        original_candidates = module.build_bibliographic_candidates
+        original_call = module.call_json
+        calls = []
+        module.REPO = Path(directory)
+        module.build_bibliographic_candidates = lambda *_args: candidates
+
+        def worker(prompt, schema, **_kwargs):
+            catalog = module.build_bibliographic_candidate_catalog(
+                candidates, bibliography, "# Stable Paper\n\nAlice Example\n",
+            )
+            decision = _candidate_id_decision(catalog)
+            calls.append(prompt)
+            return {"ok": True, "parsed": decision, "history": [{"attempt": 1}]}
+
+        module.call_json = worker
+        try:
+            first = module.review_bibliographic_metadata(
+                bibliography, "# Stable Paper\n\nAlice Example\n", "txn-cache")
+            module.call_json = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("cache hit must not recall worker"))
+            second = module.review_bibliographic_metadata(
+                bibliography, "# Stable Paper\n\nAlice Example\n", "txn-cache")
+        finally:
+            module.REPO = original_repo
+            module.build_bibliographic_candidates = original_candidates
+            module.call_json = original_call
+    assert first["ok"] is True and first["worker"]["api_called"] is True
+    assert second["ok"] is True and second["worker"]["cache_hit"] is True
+    assert second["worker"]["api_called"] is False
+    assert len(calls) == 1
 
 
 def test_validate_bibliographic_review_rejects_invented_author():
@@ -401,6 +654,53 @@ def test_resume_stored_bibliographic_validation_error_without_model_call():
         assert state["bibliographic_review"]["status"] == "ok"
         assert state["bibliographic_review_required"] is False
         assert state["errors"] == []
+
+
+def test_resume_candidate_id_decision_compiles_and_caches_without_worker():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        extract_dir = root / "temp/inbox-extract/txn-id"
+        extract_dir.mkdir(parents=True)
+        md_text = "# Paper\n\nAlice Example\n\nDOI: 10.1234/paper\n"
+        (extract_dir / "paper.md").write_text(md_text, encoding="utf-8")
+        bibliography = {
+            "title": "Paper", "authors": ["Alice Example"], "year": "2025",
+            "doi": "10.1234/paper", "evidence": {"year": "pdf_first_page.published"},
+        }
+        candidates = {
+            "title": ["Paper"], "authors": ["Alice Example"], "year": ["2025"],
+            "venue": [], "doi": ["10.1234/paper"], "arxiv_id": [],
+        }
+        catalog = module.build_bibliographic_candidate_catalog(
+            candidates, bibliography, md_text,
+        )
+        decision = _candidate_id_decision(catalog)
+        (extract_dir / "bibliographic-review.json").write_text(
+            module.json.dumps(decision), encoding="utf-8",
+        )
+        state = {
+            "transaction_id": "txn-id",
+            "status": "agent_required",
+            "extract_dir": "temp/inbox-extract/txn-id",
+            "bibliographic_meta": bibliography,
+            "bibliographic_review_required": False,
+            "bibliographic_review": {
+                "status": "agent_required", "candidates": candidates, "catalog": catalog,
+                "input_hash": module._bibliographic_worker_input_hash(catalog, md_text),
+                "worker": {"api_called": False},
+            },
+            "errors": [],
+        }
+        old_repo = module.REPO
+        module.REPO = root
+        try:
+            assert module._resume_bibliographic_review(state)
+        finally:
+            module.REPO = old_repo
+        assert state["status"] == "write_wiki"
+        assert state["bibliographic_meta"]["authors"] == ["Alice Example"]
+        assert state["bibliographic_review"]["decision"] == decision
+        assert (root / "temp/inbox-state/txn-id-bibliographic-decision.json").is_file()
 
 
 def test_validate_bibliographic_review_accepts_superscript_equivalent_title():
@@ -1044,11 +1344,41 @@ def test_bare_tokens_resolvable_proposition_not_counted():
     finally:
         graph_lib.GRAPH_DB = old_db
 
-def test_repair_prompt_requires_full_paper_triple():
-    prompt = module._build_repair_prompt([
-        {"section": "三元组", "line": "academic/wiki/papers/test | 核心方法 | DMRG", "reason": "裸缩写", "is_triple": True}
-    ], "", False)
-    assert "即使主体是「本论文」也不得用 section 格式" in prompt
+def test_semantic_patch_prompt_and_candidate_boundary():
+    import ingest_common as ic
+
+    catalog = ic.build_semantic_patch_catalog([{
+        "section": "三元组",
+        "line": "academic/wiki/papers/test | 核心方法 | DMRG",
+        "issue": "bad_object",
+        "reason": "裸缩写",
+        "is_triple": True,
+    }])
+    prompt = ic._build_semantic_patch_prompt(catalog)
+    assert "issue-01" in prompt
+    assert "主体 | 谓词 | 客体" in prompt
+    assert "不得输出完整 Wiki 或完整语义槽" in prompt
+
+    valid = {
+        "protocol_version": ic.SEMANTIC_PATCH_PROTOCOL,
+        "review_status": "patched",
+        "patches": [{
+            "issue_id": "issue-01",
+            "action": "replace",
+            "replacement_lines": ["academic/wiki/papers/test | 核心方法 | 密度矩阵重整化群(DMRG)"],
+        }],
+        "review_notes": [],
+    }
+    assert ic._compile_semantic_patch(valid, catalog).startswith("academic/wiki/papers/test |")
+
+    for invalid_patches in ([], [dict(valid["patches"][0], issue_id="issue-02")]):
+        invalid = dict(valid, patches=invalid_patches)
+        try:
+            ic._compile_semantic_patch(invalid, catalog)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("semantic patch must cover exactly the catalog issue IDs")
 
 
 def test_patch_semantic_lines_no_match():
@@ -1187,6 +1517,58 @@ def test_run_one_dispatches_failed_graph_retry_directly_to_commit():
     assert calls == ["run_commit"]
 
 
+def test_run_one_blocks_unchanged_graph_failure_context():
+    state = {
+        "transaction_id": "graph-retry",
+        "status": "failed",
+        "resume_from": "graph_ready",
+        "failure_context": "same-context",
+    }
+    original_context = module._graph_retry_context
+    original_run_phase = module._run_phase
+    original_save = module.inbox_state.save
+    try:
+        module._graph_retry_context = lambda _state: "same-context"
+        module._run_phase = lambda *_args: (_ for _ in ()).throw(
+            AssertionError("unchanged graph failure must not rerun"))
+        module.inbox_state.save = lambda *_args: None
+        result = module.run_one(state, False)
+    finally:
+        module._graph_retry_context = original_context
+        module._run_phase = original_run_phase
+        module.inbox_state.save = original_save
+    assert result["resume_blocked"] == "unchanged_failure_context"
+    assert result["retryable"] is False
+    assert result["next_action"] == "repair_graph_identity_or_metadata_then_resume"
+
+
+def test_run_one_allows_graph_resume_after_context_changes():
+    state = {
+        "transaction_id": "graph-retry",
+        "status": "failed",
+        "resume_from": "graph_ready",
+        "failure_context": "old-context",
+        "retryable": False,
+        "next_action": "repair_graph_identity_or_metadata_then_resume",
+    }
+    calls = []
+    original_context = module._graph_retry_context
+    original_run_phase = module._run_phase
+    try:
+        module._graph_retry_context = lambda _state: "new-context"
+        module._run_phase = lambda current, verbose, fn: calls.append(fn.__name__) or {
+            **current, "status": "completed",
+        }
+        result = module.run_one(state, False)
+    finally:
+        module._graph_retry_context = original_context
+        module._run_phase = original_run_phase
+    assert result["status"] == "completed"
+    assert calls == ["run_commit"]
+    assert "retryable" not in result
+    assert "next_action" not in result
+
+
 def test_create_raw_relationship_edge_ensures_missing_raw_nodes():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -1261,6 +1643,253 @@ def test_detect_raw_relationship_raw_candidate_without_page():
     assert result.get("target_raw_dir") == "test-2020-paper"
 
 
+def test_relationship_schema_forbids_worker_duplicate_decision():
+    decision = {
+        "protocol_version": module.RELATION_DECISION_PROTOCOL,
+        "review_status": "decided",
+        "selection": {
+            "candidate_id": "relation-01", "relation": "duplicate", "status": "confirmed",
+        },
+        "review_notes": [],
+    }
+    assert not module.relationship_decision_schema(decision)
+
+
+def test_relationship_compile_rejects_unknown_candidate_id():
+    catalog = {
+        "protocol_version": module.RELATION_DECISION_PROTOCOL,
+        "current": {},
+        "candidates": [{"id": "relation-01"}],
+    }
+    decision = {
+        "protocol_version": module.RELATION_DECISION_PROTOCOL,
+        "review_status": "decided",
+        "selection": {
+            "candidate_id": "relation-99", "relation": "version", "status": "confirmed",
+        },
+        "review_notes": [],
+    }
+    try:
+        module._compile_relationship_decision(decision, catalog)
+    except ValueError as exc:
+        assert "未知 relationship candidate_id" in str(exc)
+    else:
+        raise AssertionError("unknown relationship candidate ID must fail")
+
+
+def test_relationship_deterministic_fast_path_uses_locked_identity():
+    bibliography = {
+        "title": "A Study", "authors": ["Ada Lovelace"], "year": "2025",
+        "doi": "", "arxiv_id": "",
+    }
+    catalog = {
+        "protocol_version": module.RELATION_DECISION_PROTOCOL,
+        "current": {"bibliographic": bibliography, "opening_excerpt": "new"},
+        "candidates": [{
+            "id": "relation-01", "bibliographic": bibliography,
+            "title": "A Study", "similarity": 1.0, "opening_excerpt": "old",
+        }],
+    }
+    decision = module._deterministic_relationship_decision(catalog)
+    assert decision["selection"] == {
+        "candidate_id": "relation-01", "relation": "version", "status": "confirmed",
+    }
+
+
+def test_relationship_decision_cache_reuses_identical_input():
+    decision = {
+        "protocol_version": module.RELATION_DECISION_PROTOCOL,
+        "review_status": "decided",
+        "selection": {
+            "candidate_id": "relation-01", "relation": "unrelated", "status": "confirmed",
+        },
+        "review_notes": [],
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        old_repo = module.REPO
+        try:
+            module.REPO = Path(directory)
+            module._save_relationship_cache("txn", "same-input", decision)
+            assert module._load_relationship_cache("txn", "same-input") == decision
+            assert module._load_relationship_cache("txn", "changed-input") is None
+        finally:
+            module.REPO = old_repo
+
+
+def test_relationship_worker_single_call_then_cache_hit():
+    catalog = {
+        "protocol_version": module.RELATION_DECISION_PROTOCOL,
+        "current": {"bibliographic": {"title": "Study", "authors": [], "year": ""}},
+        "candidates": [{
+            "id": "relation-01", "title": "Study revised", "similarity": 0.97,
+            "bibliographic": {"title": "Study revised", "authors": [], "year": ""},
+            "opening_excerpt": "old",
+        }],
+    }
+    decision = {
+        "protocol_version": module.RELATION_DECISION_PROTOCOL,
+        "review_status": "decided",
+        "selection": {
+            "candidate_id": "relation-01", "relation": "unrelated", "status": "confirmed",
+        },
+        "review_notes": [],
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        paper_md = root / "paper.md"
+        paper_md.write_text("# Study\n", encoding="utf-8")
+        old_repo, old_builder, old_call = (
+            module.REPO, module.build_relationship_candidate_catalog, module.call_json,
+        )
+        calls = []
+        try:
+            module.REPO = root
+            module.build_relationship_candidate_catalog = lambda _state, _paper: catalog
+
+            def fake_call(*args, **kwargs):
+                calls.append(kwargs)
+                return {"ok": True, "status": "ok", "parsed": decision, "history": [{}]}
+
+            module.call_json = fake_call
+            state = {"transaction_id": "rel", "relation_candidates": [{"path": "target"}]}
+            first = module.review_uncertain_relationship(state, paper_md)
+            second = module.review_uncertain_relationship(state, paper_md)
+        finally:
+            module.REPO = old_repo
+            module.build_relationship_candidate_catalog = old_builder
+            module.call_json = old_call
+        assert first["ok"] and first["worker"]["api_called"] is True
+        assert second["ok"] and second["worker"]["cache_hit"] is True
+        assert len(calls) == 1
+        assert calls[0]["retries"] == 0
+
+
+def test_relationship_handoff_is_not_consumed_as_semantic_fix():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        semantic = root / "semantic.txt"
+        semantic.write_text("三元组:\nA | 涉及 | B\n", encoding="utf-8")
+        state = {
+            "status": "agent_required",
+            "semantic_path": "semantic.txt",
+            "relationship_review": {"status": "agent_required"},
+        }
+        old_repo = module.REPO
+        try:
+            module.REPO = root
+            assert module.resume_after_semantic_fix(state) is False
+        finally:
+            module.REPO = old_repo
+
+
+def test_uncertain_title_match_defers_until_post_extract():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "inbox").mkdir()
+        (root / "inbox" / "test-paper.pdf").write_bytes(b"not-a-real-pdf")
+        raw_dir = root / "academic" / "raw" / "references" / "test-paper"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "paper.md").write_text("# Test Paper\n\nAda Lovelace\n", encoding="utf-8")
+        old_repo = module.REPO
+        old_ensure, old_lookup = module.sf.ensure_index, module.sf.lookup_exact
+        old_extract = module.extract_pdf_bibliography
+        try:
+            module.REPO = root
+            module.sf.ensure_index = lambda: None
+            module.sf.lookup_exact = lambda _path: None
+            module.extract_pdf_bibliography = lambda _path: {
+                "title": "Test Paper", "authors": [], "year": "", "doi": "", "arxiv_id": "",
+            }
+            state = {"source": "inbox/test-paper.pdf"}
+            is_duplicate, _message = module.step_dedup_check(state)
+        finally:
+            module.REPO = old_repo
+            module.sf.ensure_index, module.sf.lookup_exact = old_ensure, old_lookup
+            module.extract_pdf_bibliography = old_extract
+        assert not is_duplicate
+        assert state["raw_relationship"]["uncertain"] is True
+        assert state["dedup_result"]["duplicate"] is False
+
+
+def test_semantic_duplicate_cleanup_skips_worker():
+    import ingest_common as ic
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        semantic = root / "semantic.txt"
+        semantic.write_text("三元组:\nA | 涉及 | B\nA | 涉及 | B\n", encoding="utf-8")
+        state = {"transaction_id": "dedup", "semantic_path": "semantic.txt"}
+        warning = {
+            "section": "三元组", "line": "A | 涉及 | B",
+            "issue": "duplicate_line", "reason": "重复", "is_triple": True,
+        }
+        old_call = ic.call_json
+        try:
+            ic.call_json = lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("duplicate cleanup must not call Worker")
+            )
+
+            def validate(_state):
+                text = semantic.read_text(encoding="utf-8")
+                return ([], [warning] if text.count("A | 涉及 | B") > 1 else [])
+
+            ok, message = ic.repair_slots(state, root, [warning], validate)
+        finally:
+            ic.call_json = old_call
+        assert ok, message
+        assert semantic.read_text(encoding="utf-8").count("A | 涉及 | B") == 1
+        assert state["semantic_repair_worker"]["skip_reason"] == "deterministic_duplicate_cleanup"
+        assert state["semantic_repair_worker"]["api_called"] is False
+
+
+def test_semantic_patch_worker_single_call_and_cache():
+    import ingest_common as ic
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        semantic = root / "semantic.txt"
+        original_text = "三元组:\nA | 涉及 | bad\n"
+        semantic.write_text(original_text, encoding="utf-8")
+        warning = {
+            "section": "三元组", "line": "A | 涉及 | bad", "issue": "bad_object",
+            "field": "object", "reason": "测试问题", "is_triple": True,
+        }
+        calls = []
+        decision = {
+            "protocol_version": ic.SEMANTIC_PATCH_PROTOCOL,
+            "review_status": "patched",
+            "patches": [{
+                "issue_id": "issue-01", "action": "replace",
+                "replacement_lines": ["A | 涉及 | good"],
+            }],
+            "review_notes": [],
+        }
+        old_call = ic.call_json
+        try:
+            def fake_call(*args, **kwargs):
+                calls.append(kwargs)
+                return {"ok": True, "status": "ok", "parsed": decision, "history": [{}]}
+
+            ic.call_json = fake_call
+
+            def validate(_state):
+                return ([], [warning] if "bad" in semantic.read_text(encoding="utf-8") else [])
+
+            first = {"transaction_id": "patch", "semantic_path": "semantic.txt"}
+            ok, message = ic.repair_slots(first, root, [warning], validate)
+            assert ok, message
+            assert len(calls) == 1
+            assert calls[0]["retries"] == 0
+            assert first["semantic_repair_worker"]["api_called"] is True
+
+            semantic.write_text(original_text, encoding="utf-8")
+            second = {"transaction_id": "patch", "semantic_path": "semantic.txt"}
+            ok, message = ic.repair_slots(second, root, [warning], validate)
+            assert ok, message
+            assert len(calls) == 1
+            assert second["semantic_repair_worker"]["cache_hit"] is True
+        finally:
+            ic.call_json = old_call
+
+
 def test_dedup_low_title_ratio_not_duplicate():
     """标题相似度 ≤ 0.95 不应判重（回归：NIPS workshop 误判为 biamonte 重复）。"""
     with tempfile.TemporaryDirectory() as directory:
@@ -1283,6 +1912,69 @@ def test_dedup_low_title_ratio_not_duplicate():
             module.extract_title_from_pdf = old_extract
     assert ok is False
     assert "疑似已摄入" not in msg
+
+
+def test_exact_fingerprint_stops_before_pdf_metadata_and_mineru():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        pdf = repo / "inbox" / "same.pdf"
+        pdf.parent.mkdir()
+        pdf.write_bytes(b"same-pdf")
+        state = {"source": "inbox/same.pdf", "quality_warnings": []}
+        originals = (
+            module.REPO, module.sf.ensure_index, module.sf.lookup_exact,
+            module.extract_pdf_bibliography, module.extract_title_from_pdf,
+        )
+        module.REPO = repo
+        module.sf.ensure_index = lambda: None
+        module.sf.lookup_exact = lambda _path: {
+            "raw_path": "academic/raw/references/existing/paper.pdf",
+            "binary_sha256": "abc123",
+            "size_bytes": 8,
+        }
+        module.extract_pdf_bibliography = lambda _path: (_ for _ in ()).throw(
+            AssertionError("exact fingerprint must stop before PDF metadata"))
+        module.extract_title_from_pdf = lambda _path: (_ for _ in ()).throw(
+            AssertionError("exact fingerprint must stop before title extraction"))
+        try:
+            duplicate, message = module.step_dedup_check(state)
+        finally:
+            (module.REPO, module.sf.ensure_index, module.sf.lookup_exact,
+             module.extract_pdf_bibliography, module.extract_title_from_pdf) = originals
+    assert duplicate is True
+    assert state["dedup_result"]["match"] == "binary_sha256"
+    assert "academic/raw/references/existing/paper.pdf" in message
+
+
+def test_post_extract_text_candidate_requires_locked_bibliography():
+    with tempfile.TemporaryDirectory() as directory:
+        paper_md = Path(directory) / "paper.md"
+        paper_md.write_text("Normalized paper text", encoding="utf-8")
+        candidate = {
+            "raw_path": "academic/raw/references/existing/paper.pdf",
+            "match": "normalized_text_sha256",
+            "text_sha256": "text123",
+        }
+        current = {
+            "title": "A Stable Title",
+            "authors": ["Alice Example", "Bob Example"],
+            "year": "2024",
+            "doi": "",
+            "arxiv_id": "",
+        }
+        original_lookup = module.sf.lookup_text_candidate
+        original_bibliography = module._bibliography_for_raw_artifact
+        try:
+            module.sf.lookup_text_candidate = lambda _path: candidate
+            module._bibliography_for_raw_artifact = lambda _path: dict(current)
+            assert module._post_extract_duplicate(
+                {"bibliographic_meta": dict(current)}, paper_md) == candidate
+            mismatch = {**current, "year": "2025"}
+            assert module._post_extract_duplicate(
+                {"bibliographic_meta": mismatch}, paper_md) is None
+        finally:
+            module.sf.lookup_text_candidate = original_lookup
+            module._bibliography_for_raw_artifact = original_bibliography
 
 
 def test_patch_semantic_lines_collision_no_loss():
@@ -1763,6 +2455,72 @@ def test_step_update_graph_default_no_clean():
         ic.run_tracked = original_run
 
 
+def test_graph_navigation_soft_gaps_degrade_quality_status():
+    state = {
+        "quality_warnings": [],
+        "graph_report": {"graph_delta": {
+            "subgraph": {"semantic_edges": 3},
+            "query_probes": {
+                "boundary_total": 11,
+                "boundary_reachable_within_2": 8,
+                "ambiguous_mentions": 3,
+            },
+        }},
+    }
+    module._record_graph_quality_warnings(state)
+    assert [warning["issue"] for warning in state["quality_warnings"]] == [
+        "graph_semantic_coverage_sparse",
+        "graph_navigation_incomplete",
+        "graph_navigation_ambiguous",
+    ]
+
+    state["graph_report"]["graph_delta"]["subgraph"]["semantic_edges"] = 4
+    state["graph_report"]["graph_delta"]["query_probes"] = {
+        "boundary_total": 4,
+        "boundary_reachable_within_2": 4,
+        "ambiguous_mentions": 0,
+    }
+    module._record_graph_quality_warnings(state)
+    assert state["quality_warnings"] == []
+
+
+def test_sparse_slots_retry_is_bounded_and_keeps_higher_coverage():
+    import tempfile
+    from pathlib import Path
+
+    old_repo = module.REPO
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            module.REPO = Path(tmp)
+            semantic_path = module.REPO / "slots.txt"
+            semantic_path.write_text("first", encoding="utf-8")
+            state = {
+                "semantic_path": "slots.txt",
+                "slots_content": "first",
+                "semantic_triple_count": 2,
+                "slots_retry": 0,
+            }
+            assert module._handle_sparse_slots(state) == "retry"
+            assert state["sparse_slots_retry"] == 1
+            assert state["slots_content"] == ""
+            assert state["_skip_wiki_for_slots_resume"] is True
+
+            semantic_path.write_text("worse", encoding="utf-8")
+            state["slots_content"] = "worse"
+            state["semantic_triple_count"] = 1
+            assert module._handle_sparse_slots(state) == "restored"
+            assert state["slots_content"] == "first"
+            assert semantic_path.read_text(encoding="utf-8") == "first"
+            assert state["semantic_coverage"] == {
+                "minimum": module.MIN_SEMANTIC_TRIPLES,
+                "selected_count": 2,
+                "retry_count": 1,
+                "status": "sparse",
+            }
+    finally:
+        module.REPO = old_repo
+
+
 def test_step_finalize_tail_skip_index():
     """skip_index=True 时跳过 index.md，仅写 log.md + catalog。"""
     import ingest_common as ic
@@ -1889,6 +2647,114 @@ def test_reingest_state_has_reingest_flag():
     assert state["paper_id"] == "doe-2019-example"
     assert state["status"] == "write_wiki"
     assert state["bibliographic_meta"] == {}
+
+
+def test_reingest_repairs_archived_bibliography_without_mutating_raw():
+    """旧 Raw 锁错书目只在事务状态修正，source.yaml 保持不可变。"""
+    import re_ingest as ri
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        raw_dir = root / "academic" / "raw" / "references" / "acin-2018-roadmap"
+        raw_dir.mkdir(parents=True)
+        raw_md = raw_dir / "paper.md"
+        raw_md.write_text(
+            "# The roadmap\n\nwrapper\n\n# The roadmap\n"
+            "Antonio Acín, Immanuel Bloch, Harry Buhrman\n",
+            encoding="utf-8",
+        )
+        source_yaml = raw_dir / "source.yaml"
+        original_source = (
+            "bibliographic:\n"
+            "  title: PHYSICAL REVIEW B 96, 195145 (2017) Machine learning topological states\n"
+            "  authors:\n"
+            "  - Antonio Acín\n"
+        )
+        source_yaml.write_text(original_source, encoding="utf-8")
+        original_repo, original_ri_repo = module.REPO, ri.REPO
+        original_temp = ri.TEMP_REINGEST
+        try:
+            module.REPO = root
+            ri.REPO = root
+            ri.TEMP_REINGEST = root / "temp" / "reingest-extract"
+            state = ri.new_state_for_reingest(
+                "acin-2018-roadmap",
+                "academic/raw/references/acin-2018-roadmap/paper.md",
+            )
+            source_after = source_yaml.read_text(encoding="utf-8")
+        finally:
+            module.REPO = original_repo
+            ri.REPO = original_ri_repo
+            ri.TEMP_REINGEST = original_temp
+    assert state["bibliographic_meta"]["title"] == "Machine learning topological states"
+    assert state["bibliographic_meta"]["authors"] == [
+        "Antonio Acín", "Immanuel Bloch", "Harry Buhrman",
+    ]
+    assert {item["field"] for item in state["bibliographic_corrections"]} == {"title", "authors"}
+    assert source_after == original_source
+
+
+def test_reingest_restores_wiki_when_graph_update_fails():
+    import re_ingest as ri
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki_path = root / "academic" / "wiki" / "papers" / "demo.md"
+        wiki_path.parent.mkdir(parents=True)
+        wiki_path.write_text("old wiki\n", encoding="utf-8")
+        extract_dir = root / "temp" / "reingest-extract" / "txn"
+        extract_dir.mkdir(parents=True)
+        (extract_dir / "wiki.md").write_text("new wiki\n", encoding="utf-8")
+        state = {
+            "transaction_id": "txn", "paper_id": "demo",
+            "wiki_path": "academic/wiki/papers/demo",
+            "extract_dir": "temp/reingest-extract/txn",
+        }
+        original_repo = ri.REPO
+        original_update = ri.ic.step_update_graph
+        original_save = ri.inbox_state.save
+        try:
+            ri.REPO = root
+            ri.ic.step_update_graph = lambda *_args, **_kwargs: (False, "simulated graph failure")
+            ri.inbox_state.save = lambda *_args, **_kwargs: None
+            result = ri.commit_wiki_and_graph(state)
+            wiki_after = wiki_path.read_text(encoding="utf-8")
+        finally:
+            ri.REPO = original_repo
+            ri.ic.step_update_graph = original_update
+            ri.inbox_state.save = original_save
+    assert result["status"] == "failed"
+    assert result["wiki_restored"] is True
+    assert result["errors"] == ["simulated graph failure"]
+    assert wiki_after == "old wiki\n"
+
+
+def test_reingest_current_raw_skips_generation_without_force():
+    import contextlib
+    import io
+    import re_ingest as ri
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        raw_path = root / "academic" / "raw" / "references" / "demo" / "paper.md"
+        raw_path.parent.mkdir(parents=True)
+        raw_path.write_text("# Demo\n", encoding="utf-8")
+        original_repo = ri.REPO
+        original_version = ri.page_ingest_version
+        original_argv = sys.argv
+        try:
+            ri.REPO = root
+            ri.page_ingest_version = lambda _paper_id: 999
+            sys.argv = ["re_ingest.py", "--raw", str(raw_path.relative_to(root))]
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = ri.main()
+        finally:
+            ri.REPO = original_repo
+            ri.page_ingest_version = original_version
+            sys.argv = original_argv
+    payload = json.loads(output.getvalue())
+    assert result == 0
+    assert payload["status"] == "completed"
+    assert payload["items"][0]["status"] == "up_to_date"
+    assert payload["items"][0]["api_called"] is False
 
 
 def main():

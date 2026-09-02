@@ -73,6 +73,14 @@ class HubDefinition:
     scope_mode: str
 
 
+@dataclass(frozen=True)
+class MembershipScoringContext:
+    canonical: tuple[HubDefinition, ...]
+    members_by_hub: dict[str, tuple[NodeProfile, ...]]
+    has_prototype: tuple[bool, ...]
+    texts: tuple[str, ...]
+
+
 def configure_page_root(root: str | Path | None) -> None:
     """Route Hub/page file reads and lifecycle writes to an explicit mirror root."""
     global PAGE_ROOT
@@ -236,16 +244,31 @@ def route_profile(
     ranked = []
     for hub, score in sorted(zip(hubs, scores), key=lambda pair: float(pair[1]), reverse=True):
         ranked.append({**asdict(hub), "score": round(float(score), 4)})
-    first = ranked[0]
-    second_score = ranked[1]["score"] if len(ranked) > 1 else 0.0
-    resolved = first["canonical"] and first["score"] >= floor
+    canonical_ranked = [item for item in ranked if item["canonical"]]
+    decision_ranked = canonical_ranked or ranked
+    first = decision_ranked[0]
+    second_score = decision_ranked[1]["score"] if len(decision_ranked) > 1 else 0.0
+    observed_margin = round(first["score"] - second_score, 4)
+    resolved = bool(
+        canonical_ranked
+        and first["score"] >= floor
+        and observed_margin >= margin
+    )
+    if resolved:
+        reason = "scope_threshold_and_margin"
+    elif not canonical_ranked:
+        reason = "no_canonical_scope"
+    elif first["score"] < floor:
+        reason = "scope_below_floor"
+    else:
+        reason = "scope_margin_too_small"
     return {
         "decision": "resolved" if resolved else "candidates",
         "node_id": first["path"] if resolved else None,
-        "reason": "scope_threshold" if resolved else "scope_below_floor",
+        "reason": reason,
         "mode": "scope_embedding",
         "top_score": first["score"],
-        "margin": round(first["score"] - second_score, 4),
+        "margin": observed_margin,
         "candidates": ranked[:top_k],
     }
 
@@ -382,23 +405,22 @@ def _structural_affinity(conn, node_id: str, members: list[NodeProfile],
     return max(scores) if scores else None
 
 
-def _membership_candidates(
+def _prepare_membership_context(
     conn,
     profile: NodeProfile,
     hubs: list[HubDefinition],
     member_cache: dict[tuple[str, str], list[NodeProfile]] | None = None,
-    neighbor_cache: dict[str, set[str]] | None = None,
-) -> tuple[list[dict], str]:
+) -> MembershipScoringContext | None:
     canonical = [hub for hub in hubs if hub.canonical]
     if not canonical:
-        return [], "empty_hub_index"
+        return None
     member_cache = member_cache if member_cache is not None else {}
     members_by_hub = {}
     for hub in canonical:
         key = (hub.path, profile.kind)
         if key not in member_cache:
             member_cache[key] = member_node_profiles(conn, hub.path, profile.kind)
-        members_by_hub[hub.path] = member_cache[key]
+        members_by_hub[hub.path] = tuple(member_cache[key])
     prototype_texts = []
     has_prototype = []
     for hub in canonical:
@@ -408,19 +430,36 @@ def _membership_candidates(
     texts = [profile.text]
     for hub, prototype in zip(canonical, prototype_texts):
         texts.extend([hub.scope, prototype])
-    vectors = _embed(texts)
-    if vectors is None or len(vectors) != len(texts):
+    return MembershipScoringContext(
+        canonical=tuple(canonical),
+        members_by_hub=members_by_hub,
+        has_prototype=tuple(has_prototype),
+        texts=tuple(texts),
+    )
+
+
+def _score_membership_candidates(
+    conn,
+    profile: NodeProfile,
+    context: MembershipScoringContext,
+    vectors,
+    neighbor_cache: dict[str, set[str]] | None = None,
+) -> tuple[list[dict], str]:
+    if vectors is None or len(vectors) != len(context.texts):
         return [], "embedding_unavailable"
     units = _unit(vectors)
     node_vector = units[0]
     existing = _existing_memberships(conn, profile.node_id)
     ranked = []
-    for index, hub in enumerate(canonical):
+    for index, hub in enumerate(context.canonical):
         scope_score = float(node_vector @ units[1 + index * 2])
         prototype_score = float(node_vector @ units[2 + index * 2])
-        semantic = scope_score if not has_prototype[index] else 0.6 * scope_score + 0.4 * prototype_score
+        semantic = (
+            scope_score if not context.has_prototype[index]
+            else 0.6 * scope_score + 0.4 * prototype_score
+        )
         structural = _structural_affinity(
-            conn, profile.node_id, members_by_hub[hub.path], neighbor_cache,
+            conn, profile.node_id, context.members_by_hub[hub.path], neighbor_cache,
         )
         if structural is None:
             score = semantic
@@ -434,7 +473,9 @@ def _membership_candidates(
             "hub": hub.path,
             "score": round(score, 4),
             "scope_score": round(scope_score, 4),
-            "prototype_score": round(prototype_score, 4) if has_prototype[index] else None,
+            "prototype_score": (
+                round(prototype_score, 4) if context.has_prototype[index] else None
+            ),
             "structural_score": round(structural, 4) if structural is not None else None,
             "threshold": threshold,
             "existing": hub.path in existing,
@@ -465,10 +506,30 @@ def plan_memberships(conn, node_ids: Iterable[str] | None = None) -> dict:
     degraded = False
     member_cache: dict[tuple[str, str], list[NodeProfile]] = {}
     neighbor_cache: dict[str, set[str]] = {}
-    for profile in profiles:
-        ranked, reason = _membership_candidates(
-            conn, profile, hubs, member_cache, neighbor_cache,
-        )
+    contexts = [
+        _prepare_membership_context(conn, profile, hubs, member_cache)
+        for profile in profiles
+    ]
+    unique_texts = list(dict.fromkeys(
+        text
+        for context in contexts if context is not None
+        for text in context.texts
+    ))
+    embedded = _embed(unique_texts) if unique_texts else None
+    vectors_by_text = None
+    if embedded is not None and len(embedded) == len(unique_texts):
+        vectors_by_text = dict(zip(unique_texts, embedded))
+
+    for profile, context in zip(profiles, contexts):
+        if context is None:
+            ranked, reason = [], "empty_hub_index"
+        else:
+            vectors = None
+            if vectors_by_text is not None:
+                vectors = np.asarray([vectors_by_text[text] for text in context.texts])
+            ranked, reason = _score_membership_candidates(
+                conn, profile, context, vectors, neighbor_cache,
+            )
         if reason != "scored":
             if reason == "empty_hub_index":
                 nodes.append({
@@ -1046,14 +1107,87 @@ def get_child_hubs(conn, hub_path: str) -> list[str]:
     ).fetchall()]
 
 
-def auto_create_check(conn) -> dict:
-    """摄入末期自动建 Hub 检查：分析全图 unassigned 节点，筛达标候选。
+def _eligible_auto_splits(conn, overloaded_hubs: list[dict]) -> tuple[list[dict], int]:
+    """Promote stable overload splits to the inbox-tail Agent handoff."""
+    eligible = []
+    backlog_count = 0
+    for overload in overloaded_hubs:
+        if overload.get("action") != "split_candidate":
+            continue
+        candidate = analyze_split(conn, str(overload.get("hub", "")))
+        if candidate.get("decision") != "agent_definition_required":
+            backlog_count += 1
+            continue
+        eligible.append({
+            **candidate,
+            "trigger": "member_limit",
+            "member_count": overload.get("member_count", candidate.get("count", 0)),
+            "limit": overload.get("limit", HUB_MEMBER_LIMIT),
+        })
+    return eligible, backlog_count
+
+
+def _redistribution_handoffs(
+    overloaded_hubs: list[dict], definitions: Iterable[HubDefinition]
+) -> list[dict]:
+    """Keep existing-child overloads visible without mutating membership in --check."""
+    by_path = {hub.path: hub for hub in definitions}
+    handoffs = []
+    for overload in overloaded_hubs:
+        if overload.get("action") != "redistribute":
+            continue
+        child_scopes = []
+        blockers = []
+        for child in overload.get("children", []):
+            definition = by_path.get(child)
+            ready = bool(definition and definition.canonical)
+            child_scopes.append({
+                "path": child,
+                "title": definition.title if definition else "",
+                "scope": definition.scope if definition else "",
+                "canonical": ready,
+                "ready": ready,
+            })
+            if not ready:
+                blockers.append({
+                    "path": child,
+                    "reason": (
+                        "missing_hub_definition" if definition is None
+                        else "missing_canonical_scope"
+                    ),
+                })
+        handoffs.append({
+            **overload,
+            "decision": (
+                "redistribution_required" if not blockers
+                else "canonical_scope_required"
+            ),
+            "trigger": "member_limit",
+            "ready_for_redistribution": not blockers,
+            "child_scopes": child_scopes,
+            "blockers": blockers,
+            "agent_task": (
+                "run an explicit membership redistribution"
+                if not blockers
+                else "define and validate missing child Hub scopes before redistribution"
+            ),
+        })
+    return handoffs
+
+
+def auto_create_check(conn, node_ids: Iterable[str] | None = None) -> dict:
+    """摄入末期 Hub 检查：筛选新 Hub 与既存 Hub 分裂候选。
 
     返回 eligible 候选（cohesion≥AUTO_CREATE_COHESION 且 members≥AUTO_CREATE_MIN_MEMBERS），
-    不达标候选只计 backlog_count，不向用户报告。
+    并把超限且通过稳定二分闸的既存 Hub 交给主 Agent 定义子 Scope。
+    不达标候选只计 backlog，不向用户报告。
     """
-    plan = dynamics_plan(conn, apply_membership=True)
-    new_hubs = plan.get("new_hubs", {})
+    membership = plan_memberships(conn, node_ids)
+    unassigned = [
+        item["node_id"] for item in membership.get("nodes", [])
+        if item.get("decision") == "unassigned"
+    ]
+    new_hubs = analyze_new_hubs(conn, unassigned)
     candidates = new_hubs.get("candidates", [])
     eligible = []
     backlog_count = 0
@@ -1066,11 +1200,23 @@ def auto_create_check(conn) -> dict:
             eligible.append(entry)
         else:
             backlog_count += 1
+    overloaded_hubs = _check_hub_overload(conn)
+    split_candidates, split_backlog_count = _eligible_auto_splits(conn, overloaded_hubs)
+    redistribution_candidates = _redistribution_handoffs(overloaded_hubs, list_hubs(conn))
     return {
-        "status": "agent_required" if eligible else "no_action",
+        "status": (
+            "agent_required"
+            if eligible or split_candidates or redistribution_candidates
+            else "no_action"
+        ),
+        "scope": "incremental" if node_ids is not None else "full",
+        "affected_node_count": membership.get("node_count", 0),
         "eligible": eligible,
+        "split_candidates": split_candidates,
+        "redistribution_candidates": redistribution_candidates,
         "backlog_count": backlog_count,
-        "membership_apply": plan.get("membership_apply", {}),
+        "split_backlog_count": split_backlog_count,
+        "membership_apply": {"applied": False, "reason": "check_read_only"},
     }
 
 
@@ -1202,6 +1348,7 @@ def main():
     split_apply.add_argument("--agent-confirmed", action="store_true")
     auto_create = sub.add_parser("auto-create")
     auto_create.add_argument("--check", action="store_true", help="分析达标候选，输出 JSON")
+    auto_create.add_argument("--node", action="append", default=[], help="仅检查受影响节点")
     auto_create.add_argument("--apply", metavar="FILE", help="Agent 完成的 hub 定义 JSON 文件")
     args = parser.parse_args()
     conn = gl.connect()
@@ -1243,8 +1390,7 @@ def main():
             _print(result)
         elif args.command == "auto-create":
             if args.check:
-                result = auto_create_check(conn)
-                conn.commit()
+                result = auto_create_check(conn, args.node or None)
                 _print(result)
             elif args.apply:
                 definitions = json.loads(Path(args.apply).read_text(encoding="utf-8"))

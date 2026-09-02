@@ -5,6 +5,19 @@ Minor fixes and internal adjustments are summarized together to keep it
 readable. Frozen paper artifacts remain governed by their own versioned
 manifests and checksums.
 
+## [Unreleased]
+
+### Highlights
+
+- Batched Hub membership embeddings across profiles, added canonical route
+  review handoffs, and blocked redistribution until child Hub scopes are ready.
+- Added entity node-origin lineage and conservative re-ingest cleanup without
+  deleting historical or shared nodes.
+- Added one-shot sparse semantic recovery and deterministic metadata subtype
+  repair so venues and people do not enter ordinary Hub membership.
+- Made public regressions independent of private embedding caches, experience
+  files, and playbooks; synchronized Hub route locators with the current spec.
+
 ## [0.2.4] - 2026-09-02
 
 ### Highlights
@@ -36,6 +49,7 @@ manifests and checksums.
 - Initial public Ran-ASKS release with the source-available engineering
   template and frozen paper artifact `1.0.0`.
 
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.4...HEAD
 [0.2.4]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.1...v0.2.2

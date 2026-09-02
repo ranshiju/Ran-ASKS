@@ -58,7 +58,7 @@ DEFAULT_CONFIDENCE = "可追溯"
 # 管道版本号：影响 wiki/图边输出的建设变更才 bump。
 # 纯改名/重构不 bump；skeleton 模板/建边逻辑/prompt 调整等影响已入库内容的 bump。
 # re_ingest --outdated 据此判断哪些论文需重新摄入。
-CURRENT_PIPELINE_VERSION = 5  # v5: file/raw-package nodes + Wiki→Raw source edges; edge locator optional
+CURRENT_PIPELINE_VERSION = 9  # v9: bounded sparse retry + node-origin lineage
 
 RAW_DOCUMENT_SUFFIXES = {
     ".md", ".txt", ".pdf", ".doc", ".docx", ".ppt", ".pptx",
@@ -200,6 +200,26 @@ def connect(db_path=None):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_edge_origins_page ON edge_origins(origin_page)")
         conn.commit()
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS managed_nodes (
+            node_path TEXT PRIMARY KEY,
+            created_origin_page TEXT NOT NULL,
+            recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS node_origins (
+            node_path TEXT NOT NULL,
+            origin_page TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '',
+            recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (node_path, origin_page, source),
+            FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_managed_nodes_origin ON managed_nodes(created_origin_page)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_node_origins_page ON node_origins(origin_page)")
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS temporal_facts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             subject TEXT NOT NULL,
@@ -280,6 +300,22 @@ def init_schema(conn):
         FOREIGN KEY (edge_id) REFERENCES edges(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS managed_nodes (
+        node_path TEXT PRIMARY KEY,
+        created_origin_page TEXT NOT NULL,
+        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS node_origins (
+        node_path TEXT NOT NULL,
+        origin_page TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT '',
+        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (node_path, origin_page, source),
+        FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS temporal_facts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         subject TEXT NOT NULL,
@@ -303,6 +339,8 @@ def init_schema(conn):
     CREATE INDEX IF NOT EXISTS idx_edges_predicate ON edges(predicate);
     CREATE INDEX IF NOT EXISTS idx_edge_evidence_source ON edge_evidence(source);
     CREATE INDEX IF NOT EXISTS idx_edge_origins_page ON edge_origins(origin_page);
+    CREATE INDEX IF NOT EXISTS idx_managed_nodes_origin ON managed_nodes(created_origin_page);
+    CREATE INDEX IF NOT EXISTS idx_node_origins_page ON node_origins(origin_page);
     CREATE INDEX IF NOT EXISTS idx_temporal_facts_subject ON temporal_facts(subject);
     CREATE INDEX IF NOT EXISTS idx_temporal_facts_object ON temporal_facts(object);
     CREATE INDEX IF NOT EXISTS idx_temporal_facts_valid ON temporal_facts(valid_from, valid_until);
@@ -338,6 +376,23 @@ def add_edge_origin(conn, edge_id, origin_page, source=""):
         "INSERT OR IGNORE INTO edge_origins (edge_id, origin_page, source, recorded_at) "
         "VALUES (?,?,?,datetime('now'))",
         (edge_id, origin_page, source or ""),
+    )
+
+
+def add_node_origin(conn, node_path, origin_page, source="", managed=False):
+    """记录页面对 entity 节点的使用；仅本次新建节点可标为 managed。"""
+    if not node_path or not origin_page:
+        return
+    if managed:
+        conn.execute(
+            "INSERT OR IGNORE INTO managed_nodes "
+            "(node_path, created_origin_page, recorded_at) VALUES (?,?,datetime('now'))",
+            (node_path, origin_page),
+        )
+    conn.execute(
+        "INSERT OR IGNORE INTO node_origins "
+        "(node_path, origin_page, source, recorded_at) VALUES (?,?,?,datetime('now'))",
+        (node_path, origin_page, source or ""),
     )
 
 
@@ -794,7 +849,7 @@ def ensure_node(
     has_raw=0, entity_subtype=None, ingest_version=None, description=None,
 ):
     """UPSERT 节点(不存在则建)。"""
-    # 获取现有 ingest_version（INSERT OR REPLACE 会清字段，需显式保留）
+    # 未显式提供的派生字段沿用旧值；UPSERT 不触发外键 ON DELETE 级联。
     existing = conn.execute(
         "SELECT ingest_version,description FROM nodes WHERE path=?", (path,)
     ).fetchone()
@@ -803,9 +858,14 @@ def ensure_node(
     if description is None:
         description = existing["description"] if existing else ""
     conn.execute(
-        "INSERT OR REPLACE INTO nodes "
+        "INSERT INTO nodes "
         "(path, title, type, entity_subtype, source_type, date, status, has_raw_source, ingest_version,description) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(path) DO UPDATE SET "
+        "title=excluded.title, type=excluded.type, entity_subtype=excluded.entity_subtype, "
+        "source_type=excluded.source_type, date=excluded.date, status=excluded.status, "
+        "has_raw_source=excluded.has_raw_source, ingest_version=excluded.ingest_version, "
+        "description=excluded.description",
         (path, str(title), node_type, entity_subtype, str(source_type), str(date),
          str(status), has_raw, ingest_version, str(description or "")),
     )

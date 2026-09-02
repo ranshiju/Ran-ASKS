@@ -15,6 +15,7 @@ warning 走 3.6b 局部修复。各阶段独立重试，最多 3 次。
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -33,6 +34,7 @@ from predicate_governance import DEFAULT_CONFIG, govern as govern_predicates, no
 from llm_structured import call_json, call_text, ingest_mode
 import ingest_common as ic
 import ingest_pipeline
+import source_fingerprints as sf
 import wiki_locator as wl
 from ingest_common import (parse_meta_block, validate_meta, extract_year_from_meta,
                            has_type_mismatch, has_year_mismatch,
@@ -43,6 +45,8 @@ from wiki_skeleton import extract_authors_from_text
 
 TEMP_EXTRACT = REPO / "temp" / "inbox-extract"
 MAX_RETRIES = 3
+MIN_SEMANTIC_TRIPLES = 4
+MAX_SPARSE_SLOT_RETRIES = 1
 _PAPER_CONTEXT_PROFILE = ic.CONTEXT_PROFILES["paper"]
 FULL_TEXT_MAX_CHARS = _PAPER_CONTEXT_PROFILE["full_text_max_chars"]
 REDUCED_CONTEXT_MAX_CHARS = _PAPER_CONTEXT_PROFILE["reduced_context_max_chars"]
@@ -196,6 +200,9 @@ def new_state_for_raw(raw_path: Path) -> dict:
     extract_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(raw_path, extract_dir / "paper.md")
     raw_dir = str(raw_path.parent.relative_to(REPO))
+    md_text = raw_path.read_text(encoding="utf-8")
+    bibliography, corrections = repair_archived_bibliography(
+        load_bibliographic_metadata(raw_path.parent), md_text)
     return {
         "transaction_id": txn,
         "status": "write_wiki",
@@ -204,7 +211,8 @@ def new_state_for_raw(raw_path: Path) -> dict:
         "raw_dir": raw_dir,
         "wiki_path": f"academic/wiki/papers/{paper_id}",
         "paper_id": paper_id,
-        "bibliographic_meta": load_bibliographic_metadata(raw_path.parent),
+        "bibliographic_meta": bibliography,
+        "bibliographic_corrections": corrections,
         "from_raw": True,
         "retry_count": 0,
         "errors": [],
@@ -216,16 +224,28 @@ def new_state_for_raw(raw_path: Path) -> dict:
 # ===== paper-id 生成 =====
 
 _JOURNAL_HEADER_RE = re.compile(r"(?i)\b(?:VOLUME|VOL\.?)\s*\d")
+_APS_TITLE_PREFIX_RE = re.compile(
+    r"(?i)^PHYSICAL REVIEW\s+(?:LETTERS|[A-Z])\s+\d+\s*,\s*"
+    r"[A-Z0-9.]+\s*\((?:19|20)\d{2}\)\s*"
+)
+
+
+def _clean_title_candidate(title: str) -> str:
+    text = " ".join(str(title or "").split()).strip()
+    stripped = _APS_TITLE_PREFIX_RE.sub("", text).strip()
+    if stripped != text:
+        return stripped
+    if _JOURNAL_HEADER_RE.search(text):
+        return ""
+    return text
 
 def extract_title_from_md(md_text: str) -> str:
     for line in md_text.splitlines():
         line = line.strip()
         if line.startswith("# ") and not line.startswith("## "):
-            title = line[2:].strip()
-            # 跳过 MinerU 误提的期刊页眉（如 "PHYSICAL REVIEW A, VOLUME 65, 032325"）
-            if _JOURNAL_HEADER_RE.search(title):
-                continue
-            return title
+            title = _clean_title_candidate(line[2:])
+            if title:
+                return title
     # 回退:h1 未找到时取首个 h2(MinerU 偶尔只输出 h2)
     for line in md_text.splitlines():
         line = line.strip()
@@ -277,6 +297,25 @@ def extract_doi(text: str) -> str:
     if m:
         return m.group(1).rstrip(".,;)")
     return ""
+
+
+def bibliographic_identity_region(md_text: str, max_lines: int = 160) -> str:
+    """Return the front-matter region that can identify the current paper.
+
+    DOI/arXiv strings below a references heading identify cited papers, not the
+    paper being ingested.  The hard line bound also keeps candidate extraction
+    aligned with the first-page evidence used elsewhere in this pipeline.
+    """
+    lines = md_text.splitlines()[:max_lines]
+    for index, line in enumerate(lines):
+        if re.match(
+            r"^\s*#{1,6}\s*(?:references|bibliography|参考文献)\s*$",
+            line,
+            re.IGNORECASE,
+        ):
+            lines = lines[:index]
+            break
+    return "\n".join(lines)
 
 
 SUPPLEMENT_KEYWORDS = ("supplement", "supp_", "si-", "si.", "supporting", "appendix")
@@ -387,6 +426,326 @@ def detect_raw_relationship(state: dict, dup_graph: list) -> dict:
     return {"type": None}
 
 
+RELATION_DECISION_PROTOCOL = "relation-id-v1"
+
+
+def relationship_decision_schema(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "protocol_version", "review_status", "selection", "review_notes",
+    }:
+        return False
+    if value.get("protocol_version") != RELATION_DECISION_PROTOCOL:
+        return False
+    if value.get("review_status") not in {"decided", "manual_required"}:
+        return False
+    if not isinstance(value.get("review_notes"), list) or not all(
+        isinstance(item, str) for item in value["review_notes"]
+    ):
+        return False
+    selection = value.get("selection")
+    if not isinstance(selection, dict) or set(selection) != {
+        "candidate_id", "relation", "status",
+    }:
+        return False
+    return (
+        isinstance(selection.get("candidate_id"), str)
+        and selection.get("relation") in {"version", "unrelated", "ambiguous"}
+        and selection.get("status") in {"confirmed", "ambiguous"}
+    )
+
+
+def _candidate_raw_path(candidate: dict) -> str:
+    raw_path = str(candidate.get("raw_path") or "")
+    if raw_path:
+        return raw_path
+    page_path = str(candidate.get("path") or "")
+    if not page_path:
+        return ""
+    try:
+        import graph_lib as gl
+        frontmatter = gl.read_frontmatter(page_path)
+        sources = gl.parse_list_field(frontmatter, "sources")
+    except Exception:
+        return ""
+    return str(sources[0]).split("#", 1)[0] if sources else ""
+
+
+def build_relationship_candidate_catalog(state: dict, paper_md: Path) -> dict:
+    items = []
+    for index, candidate in enumerate(state.get("relation_candidates") or [], 1):
+        raw_path = _candidate_raw_path(candidate)
+        bibliography = _bibliography_for_raw_artifact(raw_path) if raw_path else {}
+        excerpt = ""
+        if raw_path:
+            try:
+                excerpt = (REPO / raw_path).read_text(encoding="utf-8")[:1600]
+            except (OSError, UnicodeError):
+                pass
+        items.append({
+            "id": f"relation-{index:02d}",
+            "title": str(candidate.get("title") or bibliography.get("title") or ""),
+            "similarity": candidate.get("ratio"),
+            "bibliographic": {
+                field: bibliography.get(field)
+                for field in ("title", "authors", "year", "venue", "doi", "arxiv_id")
+            },
+            "opening_excerpt": excerpt,
+        })
+    current = state.get("bibliographic_meta") or {}
+    return {
+        "protocol_version": RELATION_DECISION_PROTOCOL,
+        "current": {
+            "bibliographic": {
+                field: current.get(field)
+                for field in ("title", "authors", "year", "venue", "doi", "arxiv_id")
+            },
+            "opening_excerpt": paper_md.read_text(encoding="utf-8")[:1600],
+        },
+        "candidates": items,
+    }
+
+
+def _relationship_input_hash(catalog: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(catalog, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _relationship_cache_path(transaction_id: str) -> Path | None:
+    if not transaction_id:
+        return None
+    return REPO / "temp" / "inbox-state" / f"{transaction_id}-relationship-decision.json"
+
+
+def _load_relationship_cache(transaction_id: str, input_hash: str) -> dict | None:
+    path = _relationship_cache_path(transaction_id)
+    if not path or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    decision = payload.get("decision") if isinstance(payload, dict) else None
+    if (payload.get("protocol_version") != RELATION_DECISION_PROTOCOL
+            or payload.get("input_hash") != input_hash
+            or not relationship_decision_schema(decision)):
+        return None
+    return decision
+
+
+def _save_relationship_cache(transaction_id: str, input_hash: str, decision: dict) -> None:
+    path = _relationship_cache_path(transaction_id)
+    if not path:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "protocol_version": RELATION_DECISION_PROTOCOL,
+        "input_hash": input_hash,
+        "decision": decision,
+    }
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+def _deterministic_relationship_decision(catalog: dict) -> dict | None:
+    current = _bibliographic_identity(catalog.get("current", {}).get("bibliographic"))
+    matches = []
+    for item in catalog.get("candidates", []):
+        existing = _bibliographic_identity(item.get("bibliographic"))
+        same_title = bool(current[0] and current[0] == existing[0])
+        same_authors = bool(current[1] and current[1] == existing[1])
+        same_year = bool(current[2] and current[2] == existing[2])
+        if same_title and same_authors and same_year:
+            matches.append(item["id"])
+    if len(matches) != 1:
+        return None
+    return {
+        "protocol_version": RELATION_DECISION_PROTOCOL,
+        "review_status": "decided",
+        "selection": {
+            "candidate_id": matches[0], "relation": "version", "status": "confirmed",
+        },
+        "review_notes": ["deterministic_fast_path: same locked title/authors/year"],
+    }
+
+
+def _compile_relationship_decision(decision: dict, catalog: dict) -> dict:
+    if not relationship_decision_schema(decision):
+        raise ValueError("relation-id-v1 决策不符合 schema")
+    selection = decision["selection"]
+    indexes = {item["id"]: item for item in catalog.get("candidates", [])}
+    candidate_id = selection["candidate_id"]
+    if candidate_id not in indexes:
+        raise ValueError(f"未知 relationship candidate_id: {candidate_id}")
+    if (decision["review_status"] == "manual_required"
+            or selection["relation"] == "ambiguous"
+            or selection["status"] == "ambiguous"):
+        raise ValueError("关系裁决仍为 ambiguous")
+    return {
+        "candidate_id": candidate_id,
+        "candidate_index": int(candidate_id.rsplit("-", 1)[-1]) - 1,
+        "relation": selection["relation"],
+        "review_notes": decision["review_notes"],
+    }
+
+
+def build_relationship_review_prompt(catalog: dict) -> str:
+    return f"""你是受程序约束的论文关系裁决 Worker。程序已排除二进制重复、DOI/arXiv 精确重复和 normalized-text 重复；你无权返回 duplicate 或删除任何来源。
+
+候选目录：
+{json.dumps(catalog, ensure_ascii=False)}
+
+只输出 JSON：
+{{
+  "protocol_version": "{RELATION_DECISION_PROTOCOL}",
+  "review_status": "decided|manual_required",
+  "selection": {{"candidate_id": "relation-01", "relation": "version|unrelated|ambiguous", "status": "confirmed|ambiguous"}},
+  "review_notes": []
+}}
+
+约束：只能选择一个现有 candidate ID；同一研究工作的修订稿、作者稿或出版稿选 version；仅标题近似但研究工作不同选 unrelated；证据不足选 ambiguous/manual_required。不得输出路径、locator 或书目值。"""
+
+
+def review_uncertain_relationship(state: dict, paper_md: Path) -> dict:
+    catalog = build_relationship_candidate_catalog(state, paper_md)
+    input_hash = _relationship_input_hash(catalog)
+    worker = {
+        "protocol_version": RELATION_DECISION_PROTOCOL,
+        "input_hash": input_hash,
+        "api_called": False,
+        "cache_hit": False,
+        "skipped": False,
+        "skip_reason": "",
+    }
+    decision = _deterministic_relationship_decision(catalog)
+    if decision:
+        worker["skipped"] = True
+        worker["skip_reason"] = "deterministic_fast_path"
+    else:
+        decision = _load_relationship_cache(state.get("transaction_id", ""), input_hash)
+        if decision:
+            worker["cache_hit"] = True
+            worker["skip_reason"] = "transaction_cache"
+    prompt = build_relationship_review_prompt(catalog)
+    if not decision:
+        result = call_json(
+            prompt,
+            relationship_decision_schema,
+            max_tokens=600,
+            retries=0,
+            operation="ingest_relation_review",
+            transaction_id=state.get("transaction_id", ""),
+            system="你是论文关系候选 ID 裁决 Worker，只输出 JSON。",
+        )
+        worker["api_called"] = bool(result.get("history"))
+        if result.get("status") == "agent_required":
+            return {
+                "ok": False, "status": "agent_required", "prompt": result.get("prompt", prompt),
+                "catalog": catalog, "input_hash": input_hash, "worker": worker,
+            }
+        if not result.get("ok"):
+            return {
+                "ok": False, "status": "agent_required", "prompt": prompt,
+                "error": result.get("error", "关系 Worker 失败"), "catalog": catalog,
+                "input_hash": input_hash, "worker": worker,
+            }
+        decision = result.get("parsed")
+    try:
+        compiled = _compile_relationship_decision(decision, catalog)
+    except ValueError as exc:
+        return {
+            "ok": False, "status": "agent_required", "prompt": prompt, "error": str(exc),
+            "decision": decision, "catalog": catalog, "input_hash": input_hash,
+            "worker": worker,
+        }
+    source_candidates = state.get("relation_candidates") or []
+    candidate_index = compiled.pop("candidate_index")
+    if candidate_index < 0 or candidate_index >= len(source_candidates):
+        return {
+            "ok": False, "status": "agent_required", "prompt": prompt,
+            "error": "relationship candidate index 越界", "decision": decision,
+            "catalog": catalog, "input_hash": input_hash, "worker": worker,
+        }
+    source_candidate = source_candidates[candidate_index]
+    compiled["target_page"] = str(source_candidate.get("path") or "")
+    if not compiled["target_page"] and source_candidate.get("dir"):
+        compiled["target_raw_dir"] = str(source_candidate["dir"])
+    if not worker["skipped"]:
+        _save_relationship_cache(state.get("transaction_id", ""), input_hash, decision)
+    return {
+        "ok": True, "status": "ok", "compiled": compiled, "decision": decision,
+        "catalog": catalog, "input_hash": input_hash, "worker": worker,
+    }
+
+
+def _apply_relationship_review(state: dict, compiled: dict) -> None:
+    relation = compiled.get("relation")
+    if relation == "version":
+        state["raw_relationship"] = {
+            "type": "version",
+            "target_page": compiled.get("target_page", ""),
+            "target_raw_dir": compiled.get("target_raw_dir", ""),
+            "uncertain": False,
+            "confirmed_by": RELATION_DECISION_PROTOCOL,
+        }
+    else:
+        state["raw_relationship"] = {
+            "type": None, "uncertain": False,
+            "confirmed_by": RELATION_DECISION_PROTOCOL,
+        }
+
+
+def _relationship_review_draft_path(state: dict) -> Path:
+    return REPO / state["extract_dir"] / "relationship-review.json"
+
+
+def _resume_relationship_review(state: dict) -> bool:
+    review_state = state.get("relationship_review") or {}
+    if state.get("status") != "agent_required" or review_state.get("status") != "agent_required":
+        return False
+    draft_path = _relationship_review_draft_path(state)
+    if not draft_path.is_file():
+        return False
+    try:
+        decision = json.loads(draft_path.read_text(encoding="utf-8"))
+        compiled = _compile_relationship_decision(decision, review_state.get("catalog") or {})
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        state["errors"] = [f"关系裁决草稿无效: {exc}"]
+        return False
+    source_candidates = state.get("relation_candidates") or []
+    candidate_index = compiled.pop("candidate_index")
+    if candidate_index < 0 or candidate_index >= len(source_candidates):
+        state["errors"] = ["relationship candidate index 越界"]
+        return False
+    source_candidate = source_candidates[candidate_index]
+    compiled["target_page"] = str(source_candidate.get("path") or "")
+    if not compiled["target_page"] and source_candidate.get("dir"):
+        compiled["target_raw_dir"] = str(source_candidate["dir"])
+    _save_relationship_cache(
+        state.get("transaction_id", ""), review_state.get("input_hash", ""), decision,
+    )
+    _apply_relationship_review(state, compiled)
+    state["relationship_review"] = {
+        "status": "ok",
+        "decision": decision,
+        "compiled": compiled,
+        "catalog": review_state.get("catalog") or {},
+        "input_hash": review_state.get("input_hash", ""),
+        "worker": review_state.get("worker") or {},
+    }
+    persist_bibliographic_metadata(REPO / state["extract_dir"], state.get("bibliographic_meta"))
+    state["status"] = "write_wiki"
+    state["agent_required"] = False
+    state["agent_prompt"] = ""
+    state["agent_write_to"] = ""
+    state["pre_handoff_status"] = ""
+    state["errors"] = []
+    return True
+
+
 def title_to_slug(title: str) -> str:
     words = re.split(r"\s+", title.lower())
     significant = [w for w in words if w and w not in STOP_WORDS]
@@ -435,7 +794,7 @@ def extract_title_from_pdf(pdf_path: Path) -> str:
         doc = fitz.open(str(pdf_path))
         try:
             # 优先使用 PDF metadata title（最可靠，避免误提期刊抬头/页眉）
-            meta_title = (doc.metadata or {}).get("title", "").strip()
+            meta_title = _clean_title_candidate((doc.metadata or {}).get("title", ""))
             if meta_title and len(meta_title) > 10:
                 return meta_title
             page = doc[0]
@@ -450,8 +809,8 @@ def extract_title_from_pdf(pdf_path: Path) -> str:
     for line in lines[:5]:
         if len(line) > 10 and not re.match(r"^(arXiv|doi|http|vol\.|page|published|\d+$)", line, re.I) \
            and not re.search(r"vol\.?\s*\d|volume\s*\d", line, re.I):
-            return line
-    return lines[0]
+            return _clean_title_candidate(line)
+    return _clean_title_candidate(lines[0])
 
 
 def extract_pdf_bibliography(pdf_path: Path) -> dict:
@@ -485,7 +844,7 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
     except Exception:
         return result
 
-    title = str(metadata.get("title") or "").strip()
+    title = _clean_title_candidate(metadata.get("title") or "")
     if len(title) > 10:
         result["title"] = title
         result["evidence"]["title"] = "pdf_metadata.title"
@@ -501,7 +860,9 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
     lines = [" ".join(line.split()) for line in first_page_text.splitlines() if line.strip()]
     evidence_lines = []
     for line in lines:
-        if re.search(r"\bProceedings of\b|\bPublished\b|Association for Computational Linguistics|[©Ⓒ]", line, re.I):
+        if re.search(
+                r"\bProceedings of\b|\bPublished\b|\bTo cite this article\b|"
+                r"Association for Computational Linguistics|[©Ⓒ]", line, re.I):
             evidence_lines.append(line)
         venue_match = re.search(
             r"\bProceedings of\s+(.+?)(?:,\s*(?:pages?|pp\.?)\b|$)", line, re.I)
@@ -517,6 +878,14 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
         if not result["venue"] and re.search(
                 r"^EPL\s*,\s*\d+\s*\((?:19|20)\d{2}\)\s*\d+\s*$", line, re.I):
             result["venue"] = "EPL"
+            result["evidence"]["venue"] = evidence_scope
+        iop_match = re.search(
+            r"\b((?:19|20)\d{2})\s+New\s+J\.\s*Phys\.\s+(\d+)\s+([A-Za-z0-9]+)\b",
+            line, re.I,
+        )
+        if not result["venue"] and iop_match:
+            year, volume, article = iop_match.groups()
+            result["venue"] = f"New J. Phys. {volume}, {article} ({year})"
             result["evidence"]["venue"] = evidence_scope
 
     year_candidates: list[tuple[str, str]] = []
@@ -723,6 +1092,15 @@ def load_bibliographic_metadata(raw_dir: Path) -> dict:
 
 BIBLIOGRAPHIC_REVIEW_OPERATION = "ingest_bibliographic_review"
 BIBLIOGRAPHIC_REVIEW_FIELDS = ("title", "authors", "year", "venue", "doi", "arxiv_id")
+BIBLIOGRAPHIC_DECISION_PROTOCOL = "candidate-id-v1"
+BIBLIOGRAPHIC_SCALAR_FIELDS = ("title", "year", "venue", "doi", "arxiv_id")
+AFFILIATION_HINT_RE = re.compile(
+    r"\b(?:university|universit[aä]t|institute|institution|laborator(?:y|ies)|lab\.?|"
+    r"department|faculty|school|college|academy|center|centre|corporation|company|"
+    r"foundation|hospital|observatory|consortium)\b|大学|学院|研究所|实验室|中心|公司|医院",
+    re.I,
+)
+_AUTHOR_TOKEN_RE = re.compile(r"^[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÿ'’.\-]*$")
 
 
 def _unique_nonempty(values: list) -> list:
@@ -735,6 +1113,96 @@ def _unique_nonempty(values: list) -> list:
             result.append(text)
             seen.add(text)
     return result
+
+
+def _repeated_title_authors(md_text: str) -> list[str]:
+    """Extract a full author line after a repeated publisher-wrapper title."""
+    title = extract_title_from_md(md_text)
+    if not title:
+        return []
+    normalized_title = " ".join(title.casefold().split())
+    lines = md_text.splitlines()
+    groups = []
+    for index, line in enumerate(lines):
+        if not line.startswith("# "):
+            continue
+        candidate_title = _clean_title_candidate(line[2:])
+        if " ".join(candidate_title.casefold().split()) != normalized_title:
+            continue
+        author_line = next((item.strip() for item in lines[index + 1:] if item.strip()), "")
+        if not author_line or re.search(r"\bTo cite this article\b", author_line, re.I):
+            continue
+        author_line = re.sub(r"<sup\b[^>]*>.*?</sup>", "", author_line, flags=re.I)
+        authors = []
+        for value in re.split(r",\s*|\s+and\s+", author_line):
+            value = " ".join(value.split()).strip(" ,")
+            tokens = value.split()
+            if not 2 <= len(tokens) <= 5 or AFFILIATION_HINT_RE.search(value):
+                continue
+            if all(_AUTHOR_TOKEN_RE.fullmatch(token) for token in tokens):
+                authors.append(value)
+        if authors:
+            groups.append(authors)
+    return max(groups, key=len, default=[])
+
+
+def bibliographic_quality_warnings(bibliography: dict, md_text: str) -> list[dict]:
+    """Report deterministic bibliography defects that should degrade file quality."""
+    warnings = []
+    title = str(bibliography.get("title") or "").strip()
+    cleaned_title = _clean_title_candidate(title)
+    if title and cleaned_title != title:
+        warnings.append({
+            "issue": "bibliographic_title_contaminated",
+            "detail": f"title contains publisher header: {title}",
+        })
+    expected_authors = _repeated_title_authors(md_text)
+    selected_authors = {str(author).strip() for author in bibliography.get("authors") or []}
+    missing_authors = [author for author in expected_authors if author not in selected_authors]
+    if missing_authors:
+        warnings.append({
+            "issue": "bibliographic_authors_incomplete",
+            "detail": (
+                f"locked authors omit {len(missing_authors)} names from the title author block: "
+                + ", ".join(missing_authors[:5])
+            ),
+        })
+    return warnings
+
+
+def repair_archived_bibliography(bibliography: dict, md_text: str) -> tuple[dict, list[dict]]:
+    """Repair deterministic defects in a runtime copy; archived Raw stays immutable."""
+    repaired = dict(bibliography or {})
+    corrections = []
+    title = str(repaired.get("title") or "").strip()
+    cleaned_title = _clean_title_candidate(title)
+    if title and cleaned_title and cleaned_title != title:
+        repaired["title"] = cleaned_title
+        corrections.append({
+            "field": "title", "reason": "publisher_header_removed",
+            "before": title, "after": cleaned_title,
+        })
+
+    selected = [str(author).strip() for author in repaired.get("authors") or [] if str(author).strip()]
+    expected = _repeated_title_authors(md_text)
+    if (expected and len(expected) > len(selected)
+            and set(selected).issubset(set(expected))):
+        repaired["authors"] = expected
+        corrections.append({
+            "field": "authors", "reason": "complete_repeated_title_author_block",
+            "before": selected, "after": expected,
+        })
+    return repaired, corrections
+
+
+def _record_bibliographic_quality_warnings(state: dict, md_text: str) -> None:
+    retained = [
+        warning for warning in state.get("quality_warnings", [])
+        if not str(warning.get("issue") or "").startswith("bibliographic_")
+    ]
+    state["quality_warnings"] = retained + bibliographic_quality_warnings(
+        state.get("bibliographic_meta") or {}, md_text,
+    )
 
 
 def _first_page_venue_candidates(evidence_lines) -> list[str]:
@@ -751,16 +1219,18 @@ def _first_page_venue_candidates(evidence_lines) -> list[str]:
 
 
 def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> dict:
-    """从 PDF 近端证据与 MinerU 文本生成书目候选，供 LLM 只做选择/否定。
+    """从 PDF 近端证据与 MinerU 文本生成程序候选。
 
-    作者候选同时保留 PDF metadata 与 paper.md 机械提取结果，原因是两种提取
-    都可能混入机构；LLM 的职责是从中保留姓名、把机构片段放入 rejected，
-    而不是创造项目里没有的候选人。
+    PDF metadata 与 paper.md 机械提取都可能混入机构，因此后续 Worker 只能
+    选择候选 ID；最终值、rejected 与 evidence 均由程序按候选目录编译。
     """
     bibliography = bibliography or {}
     pdf_authors = [str(author).strip() for author in (bibliography.get("authors") or [])]
-    md_authors = extract_authors_from_text(md_text)
+    md_authors = _unique_nonempty(
+        [*extract_authors_from_text(md_text), *_repeated_title_authors(md_text)]
+    )
     first_page_evidence = bibliography.get("first_page_evidence") or []
+    identity_region = bibliographic_identity_region(md_text)
     return {
         "doc_type": "paper",
         "title": _unique_nonempty([bibliography.get("title"), extract_title_from_md(md_text)]),
@@ -769,8 +1239,10 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
         "venue": _unique_nonempty(
             [bibliography.get("venue")] + _first_page_venue_candidates(first_page_evidence)
         ),
-        "doi": _unique_nonempty([bibliography.get("doi"), extract_doi(md_text)]),
-        "arxiv_id": _unique_nonempty([bibliography.get("arxiv_id"), extract_arxiv_id(md_text)]),
+        "doi": _unique_nonempty([bibliography.get("doi"), extract_doi(identity_region)]),
+        "arxiv_id": _unique_nonempty(
+            [bibliography.get("arxiv_id"), extract_arxiv_id(identity_region)]
+        ),
         "evidence": bibliography.get("evidence") or {},
         "first_page_evidence": first_page_evidence,
     }
@@ -832,6 +1304,284 @@ def bibliographic_review_schema(value) -> bool:
     if authors.get("status") not in {"confirmed", "corrected", "ambiguous"}:
         return False
     return True
+
+
+def bibliographic_decision_schema(value) -> bool:
+    """Validate the compact candidate-ID worker response."""
+    if not isinstance(value, dict) or set(value) != {
+        "protocol_version", "doc_type", "review_status", "selections",
+        "conflicts", "review_notes",
+    }:
+        return False
+    if value.get("protocol_version") != BIBLIOGRAPHIC_DECISION_PROTOCOL:
+        return False
+    if value.get("doc_type") not in {"paper", "document", "ambiguous"}:
+        return False
+    if value.get("review_status") not in {
+        "clean", "corrected", "ambiguous", "manual_required",
+    }:
+        return False
+    if not isinstance(value.get("conflicts"), list) or not all(
+        isinstance(item, (dict, str)) for item in value["conflicts"]
+    ):
+        return False
+    if not isinstance(value.get("review_notes"), list) or not all(
+        isinstance(item, str) for item in value["review_notes"]
+    ):
+        return False
+    selections = value.get("selections")
+    if not isinstance(selections, dict) or set(selections) != set(BIBLIOGRAPHIC_REVIEW_FIELDS):
+        return False
+    for field in ("title", "venue", "doi", "arxiv_id"):
+        item = selections.get(field)
+        if not isinstance(item, dict) or set(item) != {"candidate_id", "status"}:
+            return False
+        if not isinstance(item.get("candidate_id"), str):
+            return False
+        if item.get("status") not in {"confirmed", "corrected", "ambiguous"}:
+            return False
+    year = selections.get("year")
+    if not isinstance(year, dict) or set(year) != {"candidate_id", "kind", "status"}:
+        return False
+    if not isinstance(year.get("candidate_id"), str):
+        return False
+    if year.get("kind") not in {"published", "accepted", "received", "revised", "unknown"}:
+        return False
+    if year.get("status") not in {"confirmed", "corrected", "ambiguous"}:
+        return False
+    authors = selections.get("authors")
+    if not isinstance(authors, dict) or set(authors) != {
+        "accepted_ids", "rejected_ids", "status",
+    }:
+        return False
+    if not isinstance(authors.get("accepted_ids"), list) or not isinstance(
+        authors.get("rejected_ids"), list
+    ):
+        return False
+    if not all(isinstance(item, str) for item in authors.get("accepted_ids", [])):
+        return False
+    if not all(isinstance(item, str) for item in authors.get("rejected_ids", [])):
+        return False
+    return authors.get("status") in {"confirmed", "corrected", "ambiguous"}
+
+
+def _candidate_evidence(value: str, field: str, bibliography: dict, md_text: str) -> str:
+    """Locate candidate evidence deterministically; never ask the worker for locators."""
+    source_value = bibliography.get(field)
+    source_values = source_value if isinstance(source_value, list) else [source_value]
+    if value in [str(item or "").strip() for item in source_values]:
+        evidence = (bibliography.get("evidence") or {}).get(field)
+        if evidence:
+            return str(evidence)
+        return "pdf_metadata"
+    needle = _bibliographic_text_key(value)
+    lines = md_text.splitlines()
+    max_window = 4 if field == "title" else 2
+    for start in range(min(len(lines), 160)):
+        for end in range(start, min(start + max_window, len(lines), 160)):
+            haystack = _bibliographic_text_key(_bibliographic_evidence_text(lines[start:end + 1]))
+            if needle and needle in haystack:
+                first, last = start + 1, end + 1
+                return f"paper.md#L{first}" if first == last else f"paper.md#L{first}-L{last}"
+    return "program_candidate"
+
+
+def build_bibliographic_candidate_catalog(
+    candidates: dict, bibliography: dict | None, md_text: str,
+) -> dict:
+    """Assign stable IDs and program-owned evidence to every candidate."""
+    bibliography = bibliography or {}
+    fields = {}
+    for field in BIBLIOGRAPHIC_REVIEW_FIELDS:
+        prefix = "author" if field == "authors" else field
+        fields[field] = [
+            {
+                "id": f"{prefix}-{index:02d}",
+                "value": value,
+                "evidence": _candidate_evidence(value, field, bibliography, md_text),
+            }
+            for index, value in enumerate(candidates.get(field) or [], 1)
+        ]
+    return {"protocol_version": BIBLIOGRAPHIC_DECISION_PROTOCOL, "fields": fields}
+
+
+def compile_bibliographic_decision(decision: dict, catalog: dict) -> dict:
+    """Compile candidate IDs into the existing locked-review representation."""
+    if not bibliographic_decision_schema(decision):
+        raise ValueError("candidate-id 书目裁决不符合 schema")
+    indexes = {
+        field: {item["id"]: item for item in catalog.get("fields", {}).get(field, [])}
+        for field in BIBLIOGRAPHIC_REVIEW_FIELDS
+    }
+
+    def selected(field: str, candidate_id: str) -> tuple[str, str]:
+        if not candidate_id:
+            return "", ""
+        item = indexes[field].get(candidate_id)
+        if not item:
+            raise ValueError(f"{field} 引用了未知 candidate_id: {candidate_id}")
+        return item["value"], item["evidence"]
+
+    selections = decision["selections"]
+    bibliographic = {}
+    for field in ("title", "venue", "doi", "arxiv_id"):
+        candidate_id = selections[field]["candidate_id"]
+        status = selections[field]["status"]
+        if field in {"venue", "doi", "arxiv_id"} and not indexes[field] and not candidate_id:
+            # Empty optional fields contain no Worker decision: the program owns
+            # both the empty value and its uncertainty state.
+            status = "ambiguous"
+        elif not candidate_id and status != "ambiguous":
+            raise ValueError(f"{field} 未选择 candidate_id 时 status 必须为 ambiguous")
+        value, evidence = selected(field, candidate_id)
+        bibliographic[field] = {
+            "value": value, "evidence": evidence, "status": status,
+        }
+    if not selections["year"]["candidate_id"] and selections["year"]["status"] != "ambiguous":
+        raise ValueError("year 未选择 candidate_id 时 status 必须为 ambiguous")
+    year_value, year_evidence = selected("year", selections["year"]["candidate_id"])
+    bibliographic["year"] = {
+        "value": year_value,
+        "evidence": year_evidence,
+        "kind": selections["year"]["kind"],
+        "status": selections["year"]["status"],
+    }
+    accepted_ids = selections["authors"]["accepted_ids"]
+    rejected_ids = selections["authors"]["rejected_ids"]
+    if len(set(accepted_ids)) != len(accepted_ids) or len(set(rejected_ids)) != len(rejected_ids):
+        raise ValueError("authors candidate_id 不得重复")
+    if set(accepted_ids) & set(rejected_ids):
+        raise ValueError("同一 author candidate_id 不能同时接受和拒绝")
+    if not accepted_ids and selections["authors"]["status"] != "ambiguous":
+        raise ValueError("authors 未接受 candidate_id 时 status 必须为 ambiguous")
+    accepted = [selected("authors", candidate_id) for candidate_id in accepted_ids]
+    rejected = [selected("authors", candidate_id) for candidate_id in rejected_ids]
+    author_evidence = ", ".join(dict.fromkeys(
+        evidence for _value, evidence in accepted + rejected if evidence
+    ))
+    bibliographic["authors"] = {
+        "value": [value for value, _evidence in accepted],
+        "evidence": author_evidence,
+        "rejected": [value for value, _evidence in rejected],
+        "status": selections["authors"]["status"],
+    }
+    return {
+        "doc_type": decision["doc_type"],
+        "review_status": decision["review_status"],
+        "bibliographic": bibliographic,
+        "conflicts": decision["conflicts"],
+        "review_notes": decision["review_notes"],
+    }
+
+
+def _deterministic_bibliographic_decision(
+    bibliography: dict | None, candidates: dict, catalog: dict,
+) -> dict | None:
+    """Skip the worker only for a conservative, strong-identifier singleton case."""
+    bibliography = bibliography or {}
+    if not (candidates.get("doi") or candidates.get("arxiv_id")):
+        return None
+    if any(len(candidates.get(field) or []) > 1 for field in BIBLIOGRAPHIC_SCALAR_FIELDS):
+        return None
+    if not candidates.get("title") or not candidates.get("year"):
+        return None
+    pdf_authors = _unique_nonempty(list(bibliography.get("authors") or []))
+    candidate_authors = list(candidates.get("authors") or [])
+    if not pdf_authors or candidate_authors != pdf_authors:
+        return None
+    if any(AFFILIATION_HINT_RE.search(author) for author in candidate_authors):
+        return None
+    fields = catalog["fields"]
+    year_evidence = str((bibliography.get("evidence") or {}).get("year") or "").casefold()
+    year_kind = "published" if "published" in year_evidence else "unknown"
+
+    def only_id(field: str) -> str:
+        return fields[field][0]["id"] if fields[field] else ""
+
+    return {
+        "protocol_version": BIBLIOGRAPHIC_DECISION_PROTOCOL,
+        "doc_type": "paper",
+        "review_status": "clean",
+        "selections": {
+            "title": {"candidate_id": only_id("title"), "status": "confirmed"},
+            "authors": {
+                "accepted_ids": [item["id"] for item in fields["authors"]],
+                "rejected_ids": [],
+                "status": "confirmed",
+            },
+            "year": {
+                "candidate_id": only_id("year"), "kind": year_kind, "status": "confirmed",
+            },
+            "venue": {
+                "candidate_id": only_id("venue"),
+                "status": "confirmed" if fields["venue"] else "ambiguous",
+            },
+            "doi": {
+                "candidate_id": only_id("doi"),
+                "status": "confirmed" if fields["doi"] else "ambiguous",
+            },
+            "arxiv_id": {
+                "candidate_id": only_id("arxiv_id"),
+                "status": "confirmed" if fields["arxiv_id"] else "ambiguous",
+            },
+        },
+        "conflicts": [],
+        "review_notes": ["deterministic_fast_path: strong identifier and singleton candidates"],
+    }
+
+
+def _bibliographic_worker_input_hash(catalog: dict, md_text: str) -> str:
+    title_view, evidence_view = _paper_md_review_view(md_text)
+    payload = {
+        "protocol_version": BIBLIOGRAPHIC_DECISION_PROTOCOL,
+        "catalog": catalog,
+        "title_view": title_view,
+        "evidence_view": evidence_view,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _bibliographic_decision_cache_path(transaction_id: str) -> Path | None:
+    if not transaction_id:
+        return None
+    return REPO / "temp" / "inbox-state" / f"{transaction_id}-bibliographic-decision.json"
+
+
+def _load_bibliographic_decision_cache(transaction_id: str, input_hash: str) -> dict | None:
+    path = _bibliographic_decision_cache_path(transaction_id)
+    if not path or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    decision = payload.get("decision")
+    if (payload.get("protocol_version") != BIBLIOGRAPHIC_DECISION_PROTOCOL
+            or payload.get("input_hash") != input_hash
+            or not bibliographic_decision_schema(decision)):
+        return None
+    return decision
+
+
+def _save_bibliographic_decision_cache(
+    transaction_id: str, input_hash: str, decision: dict,
+) -> None:
+    path = _bibliographic_decision_cache_path(transaction_id)
+    if not path:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "protocol_version": BIBLIOGRAPHIC_DECISION_PROTOCOL,
+        "input_hash": input_hash,
+        "decision": decision,
+    }
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_path.replace(path)
 
 
 def _bibliographic_text_key(value: str) -> str:
@@ -916,6 +1666,38 @@ def repair_bibliographic_evidence_locators(review: dict, md_text: str) -> list[d
             "value": value,
         })
     return repairs
+
+
+def normalize_bibliographic_review(review: dict, candidates: dict) -> list[dict]:
+    """Constrain harmless negative author annotations to the candidate boundary."""
+    normalizations = []
+    bib = review.setdefault("bibliographic", {})
+    authors = bib.setdefault("authors", {})
+    candidate_authors = set(candidates.get("authors") or [])
+    rejected = list(authors.get("rejected") or [])
+    outside = [value for value in rejected if value not in candidate_authors]
+    if outside:
+        authors["rejected"] = [value for value in rejected if value in candidate_authors]
+        notes = review.setdefault("review_notes", [])
+        notes.append("候选外 affiliation 已从 authors.rejected 移除: " + "; ".join(outside))
+        normalizations.append({
+            "field": "authors.rejected",
+            "action": "move_out_of_candidate_values_to_review_notes",
+            "values": outside,
+        })
+    for field in ("doi", "arxiv_id"):
+        values = list(candidates.get(field) or [])
+        item = bib.setdefault(field, {})
+        if len(values) == 1 and not str(item.get("value") or "").strip():
+            item["value"] = values[0]
+            item["evidence"] = "program_candidate"
+            item["status"] = "confirmed"
+            normalizations.append({
+                "field": field,
+                "action": "lock_unique_program_candidate",
+                "value": values[0],
+            })
+    return normalizations
 
 
 def validate_bibliographic_review(
@@ -1010,14 +1792,14 @@ def _paper_md_review_view(md_text: str) -> tuple[str, str]:
     return "\n".join(title_lines), "\n".join(evidence_lines)
 
 
-def build_bibliographic_review_prompt(candidates: dict, md_text: str) -> str:
+def build_bibliographic_review_prompt(catalog: dict, md_text: str) -> str:
     title_view, evidence_view = _paper_md_review_view(md_text)
-    return f"""你是受程序约束的论文书目预审组件。你只能裁决程序给出的候选或上方证据中出现过的同一值，不得凭先验知识生成新的作者、标题、期刊或 DOI。
+    return f"""你是受程序约束的论文书目候选裁决 Worker。一次处理整篇书目，只能返回候选 ID，不得复制、改写或生成书目字符串，也不得生成 evidence locator。
 
 目标：锁定本篇论文的书目事实；排除机构/实验室/大学/公司等 affiliation 片段；year 区分 published/accepted/received/revised，发表年份优先。
 
-程序候选：
-{json.dumps(candidates, ensure_ascii=False)}
+候选目录（value/evidence 只用于判断，输出只能引用 id）：
+{json.dumps(catalog, ensure_ascii=False)}
 
 标题邻域：
 {title_view}
@@ -1027,21 +1809,27 @@ def build_bibliographic_review_prompt(candidates: dict, md_text: str) -> str:
 
 只输出 JSON，不得输出解释：
 {{
+  "protocol_version": "{BIBLIOGRAPHIC_DECISION_PROTOCOL}",
   "doc_type": "paper|document|ambiguous",
   "review_status": "clean|corrected|ambiguous|manual_required",
-  "bibliographic": {{
-    "title": {{"value": "", "evidence": "paper.md#Lx", "status": "confirmed|corrected|ambiguous"}},
-    "authors": {{"value": [], "evidence": "paper.md#Lx", "rejected": [], "status": "confirmed|corrected|ambiguous"}},
-    "year": {{"value": "", "evidence": "paper.md#Lx", "kind": "published|accepted|received|revised|unknown", "status": "confirmed|corrected|ambiguous"}},
-    "venue": {{"value": "", "evidence": "paper.md#Lx", "status": "confirmed|corrected|ambiguous"}},
-    "doi": {{"value": "", "evidence": "paper.md#Lx", "status": "confirmed|corrected|ambiguous"}},
-    "arxiv_id": {{"value": "", "evidence": "paper.md#Lx", "status": "confirmed|corrected|ambiguous"}}
+  "selections": {{
+    "title": {{"candidate_id": "title-01", "status": "confirmed|corrected|ambiguous"}},
+    "authors": {{"accepted_ids": ["author-01"], "rejected_ids": ["author-02"], "status": "confirmed|corrected|ambiguous"}},
+    "year": {{"candidate_id": "year-01", "kind": "published|accepted|received|revised|unknown", "status": "confirmed|corrected|ambiguous"}},
+    "venue": {{"candidate_id": "", "status": "ambiguous"}},
+    "doi": {{"candidate_id": "", "status": "ambiguous"}},
+    "arxiv_id": {{"candidate_id": "", "status": "ambiguous"}}
   }},
   "conflicts": [],
   "review_notes": []
 }}
 
-约束：无法从候选和证据裁决时，对应字段 status 为 ambiguous，且 review_status 为 manual_required；机构片段只能写入 authors.rejected，不得写入 authors.value。"""
+约束：
+1. 只能引用候选目录中对应字段的 id；不选择时 candidate_id 写空字符串。
+2. authors.accepted_ids/rejected_ids 只能引用 author-*，不得重复或交叉。
+3. rejected_ids 只标记候选目录中误识别为作者的机构；候选外机构仅可在 review_notes 描述。
+4. 无法裁决时对应 status=ambiguous 且 review_status=manual_required。
+5. 一次返回所有字段，禁止建议后续逐字段调用。"""
 
 
 def merge_bibliographic_review(bibliography: dict | None, review: dict) -> dict:
@@ -1082,44 +1870,94 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
     - bibliographic_review_required: LLM 无法裁决或类型不是 paper
     - validation_error: 结构/候选边界未通过
     """
+    bibliography = bibliography or {}
     candidates = build_bibliographic_candidates(bibliography, md_text)
-    prompt = build_bibliographic_review_prompt(candidates, md_text)
-    result = call_json(
-        prompt,
-        bibliographic_review_schema,
-        max_tokens=1800,
-        retries=1,
-        operation=BIBLIOGRAPHIC_REVIEW_OPERATION,
-        transaction_id=transaction_id,
-        system="你是受程序约束的论文书目预审组件，只裁决程序候选并输出 JSON。",
-    )
-    if result.get("status") == "agent_required":
-        return {
-            "ok": False,
-            "status": "agent_required",
-            "agent_prompt": result.get("prompt", prompt),
-            "candidates": candidates,
-        }
-    if not result.get("ok"):
+    catalog = build_bibliographic_candidate_catalog(candidates, bibliography, md_text)
+    input_hash = _bibliographic_worker_input_hash(catalog, md_text)
+    worker = {
+        "protocol_version": BIBLIOGRAPHIC_DECISION_PROTOCOL,
+        "input_hash": input_hash,
+        "api_called": False,
+        "cache_hit": False,
+        "skipped": False,
+        "skip_reason": "",
+    }
+    decision = _deterministic_bibliographic_decision(bibliography, candidates, catalog)
+    if decision:
+        worker["skipped"] = True
+        worker["skip_reason"] = "deterministic_fast_path"
+    else:
+        decision = _load_bibliographic_decision_cache(transaction_id, input_hash)
+        if decision:
+            worker["cache_hit"] = True
+            worker["skip_reason"] = "transaction_cache"
+    prompt = build_bibliographic_review_prompt(catalog, md_text)
+    if not decision:
+        result = call_json(
+            prompt,
+            bibliographic_decision_schema,
+            max_tokens=1000,
+            retries=0,
+            operation=BIBLIOGRAPHIC_REVIEW_OPERATION,
+            transaction_id=transaction_id,
+            system="你是书目候选 ID 裁决 Worker，只引用候选 ID 并输出 JSON。",
+        )
+        worker["api_called"] = bool(result.get("history"))
+        if result.get("status") == "agent_required":
+            return {
+                "ok": False,
+                "status": "agent_required",
+                "agent_prompt": result.get("prompt", prompt),
+                "candidates": candidates,
+                "catalog": catalog,
+                "input_hash": input_hash,
+                "worker": worker,
+            }
+        if not result.get("ok"):
+            return {
+                "ok": False,
+                "status": "validation_error",
+                "error": result.get("error", "书目候选 ID 裁决调用失败"),
+                "review": result.get("parsed") or {},
+                "candidates": candidates,
+                "catalog": catalog,
+                "input_hash": input_hash,
+                "prompt": prompt,
+                "worker": worker,
+            }
+        decision = result.get("parsed")
+    try:
+        review = compile_bibliographic_decision(decision, catalog)
+    except ValueError as exc:
         return {
             "ok": False,
             "status": "validation_error",
-            "error": result.get("error", "书目预审调用失败"),
-            "review": result.get("parsed") or {},
+            "error": str(exc),
+            "review": decision,
             "candidates": candidates,
+            "catalog": catalog,
+            "input_hash": input_hash,
             "prompt": prompt,
+            "worker": worker,
         }
-    review = result.get("parsed")
+    normalizations = normalize_bibliographic_review(review, candidates)
     errors = validate_bibliographic_review(review, candidates, md_text)
     if errors:
         return {
             "ok": False,
             "status": "validation_error",
             "error": "书目预审候选校验失败: " + "; ".join(errors),
-            "review": review,
+            "review": decision,
+            "compiled_review": review,
             "candidates": candidates,
+            "catalog": catalog,
+            "input_hash": input_hash,
             "prompt": prompt,
+            "normalizations": normalizations,
+            "worker": worker,
         }
+    if not worker["skipped"]:
+        _save_bibliographic_decision_cache(transaction_id, input_hash, decision)
     if (review.get("doc_type") != "paper"
             or review.get("review_status") in {"ambiguous", "manual_required"}):
         reason = f"review_status={review.get('review_status')}" if review.get("doc_type") == "paper" else f"doc_type={review.get('doc_type')}"
@@ -1129,6 +1967,9 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
             "error": f"书目预审无法锁定论文书目（{reason}）",
             "review": review,
             "candidates": candidates,
+            "catalog": catalog,
+            "input_hash": input_hash,
+            "worker": worker,
         }
     return {
         "ok": True,
@@ -1136,6 +1977,10 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
         "bibliographic": merge_bibliographic_review(bibliography, review),
         "review": review,
         "candidates": candidates,
+        "catalog": catalog,
+        "decision": decision,
+        "input_hash": input_hash,
+        "worker": worker,
     }
 
 
@@ -1153,7 +1998,15 @@ def _resume_bibliographic_review(state: dict) -> bool:
         and isinstance(review_state.get("review"), dict)
     )
     if stored_validation_error:
-        review = review_state["review"]
+        draft_path = REPO / str(review_state.get("draft_path") or "")
+        if review_state.get("draft_path") and draft_path.is_file():
+            try:
+                review = json.loads(draft_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                state["errors"] = [f"书目预审草稿读取失败: {exc}"]
+                return False
+        else:
+            review = review_state["review"]
     else:
         if state.get("status") != "agent_required" or review_state.get("status") != "agent_required":
             return False
@@ -1165,12 +2018,23 @@ def _resume_bibliographic_review(state: dict) -> bool:
         except Exception as exc:
             state["errors"] = [f"书目预审草稿读取失败: {exc}"]
             return False
-    if not bibliographic_review_schema(review):
-        state["errors"] = ["书目预审草稿不符合 JSON schema"]
-        return False
     candidates = review_state.get("candidates") or build_bibliographic_candidates(
         state.get("bibliographic_meta"), (REPO / state["extract_dir"] / "paper.md").read_text(encoding="utf-8"))
     md_text = (REPO / state["extract_dir"] / "paper.md").read_text(encoding="utf-8")
+    catalog = review_state.get("catalog") or build_bibliographic_candidate_catalog(
+        candidates, state.get("bibliographic_meta"), md_text,
+    )
+    decision = review if bibliographic_decision_schema(review) else None
+    if decision:
+        try:
+            review = compile_bibliographic_decision(decision, catalog)
+        except ValueError as exc:
+            state["errors"] = [str(exc)]
+            return False
+    elif not bibliographic_review_schema(review):
+        state["errors"] = ["书目预审草稿不符合 candidate-id 或 legacy JSON schema"]
+        return False
+    normalize_bibliographic_review(review, candidates)
     errors = validate_bibliographic_review(review, candidates, md_text)
     if errors:
         state["errors"] = errors
@@ -1182,8 +2046,20 @@ def _resume_bibliographic_review(state: dict) -> bool:
         state["errors"] = ["书目预审无法锁定论文书目"]
         return True
     state["bibliographic_meta"] = merge_bibliographic_review(state.get("bibliographic_meta"), review)
+    _record_bibliographic_quality_warnings(state, md_text)
     persist_bibliographic_metadata(REPO / state["extract_dir"], state["bibliographic_meta"])
-    state["bibliographic_review"] = {"status": "ok", "review": review, "candidates": candidates}
+    input_hash = review_state.get("input_hash") or _bibliographic_worker_input_hash(catalog, md_text)
+    if decision:
+        _save_bibliographic_decision_cache(state["transaction_id"], input_hash, decision)
+    state["bibliographic_review"] = {
+        "status": "ok",
+        "review": review,
+        "decision": decision,
+        "candidates": candidates,
+        "catalog": catalog,
+        "input_hash": input_hash,
+        "worker": review_state.get("worker", {}),
+    }
     state["bibliographic_review_required"] = False
     state["status"] = "write_wiki"
     state["agent_required"] = False
@@ -1195,6 +2071,80 @@ def _resume_bibliographic_review(state: dict) -> bool:
 
 def normalize_title(title: str) -> str:
     return deaccent(title).lower().strip()
+
+
+def _bibliographic_identity(value: dict | None) -> tuple:
+    value = value or {}
+    authors = tuple(
+        re.sub(r"\s+", " ", str(author)).strip().casefold()
+        for author in value.get("authors", []) if str(author).strip()
+    )
+    return (
+        normalize_title(str(value.get("title") or "")),
+        authors,
+        str(value.get("year") or "").strip(),
+        re.sub(r"v\d+$", "", str(value.get("arxiv_id") or "").strip().casefold()),
+        str(value.get("doi") or "").strip().casefold(),
+    )
+
+
+def _bibliography_for_raw_artifact(raw_path: str) -> dict:
+    artifact = REPO / raw_path
+    source_yaml = artifact.parent / "source.yaml"
+    if not source_yaml.is_file():
+        return {}
+    try:
+        payload = yaml.safe_load(source_yaml.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return payload.get("bibliographic") or {}
+
+
+def _post_extract_duplicate(state: dict, paper_md: Path) -> dict | None:
+    """Confirm a normalized-text candidate with locked bibliographic identity."""
+    candidate = sf.lookup_text_candidate(paper_md)
+    if not candidate:
+        return None
+    existing = _bibliography_for_raw_artifact(candidate.get("raw_path", ""))
+    current_key = _bibliographic_identity(state.get("bibliographic_meta"))
+    existing_key = _bibliographic_identity(existing)
+    current_title, current_authors, current_year, current_arxiv, current_doi = current_key
+    existing_title, existing_authors, existing_year, existing_arxiv, existing_doi = existing_key
+    strong_id = bool(
+        (current_doi and current_doi == existing_doi)
+        or (current_arxiv and current_arxiv == existing_arxiv)
+    )
+    same_bibliography = bool(
+        current_title and current_title == existing_title
+        and current_authors and current_authors == existing_authors
+        and current_year and current_year == existing_year
+    )
+    return candidate if strong_id or same_bibliography else None
+
+
+def _graph_retry_context(state: dict) -> str:
+    paths = [REPO / "cross-domain" / "graph.db"]
+    for key in ("wiki_path", "semantic_path"):
+        if state.get(key):
+            paths.append(REPO / str(state[key]))
+    snapshot = []
+    for path in paths:
+        if path.is_file():
+            stat = path.stat()
+            snapshot.append((str(path.relative_to(REPO)), stat.st_size, stat.st_mtime_ns))
+    return hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _mark_graph_failure(state: dict) -> None:
+    if state.get("status") != "failed" or state.get("resume_from") != "graph_ready":
+        return
+    state["failure_signature"] = hashlib.sha256(
+        json.dumps(state.get("errors", []), ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    state["failure_context"] = _graph_retry_context(state)
+    state["retryable"] = False
+    state["next_action"] = "repair_graph_identity_or_metadata_then_resume"
+    inbox_state.save(state["transaction_id"], state)
 
 
 # ===== 3.1 dedup_check =====
@@ -1211,6 +2161,27 @@ def step_dedup_check(state: dict) -> tuple[bool, str]:
     """
     import difflib
     pdf_path = REPO / state["source"]
+    try:
+        sf.ensure_index()
+        fingerprint_match = sf.lookup_exact(pdf_path)
+    except Exception as exc:
+        fingerprint_match = None
+        state.setdefault("quality_warnings", []).append({
+            "issue": "fingerprint_index_unavailable", "detail": str(exc),
+        })
+    if fingerprint_match:
+        state["source_fingerprint"] = {
+            "binary_sha256": fingerprint_match["binary_sha256"],
+            "size_bytes": fingerprint_match["size_bytes"],
+        }
+        state["dedup_title"] = pdf_path.name
+        state["dedup_result"] = {
+            "duplicate": True,
+            "match": "binary_sha256",
+            "raw_path": fingerprint_match["raw_path"],
+            "binary_sha256": fingerprint_match["binary_sha256"],
+        }
+        return True, f"源文件 SHA-256 已存在: {fingerprint_match['raw_path']}"
     bibliography = extract_pdf_bibliography(pdf_path)
     state["bibliographic_meta"] = bibliography
     title = bibliography.get("title") or extract_title_from_pdf(pdf_path)
@@ -1269,13 +2240,20 @@ def step_dedup_check(state: dict) -> tuple[bool, str]:
                                 "raw_path": str(raw_md.relative_to(REPO))})
     if dup_graph or dup_raw:
         state["dedup_result"] = {"graph": dup_graph, "raw": dup_raw}
+        state["relation_candidates"] = dup_graph + dup_raw
         # 候选已过 0.95 标题门槛 → 通过 metadata（DOI/arXiv ID）确认
         rel = detect_raw_relationship(state, dup_graph + dup_raw)
         state["raw_relationship"] = rel
         if rel["type"] == "duplicate":
-            tag = "（需 agent 确认）" if rel.get("uncertain") else ""
-            target = rel.get("target_page") or rel.get("target_raw_dir") or ""
-            return True, f"疑似已摄入{tag}: title={title}, target={target}"
+            if not rel.get("uncertain"):
+                target = rel.get("target_page") or rel.get("target_raw_dir") or ""
+                return True, f"已确认摄入: title={title}, target={target}"
+            state["dedup_result"] = {
+                "duplicate": False,
+                "reason": "title>0.95 without strong identifier; defer until post-extract",
+                "relation_candidates": dup_graph + dup_raw,
+            }
+            return False, ""
         if rel["type"] in ("version", "supplementary", "translation") and not rel.get("uncertain"):
             state["dedup_result"] = {"duplicate": False, "raw_relationship": rel}
             return False, ""
@@ -1322,39 +2300,111 @@ def step_extract(state: dict) -> tuple[bool, str]:
     state["extract_dir"] = str(extract_dir.relative_to(REPO))
     state["engine"] = engine
     md_text = paper_md.read_text(encoding="utf-8")
-    ic.record_llm_call(state, "bibliographic_review")
     review_result = review_bibliographic_metadata(
         state.get("bibliographic_meta"), md_text, state.get("transaction_id", ""))
+    if (review_result.get("worker") or {}).get("api_called"):
+        ic.record_llm_call(state, "bibliographic_review")
     if review_result.get("status") == "agent_required":
         draft_rel = str(extract_dir.relative_to(REPO) / "bibliographic-review.json")
         state["agent_required"] = True
         state["pre_handoff_status"] = "extract"
         state["agent_prompt"] = (
             review_result.get("agent_prompt", "")
-            + f"\n\n请将符合 schema 的书目预审 JSON 写入 `{draft_rel}`，"
+            + f"\n\n请将符合 candidate-id-v1 schema 的候选 ID 裁决 JSON 写入 `{draft_rel}`，"
             + f"然后运行 `{_resume_cmd(state)}`。"
         )
         state["bibliographic_review"] = {
             "status": "agent_required",
             "candidates": review_result.get("candidates", {}),
+            "catalog": review_result.get("catalog", {}),
+            "input_hash": review_result.get("input_hash", ""),
+            "worker": review_result.get("worker", {}),
             "draft_path": draft_rel,
         }
         return False, "需要 agent 接管书目预审"
     if not review_result.get("ok"):
+        draft_rel = str(extract_dir.relative_to(REPO) / "bibliographic-review.json")
+        if isinstance(review_result.get("review"), dict):
+            (extract_dir / "bibliographic-review.json").write_text(
+                json.dumps(review_result["review"], ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
         state["bibliographic_review_required"] = True
         state["bibliographic_review"] = {
             "status": review_result.get("status", "bibliographic_review_required"),
             "error": review_result.get("error", ""),
             "review": review_result.get("review", {}),
+            "compiled_review": review_result.get("compiled_review", {}),
             "candidates": review_result.get("candidates", {}),
+            "catalog": review_result.get("catalog", {}),
+            "input_hash": review_result.get("input_hash", ""),
+            "worker": review_result.get("worker", {}),
+            "draft_path": draft_rel,
         }
+        state["retryable"] = False
+        state["next_action"] = "repair_bibliographic_review_then_resume"
         return False, review_result.get("error", "书目预审未通过，禁止 Raw/Wiki/Graph 提交")
     state["bibliographic_meta"] = review_result.get("bibliographic")
+    _record_bibliographic_quality_warnings(state, md_text)
     state["bibliographic_review"] = {
         "status": "ok",
         "review": review_result.get("review"),
+        "decision": review_result.get("decision"),
         "candidates": review_result.get("candidates"),
+        "catalog": review_result.get("catalog"),
+        "input_hash": review_result.get("input_hash"),
+        "worker": review_result.get("worker"),
     }
+    duplicate = _post_extract_duplicate(state, paper_md)
+    if duplicate:
+        state["post_extract_duplicate"] = True
+        state["dedup_title"] = state["bibliographic_meta"].get("title", "")
+        state["dedup_result"] = {
+            "duplicate": True,
+            "match": duplicate["match"],
+            "raw_path": duplicate["raw_path"],
+            "text_sha256": duplicate["text_sha256"],
+            "confirmed_by": "locked_bibliography",
+        }
+        return False, f"提取后确认重复: {duplicate['raw_path']}"
+    pending_relation = state.get("raw_relationship") or {}
+    if pending_relation.get("uncertain") and state.get("relation_candidates"):
+        relationship_result = review_uncertain_relationship(state, paper_md)
+        if (relationship_result.get("worker") or {}).get("api_called"):
+            ic.record_llm_call(state, "relationship_review")
+        if not relationship_result.get("ok"):
+            draft_path = extract_dir / "relationship-review.json"
+            if isinstance(relationship_result.get("decision"), dict):
+                draft_path.write_text(
+                    json.dumps(relationship_result["decision"], ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            state["agent_required"] = True
+            state["pre_handoff_status"] = "extract"
+            state["agent_write_to"] = str(draft_path.relative_to(REPO))
+            state["agent_prompt"] = (
+                relationship_result.get("prompt", "")
+                + f"\n\n请将符合 {RELATION_DECISION_PROTOCOL} 的裁决 JSON 写入 "
+                + f"`{draft_path.relative_to(REPO)}`，然后运行 `{_resume_cmd(state)}`。"
+            )
+            state["relationship_review"] = {
+                "status": "agent_required",
+                "error": relationship_result.get("error", ""),
+                "decision": relationship_result.get("decision"),
+                "catalog": relationship_result.get("catalog") or {},
+                "input_hash": relationship_result.get("input_hash", ""),
+                "worker": relationship_result.get("worker") or {},
+            }
+            return False, "需要 agent 接管论文关系裁决"
+        _apply_relationship_review(state, relationship_result["compiled"])
+        state["relationship_review"] = {
+            "status": "ok",
+            "decision": relationship_result.get("decision"),
+            "compiled": relationship_result.get("compiled"),
+            "catalog": relationship_result.get("catalog") or {},
+            "input_hash": relationship_result.get("input_hash", ""),
+            "worker": relationship_result.get("worker") or {},
+        }
     persist_bibliographic_metadata(extract_dir, state.get("bibliographic_meta"))
     if engine != "mineru":
         print(f"⚠️  WARNING: 提取引擎为 {engine}（非 MinerU），结果可能需要人工复核")
@@ -1895,6 +2945,7 @@ def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
         page_path = state["wiki_path"]
         triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = \
             graph_ingest.parse_semantic_text(sem_text, page_path)
+        state["semantic_triple_count"] = len(triples)
         # 登记谓词直接通过；格式合格的新谓词进入候选池，异常文本仍是硬错误。
         allowed = set(SEMANTIC_PREDICATES)
         registry = REPO / ".scripts" / "predicate-registry.json"
@@ -2002,6 +3053,51 @@ def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
     return hard_errors, slot_warnings
 
 
+def _handle_sparse_slots(state: dict) -> str:
+    """Retry one sparse slots extraction and retain the higher-coverage result."""
+    count = int(state.get("semantic_triple_count") or 0)
+    content = str(state.get("slots_content") or "")
+    best = state.get("_sparse_slots_best") or {}
+    if count > int(best.get("count") or -1):
+        best = {"count": count, "content": content}
+        state["_sparse_slots_best"] = best
+
+    attempts = int(state.get("sparse_slots_retry") or 0)
+    if count < MIN_SEMANTIC_TRIPLES and attempts < MAX_SPARSE_SLOT_RETRIES:
+        state["sparse_slots_retry"] = attempts + 1
+        state["slots_retry"] = int(state.get("slots_retry") or 0) + 1
+        state["slots_errors"] = [
+            f"语义槽覆盖不足：仅 {count} 条三元组，至少输出 {MIN_SEMANTIC_TRIPLES} 条由 Wiki 明确支持的核心关系"
+        ]
+        state["slots_content"] = ""
+        state["_skip_wiki_for_slots_resume"] = True
+        state["semantic_coverage"] = {
+            "minimum": MIN_SEMANTIC_TRIPLES,
+            "first_count": best["count"],
+            "retry_count": attempts + 1,
+            "status": "retrying",
+        }
+        return "retry"
+
+    selected = best if int(best.get("count") or -1) > count else {
+        "count": count, "content": content,
+    }
+    action = "accepted"
+    if selected["content"] != content:
+        state["slots_content"] = selected["content"]
+        (REPO / state["semantic_path"]).write_text(selected["content"], encoding="utf-8")
+        state["semantic_triple_count"] = selected["count"]
+        action = "restored"
+    state["semantic_coverage"] = {
+        "minimum": MIN_SEMANTIC_TRIPLES,
+        "selected_count": selected["count"],
+        "retry_count": attempts,
+        "status": "complete" if selected["count"] >= MIN_SEMANTIC_TRIPLES else "sparse",
+    }
+    state.pop("_sparse_slots_best", None)
+    return action
+
+
 def find_slot_section(predicate: str, sem_text: str, obj: str) -> str:
     """根据谓词反查客体所在的语义槽 section 名。"""
     pred_to_section = {
@@ -2028,99 +3124,16 @@ def find_slot_section(predicate: str, sem_text: str, obj: str) -> str:
 
 # ===== 3.6b 局部修复语义槽（轻量 LLM）=====
 
-def _build_repair_prompt(warnings: list[dict], venue_hint: str, is_second_pass: bool) -> str:
-    problem_lines = []
-    for w in warnings:
-        problem_lines.append(f"[section: {w['section']}] 原行: {w['line']}  问题: {w['reason']}")
-    problems = "\n".join(problem_lines)
-    second_pass_note = "\n[注意] 前次修复仍有残留，请更精准地修正，确保客体是规范概念名/实体名。" if is_second_pass else ""
-    return f"""仅输出修正后的语义槽行。
-- 普通槽（期刊、作者等）用「section名: 修正后内容」
-- 标为「三元组」的每一行必须用「主体 | 谓词 | 客体」格式。逐字保留原主体与谓词，只改客体；即使主体是「本论文」也不得用 section 格式
-不要输出解释、不要输出完整语义槽、不要输出 wiki。
-只修正以下有问题行，其余行不变：{second_pass_note}
-
-[有问题行]
-{problems}
-{venue_hint}
-
-[修正要求]
-- descriptive_phrase：客体或主体若是含主谓宾的整句（如「用MPS参数化监督学习模型权重」），必须补出 4 组三元组（原行+2拆分边+1语义边），格式见下；若只是过长带标点但不含主谓宾结构，去除标点截短为规范名词即可：
-  原行保留不变（如「本论文 | 核心方法 | 用MPS参数化监督学习模型权重」）
-  原节点 | 拆分 | <主概念>（如「用MPS参数化监督学习模型权重 | 拆分 | 监督学习模型权重参数化」）
-  原节点 | 拆分 | <工具概念>（如「用MPS参数化监督学习模型权重 | 拆分 | 矩阵乘积态matrix product state(MPS)」）
-  <工具概念> | <原句动词> | <宾概念>（如「矩阵乘积态matrix product state(MPS) | 参数化 | 监督学习模型权重」）
-  谓词从原句提取（参数化/导致/改进等），不得臆造关系词；拆分出的概念写规范名
-- 修正后的客体应写规范名（含缩写时可用自然写法，如「CP分解」或「矩阵乘积态(MPS)」均可）
-- 期刊名用通用缩写（如 Phys. Rev. Lett.→PRL，Phys. Rev. B→PRB，Nature→Nature）"""
-
-
-def _repair_once(state: dict, warnings: list[dict], operation: str, is_second_pass: bool = False) -> tuple[bool, list[dict]]:
-    """单次修复 + 复验。返回 (ok, residual_warnings)。"""
-    semantic_path = REPO / state["semantic_path"]
-    sem_text = semantic_path.read_text(encoding="utf-8")
-    venue_hint = ""
-    try:
-        extract_dir = REPO / state["extract_dir"]
-        skeleton = (extract_dir / "skeleton.md").read_text(encoding="utf-8")
-        m = re.search(r'venue:\s*"([^"]*)"', skeleton)
-        if m and m.group(1):
-            venue_hint = f"\n[论文 venue 原文（供期刊名参考）]\n{m.group(1)}"
-    except Exception:
-        pass
-    prompt = _build_repair_prompt(warnings, venue_hint, is_second_pass)
-    result = call_text(prompt, max_tokens=600, retries=1, operation=operation,
-                       transaction_id=state.get("transaction_id", ""),
-                       system="你是语义槽修复组件，只输出修正后的行，不解释。")
-    if result.get("status") == "agent_required":
-        state["agent_required"] = True
-        state["agent_prompt"] = result.get("prompt", "")
-        return False, warnings
-    if not result.get("ok"):
-        return False, warnings
-    repaired_text = result.get("text", "").strip()
-    if not repaired_text:
-        return False, warnings
-    new_sem = patch_semantic_lines(sem_text, repaired_text, warnings)
-    if new_sem is None:
-        return False, warnings
-    semantic_path.write_text(new_sem, encoding="utf-8")
-    state["slots_content"] = new_sem
-    # 复验
-    _, residual = step_validate_semantics(state)
-    # 非阻断 warning 不计入残留（不触发 agent 兜底）
-    residual = [w for w in residual if ic.is_blocking_warning(w, NON_BLOCKING_ISSUES)]
-    return (len(residual) == 0), residual
-
-
 def step_repair_slots(state: dict, warnings: list[dict]) -> tuple[bool, str]:
-    """两级局部修复：DeepSeek-V4-Flash-0731 → GLM-5.2 → agent 兜底。
-
-    第一级 ingest_semantic_fill（DeepSeek-V4-Flash-0731，便宜）；
-    残留 warning → 第二级 ingest_semantic_repair（GLM-5.2，更强）；
-    仍残留 → agent 兜底。
-    """
-    # 第一级：DeepSeek-V4-Flash-0731
-    progress("[3.6b] 局部修复（DeepSeek-V4-Flash-0731）...", flush=True, end=" ")
-    ok, residual = _repair_once(state, warnings, "ingest_semantic_fill")
-    if state.get("agent_required"):
-        return False, "需要 agent 接管"
-    if ok:
-        progress("通过", flush=True)
-        return True, ""
-    # 第二级：GLM-5.2
-    if residual:
-        progress(f"残留{len(residual)}个，升级 GLM-5.2...", flush=True, end=" ")
-        ok, residual = _repair_once(state, residual, "ingest_semantic_repair", is_second_pass=True)
-        if state.get("agent_required"):
-            return False, "需要 agent 接管"
-        if ok:
-            progress("通过", flush=True)
-            return True, ""
-    # 两级都修不掉 → agent 兜底
-    progress(f"仍剩{len(residual)}个，agent 兜底", flush=True)
-    ic.handoff_to_agent(state, "语义槽两级模型修复（DeepSeek-V4-Flash-0731 + GLM-5.2）均未通过，残留 warning", step_validate_semantics, _resume_cmd(state), _validate_cmd(state))
-    return False, f"两级模型修复均未通过（残留{len(residual)}个warning）"
+    """机械修复优先；剩余阻断项整批最多一次 semantic-patch-v1。"""
+    progress("[3.6b] 局部修复（确定性优先，Worker 上限1次）...", flush=True, end=" ")
+    ok, message = ic.repair_slots(
+        state, REPO, warnings, step_validate_semantics,
+        non_blocking_issues=NON_BLOCKING_ISSUES,
+        patch_fn=patch_semantic_lines,
+    )
+    progress("通过" if ok else message, flush=True)
+    return ok, message
 
 
 def patch_semantic_lines(sem_text: str, repaired_text: str, warnings: list[dict]) -> str | None:
@@ -2334,11 +3347,54 @@ def step_finalize(state: dict) -> tuple[bool, str]:
     return ic.step_finalize(state, REPO, FINALIZE_CONFIG)
 
 
+def _record_graph_quality_warnings(state: dict) -> None:
+    graph_delta = ((state.get("graph_report") or {}).get("graph_delta") or {})
+    probes = graph_delta.get("query_probes") or {}
+    subgraph = graph_delta.get("subgraph") or {}
+    generated_issues = {
+        "graph_navigation_incomplete",
+        "graph_navigation_ambiguous",
+        "graph_semantic_coverage_sparse",
+    }
+    retained = [
+        warning for warning in state.get("quality_warnings", [])
+        if str(warning.get("issue") or "") not in generated_issues
+    ]
+    total = int(probes.get("boundary_total") or 0)
+    reachable = int(probes.get("boundary_reachable_within_2") or 0)
+    ambiguous = int(probes.get("ambiguous_mentions") or 0)
+    semantic_edges = int(
+        (state.get("semantic_coverage") or {}).get("selected_count")
+        or subgraph.get("semantic_edges")
+        or 0
+    )
+    if semantic_edges < MIN_SEMANTIC_TRIPLES:
+        retained.append({
+            "issue": "graph_semantic_coverage_sparse",
+            "detail": (
+                f"only {semantic_edges} semantic edges generated "
+                f"(minimum {MIN_SEMANTIC_TRIPLES})"
+            ),
+        })
+    if total and reachable < total:
+        retained.append({
+            "issue": "graph_navigation_incomplete",
+            "detail": f"{reachable}/{total} boundary nodes reachable within 2 hops",
+        })
+    if ambiguous:
+        retained.append({
+            "issue": "graph_navigation_ambiguous",
+            "detail": f"{ambiguous} boundary mentions remain ambiguous",
+        })
+    state["quality_warnings"] = retained
+
+
 def step_update_graph(state: dict) -> tuple[bool, str]:
     """调 graph_ingest 写图边 + 建 raw 关系边（版本/补充材料/翻译）。"""
     ok, msg = ic.step_update_graph(state, REPO, clean=state.get("reingest", False))
     if not ok:
         return False, msg
+    _record_graph_quality_warnings(state)
     rel = state.get("raw_relationship") or {}
     if rel.get("type") in ("version", "supplementary", "translation"):
         _create_raw_relationship_edge(state, rel)
@@ -2359,9 +3415,15 @@ def _create_raw_relationship_edge(state: dict, rel: dict):
     new_fm = gl.read_frontmatter(state["wiki_path"])
     new_sources = gl.parse_list_field(new_fm, "sources")
     new_raw = _derive_raw_path(new_sources[0], state["wiki_path"]) if new_sources else ""
-    target_fm = gl.read_frontmatter(rel["target_page"])
-    target_sources = gl.parse_list_field(target_fm, "sources")
-    target_raw = _derive_raw_path(target_sources[0], rel["target_page"]) if target_sources else ""
+    target_page = rel.get("target_page", "")
+    if target_page:
+        target_fm = gl.read_frontmatter(target_page)
+        target_sources = gl.parse_list_field(target_fm, "sources")
+        target_raw = _derive_raw_path(target_sources[0], target_page) if target_sources else ""
+    else:
+        target_dir = str(rel.get("target_raw_dir") or "")
+        target_source = f"academic/raw/references/{target_dir}/paper.md" if target_dir else ""
+        target_raw = _derive_raw_path(target_source) if target_source else ""
     if not new_raw or not target_raw:
         return
     rel_type = rel["type"]
@@ -2396,7 +3458,8 @@ def resume_after_semantic_fix(state: dict) -> bool:
     if state.get("status") != "agent_required":
         return False
     if (state.get("_awaiting_agent_wiki_slots") or state.get("_awaiting_agent_slots")
-            or (state.get("bibliographic_review") or {}).get("status") == "agent_required"):
+            or (state.get("bibliographic_review") or {}).get("status") == "agent_required"
+            or (state.get("relationship_review") or {}).get("status") == "agent_required"):
         return False
     semantic_path = REPO / state.get("semantic_path", "")
     if not semantic_path.is_file():
@@ -2440,7 +3503,24 @@ def step_validate_graph(state: dict) -> list[str]:
 
 
 def step_finalize_tail(state: dict) -> tuple[bool, str]:
-    return ic.step_finalize_tail(state, REPO, FINALIZE_TAIL_CONFIG)
+    success, message = ic.step_finalize_tail(state, REPO, FINALIZE_TAIL_CONFIG)
+    if not success:
+        return success, message
+    raw_dir = REPO / str(state.get("raw_dir") or "")
+    paper_pdf = raw_dir / "paper.pdf"
+    paper_md = raw_dir / "paper.md"
+    if paper_pdf.is_file():
+        try:
+            state["source_fingerprint"] = sf.register_source(
+                paper_pdf,
+                text_path=paper_md if paper_md.is_file() else None,
+                source_kind="pdf",
+            )
+        except Exception as exc:
+            state.setdefault("quality_warnings", []).append({
+                "issue": "fingerprint_register_failed", "detail": str(exc),
+            })
+    return True, message
 
 # ===== 主编排循环 =====
 
@@ -2474,6 +3554,13 @@ def run_prepare(state: dict) -> dict:
             inbox_state.save(state["transaction_id"], state)
             return state
         inbox_state.save(state["transaction_id"], state)
+    # 提取后近似标题关系裁决交接收回；不重跑 MinerU 或书目 Worker。
+    relationship_status = (state.get("relationship_review") or {}).get("status")
+    if state["status"] == "agent_required" and relationship_status == "agent_required":
+        if not _resume_relationship_review(state):
+            inbox_state.save(state["transaction_id"], state)
+            return state
+        inbox_state.save(state["transaction_id"], state)
     # 3.1 dedup_check
     if state["status"] in ("init", "dedup_check"):
         progress(f"\n{'='*60}", flush=True)
@@ -2497,6 +3584,11 @@ def run_prepare(state: dict) -> dict:
             inbox_state.save(state["transaction_id"], state)
             return state
         if not success:
+            if state.get("post_extract_duplicate"):
+                state["status"] = "duplicate_found"
+                state["errors"] = []
+                inbox_state.save(state["transaction_id"], state)
+                return state
             state["status"] = "bibliographic_review_required" if state.get("bibliographic_review_required") else "failed"
             state["errors"] = [msg]
             inbox_state.save(state["transaction_id"], state)
@@ -2570,6 +3662,9 @@ def run_prepare(state: dict) -> dict:
             progress("完成", flush=True)
             progress("[3.6] 语义槽校验...", flush=True, end=" ")
             sem_hard, slot_warnings = step_validate_semantics(state)
+            coverage_action = _handle_sparse_slots(state) if not sem_hard else "accepted"
+            if coverage_action == "restored":
+                sem_hard, slot_warnings = step_validate_semantics(state)
             blocking = [w for w in slot_warnings if ic.is_blocking_warning(w, NON_BLOCKING_ISSUES)]
             n_nonblock = len(slot_warnings) - len(blocking)
             if not sem_hard and not slot_warnings:
@@ -2584,11 +3679,18 @@ def run_prepare(state: dict) -> dict:
         except Exception as exc:
             sem_hard = [f"语义槽处理失败: {exc}"]
             slot_warnings = []
+            blocking = []
+            coverage_action = "accepted"
             progress(f"异常: {exc}", flush=True)
         inbox_state.save(state["transaction_id"], state)
-        # 无硬错误且有阻断型 warning → 局部修复（两级降级链）；非阻断型跳过修复
+        if coverage_action == "retry":
+            progress(
+                f"  ↳ 语义槽仅 {state['semantic_coverage']['first_count']} 条，保留当前版本并定向重抽取一次",
+                flush=True,
+            )
+            continue
+        # 无硬错误且有阻断 warning → 机械修复优先，剩余项至多一次 Worker。
         if not sem_hard and blocking:
-            ic.record_llm_call(state, "repair_slots")
             repaired, repair_msg = step_repair_slots(state, blocking)
             if state.get("agent_required"):
                 state["status"] = "agent_required"
@@ -2747,6 +3849,9 @@ def run_inbox_batch(verbose: bool) -> int:
         "errors": s.get("errors", [s["dedup_reason"]] if s.get("dedup_reason") else []),
         "proposition_status": s.get("proposition_status"),
         "proposition_details": s.get("proposition_details"),
+        "bibliographic_worker": (s.get("bibliographic_review") or {}).get("worker"),
+        "relationship_worker": (s.get("relationship_review") or {}).get("worker"),
+        "semantic_repair_worker": s.get("semantic_repair_worker"),
         "quality_status": "degraded" if s.get("quality_warnings") else "complete",
         "quality_warnings": s.get("quality_warnings", []),
     } for s in prepared]
@@ -2771,6 +3876,9 @@ def run_inbox_batch(verbose: bool) -> int:
             "errors": state.get("errors", []),
             "proposition_status": state.get("proposition_status"),
             "proposition_details": state.get("proposition_details"),
+            "bibliographic_worker": (state.get("bibliographic_review") or {}).get("worker"),
+            "relationship_worker": (state.get("relationship_review") or {}).get("worker"),
+            "semantic_repair_worker": state.get("semantic_repair_worker"),
             "quality_status": "degraded" if state.get("quality_warnings") else "complete",
             "quality_warnings": state.get("quality_warnings", []),
         })
@@ -2791,6 +3899,7 @@ def main() -> None:
     source_group.add_argument("--raw", help="已入库 raw paper.md 路径（网上下载等非 inbox 来源）")
     parser.add_argument("--verbose", action="store_true", help="进度打印到 stdout（调试/建设/审计用；默认写日志文件）")
     args = parser.parse_args()
+    is_resume = bool(args.resume)
     if args.resume:
         state = inbox_state.load(args.resume)
         if not state:
@@ -2818,6 +3927,10 @@ def main() -> None:
         raise SystemExit(run_inbox_batch(args.verbose))
 
     result = run_one(state, args.verbose)
+    if is_resume:
+        maintenance = ic.run_resume_post_maintenance(result)
+        if maintenance is not None:
+            result["maintenance"] = maintenance
     print_result(result)
 
 
@@ -2884,17 +3997,29 @@ def run_one(state: dict, verbose: bool) -> dict:
     # graph validation 失败会留下 failed + resume_from=graph_ready；直接交给
     # commit 状态机恢复，避免 run_prepare 的阶段白名单吞掉恢复请求。
     if state.get("status") == "failed" and state.get("resume_from") == "graph_ready":
-        return _run_phase(state, verbose, run_commit)
+        if state.get("failure_context") == _graph_retry_context(state):
+            state["retryable"] = False
+            state["next_action"] = "repair_graph_identity_or_metadata_then_resume"
+            state["resume_blocked"] = "unchanged_failure_context"
+            inbox_state.save(state["transaction_id"], state)
+            return state
+        state.pop("resume_blocked", None)
+        state.pop("retryable", None)
+        state.pop("next_action", None)
+        result = _run_phase(state, verbose, run_commit)
+        _mark_graph_failure(result)
+        return result
     state = _run_phase(state, verbose, run_prepare)
     if state["status"] == "graph_ready":
         state = _run_phase(state, verbose, run_commit)
+    _mark_graph_failure(state)
     return state
 
 
 def print_result(state: dict) -> None:
     """保持单篇调用的 JSON 输出契约。"""
     if state["status"] == "completed":
-        print(json.dumps({
+        payload = {
             "status": "completed",
             "paper_id": state.get("paper_id"),
             "raw_dir": state.get("raw_dir"),
@@ -2903,10 +4028,16 @@ def print_result(state: dict) -> None:
             "graph_report": state.get("graph_report"),
             "proposition_status": state.get("proposition_status"),
             "proposition_details": state.get("proposition_details"),
+            "bibliographic_worker": (state.get("bibliographic_review") or {}).get("worker"),
+            "relationship_worker": (state.get("relationship_review") or {}).get("worker"),
+            "semantic_repair_worker": state.get("semantic_repair_worker"),
             "quality_status": "degraded" if state.get("quality_warnings") else "complete",
             "quality_warnings": state.get("quality_warnings", []),
             "transaction_id": state["transaction_id"],
-        }, ensure_ascii=False, indent=2))
+        }
+        if state.get("maintenance") is not None:
+            payload["maintenance"] = state["maintenance"]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif state["status"] == "duplicate_found":
         print(json.dumps({
             "status": "duplicate_found",
@@ -2916,8 +4047,17 @@ def print_result(state: dict) -> None:
         }, ensure_ascii=False, indent=2))
     elif state["status"] == "agent_required":
         review_agent = (state.get("bibliographic_review") or {}).get("status") == "agent_required"
-        message = ("INGEST_BACKEND=agent，需要 agent 接管书目预审"
-                   if review_agent else "INGEST_BACKEND=agent，需要 agent 接管 3.3 wiki 撰写")
+        relationship_agent = (
+            (state.get("relationship_review") or {}).get("status") == "agent_required"
+        )
+        if review_agent:
+            message = "INGEST_BACKEND=agent，需要 agent 接管书目预审"
+        elif relationship_agent:
+            message = "需要 agent 接管论文关系候选裁决"
+        elif state.get("semantic_repair_worker"):
+            message = "需要 agent 接管局部语义修补"
+        else:
+            message = "INGEST_BACKEND=agent，需要 agent 接管 3.3 wiki 撰写"
         review_path = (state.get("bibliographic_review") or {}).get("draft_path", "")
         payload = {
             "status": "agent_required",
@@ -2925,6 +4065,9 @@ def print_result(state: dict) -> None:
             "prompt": state.get("agent_prompt", ""),
             "write_to": state.get("agent_write_to", "") or review_path,
             "pipeline_plan": PIPELINE_PLAN_AGENT,
+            "bibliographic_worker": (state.get("bibliographic_review") or {}).get("worker"),
+            "relationship_worker": (state.get("relationship_review") or {}).get("worker"),
+            "semantic_repair_worker": state.get("semantic_repair_worker"),
             "transaction_id": state["transaction_id"],
         }
         if review_path:
@@ -2936,6 +4079,10 @@ def print_result(state: dict) -> None:
             "errors": state.get("errors", []),
             "bibliographic_review": state.get("bibliographic_review"),
             "transaction_id": state["transaction_id"],
+            "resume_from": state.get("resume_from"),
+            "retryable": state.get("retryable"),
+            "next_action": state.get("next_action"),
+            "failure_signature": state.get("failure_signature"),
         }, ensure_ascii=False, indent=2))
         # 失败时 quiet 模式自动展开进度日志到 stdout，agent 无需额外读日志文件
         log_path = get_progress_log_path()

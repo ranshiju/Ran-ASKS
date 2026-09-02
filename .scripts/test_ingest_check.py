@@ -145,6 +145,45 @@ def test_graph_checks_accepts_author_titles_paths_and_aliases_as_one_identity():
         assert not errors
 
 
+def test_graph_checks_treats_proceedings_and_conference_venue_as_equivalent():
+    import sqlite3
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory).resolve()
+        page = repo / "academic/wiki/papers/test.md"
+        page.parent.mkdir(parents=True)
+        page.write_text(
+            "---\ntitle: Test\ntype: paper-summary\n"
+            "authors: []\n"
+            "venue: 'Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing'\n"
+            "---\n## Navigation\nX\n## Content\nX\n",
+            encoding="utf-8",
+        )
+        db = repo / "cross-domain/graph.db"
+        db.parent.mkdir()
+        conn = sqlite3.connect(db)
+        conn.executescript("""
+            CREATE TABLE nodes (path TEXT PRIMARY KEY, title TEXT, type TEXT);
+            CREATE TABLE edges (subject TEXT, predicate TEXT, object TEXT, source TEXT);
+        """)
+        conn.executemany("INSERT INTO nodes VALUES (?,?,?)", [
+            ("academic/wiki/papers/test", "Test", "paper-summary"),
+            ("emnlp-2024", "the 2024 Conference on Empirical Methods in Natural Language Processing", "entity"),
+        ])
+        conn.execute(
+            "INSERT INTO edges VALUES (?,?,?,?)",
+            ("academic/wiki/papers/test", "发表于", "emnlp-2024", "raw"),
+        )
+        conn.commit()
+        conn.close()
+        old_repo = ingest_check.REPO
+        ingest_check.REPO = repo
+        try:
+            errors, _warnings = ingest_check.graph_checks(page)
+        finally:
+            ingest_check.REPO = old_repo
+    assert not any("发表于边与 wiki venue 不一致" in error for error in errors), errors
+
+
 def check(text, rel="academic/wiki/papers/test.md"):
     with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8", delete=False) as f:
         f.write(text)
@@ -312,6 +351,7 @@ def main():
     test_graph_checks_with_isolated_database()
     test_graph_checks_rejects_cross_layer_metadata_without_requiring_locator()
     test_graph_checks_accepts_author_titles_paths_and_aliases_as_one_identity()
+    test_graph_checks_treats_proceedings_and_conference_venue_as_equivalent()
     valid = """---
 title: Test
 type: paper-summary

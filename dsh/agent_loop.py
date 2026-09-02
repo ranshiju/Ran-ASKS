@@ -237,15 +237,20 @@ class IngestAgentLoop:
         saw_status = False
         workflow_statuses = {
             "completed", "duplicate_found", "agent_required", "failed",
-            "type_mismatch", "partial", "error",
+            "type_mismatch", "classification_required", "bibliographic_review_required",
+            "validation_error", "partial", "error",
         }
-        for idx in range(len(content)):
-            if content[idx] != "{":
-                continue
+        cursor = 0
+        while cursor < len(content):
+            idx = content.find("{", cursor)
+            if idx < 0:
+                break
             try:
-                obj, _ = decoder.raw_decode(content[idx:])
+                obj, end = decoder.raw_decode(content[idx:])
             except json.JSONDecodeError:
+                cursor = idx + 1
                 continue
+            cursor = idx + end
             if not isinstance(obj, dict):
                 continue
             if fallback is None:
@@ -306,11 +311,12 @@ class IngestAgentLoop:
                     "pipeline_plan": self.last_structured.get("pipeline_plan", []),
                 }
             if status == "failed":
-                return "failed", {
-                    "status": "failed",
-                    "transaction_id": self.last_structured.get("transaction_id", ""),
-                    "errors": self.last_structured.get("errors", []),
-                }
+                return "failed", dict(self.last_structured)
+            if status in {
+                "bibliographic_review_required", "validation_error",
+                "classification_required", "type_mismatch", "partial",
+            }:
+                return status, dict(self.last_structured)
             if status == "duplicate_found":
                 return "duplicate_found", dict(self.last_structured)
             if status == "completed":
@@ -319,13 +325,35 @@ class IngestAgentLoop:
 
     def _make_turn_result(self, fallback: str, reason: str) -> IngestTurnResult:
         status, handoff = self._status_from_last()
-        if status in {"agent_required", "failed", "duplicate_found"}:
+        if status in {
+            "agent_required", "failed", "duplicate_found", "bibliographic_review_required",
+            "validation_error", "classification_required", "type_mismatch", "partial",
+        }:
             self.session_log.append("ingest/handoff", {"status": status, "reason": reason, "handoff": handoff})
             self.session_log.append("turn/end", {"reason": status})
             return IngestTurnResult(
                 session_id=self.session_log.session_id,
                 status=status,
                 handoff=handoff,
+                snapshot=self._snapshot(),
+            )
+        maintenance = (handoff or {}).get("maintenance") if handoff else None
+        if status == "completed" and isinstance(maintenance, dict) and (
+                maintenance.get("status") in {"agent_required", "error"}):
+            maintenance_handoff = {
+                "status": "completed",
+                "file_status": "completed",
+                "maintenance": maintenance,
+            }
+            self.session_log.append("ingest/handoff", {
+                "status": status, "reason": "post_ingest_maintenance",
+                "handoff": maintenance_handoff,
+            })
+            self.session_log.append("turn/end", {"reason": "post_ingest_maintenance"})
+            return IngestTurnResult(
+                session_id=self.session_log.session_id,
+                status=status,
+                handoff=maintenance_handoff,
                 snapshot=self._snapshot(),
             )
         self.session_log.append("turn/end", {"reason": reason})

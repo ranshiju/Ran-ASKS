@@ -10,6 +10,7 @@
 
 差异点由各脚本传入 config（谓词集、修复 prompt builder、page_type、finalize 配置等）。"""
 from __future__ import annotations
+import hashlib
 import json
 import re
 import subprocess
@@ -18,7 +19,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from llm_structured import call_text
+from llm_structured import call_json
 
 
 # ===== META 块解析与校验（LLM 读全文时的元信息交叉校验）=====
@@ -266,6 +267,170 @@ def is_blocking_warning(w: dict, non_blocking_issues: tuple[str, ...] = ()) -> b
     return True
 
 
+SEMANTIC_PATCH_PROTOCOL = "semantic-patch-v1"
+
+
+def semantic_patch_decision_schema(value) -> bool:
+    """受限局部修补协议：Worker 只按 issue ID 返回替换行。"""
+    if not isinstance(value, dict) or set(value) != {
+        "protocol_version", "review_status", "patches", "review_notes",
+    }:
+        return False
+    if value.get("protocol_version") != SEMANTIC_PATCH_PROTOCOL:
+        return False
+    if value.get("review_status") not in {"patched", "manual_required"}:
+        return False
+    if not isinstance(value.get("review_notes"), list) or not all(
+        isinstance(item, str) for item in value["review_notes"]
+    ):
+        return False
+    if not isinstance(value.get("patches"), list) or len(value["patches"]) > 32:
+        return False
+    for patch in value["patches"]:
+        if not isinstance(patch, dict) or set(patch) != {
+            "issue_id", "action", "replacement_lines",
+        }:
+            return False
+        if not isinstance(patch.get("issue_id"), str):
+            return False
+        if patch.get("action") not in {"replace", "abstain"}:
+            return False
+        lines = patch.get("replacement_lines")
+        if not isinstance(lines, list) or len(lines) > 4 or not all(
+            isinstance(line, str) and line.strip() for line in lines
+        ):
+            return False
+        if patch["action"] == "replace" and not lines:
+            return False
+        if patch["action"] == "abstain" and lines:
+            return False
+    return True
+
+
+def build_semantic_patch_catalog(warnings: list[dict]) -> dict:
+    issues = []
+    for index, warning in enumerate(warnings, 1):
+        issues.append({
+            "id": f"issue-{index:02d}",
+            "section": str(warning.get("section") or ""),
+            "line": str(warning.get("line") or ""),
+            "issue": str(warning.get("issue") or "unknown"),
+            "field": str(warning.get("field") or "object"),
+            "reason": str(warning.get("reason") or ""),
+            "is_triple": bool(warning.get("is_triple", "|" in str(warning.get("line") or ""))),
+        })
+    return {"protocol_version": SEMANTIC_PATCH_PROTOCOL, "issues": issues}
+
+
+def _semantic_patch_input_hash(catalog: dict, semantic_text: str) -> str:
+    payload = {
+        "protocol_version": SEMANTIC_PATCH_PROTOCOL,
+        "catalog": catalog,
+        "semantic_sha256": hashlib.sha256(semantic_text.encode("utf-8")).hexdigest(),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _semantic_patch_cache_path(REPO: Path, transaction_id: str) -> Path | None:
+    if not transaction_id:
+        return None
+    return REPO / "temp" / "inbox-state" / f"{transaction_id}-semantic-patch-decision.json"
+
+
+def _load_semantic_patch_cache(REPO: Path, transaction_id: str, input_hash: str) -> dict | None:
+    path = _semantic_patch_cache_path(REPO, transaction_id)
+    if not path or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    decision = payload.get("decision") if isinstance(payload, dict) else None
+    if (payload.get("protocol_version") != SEMANTIC_PATCH_PROTOCOL
+            or payload.get("input_hash") != input_hash
+            or not semantic_patch_decision_schema(decision)):
+        return None
+    return decision
+
+
+def _save_semantic_patch_cache(
+    REPO: Path, transaction_id: str, input_hash: str, decision: dict,
+) -> None:
+    path = _semantic_patch_cache_path(REPO, transaction_id)
+    if not path:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "protocol_version": SEMANTIC_PATCH_PROTOCOL,
+        "input_hash": input_hash,
+        "decision": decision,
+    }
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+def _build_semantic_patch_prompt(catalog: dict) -> str:
+    return f"""你是受程序约束的语义槽局部修补 Worker。一次处理全部问题，只能按 issue ID 返回局部替换，不得输出完整 Wiki 或完整语义槽。
+
+问题目录：
+{json.dumps(catalog, ensure_ascii=False)}
+
+只输出 JSON：
+{{
+  "protocol_version": "{SEMANTIC_PATCH_PROTOCOL}",
+  "review_status": "patched|manual_required",
+  "patches": [
+    {{"issue_id": "issue-01", "action": "replace|abstain", "replacement_lines": ["主体 | 谓词 | 客体"]}}
+  ],
+  "review_notes": []
+}}
+
+约束：
+1. 每个 issue ID 必须且只能出现一次，禁止引用目录外 ID。
+2. replace 只修对应行；三元组保持“主体 | 谓词 | 客体”，不得改动无关事实。
+3. replacement_lines 最多 4 行；证据不足就 abstain，并设 review_status=manual_required。
+4. 不得生成 source locator、文件路径、作者或 venue 等确定性元数据。"""
+
+
+def _compile_semantic_patch(decision: dict, catalog: dict) -> str:
+    if not semantic_patch_decision_schema(decision):
+        raise ValueError("semantic-patch-v1 决策不符合 schema")
+    expected = [item["id"] for item in catalog.get("issues", [])]
+    patches = decision.get("patches", [])
+    actual = [patch["issue_id"] for patch in patches]
+    if len(actual) != len(set(actual)) or set(actual) != set(expected):
+        raise ValueError("semantic patch 必须逐一覆盖且只能引用现有 issue ID")
+    by_id = {patch["issue_id"]: patch for patch in patches}
+    if decision.get("review_status") == "manual_required" or any(
+        patch["action"] == "abstain" for patch in patches
+    ):
+        raise ValueError("semantic patch 仍需人工裁决")
+    lines = []
+    for issue_id in expected:
+        lines.extend(line.strip() for line in by_id[issue_id]["replacement_lines"])
+    return "\n".join(lines)
+
+
+def _deduplicate_semantic_triples(semantic_text: str) -> str:
+    """保持非三元组内容与首条顺序，只删除完全相同的重复三元组。"""
+    seen = set()
+    result = []
+    for line in semantic_text.splitlines():
+        stripped = line.strip()
+        parts = tuple(part.strip() for part in stripped.split("|")) if "|" in stripped else ()
+        if len(parts) == 3:
+            if parts in seen:
+                continue
+            seen.add(parts)
+        result.append(line)
+    return "\n".join(result) + "\n"
+
+
 def is_malformed_predicate(pred: str) -> bool:
     """谓词格式非法：空串、含空白或标点，属于结构性硬错误。"""
     if not pred or pred != pred.strip():
@@ -393,55 +558,121 @@ def patch_semantic_lines(sem_text: str, repaired_text: str, warnings: list[dict]
 
 
 
-def repair_once(state: dict, REPO: Path, warnings: list[dict],
-                build_repair_prompt, validate_fn, non_blocking_issues: tuple[str, ...] = (),
-                operation: str = "ingest_semantic_fill",
-                is_second_pass: bool = False) -> tuple[bool, list[dict]]:
-    """单次修复 + 复验。返回 (ok, residual_warnings)。"""
-    semantic_path = REPO / state["semantic_path"]
-    sem_text = semantic_path.read_text(encoding="utf-8")
-    prompt = build_repair_prompt(warnings, is_second_pass)
-    result = call_text(prompt, max_tokens=600, retries=1, operation=operation,
-                       system="你是语义槽修复组件，只输出修正后的行，不解释。")
-    if result.get("status") == "agent_required":
-        state["agent_required"] = True
-        state["agent_prompt"] = result.get("prompt", "")
-        return False, warnings
-    if not result.get("ok"):
-        return False, warnings
-    repaired_text = result.get("text", "").strip()
-    if not repaired_text:
-        return False, warnings
-    new_sem = patch_semantic_lines(sem_text, repaired_text, warnings)
-    if new_sem is None:
-        return False, warnings
-    semantic_path.write_text(new_sem, encoding="utf-8")
-    state["slots_content"] = new_sem
-    _, residual = validate_fn(state)
-    residual = [w for w in residual if is_blocking_warning(w, non_blocking_issues)]
-    return (len(residual) == 0), residual
-
-
-def repair_slots(state: dict, REPO: Path, warnings: list[dict],
-                 build_repair_prompt, validate_fn, non_blocking_issues: tuple[str, ...] = ()
-                 ) -> tuple[bool, str]:
-    """两级局部修复：DeepSeek → GLM → agent 兜底。"""
-    repaired, residual = repair_once(state, REPO, warnings, build_repair_prompt,
-                                     validate_fn, non_blocking_issues,
-                                     operation="ingest_semantic_fill")
-    if repaired:
+def repair_slots(
+    state: dict,
+    REPO: Path,
+    warnings: list[dict],
+    validate_fn,
+    non_blocking_issues: tuple[str, ...] = (),
+    patch_fn=None,
+) -> tuple[bool, str]:
+    """先机械修复，再至多调用一次 semantic-patch-v1 Worker。"""
+    blocking = [
+        warning for warning in warnings
+        if is_blocking_warning(warning, non_blocking_issues)
+    ]
+    worker = {
+        "protocol_version": SEMANTIC_PATCH_PROTOCOL,
+        "input_hash": "",
+        "api_called": False,
+        "cache_hit": False,
+        "skipped": False,
+        "skip_reason": "",
+    }
+    state["semantic_repair_worker"] = worker
+    if not blocking:
+        worker["skipped"] = True
+        worker["skip_reason"] = "non_blocking_only"
         return True, ""
-    if residual:
-        repaired2, residual2 = repair_once(state, REPO, residual, build_repair_prompt,
-                                           validate_fn, non_blocking_issues,
-                                           operation="ingest_semantic_repair",
-                                           is_second_pass=True)
-        if repaired2:
+
+    semantic_path = REPO / state["semantic_path"]
+    semantic_text = semantic_path.read_text(encoding="utf-8")
+    if any(warning.get("issue") == "duplicate_line" for warning in blocking):
+        cleaned = _deduplicate_semantic_triples(semantic_text)
+        if cleaned != semantic_text:
+            semantic_path.write_text(cleaned, encoding="utf-8")
+            state["slots_content"] = cleaned
+        _hard, residual = validate_fn(state)
+        blocking = [
+            warning for warning in residual
+            if is_blocking_warning(warning, non_blocking_issues)
+        ]
+        if not blocking:
+            worker["skipped"] = True
+            worker["skip_reason"] = "deterministic_duplicate_cleanup"
             return True, ""
-        if residual2:
+        semantic_text = semantic_path.read_text(encoding="utf-8")
+
+    catalog = build_semantic_patch_catalog(blocking)
+    input_hash = _semantic_patch_input_hash(catalog, semantic_text)
+    worker["input_hash"] = input_hash
+    transaction_id = state.get("transaction_id", "")
+    decision = _load_semantic_patch_cache(REPO, transaction_id, input_hash)
+    if decision:
+        worker["cache_hit"] = True
+        worker["skip_reason"] = "transaction_cache"
+    prompt = _build_semantic_patch_prompt(catalog)
+    if not decision:
+        result = call_json(
+            prompt,
+            semantic_patch_decision_schema,
+            max_tokens=800,
+            retries=0,
+            operation="ingest_semantic_fill",
+            transaction_id=transaction_id,
+            system="你是语义槽局部修补 Worker，只按 issue ID 输出 JSON。",
+        )
+        worker["api_called"] = bool(result.get("history"))
+        if worker["api_called"]:
+            record_llm_call(state, "repair_slots")
+        if result.get("status") == "agent_required":
             state["agent_required"] = True
-            return False, "局部修复失败，需 agent 兜底"
-    return False, "修复失败"
+            state["agent_prompt"] = (
+                result.get("prompt", prompt)
+                + f"\n\n请直接修正 `{state['semantic_path']}` 中对应行，然后按原事务 resume。"
+            )
+            return False, "需要 agent 接管局部语义修补"
+        if not result.get("ok"):
+            state["agent_required"] = True
+            state["agent_prompt"] = (
+                prompt
+                + f"\n\nWorker 失败：{result.get('error', 'unknown')}。"
+                + f"请直接修正 `{state['semantic_path']}` 中对应行，然后按原事务 resume。"
+            )
+            return False, "semantic patch Worker 失败，需 agent 兜底"
+        decision = result.get("parsed")
+        _save_semantic_patch_cache(REPO, transaction_id, input_hash, decision)
+    try:
+        repaired_text = _compile_semantic_patch(decision, catalog)
+    except ValueError as exc:
+        state["agent_required"] = True
+        state["agent_prompt"] = (
+            prompt + f"\n\n决策无法编译：{exc}。请直接修正 `{state['semantic_path']}` 后 resume。"
+        )
+        return False, str(exc)
+    apply_patch_fn = patch_fn or patch_semantic_lines
+    new_semantic = apply_patch_fn(semantic_text, repaired_text, blocking)
+    if new_semantic is None:
+        state["agent_required"] = True
+        state["agent_prompt"] = (
+            prompt + f"\n\n局部 patch 无法安全应用。请直接修正 `{state['semantic_path']}` 后 resume。"
+        )
+        return False, "semantic patch 无法安全应用"
+    semantic_path.write_text(new_semantic, encoding="utf-8")
+    state["slots_content"] = new_semantic
+    hard_errors, residual = validate_fn(state)
+    blocking = [
+        warning for warning in residual
+        if is_blocking_warning(warning, non_blocking_issues)
+    ]
+    if hard_errors or blocking:
+        state["agent_required"] = True
+        state["agent_prompt"] = (
+            f"semantic-patch-v1 复验仍有 {len(hard_errors)} 个硬错误、"
+            f"{len(blocking)} 个阻断 warning。请修正 `{state['semantic_path']}` 后 resume。"
+        )
+        return False, "semantic patch 复验未通过"
+    return True, ""
 
 
 def stop_for_semantic_errors(state: dict, errors: list[str], resume_cmd: str,
@@ -733,6 +964,48 @@ def step_update_graph(state: dict, REPO: Path, clean: bool = False) -> tuple[boo
     return True, ""
 
 
+def _abbreviation_todo_key(entry: dict) -> tuple:
+    return (
+        str(entry.get("page", "")), str(entry.get("subject", "")),
+        str(entry.get("predicate", "")), str(entry.get("object", "")),
+        str(entry.get("field", "object")),
+        str(entry.get("token") or entry.get("value") or ""),
+    )
+
+
+def _read_abbreviation_todo(path: Path) -> tuple[list[dict], list[str]]:
+    entries = []
+    errors = []
+    if not path.exists():
+        return entries, errors
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"line {line_number}: {exc}")
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+        else:
+            errors.append(f"line {line_number}: expected object")
+    return entries, errors
+
+
+def _write_abbreviation_todo(path: Path, entries: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    unique = {}
+    for entry in entries:
+        unique[_abbreviation_todo_key(entry)] = entry
+    temp_path = path.with_name(path.name + ".tmp")
+    temp_path.write_text(
+        "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in unique.values()),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
 def _record_abbreviation_warnings(state: dict, REPO: Path) -> None:
     """将 graph_report 中的 bare_abbreviation warning 追加到
     cross-domain/abbreviation-todo.jsonl，供后置 alias 补全参考。
@@ -751,20 +1024,30 @@ def _record_abbreviation_warnings(state: dict, REPO: Path) -> None:
         state["abbreviation_warnings_recorded"] = True
         return
     todo_path = REPO / "cross-domain" / "abbreviation-todo.jsonl"
-    todo_path.parent.mkdir(parents=True, exist_ok=True)
+    existing, _errors = _read_abbreviation_todo(todo_path)
     txn = state.get("transaction_id", "")
     page = state.get("wiki_path", "")
     doc_id = state.get("paper_id") or state.get("meeting_id") or ""
-    with todo_path.open("a", encoding="utf-8") as handle:
-        for w in bare:
-            handle.write(json.dumps({
+    additions = []
+    for w in bare:
+        context = str(w.get("value") or w.get("object") or w.get("subject") or "")
+        tokens = re.findall(r"[A-Z]{2,}[A-Za-z0-9]*", context)
+        for token in tokens:
+            additions.append({
+                "schema_version": "abbreviation-todo-v2",
                 "transaction_id": txn,
                 "doc_id": doc_id,
                 "page": page,
+                "subject": w.get("subject", ""),
                 "predicate": w.get("predicate", ""),
                 "object": w.get("object", ""),
                 "field": w.get("field", "object"),
-            }, ensure_ascii=False) + "\n")
+                "token": token,
+                "context": context,
+                "locator": w.get("locator") or w.get("source") or "",
+                "resolution_state": "unresolved",
+            })
+    _write_abbreviation_todo(todo_path, [*existing, *additions])
     state["abbreviation_warnings_recorded"] = True
 
 
@@ -955,14 +1238,14 @@ def lightweight_abbr_resolve(REPO: Path) -> dict:
     if not todo_path.exists():
         return {"resolved": 0, "remaining": 0, "details": []}
 
-    entries = []
     try:
-        for line in todo_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line:
-                entries.append(json.loads(line))
-    except (OSError, json.JSONDecodeError):
-        return {"resolved": 0, "remaining": 0, "details": []}
+        entries, parse_errors = _read_abbreviation_todo(todo_path)
+    except OSError as exc:
+        return {"status": "error", "resolved": 0, "remaining": 0,
+                "details": [], "errors": [str(exc)]}
+    if parse_errors:
+        return {"status": "error", "resolved": 0, "remaining": len(entries),
+                "details": [], "errors": parse_errors}
 
     remaining = []
     resolved_details = []
@@ -973,7 +1256,7 @@ def lightweight_abbr_resolve(REPO: Path) -> dict:
         return {"resolved": 0, "remaining": len(entries), "details": []}
 
     for entry in entries:
-        abbr = entry.get("object", "").strip()
+        abbr = str(entry.get("token") or entry.get("value") or entry.get("object") or "").strip()
         if not abbr:
             remaining.append(entry)
             continue
@@ -992,15 +1275,53 @@ def lightweight_abbr_resolve(REPO: Path) -> dict:
         remaining.append(entry)
 
     if resolved_details:
-        with todo_path.open("w", encoding="utf-8") as handle:
-            for entry in remaining:
-                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        _write_abbreviation_todo(todo_path, remaining)
 
     return {
+        "status": "completed",
         "resolved": len(resolved_details),
         "remaining": len(remaining),
         "details": resolved_details,
     }
+
+
+def run_resume_post_maintenance(state: dict) -> dict | None:
+    """Run the unified inbox tail after a successful direct resume."""
+    if state.get("status") != "completed":
+        return None
+    repo = Path(state.get("repo") or state.get("repo_path") or Path(__file__).resolve().parents[1])
+    inbox = repo / "inbox"
+    skip_files = {".gitkeep", ".DS_Store", "facts-pending.md"}
+    pending = [
+        path for path in inbox.iterdir()
+        if path.is_file() and path.name not in skip_files and not path.name.startswith(".")
+    ] if inbox.is_dir() else []
+    if pending:
+        return {
+            "status": "deferred",
+            "reason": "pending_inbox_files",
+            "pending_count": len(pending),
+            "receipt_path": "",
+            "actions": [],
+            "errors": [],
+            "components": {},
+        }
+    try:
+        from ingest_inbox import compact_maintenance, run_post_ingest_maintenance
+        transaction_id = str(state.get("transaction_id", "resume"))
+        result = [{
+            "file": state.get("source_filename") or state.get("source") or transaction_id,
+            "ok": True,
+            "status": "completed",
+        }]
+        envelope = run_post_ingest_maintenance(result, f"resume-{transaction_id}")
+        return compact_maintenance(envelope)
+    except Exception as exc:
+        return {
+            "status": "error", "receipt_path": "", "actions": [],
+            "errors": [f"post-ingest maintenance failed: {type(exc).__name__}: {exc}"],
+            "components": {},
+        }
 
 
 

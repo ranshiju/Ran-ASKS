@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -272,6 +273,59 @@ def merge_duplicate_edges(conn, apply):
     return {"groups": groups, "removed": removed}
 
 
+def targeted_orphan_nodes(conn, node_paths, apply=False):
+    """Remove only explicitly named, disconnected entity nodes."""
+    results = []
+    for node_path in dict.fromkeys(str(path) for path in node_paths if str(path)):
+        row = conn.execute(
+            "SELECT path,title,type FROM nodes WHERE path=?", (node_path,)
+        ).fetchone()
+        if not row:
+            results.append({"path": node_path, "decision": "missing", "removed": False})
+            continue
+        edge_count = conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE subject=? OR object=?",
+            (node_path, node_path),
+        ).fetchone()[0]
+        temporal_count = conn.execute(
+            "SELECT COUNT(*) FROM temporal_facts WHERE subject=? OR object=?",
+            (node_path, node_path),
+        ).fetchone()[0]
+        aliases = [item[0] for item in conn.execute(
+            "SELECT alias FROM aliases WHERE node_path=? ORDER BY alias", (node_path,)
+        ).fetchall()]
+        eligible = row["type"] == "entity" and edge_count == 0 and temporal_count == 0
+        result = {
+            "path": node_path,
+            "title": row["title"],
+            "type": row["type"],
+            "edge_count": edge_count,
+            "temporal_count": temporal_count,
+            "aliases": aliases,
+            "decision": "remove" if eligible else "blocked",
+            "removed": False,
+        }
+        if apply and eligible:
+            conn.execute("DELETE FROM aliases WHERE node_path=?", (node_path,))
+            conn.execute("DELETE FROM nodes WHERE path=?", (node_path,))
+            result["removed"] = True
+        results.append(result)
+    return results
+
+
+def execute_targeted_orphans(conn, node_paths, apply=False):
+    if not apply:
+        return targeted_orphan_nodes(conn, node_paths, False)
+    conn.execute("BEGIN")
+    try:
+        result = targeted_orphan_nodes(conn, node_paths, True)
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def build_plan(conn):
     conf_counts = confidence_counts(conn)
     raw_links = migrate_raw_links(conn, False)
@@ -357,6 +411,8 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="只输出修复计划，不写入")
     parser.add_argument("--raw-links-only", action="store_true",
                         help="只迁移/补齐文件节点与 Wiki→来源→Raw 模型")
+    parser.add_argument("--orphan-node", action="append", default=[],
+                        help="显式检查无边、无时态事实的 entity；可重复，配合 --apply 删除")
     args = parser.parse_args(argv)
 
     db_path = Path(args.db) if args.db else gl.GRAPH_DB
@@ -365,7 +421,11 @@ def main(argv=None):
         return 2
     conn = gl.connect(str(db_path))
     try:
-        if args.raw_links_only:
+        if args.orphan_node:
+            apply = args.apply and not args.dry_run
+            result = execute_targeted_orphans(conn, args.orphan_node, apply)
+            print(json.dumps({"applied": apply, "nodes": result}, ensure_ascii=False, indent=2))
+        elif args.raw_links_only:
             apply = args.apply and not args.dry_run
             result = execute_raw_links(conn, apply)
             print(format_plan(result, applied=apply))

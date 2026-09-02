@@ -220,7 +220,6 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             progress(f"异常: {exc}", flush=True)
         _save(state)
         if not sem_hard and slot_warnings:
-            ic.record_llm_call(state, "repair_slots")
             repaired, repair_msg = steps["repair_slots"](state, slot_warnings)
             if state.get("agent_required"):
                 state["status"] = "agent_required"

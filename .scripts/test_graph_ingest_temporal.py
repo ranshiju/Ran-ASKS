@@ -24,6 +24,7 @@ spec.loader.exec_module(module)
 def make_db():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     gl.init_schema(conn)
     return conn
 
@@ -178,6 +179,76 @@ def test_clean_page_edges_uses_lineage_for_shared_indirect_edge():
             assert not conn.execute("SELECT 1 FROM edges WHERE id=?", (edge_id,)).fetchone()
         finally:
             gl.REPO = old_repo
+
+
+def test_ensure_node_upsert_preserves_node_lineage():
+    conn = make_db()
+    add_node(conn, "academic/wiki/papers/a", "page")
+    gl.ensure_node(conn, "concept-a", "Concept A", "entity", entity_subtype="keyword")
+    gl.add_node_origin(
+        conn, "concept-a", "academic/wiki/papers/a", "academic/raw/a.md#L3", managed=True
+    )
+    conn.commit()
+
+    gl.ensure_node(
+        conn, "concept-a", "Concept A updated", "entity", entity_subtype="keyword"
+    )
+    conn.commit()
+
+    assert conn.execute("SELECT COUNT(*) FROM managed_nodes").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM node_origins").fetchone()[0] == 1
+    assert conn.execute("SELECT title FROM nodes WHERE path='concept-a'").fetchone()[0] == "Concept A updated"
+
+
+def test_add_knowledge_edges_records_managed_and_reused_node_origins():
+    conn = make_db()
+    page = "academic/wiki/papers/a"
+    add_node(conn, page, "page")
+    gl.ensure_node(conn, "existing", "既有概念", "entity", entity_subtype="keyword")
+    triples = [
+        {"subject": page, "predicate": "研究关键词", "object": "新概念",
+         "source": "academic/raw/a.md#L3"},
+        {"subject": page, "predicate": "研究关键词", "object": "既有概念",
+         "source": "academic/raw/a.md#L4"},
+    ]
+
+    module.add_knowledge_edges(conn, page, triples)
+    new_path = gl.extract_keyword_id("新概念")
+    assert conn.execute(
+        "SELECT created_origin_page FROM managed_nodes WHERE node_path=?", (new_path,)
+    ).fetchone()[0] == page
+    assert not conn.execute(
+        "SELECT 1 FROM managed_nodes WHERE node_path='existing'"
+    ).fetchone()
+    assert conn.execute(
+        "SELECT COUNT(*) FROM node_origins WHERE origin_page=?", (page,)
+    ).fetchone()[0] == 2
+
+
+def test_clean_page_edges_only_collects_unowned_managed_nodes():
+    conn = make_db()
+    page_a = "academic/wiki/papers/a"
+    page_b = "academic/wiki/papers/b"
+    for page in (page_a, page_b):
+        add_node(conn, page, "page")
+    gl.ensure_node(conn, "shared", "Shared", "entity", entity_subtype="keyword")
+    gl.add_node_origin(conn, "shared", page_a, "raw/a#L1", managed=True)
+    gl.add_node_origin(conn, "shared", page_b, "raw/b#L1")
+    gl.insert_aliases(conn, "shared", ["shared-alias"])
+    gl.ensure_node(conn, "historical", "Historical", "entity", entity_subtype="keyword")
+    gl.add_node_origin(conn, "historical", page_a, "raw/a#L2")
+    conn.commit()
+
+    first = module.clean_page_edges(conn, page_a)
+    assert first["managed_nodes_removed"] == 0
+    assert conn.execute("SELECT 1 FROM nodes WHERE path='shared'").fetchone()
+    assert conn.execute("SELECT 1 FROM nodes WHERE path='historical'").fetchone()
+
+    second = module.clean_page_edges(conn, page_b)
+    assert second["managed_nodes_removed"] == 1
+    assert not conn.execute("SELECT 1 FROM nodes WHERE path='shared'").fetchone()
+    assert not conn.execute("SELECT 1 FROM aliases WHERE node_path='shared'").fetchone()
+    assert conn.execute("SELECT 1 FROM nodes WHERE path='historical'").fetchone()
 
 
 def test_cmd_ingest_writes_temporal_fact_end_to_end():

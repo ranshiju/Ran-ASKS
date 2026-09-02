@@ -79,6 +79,69 @@ def test_bilingual_name_reuses_unique_decomposed_title():
     assert result["match_mode"] == "unique_decomposed_title_or_alias"
 
 
+def test_generic_decomposed_alias_does_not_reuse_unrelated_concept():
+    conn = make_db()
+    add_node(conn, "backflow", "backflow变换backflow transformation")
+    gl.insert_aliases(conn, "backflow", ["变换", "backflow transformation"])
+    result = ns.resolve_node(
+        conn, "Jordan-Wigner变换Jordan-Wigner transformation", node_types=["entity"]
+    )
+    assert result["decision"] == "unmatched"
+
+
+def test_complexity_qualifier_does_not_become_bilingual_identity():
+    conn = make_db()
+    add_node(conn, "hard", "困难")
+    add_node(conn, "complete", "完全")
+    add_node(conn, "hard-problem", "困难问题")
+    add_node(conn, "complete-problem", "完全问题")
+    for mention in ("QMA困难QMA-hard", "BQP完全BQP-complete"):
+        result = ns.resolve_node(conn, mention, node_types=["entity"])
+        assert result["decision"] == "unmatched", (mention, result)
+
+
+def test_anchored_complexity_problem_reuses_full_parenthetical_identity():
+    conn = make_db()
+    add_node(conn, "qma-problem", "QMA难问题")
+    add_node(conn, "bqp-problem", "BQP完全问题")
+    add_node(conn, "hard-problem", "困难问题")
+    add_node(conn, "complete-problem", "完全问题")
+    cases = {
+        "QMA困难问题(QMA-hard)": "qma-problem",
+        "BQP完全问题(BQP-complete)": "bqp-problem",
+    }
+    for mention, expected in cases.items():
+        result = ns.resolve_node(conn, mention, node_types=["entity"])
+        assert result["decision"] == "resolved", (mention, result)
+        assert result["node_id"] == expected, (mention, result)
+        assert result["match_mode"] == "unique_decomposed_title_or_alias"
+
+
+def test_bilingual_hybrid_prefix_resolves_without_embedding():
+    conn = make_db()
+    add_node(conn, "jw", "Jordan-Wigner变换")
+    result = ns.resolve_node(
+        conn, "Jordan-Wigner变换Jordan-Wigner transformation", node_types=["entity"]
+    )
+    assert result["decision"] == "resolved"
+    assert result["node_id"] == "jw"
+    assert result["match_mode"] == "unique_decomposed_title_or_alias"
+
+
+def test_embedded_english_mention_does_not_reuse_whole_concept():
+    conn = make_db()
+    add_node(conn, "majorana", "Majorana费米子Majorana fermion")
+    gl.insert_aliases(conn, "majorana", ["Majorana"])
+    add_node(conn, "material", "扭曲Kitaev链材料CoNb2O6")
+    gl.insert_aliases(conn, "material", ["Kitaev"])
+    for mention in (
+        "以边缘单方向磁化探测Majorana边缘零模",
+        "Kitaev磁体候选材料的实验探测",
+    ):
+        result = ns.resolve_node(conn, mention, node_types=["entity"])
+        assert result["decision"] == "unmatched", (mention, result)
+
+
 def test_pure_english_venue_does_not_decompose_to_stopword():
     old_venue = "the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)"
     new_venue = "the 2024 Conference on Empirical Methods in Natural Language Processing"
