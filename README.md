@@ -14,6 +14,9 @@
 **General-reader introduction (Chinese PDF):** [ASKS Chinese introduction, 2026-09-03 revision](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
 ([version scope](docs/introduction/README.md))
 
+The PDF is published as a browser-compatible normalized export so the link can
+open directly in GitHub's embedded viewer.
+
 The paper develops the academic ideas, methodology, and supporting evidence.
 The Chinese PDF is a more accessible, use-oriented project introduction for
 general readers who want to understand what ASKS does and how to approach it.

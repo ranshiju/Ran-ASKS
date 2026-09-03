@@ -21,6 +21,7 @@ The public release is an engineering template, never a copy of the personal know
 - The root `CHANGELOG.md` records public project updates; its newest release heading must match `VERSION` before publication.
 - Keep the changelog human-readable: prioritize important user-facing capabilities, behavior or contract changes, compatibility, quality, and security; summarize minor fixes and internal adjustments instead of listing them individually.
 - Every GitHub update requires a content-level documentation review. Synchronize the English README, Chinese README, dated Chinese introduction PDF, and its version-scope note with any affected capabilities, configuration, workflow, or user guidance. The release verifier rejects a pending or latest committed public diff that does not include all four reader-facing documents.
+- Normalize the dated Chinese introduction after Word export so GitHub's embedded PDF viewer can parse it. The release asset must contain a Ghostscript producer marker; `verify` rejects the original Word/Quartz export even when local PDF tools accept it.
 - A documentation synchronization commit on `main` may retain the current `VERSION`; increment it only when establishing a new tag/Release boundary. Keeping the version does not waive the documentation review.
 - This number is separate from pipeline versioning: `CURRENT_PIPELINE_VERSION` in `.scripts/graph_lib.py` tracks content-pipeline upgrades and is never the public release number.
 - Increment PATCH for compatible fixes or documentation-only releases, MINOR for backward-compatible public capabilities, and MAJOR for breaking public contracts.
@@ -36,6 +37,18 @@ The public release is an engineering template, never a copy of the personal know
 5. In a Git worktree, verify that no manifest-approved release file is excluded
    by the destination `.gitignore`.
 6. Review the staged diff and confirm that documentation describes the affected behavior rather than merely changing dates or version badges; then run the normal engineering regressions.
+
+Normalize the Word-exported introduction before placing it in the public-assets directory:
+
+```bash
+gs -q -dSAFER -dNOPAUSE -dBATCH -sDEVICE=pdfwrite \
+  -dCompatibilityLevel=1.4 -dPDFSETTINGS=/prepress -dAutoRotatePages=/None \
+  -sOutputFile=/tmp/ASKS-Chinese-Introduction-normalized.pdf \
+  /path/to/ASKS-Chinese-Introduction-word-export.pdf
+```
+
+Compare the normalized rendering with the Word export, then move the normalized
+file to the dated path declared by `open-source-manifest.yaml`.
 
 ```bash
 python3 .scripts/open_source_release.py build /path/to/WikiGraph_clean --clean --force

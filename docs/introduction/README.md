@@ -12,6 +12,9 @@ engineering description with the existing `v0.3.0` boundary, including unified
 document graph compilation, the single Meeting Compiler, bounded semantic
 recovery, and separate ingestion model roles. This documentation update does
 not increment `VERSION` or alter a frozen paper artifact.
+The published PDF is a browser-compatible normalized export of the reviewed
+Word rendering; this changes its container structure, not its reader-facing
+content or experimental scope.
 
 | Content described in the PDF | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
@@ -32,6 +35,8 @@ artifact directories linked from the repository README.
 列出的实验内容和版本范围保持不变。2026年9月3日修订版把工程说明同步到现有
 `v0.3.0` 边界，包括统一文档落图、单一 Meeting Compiler、受限语义恢复和分离
 的摄入模型角色。本次文档更新不改变 `VERSION`，也不改变冻结论文数据产物。
+公开 PDF 是经浏览器兼容标准化的已审阅 Word 渲染版本；标准化只调整 PDF 容器
+结构，不改变面向读者的内容或实验范围。
 
 | PDF 涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

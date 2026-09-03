@@ -9,7 +9,8 @@ manifests and checksums.
 
 - Kept the public READMEs and Chinese introduction synchronized with the unified
   ingestion architecture, and added a release gate requiring those reader-facing
-  documents to accompany every GitHub update.
+  documents to accompany every GitHub update. The introduction PDF is now
+  normalized for GitHub's embedded viewer.
 
 ## [0.3.0] - 2026-09-03
 

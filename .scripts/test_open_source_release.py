@@ -44,6 +44,7 @@ def main() -> None:
         introduction = destination / introduction_relative
         assert introduction.is_file()
         assert introduction.stat().st_size > 100_000
+        assert b"GPL Ghostscript" in introduction.read_bytes()
         assert (destination / "docs/introduction/README.md").is_file()
         assert introduction_relative in (
             destination / "README.md"
@@ -55,6 +56,12 @@ def main() -> None:
         assert "sjran@cnu.edu.cn" in (
             destination / "README.zh-CN.md"
         ).read_text(encoding="utf-8")
+
+        original_introduction = introduction.read_bytes()
+        introduction.write_bytes(original_introduction.replace(b"GPL Ghostscript", b"Word PDF export"))
+        unnormalized = run("verify", str(destination), expected=1)
+        assert "public introduction PDF is not browser-normalized" in unnormalized.stderr
+        introduction.write_bytes(original_introduction)
         assert (destination / "THIRD_PARTY_NOTICES.md").is_file()
         assert (destination / "VERSION").is_file()
         assert (destination / "VERSION").read_text(encoding="utf-8").strip() == expected_version

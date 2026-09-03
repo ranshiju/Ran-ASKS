@@ -14,6 +14,8 @@
 **面向一般使用者的中文介绍（PDF）：** [ASKS 中文介绍（2026年9月3日修订版）](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
 （[版本对应关系](docs/introduction/README.md)）
 
+该 PDF 以浏览器兼容的标准化格式发布，可直接在 GitHub 的嵌入式查看器中打开。
+
 论文侧重阐述学术思想、方法论与实验依据。中文 PDF 更侧重项目介绍和传播，帮助
 一般使用者理解 ASKS 解决什么问题、具有哪些特点，以及如何开始使用。
 

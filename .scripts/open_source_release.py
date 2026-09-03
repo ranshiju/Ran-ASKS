@@ -26,6 +26,7 @@ RELEASE_DOCUMENTATION_PATHS = {
     "docs/introduction/README.md",
 }
 INTRODUCTION_PDF_PREFIX = "docs/introduction/ASKS-Chinese-Introduction-"
+NORMALIZED_PDF_PRODUCER = b"GPL Ghostscript"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 PRIVATE_PREFIXES = (
     "academic/raw/", "academic/wiki/", "academic/outputs/",
@@ -351,13 +352,22 @@ def verify(destination: Path) -> int:
         failures.append(f"unexpected file: {path}")
     try:
         publication_changes = git_publication_changes(destination)
-        missing_documentation = documentation_sync_paths(manifest) - publication_changes
+        required_documentation = documentation_sync_paths(manifest)
+        missing_documentation = required_documentation - publication_changes
         if publication_changes and missing_documentation:
             failures.append(
                 "public update must synchronize README.md, README.zh-CN.md, the Chinese "
                 "introduction PDF, and its scope note; missing from this update: "
                 + ", ".join(sorted(missing_documentation))
             )
+        for path in sorted(required_documentation):
+            if not path.endswith(".pdf") or path not in actual:
+                continue
+            content = (destination / path).read_bytes()
+            if not content.startswith(b"%PDF-") or NORMALIZED_PDF_PRODUCER not in content:
+                failures.append(
+                    f"public introduction PDF is not browser-normalized: {path}"
+                )
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         failures.append(f"unable to verify release documentation synchronization: {error}")
     try:
