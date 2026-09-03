@@ -663,6 +663,11 @@ def _hub_route_reviews(results: list[dict]) -> list[dict]:
             "margin": route.get("margin"),
             "profile": route.get("profile", {}),
             "canonical_candidates": canonical,
+            "apply_command_template": (
+                "python3 .scripts/hub_semantics.py route-apply "
+                f"--page '{item.get('wiki_path', '')}' "
+                "--hub '<agent-selected-canonical-hub>' --agent-confirmed"
+            ),
         })
     return reviews
 
@@ -911,7 +916,7 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
         for key in (
             "quality_status", "reason", "transaction_id", "retryable",
             "next_action", "resume_from", "failure_signature", "bibliographic_worker",
-            "relationship_worker", "semantic_repair_worker",
+            "relationship_worker", "semantic_repair_worker", "failure_disposition",
         ):
             if item.get(key) is not None:
                 compact[key] = item[key]
@@ -1153,6 +1158,7 @@ def main():
                     for key in (
                         "transaction_id", "errors", "retryable", "next_action", "resume_from",
                         "failure_signature", "bibliographic_review", "prompt", "write_to",
+                        "failure_disposition",
                     ):
                         if parsed.get(key) is not None:
                             entry[key] = parsed[key]

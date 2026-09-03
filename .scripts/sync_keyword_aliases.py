@@ -65,7 +65,7 @@ def find_alias_groups(conn):
     return result
 
 
-def sync(conn, apply=False):
+def sync(conn, apply=False, *, commit=True):
     groups = find_alias_groups(conn)
     added = 0
     skipped = 0
@@ -83,7 +83,7 @@ def sync(conn, apply=False):
                     (alias, canonical)
                 )
             added += 1
-    if apply:
+    if apply and commit:
         conn.commit()
     return len(groups), added, skipped
 

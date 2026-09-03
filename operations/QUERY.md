@@ -38,11 +38,13 @@
 
 **跨域统一召回（v7）**：新动作 `wiki_recall(query, domain, topk)` 复用上述流程；`domain` 可为 `academic/admin/teaching/business`，为空表示跨域。`admin_recall` 保留为兼容入口。business 结果标记 `sensitive_review=true`，回答前必须按权限/敏感性复核，不能因召回命中直接扩散合同、财务或个人信息。
 
+**自适应联合召回（v10）**：关系、解释、探索和研究脉络问题优先调用 `hybrid_recall(query,intent,domain,topk)`，并行取得 Wiki narrative recall 与 Graph structural recall，再用按 intent 加权的 reciprocal-rank fusion 合并；不得直接相加 embedding、词频和图分数。简单事实已有唯一强命中时仍可走低成本 cascade。联合召回返回候选 `semantic_address` 和 section capsule，只用于定位，事实仍须下钻 Raw。
+
 **Hub Scope 召回**：`wiki_recall` 匹配 page 标题、Navigation 和论文 `## 研究方向定位`，并与图回退结果合并。需要检查论文→Hub 路由时调用只读 `hub_route`；需要审视 Hub Scope、parent 和成员时调用 `hub_inspect`。查询不再读旧 Hub `## 关键词`。
 
 **弱模型保护（v8）**：LLM 只提交有限意图 JSON（`need_recall/need_graph/query/domain/topk`），不得自由编写动作列表；由 `query_orchestrate.py intent_to_plan` 生成白名单动作。意图缺字段或非法值时不执行；召回候选仍须先读 Navigation，再由程序/LLM决定是否读 Content/raw。
 
-查询按以下优先级依次检索，命中即止：
+查询采用“简单事实强命中即止、复合问题双路融合”的自适应策略：
 
 > **图导航 v5**:检索主路径是 SQLite 图查询(`.scripts/query_graph.py`)。图中每个知识库文件都有代表节点：原件与同 stem locator companion 共用一个 Raw 文档包节点，Wiki page 是独立节点并通过 `来源` 边直连 Raw；人物、概念、Hub 等其他节点主要与 Wiki 相连。关键词/别名/标题用于入口定位，作者、引用、发表、方法、研究方向、参会等关系边用于纵向导航。原 keyword/triples/page-catalog 索引的功能已并入图，不再作为独立主数据源。各层映射:
 > - 第一层(图搜索入口):图 `search <term>` 子命令(匹配 nodes 的 title/aliases/abbreviations 等定位字段)
@@ -86,6 +88,8 @@
 **Raw Locator（2026-08-25）**：统一使用 `python3 .scripts/wg.py read-raw '<path>#<locator>'` 做局部读取。Markdown/TXT 支持标题、`#L12`、`#L12-L18`；非论文且有文本层的 PDF 支持 `#page-3`、`#page-3-5`。工具可以机械扫描文件，但只把 locator 命中的片段送入 LLM；裸路径与 `#全篇` 均拒绝执行，Graph 中的 `#全篇` 仅是文件级 provenance，读取前必须细化 locator。命中片段超过单次上限时也拒绝返回半截内容，调用方须缩小章节、行范围或页码。原文件没有稳定可读 locator 时，沿 wiki `sources` 读取同目录 Markdown companion；不得因此把整份二进制文档送入模型。学术论文始终读取 MinerU `paper.md`，不得因 PDF 有文本层而绕过它。
 
 **Wiki Locator（2026-08-25）**：Wiki 是可重建的阅读导航层，使用稳定 heading slug，不使用 Wiki 行号。调用 `python3 .scripts/wg.py read-section '<wiki-page>.md#<heading-slug>'` 时，程序只返回目标 heading 到下一个同级/更高标题之间的正文，并解析该节实际使用的 `[^rN]` 脚注，返回 `raw_citations`。回答事实时再把这些 Raw locators 交给 `read-raw`；不得因读取 Wiki section 而自动读取整页或整份 Raw。
+
+**Semantic Address 与 Context Envelope（v10）**：`<wiki-page>#<heading-slug>` 是跨 Wiki/Graph 的正式语义地址。边填写该地址时必须可解析到真实 section；新摄入 section 必须带精确 Raw 脚注，历史缺失由 validator 聚合为迁移 WARN。`wg.py read-section ... --with-context --profile <intent>` 可动态附加受限 Graph neighbors、Hub 和来源局部 gloss；overlay 不回写 Wiki，也不是事实证据。
 
 **防退化**(必守,见 SCHEMA):
 - section 名精确匹配(`Navigation`/`Content`),无附加文字
@@ -173,13 +177,13 @@
 
 ## 混合查询规则
 
-当问题既含实体定位又含关系查询时(如"白生辰的论文用了什么方法""青梧工作室与哪些人合作"),按两步串联,非并行:
+当问题既含实体定位又含关系查询时（如“白生辰的论文用了什么方法”“青梧工作室与哪些人合作”），Wiki 与 Graph 召回可并行融合；Graph 内部的实体解析与关系扩展仍按依赖串联：
 
 1. **先图 search 定位主体实体**(白生辰 → people 页;青梧工作室 → Hub 页)
 2. **再图 neighbors/relations 发现关系**(relations --predicate 合作者/指导 查白生辰;relations --predicate 提出方法 查方法关系)
 3. 综合两层结果读取目标页面 + 锚点
 
-不并行是因为关系查询依赖实体先定位(三元组主体需先确定),串联符合依赖顺序。
+并行的是两种表示的候选召回，不是 Graph 内部的依赖步骤。融合后先读 semantic address，再沿该节脚注核验 Raw。
 
 ## 第四层：联想层（LLM 参数化知识 + 网络，2026-07-25 v3 合并）
 
@@ -219,12 +223,12 @@
 
 ## embedding 应用(v3,2026-07-25 局部引入)
 
-**已引入(局部)**:embedding 用于 hub 成员/节点候选的**概率采样**(步骤 3a),非全局语义检索第五层。
+**已引入（局部）**：embedding 用于节点/Hub description 的语义候选、身份门控和 Hub 路由，不做全文向量检索；`hybrid_recall` 只将其候选排名作为一路 rank 信号。
 - 模型:GLM-Embedding-3(复用项目 `.env`,dim=2048,中英混排)
 - 节点名 embedding 预算缓存(graph.db `embeddings` 表,ingest 时算)+ query 向量缓存(LRU 500 + TTL 7 天【初始工程参数】)
 - 采样:节点名 + query 向量余弦 → 两阶段(top-k cutoff 截断 + softmax 温度 T)→ 不重复采样
 
-**远期第五层(全局语义检索,未引入)**:全文 embedding 语义检索,大工程,留远期。当前局部 embedding 只算节点名相似度,不是全文检索。
+**远期第五层（全文语义检索，未引入）**：当前 section capsule 从 heading、section 正文和 Raw 脚注即时派生，不建立全文向量库。
 - 触发判据(满足任一):漏召率上升(月度 >10% 进第三层未命中)/ 规模临界(页面 >500 且图检索召回率下降)
 - 引入形态:作第五层兜底,不替代图路由,召回仍需锚点定位 + raw 回溯
 

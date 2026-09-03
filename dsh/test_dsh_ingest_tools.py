@@ -2,7 +2,7 @@
 """dsh/ 摄入工具 seam 回归测试。
 
 验证点：
-- ingest 工具注册表包含 dry-run/run/run-file/paper-pdf/paper-resume
+- ingest 工具注册表包含 dry-run/run/run-file/paper-pdf 与 paper/meeting resume
 - IngestGuard 只放行 inbox 文件与合法事务 ID，拒绝路径穿越/越界/空参数
 - IngestAgentLoop 挂载 ingest guard，不挂载查询 guard
 """
@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / ".scripts"))
 
-from dsh.harness import ToolExecution, PreToolDecision
+from dsh.harness import ToolExecution, ToolExecutionResult, PreToolDecision
 from dsh.ingest_tools import build_ingest_tools
 from dsh.guards.ingest_guard import IngestGuard
 from dsh.agent_loop import AgentLoop, IngestAgentLoop
@@ -32,6 +32,7 @@ def test_ingest_tool_names():
         "ingest_paper_pdf",
         "ingest_paper_resume",
         "ingest_meeting_txt",
+        "ingest_meeting_resume",
         "ingest_document_file",
         "re_ingest_raw",
     } <= names
@@ -94,6 +95,11 @@ def test_guard_validates_resume_txn():
         name="ingest_paper_resume", arguments={"txn": "../../etc"}))
     assert invalid is not None
     assert invalid.kind == "deny"
+    assert guard.on_pre_execute(ToolExecution(
+        name="ingest_meeting_resume", arguments={"txn": "20260903-142501-group-meeting"})) is None
+    invalid_meeting = guard.on_pre_execute(ToolExecution(
+        name="ingest_meeting_resume", arguments={"txn": "../../etc"}))
+    assert invalid_meeting is not None and invalid_meeting.kind == "deny"
 
 
 def test_ingest_loop_has_guard_and_tools():
@@ -104,9 +110,28 @@ def test_ingest_loop_has_guard_and_tools():
 
 def test_ingest_loop_convenience_methods():
     loop = IngestAgentLoop()
-    for name in ("ingest_meeting", "ingest_document", "re_ingest_raw",
+    for name in ("ingest_meeting", "resume_meeting", "ingest_document", "re_ingest_raw",
                  "ingest_paper_inbox", "execute"):
         assert hasattr(loop, name)
+
+
+def test_ingest_loop_does_not_retry_timeout_result():
+    loop = IngestAgentLoop()
+    calls = []
+    original_execute = loop.registry.execute
+    try:
+        loop.registry.execute = lambda execution, _session_log: (
+            calls.append(execution.name) or ToolExecutionResult(
+                content="[ERROR category=api_timeout script=ingest_paper.py code=1]",
+                is_error=True,
+            )
+        )
+        output = loop.execute("ingest_inbox_run", {})
+    finally:
+        loop.registry.execute = original_execute
+    assert calls == ["ingest_inbox_run"]
+    assert "category=api_timeout" in output
+    assert "ingest/retry" not in [event.type for event in loop.session_log.events()]
 
 
 def test_structured_parse():
@@ -147,6 +172,22 @@ def test_bibliographic_review_status_and_fields_are_preserved():
     status, handoff = loop._status_from_last()
     assert status == "bibliographic_review_required"
     assert handoff == payload
+
+
+def test_meeting_compiler_handoff_preserves_write_target():
+    loop = IngestAgentLoop()
+    loop.last_structured = {
+        "status": "agent_required",
+        "transaction_id": "20260903-142501-group-meeting",
+        "message": "meeting compiler",
+        "prompt": "compile once",
+        "write_to": "temp/inbox-extract/txn/agent-meeting-compiler.txt",
+        "pipeline_plan": [{"step": "会议编译"}],
+    }
+    status, handoff = loop._status_from_last()
+    assert status == "agent_required"
+    assert handoff["write_to"].endswith("agent-meeting-compiler.txt")
+    assert handoff["message"] == "meeting compiler"
 
 
 def test_completed_file_preserves_actionable_maintenance_handoff():
@@ -220,6 +261,23 @@ def test_classify_error_honors_explicit_structured_category():
     assert _classify_error(1, "", payload) == "graph_failed"
 
 
+def test_classify_error_consumes_canonical_failure_disposition():
+    from dsh.ingest_tools import _classify_error
+    payload = json.dumps({
+        "status": "failed",
+        "errors": ["opaque failure"],
+        "failure_disposition": {
+            "category": "deterministic_validation",
+            "domain": "graph",
+            "disposition": "engineering_fix",
+            "retryable": False,
+            "owner": "engineering",
+            "next_action": "repair_graph_then_resume",
+        },
+    })
+    assert _classify_error(1, "", payload) == "graph_failed"
+
+
 def test_error_output_includes_category():
     from dsh.ingest_tools import _ingest_call
     # _ingest_call with nonexistent script will produce non-zero return
@@ -240,6 +298,7 @@ def main():
     test_structured_parse()
     test_structured_parse_preserves_top_level_batch_envelope()
     test_bibliographic_review_status_and_fields_are_preserved()
+    test_meeting_compiler_handoff_preserves_write_target()
     test_completed_file_preserves_actionable_maintenance_handoff()
     test_structured_parse_deep_nested()
     test_structured_parse_prefers_status()
@@ -250,6 +309,7 @@ def main():
     test_classify_error_categories()
     test_classify_error_prefers_structured_bibliographic_failure_over_pdf_name()
     test_classify_error_honors_explicit_structured_category()
+    test_classify_error_consumes_canonical_failure_disposition()
     test_error_output_includes_category()
     print("dsh ingest tools regression: PASS")
 

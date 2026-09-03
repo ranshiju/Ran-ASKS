@@ -46,6 +46,7 @@ sys.path.insert(0, str(SCRIPTS))
 import source_locator as sl
 import wiki_locator as wl
 import graph_lib as gl
+import query_actions as qa
 
 RAW_PREVIEW_CHARS = 6000
 
@@ -150,11 +151,25 @@ def cmd_abbr(args):
 
 def cmd_read_section(args):
     try:
-        result = wl.read_wiki_locator(args.page, args.section or "")
+        if args.with_context:
+            result = qa.wiki_context_data(
+                args.page, args.section or "", args.profile, args.topk
+            )
+            sources = result["wiki"]["raw_citations"]
+        else:
+            result = wl.read_wiki_locator(args.page, args.section or "")
+            sources = result["raw_citations"]
     except (FileNotFoundError, ValueError, KeyError) as exc:
         return envelope("read-section", None, status="error", error=str(exc))
     return envelope("read-section", result,
-                    sources=result["raw_citations"], status="ok")
+                    sources=sources, status="ok")
+
+
+def cmd_hybrid_recall(args):
+    text, _tokens = qa.hybrid_recall(args.query, args.intent, args.domain, str(args.topk))
+    if text.startswith("[ERROR"):
+        return envelope("hybrid-recall", None, status="error", error=text)
+    return envelope("hybrid-recall", json.loads(text), status="ok")
 
 
 def cmd_read_raw(args):
@@ -287,7 +302,19 @@ def build_parser():
     p = sub.add_parser("read-section", help="按 heading slug 读 wiki 页及该节 Raw 引用")
     p.add_argument("page", help="wiki 路径，亦可直接写 page.md#heading-slug")
     p.add_argument("section", nargs="?", default="", help="heading 标题或 slug")
+    p.add_argument("--with-context", action="store_true", help="动态附加受限 Graph 上下文")
+    p.add_argument("--profile", default="explanation",
+                   choices=("fact", "relation", "explanation", "exploration", "lineage"))
+    p.add_argument("--topk", type=int, default=12)
     p.set_defaults(func=cmd_read_section)
+
+    p = sub.add_parser("hybrid-recall", help="按意图融合 Wiki 语义与 Graph 结构召回")
+    p.add_argument("query")
+    p.add_argument("--intent", default="exploration",
+                   choices=("fact", "relation", "explanation", "exploration", "lineage"))
+    p.add_argument("--domain", default="", choices=("", "academic", "admin", "teaching", "business"))
+    p.add_argument("--topk", type=int, default=8)
+    p.set_defaults(func=cmd_hybrid_recall)
 
     p = sub.add_parser("read-raw", help="按 locator 读 raw 片段溯源核验")
     p.add_argument("locator"); p.set_defaults(func=cmd_read_raw)

@@ -151,6 +151,71 @@ def test_targeted_orphan_cleanup_is_explicit_and_conservative():
         conn.close()
 
 
+def test_description_audit_only_selects_source_backed_keyword_origins():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki = root / "academic/wiki/papers/demo.md"
+        raw = root / "academic/raw/references/demo/paper.md"
+        wiki.parent.mkdir(parents=True)
+        raw.parent.mkdir(parents=True)
+        wiki.write_text(
+            "---\ntitle: Demo\ntype: paper-summary\nsources:\n"
+            "  - academic/raw/references/demo/paper.md\n---\n",
+            encoding="utf-8",
+        )
+        raw.write_text("# Demo\n", encoding="utf-8")
+        original_repo = gl.REPO
+        try:
+            gl.REPO = root
+            conn = make_conn(directory)
+            gl.ensure_node(conn, "missing", "缺失概念", "entity", entity_subtype="keyword")
+            gl.ensure_node(
+                conn, "valid", "完整概念", "entity", entity_subtype="keyword",
+                description="该概念用于描述测试中的完整语义对象。",
+            )
+            gl.ensure_node(conn, "blocked", "无来源概念", "entity", entity_subtype="keyword")
+            gl.ensure_node(conn, "中文概念", "中文概念", "entity", entity_subtype="keyword")
+            gl.ensure_node(
+                conn, "中文概念Chinese concept", "中文概念Chinese concept", "entity",
+                entity_subtype="keyword",
+            )
+            gl.add_node_origin(conn, "missing", "academic/wiki/papers/demo")
+            gl.add_node_origin(conn, "中文概念", "academic/wiki/papers/demo")
+            gl.add_node_origin(conn, "中文概念Chinese concept", "academic/wiki/papers/demo")
+            report = module.semantic_description_audit(conn, details=True)
+            assert report["keyword_count"] == 5
+            assert report["valid_description_count"] == 1
+            assert report["source_recoverable_nodes"] == 1
+            assert report["lineage_blocked_nodes"] == 1
+            assert report["identity_review_nodes"] == 2
+            assert report["identity_issues"] == {"possible_bilingual_duplicate": 2}
+            assert report["reingest_pages"] == [{
+                "page": "academic/wiki/papers/demo",
+                "raw_inputs": ["academic/raw/references/demo/paper.md"],
+            }]
+            conn.close()
+        finally:
+            gl.REPO = original_repo
+
+
+def test_description_audit_rejects_deictic_and_identity_metadata_text():
+    assert module.keyword_description_issue(
+        "矩阵乘积态", "该文档使用矩阵乘积态压缩表示量子多体波函数。"
+    ) == "deictic_context"
+    assert module.keyword_description_issue(
+        "CONFLICTBANK", "Agent-confirmed abbreviation kind: dataset_or_model"
+    ) == "identity_metadata"
+    assert not module.keyword_description_issue(
+        "矩阵乘积态", "矩阵乘积态以一维张量链压缩表示量子多体波函数。"
+    )
+    assert module.keyword_identity_issue("Delta") == "generic_symbol_label"
+    assert module.keyword_identity_issue("θ") == "generic_symbol_label"
+    assert module.keyword_identity_issue("x") == "generic_symbol_label"
+    assert module._keyword_identity_issues([
+        {"path": "Delta", "title": "工作区间覆盖混沌与非遍历两区"},
+    ]) == {"Delta": "generic_symbol_label"}
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
     for test in tests:

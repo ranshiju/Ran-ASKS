@@ -271,18 +271,6 @@ class IngestAgentLoop:
                           agent_id=self.session_log.session_id),
             self.session_log,
         )
-        # 瞬时失败（api_timeout）自动重试一次，间隔 5 秒
-        if result.is_error and "category=api_timeout" in result.content:
-            self.session_log.append("ingest/retry", {
-                "tool": name, "reason": "api_timeout", "attempt": 2,
-            })
-            import time
-            time.sleep(5)
-            result = self.registry.execute(
-                ToolExecution(name=name, arguments=arguments,
-                              agent_id=self.session_log.session_id),
-                self.session_log,
-            )
         structured = self._parse_structured(result.content)
         self.last_structured = structured
         self.session_log.append(
@@ -307,7 +295,9 @@ class IngestAgentLoop:
                 return "agent_required", {
                     "status": "agent_required",
                     "transaction_id": self.last_structured.get("transaction_id", ""),
+                    "message": self.last_structured.get("message", ""),
                     "prompt": self.last_structured.get("prompt", ""),
+                    "write_to": self.last_structured.get("write_to", ""),
                     "pipeline_plan": self.last_structured.get("pipeline_plan", []),
                 }
             if status == "failed":
@@ -425,6 +415,9 @@ class IngestAgentLoop:
         if subproject:
             args["subproject"] = subproject
         return self._execute("ingest_meeting_txt", args)
+
+    def resume_meeting(self, txn: str) -> str:
+        return self._execute("ingest_meeting_resume", {"txn": txn})
 
     def ingest_document(self, file: str, subproject: str | None = None,
                         document_type: str | None = None) -> str:

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """ingest_meeting.py — 代码驱动的会议纪要摄入编排器。
 
-3.3 分两阶段调用 LLM (call_text)：3.3a 撰写 wiki（带 corrected.txt + entity-resolution）→
-3.4 校验通过 → 3.3b 抽取语义槽（单轮，只带 wiki）。其余步骤全纯代码。
-流程: 3.1 dedup_check → 3.2 preprocess → 3.3a write_wiki → 3.4 validate_wiki →
-3.3b write_slots → 3.5 fill_semantics → 3.6 validate_semantics → 落位 →
+3.3 由一个 Meeting Compiler specialist 单次完成转写纠错决策、wiki 编译与语义槽抽取；
+3.2 仅准备确定性人物候选，其余步骤全纯代码。
+流程: 3.1 dedup_check → 3.2 candidate_preprocess → 3.3 compile_meeting → 3.4 validate_wiki →
+3.5 fill_semantics → 3.6 validate_semantics → 落位 →
 3.7 update_graph → 3.8 validate_graph → 3.9 finalize_tail
-修复循环: wiki 硬错误回 3.3a 重写；语义槽硬错误回 3.3b 重写（保留 wiki）；
-warning 走 3.6b 局部修复。各阶段独立重试，最多 3 次。
+修复循环: wiki/语义槽硬错误回同一个 compiler 定向重写；warning 走 3.6b 局部修复。
 状态: temp/inbox-state/<txn-id>.json，可从任意步骤恢复。
 """
 from __future__ import annotations
@@ -21,34 +20,48 @@ from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / ".scripts"))
 import inbox_state
 import trash_util
 import ingest_common as ic
 import ingest_pipeline
-from llm_structured import call_text, ingest_mode
-from ingest_common import (parse_meta_block, validate_meta, extract_year_from_meta,
+import recovery_policy as rp
+from llm_structured import ingest_mode
+from dsh.meeting_compiler_agent import (
+    MeetingCompilerAgent,
+    MeetingCompilerTask,
+    PREPROCESS_DELIMITER,
+    PROTOCOL_VERSION as MEETING_COMPILER_PROTOCOL,
+    apply_transcript_replacements,
+    parse_proposal as parse_meeting_compiler_proposal,
+    task_context_hash,
+)
+from ingest_common import (validate_meta, extract_year_from_meta,
                            has_type_mismatch, has_year_mismatch,
-                           progress, parse_delimited, set_progress_file, set_progress_log_path)
+                           progress, set_progress_file, set_progress_log_path)
 
 TEMP_EXTRACT = REPO / "temp" / "inbox-extract"
 NON_BLOCKING_ISSUES = ("bare_abbreviation", "descriptive_phrase")
-MAX_RETRIES = 3
-WIKI_DELIMITER = "<<<WIKI>>>"
-SLOTS_DELIMITER = "<<<SLOTS>>>"
-
+RECOVERY_LIMITS = rp.normalize_limits({
+    "wiki_revision": 1,
+    "semantic_revision": 1,
+    "deterministic_repair": 1,
+    "subagent": 1,
+})
 PIPELINE_PLAN_AGENT = [
-    {"step": "判断重复 + 预处理", "needs_agent": False,
-     "desc": "dedup(查图+查raw) → speech_entity_resolver 实体纠错(corrected.txt + entity-resolution.json)，一次程序调用完成"},
-    {"step": "撰写 wiki 与语义槽", "needs_agent": True,
-     "desc": "agent 接管：读 corrected.txt + entity-resolution.json → 撰写会议 wiki → 抽取语义槽，一次输出 <<<WIKI>>> + <<<SLOTS>>>"},
+    {"step": "判断重复 + 候选准备", "needs_agent": False,
+     "desc": "dedup(查图+查raw) → speech_entity_resolver 只生成确定性人物候选，不修改原文"},
+    {"step": "会议编译", "needs_agent": True,
+     "desc": "一个 Meeting Compiler sub-agent 读原文+人物候选，一次输出 <<<PREPROCESS>>> + <<<WIKI>>> + <<<SLOTS>>>"},
     {"step": "更新 Graph + 校验 + 收尾", "needs_agent": False,
      "desc": "validate→落位→graph_ingest 建边→validate_graph→finalize_tail(log/index/派生同步)+清理，--resume 一次调用完成"},
 ]
 
 PIPELINE_PLAN_API = [
     {"step": "摄入会议纪要（代码+API 全自动）", "needs_agent": False,
-     "desc": "dedup→preprocess→wiki(API)→slots(API)→validate→落位→建图→图校验→收尾+清理，--txt 一条命令完成；agent 仅读最终 JSON 确认 meeting-id/路径/边数"},
+     "desc": "dedup→候选准备→Meeting Compiler(API 单次语义编译)→validate→落位→统一 IR/建图→图校验→收尾+清理"},
 ]
 
 def pipeline_plan_for(mode: str) -> list[dict]:
@@ -174,42 +187,38 @@ def step_dedup_check(state: dict) -> tuple[bool, str]:
 # ===== 3.2 preprocess =====
 
 def step_preprocess(state: dict) -> tuple[bool, str]:
-    """调 speech_entity_resolver.py 做实体纠错。"""
+    """Build deterministic entity candidates; semantic correction belongs to one compiler."""
     extract_dir = REPO / state["extract_dir"]
     extract_dir.mkdir(parents=True, exist_ok=True)
     source_path = REPO / state["source"]
-    resolution_path = extract_dir / "entity-resolution.json"
-    corrected_path = extract_dir / "corrected.txt"
-    output = run([sys.executable, str(REPO / ".scripts/speech_entity_resolver.py"),
+    candidate_path = extract_dir / "entity-candidates.json"
+    run([sys.executable, str(REPO / ".scripts/speech_entity_resolver.py"),
                   str(source_path),
-                  "--output", str(resolution_path.relative_to(REPO)),
-                  "--apply", str(corrected_path.relative_to(REPO))])
-    if not corrected_path.exists():
-        # --apply 失败时回退用原文
-        corrected_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
-    if resolution_path.exists():
-        state["entity_resolution"] = str(resolution_path.relative_to(REPO))
-    else:
-        state["entity_resolution"] = ""
-    state["corrected_path"] = str(corrected_path.relative_to(REPO))
+                  "--output", str(candidate_path.relative_to(REPO))])
+    if not candidate_path.is_file():
+        return False, "speech_entity_resolver 未生成 entity-candidates.json"
+    state["entity_candidates"] = str(candidate_path.relative_to(REPO))
     return True, ""
 
 
-def build_agent_meeting_wiki_slots_prompt(corrected_text: str, entity_info: str,
+def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: str,
                                         meeting_id: str, date_str: str,
                                         sources_path: str, full_date: str, today: str,
                                         errors: list[str] | None = None) -> str:
-    """agent 模式专用 prompt：合并 wiki 撰写 + 语义槽抽取为单次任务，省一轮 LLM 调用。"""
+    """Build the single Meeting Compiler task used by both API and agent backends."""
     error_section = ""
     if errors:
         error_section = "\n\n[上次输出的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
-    return f"""你是知识库摄入组件。请一次性完成会议 wiki 页面撰写 + 语义槽抽取。
+    return f"""你是受限的 Meeting Compiler sub-agent。请在同一上下文中一次性完成：
+1. 判断必要的转写/人物纠错；
+2. 编译会议 wiki；
+3. 抽取语义槽。
 
-[会议纪要上下文]
-{corrected_text}
+[会议纪要原文，只读事实源]
+{source_text}
 
-[已解析人物映射（复用，不重复提取人名）]
-{entity_info}{error_section}
+[程序提供的人物候选目录；exact 项优先复用，review 项必须结合原文判断]
+{entity_candidates}{error_section}
 
 [会议 ID] {meeting_id}
 [日期] {full_date}
@@ -217,13 +226,16 @@ def build_agent_meeting_wiki_slots_prompt(corrected_text: str, entity_info: str,
 [今日日期] {today}（created、updated 字段使用此值）
 
 [要求]
-1. 撰写 conference-summary 类型 wiki 页面，含 frontmatter 和正文。
-2. frontmatter 必须包含: title, type: conference-summary, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: current, created（今日日期）, updated（今日日期）。
-3. 正文结构: # 标题 → > 日期+参与者行（用 [[authors/路径|姓名]] 格式，复用上方人物映射）→ ## Navigation（2-4 句导航概述）→ ## Content（按议题分子段，- 列表项）。
-4. 简写+纠错+去口语化，忠实于原文，不编造。
-5. 三元组客体须为规范概念名/实体名：不含逗号、卷号页码、年份或描述性短语；核心词格式统一为「中文英文(缩写)」；无公认缩写则不写括号；无对应中文则只写英文，无对应英文则只写中文。
-6. 会议纪要主要用于学术灵感与构思，三元组提取数量和密度宜低：只提取会议明确讨论的核心议题与学术判断，不提取顺带提及的背景知识。
-7. 用 <<<WIKI>>> 和 <<<SLOTS>>> 两个分隔符分别包裹输出（先 wiki 后语义槽）。
+1. PREPROCESS 只列必要、证据明确的 exact replacements；original 必须是原文中的连续原串，replacement 不得含换行。没有可靠纠错就返回空数组。不要输出整份改写后的原文。
+2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved，不得猜测。
+3. Wiki 和 slots 必须基于同一组纠错与实体判断，禁止在两个产物中使用相互矛盾的人名或术语。
+4. 撰写 conference-summary 类型 wiki 页面，含 frontmatter 和正文。
+5. frontmatter 必须包含: title, type: conference-summary, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: current, created（今日日期）, updated（今日日期）。
+6. 正文结构: # 标题 → > 日期+参与者行（用 [[authors/路径|姓名]] 格式，复用人物候选）→ ## Navigation（2-4 句导航概述）→ ## Content（按议题分子段，- 列表项）。
+7. Wiki 简写、纠错、去口语化，但忠实于原文，不编造。
+8. 三元组客体须为规范概念名/实体名：不含逗号、卷号页码、年份或描述性短语；核心词格式统一为「中文英文(缩写)」；无公认缩写则不写括号；无对应中文则只写英文，无对应英文则只写中文。
+9. 会议纪要主要用于学术灵感与构思，三元组提取数量和密度宜低：只提取会议明确讨论的核心议题与学术判断，不提取顺带提及的背景知识。
+10. 严格按 META → PREPROCESS → WIKI → SLOTS 的顺序输出，不要增加第四种产物或解释文字。
 
 语义槽格式：
 参会者:
@@ -249,87 +261,115 @@ doc_date: <会议日期，从纪要内容提取；有什么提什么，如 2024-
 title: <会议标题>
 doc_type: meeting
 <<</META>>>
+{PREPROCESS_DELIMITER}
+{{"protocol_version":"{MEETING_COMPILER_PROTOCOL}","transcript_replacements":[{{"original":"原文精确片段","replacement":"纠正后片段","reason":"原文或人物候选依据"}}],"entity_resolutions":[{{"mention":"原文称呼","canonical":"entity 路径或规范姓名；unresolved 时为空串","status":"resolved|unchanged|unresolved","reason":"判断依据"}}]}}
 <<<WIKI>>>
 （完整 wiki markdown，含 frontmatter）
 <<<SLOTS>>>
 （语义槽）"""
 
-# ===== 3.3a write_wiki =====
+# ===== 3.3 write_wiki + semantic slots =====
 
-def _format_resolved_entities(resolution_path: str) -> str:
-    """从 entity-resolution.json 提取已 resolved 的人物映射，格式化为提示词片段。"""
-    if not resolution_path:
-        return "（无 entity-resolution.json，请从纪要正文识别人名）"
-    p = REPO / resolution_path
-    if not p.exists():
-        return "（entity-resolution.json 不存在）"
+
+def _load_entity_candidates(state: dict) -> tuple[dict, str]:
+    candidate_relative = state.get("entity_candidates") or state.get("entity_resolution", "")
+    if not candidate_relative:
+        return {}, ""
+    candidate_path = REPO / candidate_relative
+    if not candidate_path.is_file():
+        return {}, ""
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return "（entity-resolution.json 解析失败）"
-    lines = []
-    for r in data.get("resolved", []):
-        orig = r.get("original", "")
-        norm = r.get("normalized", "")
-        entity = r.get("entity", "")
-        if entity and norm:
-            lines.append(f"- {orig} → {entity}（{norm}）")
-        elif norm:
-            lines.append(f"- {orig} → {norm}")
-    return "\n".join(lines) if lines else "（无 resolved 条目）"
+        return json.loads(candidate_path.read_text(encoding="utf-8")), ""
+    except (OSError, json.JSONDecodeError):
+        return {}, "entity candidate catalog 解析失败"
 
 
-def build_meeting_wiki_prompt(corrected_text: str, entity_info: str,
-                               meeting_id: str, date_str: str,
-                               sources_path: str, full_date: str, today: str,
-                               errors: list[str] | None = None) -> str:
-    error_section = ""
-    if errors:
-        error_section = "\n\n[上次输出的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
-    return f"""你是知识库摄入组件。基于以下会议纪要上下文，撰写会议 wiki 页面。
+def _compiler_request(state: dict, source_text: str, entity_candidates: dict, *,
+                      host_agent: bool, extra_errors: list[str] | None = None
+                      ) -> tuple[str, str]:
+    date_str = state.get("date_str", "")
+    today = datetime.now().strftime("%Y-%m-%d")
+    year = datetime.now().strftime("%Y")
+    full_date = f"{year}-{date_str[:2]}-{date_str[2:]}" if len(date_str) == 4 else date_str or today
+    sources_path = f"{state['raw_dir']}/{state['source_filename']}"
+    errors = []
+    for key in ("wiki_errors", "slots_errors", "compiler_errors"):
+        for error in state.get(key, []) or []:
+            if str(error) not in errors:
+                errors.append(str(error))
+    for error in extra_errors or []:
+        if str(error) not in errors:
+            errors.append(str(error))
+    source_context = source_text
+    if host_agent:
+        source_context = (
+            f"请使用读取工具完整读取仓库内 `{state['source']}` 一次。"
+            "不要用 shell 头尾切片，不要修改该文件。"
+        )
+    prompt = build_agent_meeting_wiki_slots_prompt(
+        source_context,
+        json.dumps(entity_candidates, ensure_ascii=False, sort_keys=True),
+        state["meeting_id"], date_str, sources_path, full_date, today,
+        errors or None,
+    )
+    context_hash = task_context_hash(
+        source_text,
+        entity_candidates,
+        meeting_id=state["meeting_id"],
+        target_source_path=sources_path,
+        errors=errors,
+    )
+    return prompt, context_hash
 
-[会议纪要上下文]
-{corrected_text}
 
-[已解析人物映射（复用，不重复提取人名）]
-{entity_info}
-{error_section}
-
-[会议 ID] {meeting_id}
-[日期] {full_date}
-[sources 路径] {sources_path}（frontmatter sources 字段必须精确使用此值，不得编造或用 memory:// 等占位）
-[今日日期] {today}（created、updated 字段使用此值）
-
-[要求]
-1. 撰写 conference-summary 类型 wiki 页面，含 frontmatter 和正文。
-2. frontmatter 必须包含: title, type: conference-summary, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: current, created（今日日期）, updated（今日日期）。
-3. 正文结构: # 标题 → > 日期+参与者行（用 [[authors/路径|姓名]] 格式，复用上方人物映射）→ ## Navigation（2-4 句导航概述）→ ## Content（按议题分子段，- 列表项）。
-4. 简写+纠错+去口语化，忠实于原文，不编造。
-5. 输出完整 wiki markdown（含 frontmatter），用 <<<WIKI>>> 分隔符包裹。
-
-[输出格式]
-<<<WIKI>>>
-（完整 wiki markdown，含 frontmatter）"""
+def step_prepare_unified_handoff(state: dict, errors: list[str]) -> tuple[bool, str]:
+    """Keep exhausted Wiki revision on the full Meeting Compiler protocol."""
+    source_path = REPO / state["source"]
+    try:
+        source_text = source_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"会议原文读取失败: {exc}"
+    entity_candidates, candidate_error = _load_entity_candidates(state)
+    if candidate_error:
+        return False, candidate_error
+    prompt, context_hash = _compiler_request(
+        state, source_text, entity_candidates, host_agent=True, extra_errors=errors,
+    )
+    agent_output = REPO / state["extract_dir"] / "agent-meeting-compiler.txt"
+    state["_awaiting_agent_wiki_slots"] = True
+    state["agent_prompt"] = prompt
+    state["agent_write_to"] = str(agent_output.relative_to(REPO))
+    state["compiler_errors"] = list(dict.fromkeys(str(error) for error in errors))
+    state["meeting_compiler"] = {
+        "protocol_version": MEETING_COMPILER_PROTOCOL,
+        "status": "agent_required",
+        "reason": "wiki_revision_budget_exhausted",
+        "context_hash": context_hash,
+    }
+    return True, ""
 
 
 def step_write_wiki(state: dict) -> tuple[bool, str]:
-    """3.3a 第一阶段：调 LLM 撰写会议 wiki。"""
+    """Run or consume the one-shot Meeting Compiler proposal."""
     extract_dir = REPO / state["extract_dir"]
-    corrected_path = REPO / state["corrected_path"]
-    corrected_text = corrected_path.read_text(encoding="utf-8")
-    context_text = ic.build_source_context(
-        "meeting", corrected_text, force_reduced=(ingest_mode() == "api"))
-    entity_info = _format_resolved_entities(state.get("entity_resolution", ""))
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    source_path = REPO / state["source"]
+    source_text = source_path.read_text(encoding="utf-8")
+    agent_output = extract_dir / "agent-meeting-compiler.txt"
+    resumed_compiler = state.pop("_awaiting_agent_wiki_slots", False)
+    entity_candidates, candidate_error = _load_entity_candidates(state)
+    if candidate_error:
+        return False, candidate_error
     # 生成 meeting-id（仅首次）
+    subproject = state.get("subproject", "academic")
     if "meeting_id" not in state:
         title = ""
-        m = re.search(r"^#\s+(.+)", corrected_text, re.M)
+        m = re.search(r"^#\s+(.+)", source_text, re.M)
         if m:
             title = m.group(1).strip()
         if not title:
-            title = _fallback_meeting_title(corrected_text, state["source_filename"])
+            title = _fallback_meeting_title(source_text, state["source_filename"])
         base_id = generate_meeting_id(state["source_filename"], title)
-        subproject = state.get("subproject", "academic")
         meeting_id = ensure_unique_meeting_id(base_id, subproject)
         state["meeting_id"] = meeting_id
         year = datetime.now().strftime("%Y")
@@ -338,36 +378,57 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         state["wiki_path"] = mp["wiki_path"]
         state["log_path"] = mp["log"]
         state["index_path"] = mp["index"]
-    date_str = state.get("date_str", "")
-    today = datetime.now().strftime("%Y-%m-%d")
-    year = datetime.now().strftime("%Y")
-    if len(date_str) == 4:
-        full_date = f"{year}-{date_str[:2]}-{date_str[2:]}"
-    else:
-        full_date = date_str or today
     sources_path = f"{state['raw_dir']}/{state['source_filename']}"
-    errors = state.get("wiki_errors", []) if state.get("wiki_retry", 0) > 0 else None
-    is_agent = ingest_mode() == "agent"
-    if is_agent:
-        prompt = build_agent_meeting_wiki_slots_prompt(context_text, entity_info,
-                                        state["meeting_id"], date_str,
-                                        sources_path, full_date, today, errors)
+    prompt, context_hash = _compiler_request(
+        state, source_text, entity_candidates, host_agent=ingest_mode() == "agent",
+    )
+    errors = list(state.get("wiki_errors", []) or [])
+    errors.extend(state.get("slots_errors", []) or [])
+    errors.extend(state.get("compiler_errors", []) or [])
+    if resumed_compiler:
+        if not agent_output.is_file():
+            state["_awaiting_agent_wiki_slots"] = True
+            state["agent_required"] = True
+            return False, f"agent 输出尚未写入: {agent_output.relative_to(REPO)}"
+        proposal, parse_error = parse_meeting_compiler_proposal(
+            agent_output.read_text(encoding="utf-8")
+        )
+        if proposal is None:
+            state["_awaiting_agent_wiki_slots"] = True
+            state["agent_required"] = True
+            state["agent_prompt"] = prompt + f"\n\n上次 agent 输出不符合协议：{parse_error}。请覆盖 write_to。"
+            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            return False, parse_error
+        state["meeting_compiler"] = {
+            "protocol_version": MEETING_COMPILER_PROTOCOL,
+            "status": "compiled",
+            "reason": "host_agent_output_validated",
+            "context_hash": context_hash,
+            "model_calls": 0,
+        }
     else:
-        prompt = build_meeting_wiki_prompt(context_text, entity_info,
-                                        state["meeting_id"], date_str,
-                                        sources_path, full_date, today, errors)
-    result = call_text(prompt, max_tokens=4096, retries=1, operation="ingest_wiki_write",
-                       transaction_id=state.get("transaction_id", ""),
-                       system="你是受程序约束的知识库摄入组件，基于会议纪要撰写 wiki 页面。")
-    if result.get("status") == "agent_required":
-        state["agent_required"] = True
-        state["agent_prompt"] = result.get("prompt", "")
-        return False, "需要 agent 接管"
-    if not result.get("ok"):
-        return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
-    text = result.get("text", "")
+        task = MeetingCompilerTask(
+            transaction_id=state.get("transaction_id", ""),
+            source_path=state["source"],
+            meeting_id=state["meeting_id"],
+            target_source_path=sources_path,
+            context_hash=context_hash,
+            prompt=prompt,
+            errors=tuple(errors),
+        )
+        result = MeetingCompilerAgent(task).run()
+        state["meeting_compiler"] = result.trace() | {"context_hash": context_hash}
+        if result.status == "agent_required":
+            state["_awaiting_agent_wiki_slots"] = True
+            state["agent_required"] = True
+            state["agent_prompt"] = result.prompt
+            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            return False, "需要 Meeting Compiler sub-agent 接管"
+        if result.status != "compiled" or result.proposal is None:
+            return False, f"Meeting Compiler 失败: {result.reason}"
+        proposal = result.proposal
     # META 交叉校验
-    meta = parse_meta_block(text)
+    meta = proposal.get("meta") or {}
     if meta:
         expected_year = datetime.now().strftime("%Y")
         mismatches = validate_meta(meta, {"doc_type": "meeting", "year": expected_year})
@@ -387,21 +448,42 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
                 state["log_path"] = mp["log"]
                 state["index_path"] = mp["index"]
                 state["meta_year_corrected"] = {"from": old_year, "to": llm_year}
-    wiki_content = parse_delimited(text, WIKI_DELIMITER)
-    if not wiki_content:
-        return False, "LLM 输出缺少 <<<WIKI>>> 段"
+    preprocess = proposal["preprocess"]
+    try:
+        corrected_text = apply_transcript_replacements(
+            source_text, preprocess["transcript_replacements"]
+        )
+    except ValueError as exc:
+        return False, f"Meeting Compiler PREPROCESS 无法安全应用: {exc}"
+    wiki_content = proposal["wiki_markdown"]
     # sources 回填：年份/type 纠正后 raw_dir 已变，用最终路径覆盖（与 ingest_document 一致）
     correct_source = f"{state['raw_dir']}/{state['source_filename']}"
     wiki_content = re.sub(
         r'(sources:\s*\n\s*-\s*)(?:path:\s*)?"?[^\n]+"?',
         f'\\1"{correct_source}"', wiki_content, count=1)
+    corrected_path = extract_dir / "corrected.txt"
+    corrected_path.write_text(corrected_text, encoding="utf-8")
+    resolution = dict(entity_candidates)
+    resolution.update({
+        "protocol_version": MEETING_COMPILER_PROTOCOL,
+        "compiler_context_hash": context_hash,
+        "compiler_entity_resolutions": preprocess["entity_resolutions"],
+        "compiler_transcript_replacements": preprocess["transcript_replacements"],
+    })
+    resolution_path = extract_dir / "entity-resolution.json"
+    resolution_path.write_text(
+        json.dumps(resolution, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     (extract_dir / "wiki.md").write_text(wiki_content, encoding="utf-8")
+    state["corrected_path"] = str(corrected_path.relative_to(REPO))
+    state["entity_resolution"] = str(resolution_path.relative_to(REPO))
     state["wiki_content"] = wiki_content
-    # agent 模式：合并任务已同时产出语义槽，提前存入 state 供第二阶段跳过
-    if is_agent:
-        slots_content = parse_delimited(text, SLOTS_DELIMITER)
-        if slots_content:
-            state["slots_content"] = slots_content
+    state["slots_content"] = proposal["semantic_slots"]
+    state["semantic_worker"] = "meeting-compiler-agent" if resumed_compiler else "meeting-compiler-api"
+    state["agent_required"] = False
+    state["agent_prompt"] = ""
+    state.pop("agent_write_to", None)
     return True, ""
 
 
@@ -436,90 +518,11 @@ def step_validate_wiki(state: dict) -> list[str]:
 
 # ===== 3.3b write_slots =====
 
-def build_meeting_slots_prompt(wiki_content: str, entity_info: str,
-                               errors: list[str] | None = None) -> str:
-    error_section = ""
-    if errors:
-        error_section = "\n\n[上次语义槽的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
-    return f"""基于你刚写好的 wiki 页面，为这次会议抽取语义槽。
-
-[已写好的 wiki 页面]
-<<<WIKI>>>
-{wiki_content}
-
-[已解析人物映射（参会者用这些 entity 路径）]
-{entity_info}
-{error_section}
-
-[要求]
-1. 三元组客体须为规范概念名/实体名：不含逗号、卷号页码、年份或描述性短语；核心词格式统一为「中文英文(缩写)」，如 检索增强生成retrieval-augmented generation(RAG)；无公认缩写则不写括号；无对应中文则只写英文，无对应英文则只写中文。
-2. 会议纪要主要用于学术灵感与构思，三元组提取数量和密度宜低：只提取会议明确讨论的核心议题与学术判断，不提取顺带提及的背景知识。
-3. 用 <<<SLOTS>>> 分隔符包裹输出语义槽，格式如下：
-
-参会者:
-<参会者 entity 路径，每行一个，如 cnu-wu-xi；复用上方人物映射>
-汇报者:
-<人名 entity | 汇报议题，每行一条。议题用规范学术概念名（中文英文缩写），如 cnu-ren-shengquan | 树状采样tree search sampling>
-决策:
-<决策或学术判断，每行一条。含行政决定（暂缓写文章）与学术判断（实验结论、方法选择、理论判断），如 树状采样表现略优>
-待办:
-<任务 | 负责人 entity，每行一条。任务名用规范概念名，如 补充Agent对比实验 | cnu-ren-shengquan>
-三元组:
-<主体|谓词|客体，每行一条>
-主体用"本会议"代表这次会议；人物关系直接写人名/entity 路径作主体。
-会议→议题 建议谓词: 讨论（核心议题，兜底）/涉及（顺带提及）/规划（行动项/计划）
-议题→议题 建议谓词: 涉及（弱相关）/紧密相关于（强相关，如 Agent框架 | 紧密相关于 | 树状采样）
-人物→会议 谓词: 参会
-人物→人物 谓词: 指导/师从
-只使用以上谓词；未列出的谓词不要使用。
-汇报者、决策、待办是独立 section，不要重复写进三元组。
-
-[语义槽填写示例（仅示格式，内容勿照搬）]
-参会者:
-cnu-wu-xi
-cnu-ran-shiju
-汇报者:
-cnu-ren-shengquan | 对比实验进展
-决策:
-暂缓写文章优先敲定核心实验图
-待办:
-补充Agent对比实验 | cnu-ren-shengquan
-三元组:
-本会议 | 讨论 | 知识库选型knowledge base selection
-本会议 | 规划 | 四层自动化方案
-cnu-ran-shiju | 指导 | cnu-ren-shengquan
-
-[输出格式]
-<<<SLOTS>>>
-（语义槽）"""
-
-
 def step_write_slots(state: dict) -> tuple[bool, str]:
-    """3.3b 第二阶段：续接对话，抽语义槽。"""
-    # agent 合并模式已产出语义槽 → 跳过 LLM 调用
+    """Consume slots emitted by the same Meeting Compiler invocation."""
     if state.get("slots_content"):
         return True, ""
-    wiki_content = state.get("wiki_content", "")
-    if not wiki_content:
-        return False, "无 wiki_content"
-    entity_info = _format_resolved_entities(state.get("entity_resolution", ""))
-    errors = state.get("slots_errors", []) if state.get("slots_retry", 0) > 0 else None
-    prompt = build_meeting_slots_prompt(wiki_content, entity_info, errors)
-    result = call_text(prompt, max_tokens=4096, retries=1, operation="ingest_wiki_write",
-                       transaction_id=state.get("transaction_id", ""),
-                       system="你是受程序约束的知识库摄入组件，基于 wiki 页面抽取语义槽。")
-    if result.get("status") == "agent_required":
-        state["agent_required"] = True
-        state["agent_prompt"] = result.get("prompt", "")
-        return False, "需要 agent 接管"
-    if not result.get("ok"):
-        return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
-    text = result.get("text", "")
-    slots_content = parse_delimited(text, SLOTS_DELIMITER)
-    if not slots_content:
-        return False, "LLM 输出缺少 <<<SLOTS>>> 段"
-    state["slots_content"] = slots_content
-    return True, ""
+    return False, "Meeting Compiler 未产出 <<<SLOTS>>> 段"
 
 
 # ===== 3.5 fill_semantics =====
@@ -622,13 +625,13 @@ def step_finalize_tail(state: dict) -> tuple[bool, str]:
 
 MEETING_SPEC = {
     "script_name": "ingest_meeting.py",
-    "preprocess_label": "speech_entity_resolver 实体纠错",
+    "preprocess_label": "speech_entity_resolver 人物候选准备",
+    "unified_semantic_worker": True,
     "completion_label_key": "meeting_id",
-    "repair_fail_strategy": "handoff",
     "cleanup_after": "validate_graph",
     "rollback_fn": None,
     "finalize_tail_failure": "warn",
-    "max_retries": MAX_RETRIES,
+    "recovery_limits": RECOVERY_LIMITS,
     "non_blocking_issues": NON_BLOCKING_ISSUES,
     "normalize_slots": normalize_slots,
     "steps": {
@@ -639,6 +642,7 @@ MEETING_SPEC = {
         "write_slots": step_write_slots,
         "validate_semantics": step_validate_semantics,
         "repair_slots": step_repair_slots,
+        "prepare_unified_handoff": step_prepare_unified_handoff,
         "finalize": step_finalize,
         "update_graph": step_update_graph,
         "validate_graph": step_validate_graph,
@@ -718,19 +722,20 @@ def main() -> None:
             "transaction_id": state["transaction_id"],
         }, ensure_ascii=False, indent=2))
     elif state["status"] == "agent_required":
-        print(json.dumps({
+        print(json.dumps(inbox_state.output_payload(state, {
             "status": "agent_required",
-            "message": "INGEST_BACKEND=agent，需要 agent 接管 wiki 撰写",
+            "message": "需要一个 Meeting Compiler sub-agent 完成预处理、Wiki 与语义槽",
             "prompt": state.get("agent_prompt", ""),
+            "write_to": state.get("agent_write_to", ""),
             "pipeline_plan": pipeline_plan_for(ingest_mode()),
             "transaction_id": state["transaction_id"],
-        }, ensure_ascii=False, indent=2))
+        }), ensure_ascii=False, indent=2))
     else:
-        print(json.dumps({
+        print(json.dumps(inbox_state.output_payload(state, {
             "status": state["status"],
             "errors": state.get("errors", []),
             "transaction_id": state["transaction_id"],
-        }, ensure_ascii=False, indent=2))
+        }), ensure_ascii=False, indent=2))
         log_path = ic.get_progress_log_path()
         if log_path:
             print(f"日志: {log_path}", file=sys.stderr)

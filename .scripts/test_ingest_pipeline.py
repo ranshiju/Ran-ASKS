@@ -894,6 +894,109 @@ def test_inbox_state_records_telemetry_events():
     assert len(events) == 2
     assert events[0]["to"] == "init" and events[1]["to"] == "write_wiki"
     assert events[1]["errors_count"] == 1
+    assert events[1]["recovery_attempts"] == 0
+    assert state["telemetry"]["execution_events"] == {
+        "event_version": "execution-event-v1",
+        "directory": "temp/llm-events",
+        "transaction_id": "txn",
+        "canonical_for_api_calls": True,
+    }
+    assert events[1]["failure"]["category"] == "unknown_failure"
+    assert events[1]["failure"]["retryable"] is False
+    assert len(events[1]["failure"]["fingerprints"]) == 1
+    assert inbox_state.classify_failure({
+        "status": "failed", "errors": ["HTTP Error 429: Too Many Requests"],
+    })["category"] == "api_rate_limit"
+    assert inbox_state.classify_failure({
+        "status": "agent_required", "errors": ["谓词格式不合法"],
+    })["owner"] == "specialist_agent"
+
+
+def test_inbox_state_atomic_save_and_guarded_resume():
+    import inbox_state
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        original_repo = inbox_state.REPO
+        original_replace = inbox_state.os.replace
+        inbox_state.REPO = repo
+        try:
+            state = {"status": "failed", "errors": ["graph_ingest failed"]}
+            path = inbox_state.save("txn-atomic", state)
+            persisted = path.read_text(encoding="utf-8")
+            state["errors"] = ["new failure"]
+            inbox_state.os.replace = lambda *_args: (_ for _ in ()).throw(OSError("interrupt"))
+            try:
+                inbox_state.save("txn-atomic", state)
+                raise AssertionError("atomic replace failure must propagate")
+            except OSError:
+                pass
+            assert path.read_text(encoding="utf-8") == persisted
+            inbox_state.os.replace = original_replace
+
+            try:
+                inbox_state.transition(state, "completed", reason="unsafe skip")
+                raise AssertionError("failed transaction must not skip to completed")
+            except ValueError:
+                pass
+            inbox_state.transition(state, "graph_ready", reason="graph repaired")
+            inbox_state.save("txn-atomic", state)
+            loaded = inbox_state.load("txn-atomic")
+            event = loaded["telemetry"]["events"][-1]
+            assert event["transition"]["from"] == "failed"
+            assert event["transition"]["to"] == "graph_ready"
+            assert event["transition"]["reason"] == "graph repaired"
+
+            try:
+                inbox_state.save("txn-invalid", {"status": "invented"})
+                raise AssertionError("unknown status must fail")
+            except ValueError:
+                pass
+        finally:
+            inbox_state.os.replace = original_replace
+            inbox_state.REPO = original_repo
+
+
+def test_inbox_state_runtime_summary_uses_canonical_events():
+    import inbox_state
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        states = root / "states"
+        events = root / "events"
+        states.mkdir()
+        events.mkdir()
+        (states / "txn.json").write_text(json.dumps({
+            "transaction_id": "txn", "status": "agent_required",
+            "errors": ["semantic review required"],
+            "quality_warnings": [{"issue": "demo"}],
+            "recovery": {"attempts": {"semantic_revision": 1}},
+        }), encoding="utf-8")
+        api_event = {
+            "event_version": "execution-event-v1", "event_kind": "llm_api_call",
+            "transaction_id": "txn", "operation": "ingest_wiki_write", "status": "ok",
+            "latency_sec": 1.25, "usage": {"total_tokens": 120},
+        }
+        (events / "events.jsonl").write_text(
+            json.dumps(api_event) + "\nnot-json\n", encoding="utf-8")
+        report = inbox_state.summarize_runtime(states, events)
+    assert report["transactions"] == 1
+    assert report["by_status"] == {"agent_required": 1}
+    assert report["degraded"] == 1
+    assert report["recovery_attempts"] == {"semantic_revision": 1}
+    assert report["api"]["calls"] == 1
+    assert report["api"]["total_tokens"] == 120
+    assert report["invalid_event_lines"] == 1
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        empty_states = root / "states"
+        unrelated_events = root / "events"
+        empty_states.mkdir()
+        unrelated_events.mkdir()
+        (unrelated_events / "events.jsonl").write_text(
+            json.dumps(api_event) + "\n", encoding="utf-8")
+        empty_report = inbox_state.summarize_runtime(empty_states, unrelated_events)
+    assert empty_report["transactions"] == 0
+    assert empty_report["api"]["calls"] == 0
 
 
 def test_step_update_graph_fails_on_non_json_output():
@@ -1202,6 +1305,7 @@ def test_wiki_validation_retry_budget_hands_off_without_third_full_rewrite():
         ingest_pipeline._save = original_save
     assert calls == ["write", "write"], "初次 + 1 次定向重写后必须停止"
     assert result["status"] == "agent_required"
+    assert result["recovery"]["attempts"]["wiki_revision"] == 1
     assert result["write_to"] if "write_to" in result else result["agent_write_to"].endswith("wiki.md")
     assert "缺少 ## Content" in result["agent_prompt"]
 
@@ -1244,7 +1348,42 @@ def test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff():
     assert len(calls) == 2, "初次生成后只允许一次定向重写"
     assert calls[1] == ["三元组格式错误"]
     assert result["semantic_hard_retry"] == 1
+    assert result["recovery"]["attempts"]["semantic_revision"] == 1
     assert result["status"] == "agent_required"
+
+
+def test_llm_transport_failure_is_not_retried_by_pipeline():
+    state = {
+        "transaction_id": "transport-owned-by-client",
+        "status": "write_wiki",
+        "errors": [],
+    }
+    calls = []
+    spec = {
+        "script_name": "test_driver.py",
+        "steps": {
+            "write_wiki": lambda _state: calls.append("write") or
+            (False, "LLM 调用失败: HTTP 429 exhausted"),
+        },
+        "recovery_limits": {
+            "infrastructure": 1,
+            "output_transport": 1,
+            "wiki_revision": 1,
+            "semantic_revision": 1,
+            "deterministic_repair": 1,
+            "subagent": 1,
+        },
+    }
+    original_save = ingest_pipeline._save
+    try:
+        ingest_pipeline._save = lambda _state: None
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+    assert calls == ["write"]
+    assert result["status"] == "failed"
+    assert result["recovery"]["attempts"] == {}
+    assert "llm_calls" not in result.get("telemetry", {})
 
 
 def test_resume_post_maintenance_uses_unified_inbox_tail():
@@ -1331,6 +1470,8 @@ def main():
     test_free_edge_bare_abbreviation_report_accurate()
     test_cleanup_ghost_hubs_removes_orphan()
     test_inbox_state_records_telemetry_events()
+    test_inbox_state_atomic_save_and_guarded_resume()
+    test_inbox_state_runtime_summary_uses_canonical_events()
     test_step_update_graph_fails_on_non_json_output()
     test_validate_completion_blocks_stale_errors_and_empty_graph()
     test_resolve_bare_name_normalized_match()

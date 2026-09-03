@@ -408,6 +408,8 @@ def test_low_margin_hub_route_writes_agent_handoff_without_maintenance_scan():
             assert [item["path"] for item in payload[0]["canonical_candidates"]] == [
                 "hub-a", "hub-b",
             ]
+            assert "route-apply" in payload[0]["apply_command_template"]
+            assert "academic/wiki/papers/paper" in payload[0]["apply_command_template"]
     finally:
         module.REPO = old_repo
         module.subprocess.run = old_run

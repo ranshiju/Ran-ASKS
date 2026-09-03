@@ -37,7 +37,7 @@
    - **ingest_check PASS**：wiki 页 `ERROR=0`
    - 三件任一缺失 → **不清空 inbox**，定位问题修复后重验；不得传 `--cleanup` 或删除 inbox 原始文件
    - 全部齐全 → 记录回执路径后进入步骤 6
-   - 成功后由统一收尾维护依次处理缩写、人物页和 Hub；直接 `--resume` 成功也必须走同一入口。若 inbox 仍有普通待摄入文件，入口返回 `maintenance.status=deferred`，由最后一个完成项执行一次全局维护，禁止每篇重复扫描。文件终态见 `status`/`file_status`，维护终态见 `maintenance.status`，完整回执写 `temp/inbox-maintenance/`。类型化缩写与 Hub canonical 候选由主 Agent 批量处理，不能用维护 handoff 覆盖文件成功终态。Hub membership 的 profile/Scope/prototype embedding 必须汇总去重后批量请求；路由 margin 不足写 `hub-route-review`，已有子 Hub 的超限父 Hub写 `hub-auto-redistribute` 并附 Scope readiness/blockers。120 秒维护超时只返回可重试 `deferred`。
+   - 成功后由统一收尾维护依次处理缩写、人物页和 Hub；直接 `--resume` 成功也必须走同一入口。若 inbox 仍有普通待摄入文件，入口返回 `maintenance.status=deferred`，由最后一个完成项执行一次全局维护，禁止每篇重复扫描。文件终态见 `status`/`file_status`，维护终态见 `maintenance.status`，完整回执写 `temp/inbox-maintenance/`。类型化缩写与 Hub canonical 候选由主 Agent 批量处理，不能用维护 handoff 覆盖文件成功终态。Hub membership 的 profile/Scope/prototype embedding 必须汇总去重后批量请求；路由 margin 不足写带 `route-apply` 模板的 `hub-route-review`，已有子 Hub 的超限父 Hub写带 Scope readiness/blockers 及 `define-scope`/`redistribute` 动作的 `hub-auto-redistribute`。120 秒维护超时只返回可重试 `deferred`。
 7. 清理：删除临时区 `temp/inbox-extract/`；清空 inbox 原始文件（保留 `facts-pending.md` 和 `.gitkeep`）。清理必须递归处理隐藏目录；成功/失败阶段写入 `temp/inbox-state/<transaction-id>.json`，以便恢复。
 
 **事务入口（批量/非标准场景）**：`.scripts/inbox_ingest.py plan` → 每项 `prepare` → `complete`。仅用于 `ingest_paper.py`/`ingest_document.py` 未覆盖的批量或非标准场景；常规单篇摄入走 playbook 代码驱动脚本。

@@ -20,6 +20,7 @@
   graph_metrics.py all [--apply-state]
 """
 import argparse
+from collections import defaultdict
 import json
 import sqlite3
 import sys
@@ -206,6 +207,91 @@ def check_unsplit_phrases(conn):
     return {"total_entities": len(rows), "flagged_count": len(flagged), "flagged": flagged}
 
 
+def consolidation_candidates(conn, min_sources=3, min_hub_members=5, limit=50):
+    """Return Graph accumulation signals for Agent-reviewed synthesis."""
+    nodes = {row["path"]: dict(row) for row in conn.execute(
+        "SELECT path,title,type,entity_subtype FROM nodes"
+    )}
+    adjacency = defaultdict(set)
+    edge_rows = list(conn.execute("SELECT id,subject,predicate,object FROM edges"))
+    for edge in edge_rows:
+        adjacency[edge["subject"]].add(edge["object"])
+        adjacency[edge["object"]].add(edge["subject"])
+
+    edge_by_id = {edge["id"]: edge for edge in edge_rows}
+    origin_pages_by_node = defaultdict(set)
+    for row in conn.execute("SELECT edge_id,origin_page FROM edge_origins"):
+        edge = edge_by_id.get(row["edge_id"])
+        if edge:
+            origin_pages_by_node[edge["subject"]].add(row["origin_page"])
+            origin_pages_by_node[edge["object"]].add(row["origin_page"])
+
+    synthesis_titles = {
+        str(node.get("title") or "").casefold()
+        for path, node in nodes.items()
+        if node["type"] == "page" and any(
+            marker in path for marker in ("/wiki/reviews/", "/wiki/comparisons/", "/wiki/concepts/")
+        )
+    }
+
+    def supporting_pages(path):
+        pages = {item for item in adjacency[path] if nodes.get(item, {}).get("type") == "page"}
+        for item in adjacency[path]:
+            if nodes.get(item, {}).get("entity_subtype") == "proposition":
+                pages.update(
+                    other for other in adjacency[item]
+                    if nodes.get(other, {}).get("type") == "page"
+                )
+        return pages
+
+    candidates = []
+    for path, node in nodes.items():
+        title = str(node.get("title") or path)
+        subtype = node.get("entity_subtype") or ""
+        if subtype == "keyword":
+            pages = supporting_pages(path)
+            if len(pages) >= min_sources and title.casefold() not in synthesis_titles:
+                candidates.append({
+                    "action": "PROMOTE_CONCEPT", "target": path, "title": title,
+                    "source_pages": len(pages),
+                    "basis": "reused_across_source_pages_without_synthesis_page",
+                    "sample_pages": sorted(pages)[:5],
+                })
+        elif subtype == "proposition":
+            pages = supporting_pages(path)
+            pages.update(origin_pages_by_node[path])
+            if len(pages) >= 2:
+                candidates.append({
+                    "action": "PROMOTE_PROPOSITION", "target": path, "title": title,
+                    "source_pages": len(pages),
+                    "basis": "claim_reused_by_multiple_source_pages",
+                    "sample_pages": sorted(pages)[:5],
+                })
+        elif node.get("type") == "hub":
+            pages = {
+                item for item in adjacency[path]
+                if nodes.get(item, {}).get("type") == "page" and "/wiki/hubs/" not in item
+            }
+            if len(pages) >= min_hub_members and title.casefold() not in synthesis_titles:
+                candidates.append({
+                    "action": "CREATE_REVIEW", "target": path, "title": title,
+                    "source_pages": len(pages),
+                    "basis": "hub_has_multi_page_accumulation_without_review",
+                    "sample_pages": sorted(pages)[:5],
+                })
+
+    candidates.sort(key=lambda item: (-item["source_pages"], item["action"], item["target"]))
+    total = len(candidates)
+    return {
+        "writes": False,
+        "thresholds": {"min_sources": min_sources, "min_hub_members": min_hub_members},
+        "count": total,
+        "candidates": candidates[:max(1, int(limit))],
+        "truncated": total > limit,
+        "next": "Agent reviews candidates; creation or update requires an explicit action",
+    }
+
+
 def fmt_unsplit_phrases(r):
     lines = [f"主谓宾结构未拆分检查(查包含边)({r['flagged_count']}/{r['total_entities']} 个 entity 需拆分):"]
     for f in r["flagged"][:20]:
@@ -269,12 +355,28 @@ def fmt_predicates(r):
     return "\n".join(lines)
 
 
+def fmt_consolidation(report):
+    lines = [f"巩固候选（只读）: {report['count']} 个"]
+    for item in report["candidates"]:
+        lines.append(
+            f"  [{item['action']}] {item['title']} | 来源页={item['source_pages']} | {item['basis']}"
+        )
+    if report["truncated"]:
+        lines.append("  ... 输出已截断，用 --limit 调整")
+    lines.append("提示:候选只触发 Agent 审核，不自动修改 Wiki 或 graph.db。")
+    return "\n".join(lines)
+
+
 def main():
     ap = argparse.ArgumentParser(description="图论诊断")
-    ap.add_argument("cmd", choices=["connectivity", "tight_clusters", "predicates", "unsplit_phrases", "all"])
+    ap.add_argument("cmd", choices=["connectivity", "tight_clusters", "predicates", "unsplit_phrases", "consolidation", "all"])
     ap.add_argument("--min-size", type=int, default=3, help="紧密簇最小节点数")
     ap.add_argument("--apply-state", action="store_true", help="更新紧密簇状态文件")
     ap.add_argument("--all-clusters", action="store_true", help="显示全部紧密簇(非仅新增)")
+    ap.add_argument("--min-sources", type=int, default=3, help="概念晋升所需来源页数")
+    ap.add_argument("--min-hub-members", type=int, default=5, help="Hub 触发综述候选的成员页数")
+    ap.add_argument("--limit", type=int, default=50, help="巩固候选最大返回数")
+    ap.add_argument("--json", action="store_true", help="JSON 输出（consolidation）")
     args = ap.parse_args()
 
     conn = connect()
@@ -301,6 +403,17 @@ def main():
         out.append("")
     if args.cmd in ("unsplit_phrases", "all"):
         out.append(fmt_unsplit_phrases(check_unsplit_phrases(conn)))
+    if args.cmd in ("consolidation", "all"):
+        report = consolidation_candidates(
+            conn, args.min_sources, args.min_hub_members, args.limit
+        )
+        if args.json and args.cmd == "consolidation":
+            conn.close()
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return
+        if out and out[-1]:
+            out.append("")
+        out.append(fmt_consolidation(report))
     conn.close()
     print("\n".join(out))
 

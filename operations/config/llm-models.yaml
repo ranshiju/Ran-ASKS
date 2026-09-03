@@ -1,4 +1,4 @@
-updated: '2026-09-01'
+updated: '2026-09-03'
 source: user-provided-provider-catalog
 enforced: false
 notes:
@@ -6,11 +6,35 @@ notes:
   - 命题抽取推荐 MiniMax-M3：短 JSON、fast reasoning、450 token 上限；失败后回退主模型。
   - 视觉产物 QA 推荐 GLM-4.6V：覆盖图像与页面布局理解并输出结构化 JSON；调用失败时回退同系列 GLM-4.5V。
   - GLM-5.3-Flash 当前 endpoint 于 2026-09-01 实测 reasoning_effort 接受 low/high、拒绝 medium；摄入映射 fast/standard=low、deep/xdeep=high。
+  - Sub-Agent 模型由离线策略按任务能力、稳定性、延迟和成本选择，运行中的 Agent 不得自行换模型；pending_evaluation 推荐不自动生效。
+sub_agent_policy:
+  text_model: GLM-5.3-Flash
+  status: fixed_pending_evaluation
+  excluded_families: [GPT]
+  runtime_model_selection: disabled
+  automatic_promotion: disabled
+  visual_model_policy: preserve_existing_visual_qa
+  embedding_model_policy: preserve_existing_embed_configuration
 preferred:
+  meeting_compiler: GLM-5.3-Flash
   ingest_proposition: MiniMax-M3
   visual_qa: GLM-4.6V
+  semantic_recovery_agent: GLM-5.3-Flash
 fallback:
   visual_qa: GLM-4.5V
+agent_profiles:
+  meeting_compiler_agent:
+    status: active
+    primary_role: inherit_text_sub_agent_policy
+    runtime_operation: ingest_meeting_compile
+    api_profile: INGEST_GENERATION
+    required_capabilities: [long_context, structured_text, evidence_bounded_normalization]
+  semantic_recovery_agent:
+    status: pending_evaluation
+    primary_role: inherit_text_sub_agent_policy
+    excluded_families: [GPT]
+    required_capabilities: [structured_json, multi_turn_tool_use, evidence_bounded_repair]
+    activation: inherit_primary_model_until_evaluated
 visual_capabilities:
   contracted:
     - model: GLM-4.6V

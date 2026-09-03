@@ -45,11 +45,11 @@ def _similar_topk_for_round(loop_count: int) -> int:
 # start=只许发现类(graph_search/recall/neighbors),evidence/continue=许 read_section,answer=不许再读
 _DISCOVERY = {"graph_search", "node_resolve", "semantic_search",
                "graph_neighbors", "graph_relations", "graph_hub_of",
-               "admin_recall", "wiki_recall"}
+               "admin_recall", "wiki_recall", "hybrid_recall"}
 STAGE_ACTIONS = {
     "start": _DISCOVERY,
-    "evidence": _DISCOVERY | {"read_section", "read_raw"},
-    "continue": _DISCOVERY | {"read_section", "read_raw"},
+    "evidence": _DISCOVERY | {"read_section", "wiki_context", "read_raw"},
+    "continue": _DISCOVERY | {"read_section", "wiki_context", "read_raw"},
     "answer": set(),
 }
 
@@ -69,6 +69,8 @@ _ACTION_SIGS: dict[str, list[tuple[str, str]]] = {
         ("semantic_search", actions.semantic_search),
         ("admin_recall", actions.admin_recall),
         ("wiki_recall", actions.wiki_recall),
+        ("hybrid_recall", actions.hybrid_recall),
+        ("wiki_context", actions.wiki_context),
     ]
 }
 SESSIONS_DIR = _REPO / ".scripts" / "query_sessions"
@@ -298,7 +300,7 @@ def execute_plan(session: QuerySession, plan: list[dict], is_continuation: bool 
         r = actions.execute(action, inp)
         session.add_tokens(r["tokens"])
         session.record_visit(action, inp)
-        if action == "read_section" and isinstance(inp, dict) and r["ok"]:
+        if action in {"read_section", "wiki_context"} and isinstance(inp, dict) and r["ok"]:
             collect_evidence_facts(session, inp.get("page", ""))
         if action == "read_raw" and r["ok"]:
             loc = inp.get("locator", "")
@@ -307,7 +309,7 @@ def execute_plan(session: QuerySession, plan: list[dict], is_continuation: bool 
         result_entry = {"action": action, "input": inp, "ok": r["ok"], "tokens": r["tokens"],
                         "text_preview": r["text"][:200], "error": r["error"]}
         # gap2: 预算感知降级提示(程序提示,LLM 自主决定——不强制降级,因"是否须全文"是语义判断)
-        if action == "read_section" and r["ok"] and session.budget_warned():
+        if action in {"read_section", "wiki_context"} and r["ok"] and session.budget_warned():
             sec = inp.get("section", "")
             if sec == "Content":
                 result_entry["budget_hint"] = (
@@ -463,9 +465,10 @@ def intent_to_plan(intent: dict) -> list[dict]:
     """把 LLM 的有限意图转换成合法动作；LLM 不直接编写执行动作。"""
     steps = []
     if intent.get("need_recall", True):
-        steps.append(_build_step({"action": "wiki_recall", "query": intent.get("query", ""),
+        steps.append(_build_step({"action": "hybrid_recall", "query": intent.get("query", ""),
+                                  "intent": intent.get("intent", "exploration"),
                                   "domain": intent.get("domain", ""), "topk": str(intent.get("topk", 8)),
-                                  "reason": "程序根据意图生成初始召回"}))
+                                  "reason": "程序按查询意图融合 Wiki 语义与 Graph 结构召回"}))
     if intent.get("need_graph"):
         steps.append(_build_step({"action": "graph_search", "term": intent.get("graph_term", intent.get("query", "")),
                                   "reason": "程序根据意图生成图扩展"}))
@@ -541,8 +544,8 @@ def _build_api_prompt(session: QuerySession, last_results: list, round_num: int)
     parts.append('   "citations": ["raw路径或locator", ...]}')
     parts.append("规则:")
     parts.append("- 第一轮 discover/read 必须先提交轻量检索策略 strategy；无固定策略的弱结构题应 drafted，直达题可 skipped 并写明 reason")
-    parts.append("- discover: 用 graph_search/wiki_recall 发现候选（graph_search 覆盖缩写/别名/标题三路匹配）")
-    parts.append("- read: 用 read_section/read_raw 核验候选（read_raw 的 locator 会记入已读来源）")
+    parts.append("- discover: 优先用 hybrid_recall 按 intent 融合 Wiki/Graph；明确实体可用 graph_search/node_resolve")
+    parts.append("- read: 用 wiki_context/read_section 读语义地址，再用 read_raw 核验脚注 locator")
     parts.append("- answer: 给出回答，citations 必须全部来自已读来源(raw locator)")
     parts.append("- citations 为空时标记为无引用；引用未在已读来源中时标记为未核验")
     return "\n".join(parts)

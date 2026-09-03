@@ -60,6 +60,21 @@ def test_invalid_node_type_and_entity_subtype_are_errors():
         assert len(report["errors"]) == 2
 
 
+def test_missing_keyword_description_is_aggregated_warning():
+    tmp, conn = isolated_db()
+    try:
+        insert(conn, "concept-a", "entity", "keyword")
+        insert(conn, "concept-b", "entity", "keyword")
+        conn.commit()
+        report = module.validate_graph(conn, module.DEFAULTS)
+    finally:
+        conn.close()
+        tmp.cleanup()
+    assert report["counts"]["missing_semantic_description"] == 2
+    warnings = [item for item in report["warnings"] if item["check"] == "missing_semantic_description"]
+    assert len(warnings) == 1
+
+
 def test_legacy_confidence_is_warning_but_missing_evidence_is_not_checked():
     with tempfile.TemporaryDirectory() as directory:
         conn = sqlite3.connect(Path(directory) / "graph.db")

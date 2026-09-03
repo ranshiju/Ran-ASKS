@@ -203,6 +203,27 @@ Example University, Department of Physics
     assert [item["issue"] for item in warnings] == ["bibliographic_authors_incomplete"]
 
 
+def test_repeated_title_author_block_skips_publisher_heading():
+    md = """To cite this article: Tai-Danae Bradley et al 2020 Journal 1 035008
+
+# Modeling sequences with quantum states: a look under the hood
+
+## OPEN ACCESS
+
+Tai-Danae Bradley<sup>1</sup>, E M Stoudenmire<sup>2</sup> and John Terilla<sup>3</sup>\ue9d9
+
+RECEIVED 17 October 2019
+"""
+    expected = ["Tai-Danae Bradley", "E M Stoudenmire", "John Terilla"]
+    assert module._repeated_title_authors(md) == expected
+    candidates = module.build_bibliographic_candidates({
+        "title": "Modeling sequences with quantum states: a look under the hood",
+        "authors": ["Tai-Danae Bradley ,E M Stoudenmire ,John Terilla"],
+        "year": "2020",
+    }, md)
+    assert all(author in candidates["authors"] for author in expected)
+
+
 def test_bibliographic_candidates_include_full_acl_first_page_venues():
     cases = [
         (
@@ -293,6 +314,50 @@ def test_salvage_slots_without_delimiter_accepts_misplaced_wrapper_only():
     assert module.salvage_slots_without_delimiter("普通说明文字") == ""
 
 
+def test_normalize_slots_preserves_two_column_concept_glosses():
+    source = """三元组:
+本论文 | 核心方法 | 影响泛函influence functional
+概念说明:
+影响泛函influence functional | 本文将其表示为时间方向的矩阵乘积态。
+"""
+    normalized = module.normalize_slots(source)
+    assert "概念说明:\n影响泛函influence functional | 本文将其表示为时间方向的矩阵乘积态。" in normalized
+
+
+def test_normalize_slots_keeps_legacy_and_current_section_headers():
+    source = "核心方法: 张量网络\n概念说明:\n张量网络 | 本文用于表示量子态。\n"
+    normalized = module.normalize_slots(source)
+    assert "核心方法:\n张量网络" in normalized
+    assert "概念说明:\n张量网络 | 本文用于表示量子态。" in normalized
+    assert module.LEGACY_SLOT_SECTIONS | module.CURRENT_SLOT_SECTIONS == module.KNOWN_SECTIONS
+
+
+def test_slots_prompts_assign_local_glosses_to_worker_without_locators():
+    standalone = module.build_slots_prompt("# Example")
+    combined = module.build_agent_wiki_slots_prompt(
+        Path("/tmp/paper.md"), "sources:\n  - academic/raw/example/paper.md\n"
+    )
+    for prompt in (standalone, combined):
+        assert "概念说明:" in prompt
+        assert "locator 由程序" in prompt or "程序会从 wiki section 脚注" in prompt
+
+
+def test_paper_semantic_contract_is_shared_by_api_and_agent_prompts():
+    contract = module.build_paper_semantic_contract()
+    standalone = module.build_slots_prompt("# Example")
+    combined = module.build_agent_wiki_slots_prompt(
+        Path("/tmp/paper.md"), "sources:\n  - academic/raw/example/paper.md\n"
+    )
+    assert module.PAPER_SEMANTIC_CONTRACT_VERSION in contract
+    assert contract in standalone
+    assert contract in combined
+    for prompt in (standalone, combined):
+        assert "研究基础`、`核心方法`、`对比方法`指向可复用的规范概念名" in prompt
+        assert "核心创新点`、`局限性`、`未来展望`指向论文明确陈述的完整、简洁 proposition" in prompt
+        assert "旧式“叙述节点 + 拆分边”不再生成" in prompt
+        assert "必须输出 4 组三元组" not in prompt
+
+
 def test_bibliographic_review_merges_and_rejects_german_institutions():
     bibliography = {
         "title": "Pyrochlore S=1/2 quantum spin liquid",
@@ -377,6 +442,7 @@ def _candidate_id_decision(catalog, *, title_id=None):
             "authors": {
                 "accepted_ids": [item["id"] for item in fields["authors"]],
                 "rejected_ids": [],
+                "proposed": [],
                 "status": "confirmed",
             },
             "year": {"candidate_id": only("year"), "kind": "published", "status": "confirmed"},
@@ -429,6 +495,125 @@ def test_candidate_id_catalog_compiles_without_free_form_values():
         assert "未知 candidate_id" in str(exc)
     else:
         raise AssertionError("unknown candidate IDs must be rejected")
+
+
+def test_candidate_id_v2_compiles_evidence_bound_author_proposals():
+    md_text = """# Paper
+
+## OPEN ACCESS
+
+Alice Example<sup>1</sup>, Bob Builder<sup>2</sup> and Carol Researcher<sup>3</sup>
+"""
+    candidates = {
+        "title": ["Paper"], "authors": ["Alice Example, Bob Builder, Carol Researcher"],
+        "year": ["2024"], "venue": [], "doi": [], "arxiv_id": [],
+    }
+    catalog = module.build_bibliographic_candidate_catalog(candidates, {}, md_text)
+    decision = _candidate_id_decision(catalog)
+    decision["review_status"] = "corrected"
+    decision["selections"]["authors"] = {
+        "accepted_ids": [],
+        "rejected_ids": ["author-01"],
+        "proposed": [
+            {"value": "Alice Example", "evidence": "paper.md#L5"},
+            {"value": "Bob Builder", "evidence": "paper.md#L5"},
+            {"value": "Carol Researcher", "evidence": "paper.md#L5"},
+        ],
+        "status": "corrected",
+    }
+    review = module.compile_bibliographic_decision(decision, catalog, md_text)
+    assert review["bibliographic"]["authors"]["value"] == [
+        "Alice Example", "Bob Builder", "Carol Researcher",
+    ]
+    assert module.validate_bibliographic_review(review, candidates, md_text) == []
+
+
+def test_candidate_id_v2_rejects_unverified_or_compound_author_proposals():
+    md_text = "# Paper\n\nAlice Example and Bob Builder\n"
+    candidates = {
+        "title": ["Paper"], "authors": [], "year": ["2024"],
+        "venue": [], "doi": [], "arxiv_id": [],
+    }
+    catalog = module.build_bibliographic_candidate_catalog(candidates, {}, md_text)
+    for proposal, expected in [
+        ({"value": "Made Up Person", "evidence": "paper.md#L3"}, "未在"),
+        ({"value": "Alice Example and Bob Builder", "evidence": "paper.md#L3"}, "multiple authors"),
+        ({"value": "Alice Example, Bob Builder", "evidence": "paper.md#L3"}, "multiple authors"),
+        ({"value": "Alice Example", "evidence": "paper.md#L41"}, "前 40 行"),
+    ]:
+        decision = _candidate_id_decision(catalog)
+        decision["review_status"] = "corrected"
+        decision["selections"]["authors"] = {
+            "accepted_ids": [], "rejected_ids": [], "proposed": [proposal],
+            "status": "corrected",
+        }
+        try:
+            module.compile_bibliographic_decision(decision, catalog, md_text)
+        except ValueError as exc:
+            assert expected in str(exc)
+        else:
+            raise AssertionError("invalid evidence-bound author proposal must be rejected")
+
+    decision = _candidate_id_decision(catalog)
+    decision["review_status"] = "corrected"
+    decision["selections"]["authors"] = {
+        "accepted_ids": [], "rejected_ids": [],
+        "proposed": [
+            {"value": "Bob Builder", "evidence": "paper.md#L3"},
+            {"value": "Alice Example", "evidence": "paper.md#L3"},
+        ],
+        "status": "corrected",
+    }
+    try:
+        module.compile_bibliographic_decision(decision, catalog, md_text)
+    except ValueError as exc:
+        assert "顺序" in str(exc)
+    else:
+        raise AssertionError("out-of-order author proposals must be rejected")
+
+
+def test_bibliographic_validation_rejects_compound_candidate_selected_as_one_author():
+    md_text = "# Paper\n\nAlice Example, Bob Builder, Carol Researcher\n"
+    candidates = {
+        "title": ["Paper"], "authors": ["Alice Example, Bob Builder, Carol Researcher"],
+        "year": ["2024"], "venue": [], "doi": [], "arxiv_id": [],
+    }
+    catalog = module.build_bibliographic_candidate_catalog(candidates, {}, md_text)
+    decision = _candidate_id_decision(catalog)
+    review = module.compile_bibliographic_decision(decision, catalog, md_text)
+    errors = module.validate_bibliographic_review(review, candidates, md_text)
+    assert any("不是单一人物" in error for error in errors)
+
+
+def test_bibliographic_worker_manual_required_hands_off_to_agent():
+    bibliography = {"title": "Paper", "authors": [], "year": "2024"}
+    candidates = {
+        "doc_type": "paper", "title": ["Paper"], "authors": [], "year": ["2024"],
+        "venue": [], "doi": [], "arxiv_id": [], "evidence": {},
+        "first_page_evidence": [],
+    }
+    catalog = module.build_bibliographic_candidate_catalog(candidates, bibliography, "# Paper\n")
+    decision = _candidate_id_decision(catalog)
+    decision["review_status"] = "manual_required"
+    decision["selections"]["authors"] = {
+        "accepted_ids": [], "rejected_ids": [], "proposed": [], "status": "ambiguous",
+    }
+    originals = module.REPO, module.build_bibliographic_candidates, module.call_json
+    with tempfile.TemporaryDirectory() as directory:
+        module.REPO = Path(directory)
+        module.build_bibliographic_candidates = lambda *_args: candidates
+        module.call_json = lambda *_args, **_kwargs: {
+            "ok": True, "parsed": decision, "history": [{"attempt": 1}],
+        }
+        try:
+            result = module.review_bibliographic_metadata(
+                bibliography, "# Paper\n", "txn-manual")
+        finally:
+            module.REPO, module.build_bibliographic_candidates, module.call_json = originals
+    assert result["status"] == "agent_required"
+    assert "candidate-id-v2" in result["agent_prompt"]
+    assert result["decision"]["review_status"] == "manual_required"
+    assert result["worker"]["api_called"] is True
 
 
 def test_empty_optional_catalog_is_compiled_by_program():
@@ -837,6 +1022,7 @@ SLOTS>>>
 <<<SLOTS>>>"""
     salvaged = module.salvage_slots_without_delimiter(text)
     assert salvaged.splitlines() == [
+        "三元组:",
         "本论文 | 核心方法 | 树状张量网络",
         "树状张量网络 | 应用于 | 图像分类",
     ]
@@ -1044,6 +1230,38 @@ def test_normalize_slots_normalizes_predicate_alias():
     assert "本论文 | 应用于 | 张量网络" in result.splitlines()
 
 
+def test_normalize_slots_wraps_bare_triples_and_drops_protocol_end_marker():
+    text = (
+        "本论文 | 核心方法 | 多重网格算法multigrid algorithm\n"
+        "多重网格算法multigrid algorithm | 改进 | 密度矩阵重整化群\n"
+        "<<<END>>>\n"
+    )
+    result = module.normalize_slots(text)
+    assert result.splitlines() == [
+        "三元组:",
+        "本论文 | 核心方法 | 多重网格算法multigrid algorithm",
+        "多重网格算法multigrid algorithm | 改进 | 密度矩阵重整化群",
+    ]
+
+
+def test_graph_parser_recovers_bare_triples_with_structure_diagnostics():
+    import graph_ingest
+
+    text = (
+        "本论文 | 核心方法 | 多重网格算法\n"
+        "多重网格算法 | 改进 | 密度矩阵重整化群\n"
+        "<<<END>>>\n"
+    )
+    sections, diagnostics = graph_ingest.parse_semantic_sections(text)
+    assert sections["三元组"] == [
+        "本论文 | 核心方法 | 多重网格算法",
+        "多重网格算法 | 改进 | 密度矩阵重整化群",
+    ]
+    assert diagnostics["triple_section_present"] is False
+    assert diagnostics["bare_triples_recovered"] == 2
+    assert diagnostics["semantic_triple_count"] == 2
+
+
 def test_normalize_slots_skips_unknown_inline():
     text = "arXiv: 2203.12345\n期刊:\nPRL\n"
     result = module.normalize_slots(text)
@@ -1060,6 +1278,30 @@ def test_build_wiki_prompt_includes_skeleton():
     assert "研究对象、实验设置和适用场景本身不是局限" in prompt
     assert "论文定向摘要" in prompt
     assert "关键证据包" not in prompt
+    assert "<<<META>>>" not in prompt
+
+
+def test_legacy_paper_meta_is_audit_only():
+    state = {
+        "paper_id": "example-2021-paper",
+        "raw_dir": "academic/raw/references/example-2021-paper",
+        "wiki_path": "academic/wiki/papers/example-2021-paper",
+        "bibliographic_meta": {"year": "2021", "doc_type": "paper"},
+    }
+    module.record_legacy_paper_meta(state, """<<<META>>>
+doc_date: 2022
+doc_type: document
+<<</META>>>
+<<<WIKI>>>
+# Example
+""")
+    assert state["paper_id"] == "example-2021-paper"
+    assert state["raw_dir"].endswith("example-2021-paper")
+    assert "type_mismatch" not in state
+    assert "meta_year_corrected" not in state
+    audit = state["legacy_meta_audit"]
+    assert audit["ignored"] is True
+    assert len(audit["mismatches"]) == 2
 
 
 def test_build_paper_context_keeps_normal_paper_full():
@@ -1095,15 +1337,28 @@ def test_build_slots_prompt_references_wiki():
     assert "<<<SLOTS>>>" in prompt
     assert "<<<WIKI>>>" in prompt  # 引用已写好的 wiki
     assert "优先使用以下已登记谓词" in prompt
-    assert "主要研究" in prompt
+    assert "研究方向也不写入三元组" in prompt
     assert "不得从“关联/构造/表示”自行推导“基于”" in prompt
     assert "研究对象、模型维度、实验设置和适用场景不得标为局限性" in prompt
+    assert "<<</SLOTS>>>" in prompt
+    assert "不得输出 `<<<END>>>`" in prompt
+
+
+def test_build_slots_retry_prompt_includes_previous_output_and_exact_count():
+    previous = "三元组:\n本论文 | 核心方法 | 张量网络"
+    error = "格式校验已通过，成功解析 1 条 Worker 三元组，至少需要 4 条"
+    prompt = module.build_slots_prompt("# Wiki", [error], previous)
+    assert error in prompt
+    assert "[上次语义槽输出]" in prompt
+    assert previous in prompt
+    assert prompt.index("<<<SLOTS>>>") < prompt.index("<<</SLOTS>>>")
 
 
 def test_paper_slots_retry_passes_semantic_reasoning_context():
     captured = {}
 
-    def fake_call(_prompt, **kwargs):
+    def fake_call(prompt, **kwargs):
+        captured["prompt"] = prompt
         captured.update(kwargs)
         return {"ok": True, "status": "ok", "text": (
             "<<<SLOTS>>>\n三元组:\n本论文 | 核心方法 | 张量网络\n")}
@@ -1118,6 +1373,10 @@ def test_paper_slots_retry_passes_semantic_reasoning_context():
                 "wiki_content": "# Paper\n\n## Content\n\n正文。",
                 "slots_retry": 1,
                 "slots_errors": ["谓词不合法"],
+                "_sparse_slots_best": {
+                    "count": 1,
+                    "content": "三元组:\n本论文 | 核心方法 | 旧方法",
+                },
                 "transaction_id": "reasoning-paper",
             }
             success, message = module.step_write_slots(state)
@@ -1128,6 +1387,8 @@ def test_paper_slots_retry_passes_semantic_reasoning_context():
     assert captured["reasoning_context"]["document_kind"] == "paper"
     assert captured["reasoning_context"]["failure_kind"] == "semantic"
     assert captured["reasoning_context"]["retry"] == 1
+    assert "[上次语义槽输出]" in captured["prompt"]
+    assert "本论文 | 核心方法 | 旧方法" in captured["prompt"]
 
 
 def test_predicate_candidate_validation():
@@ -1149,6 +1410,48 @@ def test_validate_before_commit_returns_semantic_errors():
         assert module.ic.validate_before_commit({}, module.step_validate_semantics, module.NON_BLOCKING_ISSUES) == ["谓词格式不合法"]
     finally:
         module.step_validate_semantics = original
+
+
+def test_semantic_coverage_count_excludes_deterministic_metadata_edges():
+    import graph_ingest
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        semantic = root / "semantic.txt"
+        semantic.write_text(
+            "三元组:\n"
+            "本论文 | 核心方法 | 张量网络\n"
+            "本论文 | 研究基础 | 量子多体系统\n",
+            encoding="utf-8",
+        )
+        page = "academic/wiki/papers/demo"
+        parsed = [
+            {"subject": page, "predicate": "核心方法", "object": "张量网络"},
+            {"subject": page, "predicate": "研究基础", "object": "量子多体系统"},
+            {"subject": "作者甲", "predicate": "第一作者", "object": page},
+            {"subject": "作者乙", "predicate": "作者", "object": page},
+            {"subject": "作者丙", "predicate": "作者", "object": page},
+            {"subject": "作者丁", "predicate": "作者", "object": page},
+            {"subject": page, "predicate": "发表于", "object": "物理评论快报"},
+        ]
+        original_repo = module.REPO
+        original_parse = graph_ingest.parse_semantic_text
+        module.REPO = root
+        graph_ingest.parse_semantic_text = lambda *_args: (
+            parsed, [], None, set(), [], [],
+        )
+        state = {
+            "semantic_path": "semantic.txt",
+            "wiki_path": page,
+        }
+        try:
+            hard_errors, _warnings = module.step_validate_semantics(state)
+        finally:
+            module.REPO = original_repo
+            graph_ingest.parse_semantic_text = original_parse
+        assert not hard_errors
+        assert state["semantic_triple_count"] == 2
+        assert state["semantic_slot_diagnostics"]["semantic_triple_count"] == 2
 
 
 def test_descriptive_object_matches_graph_rule():
@@ -1567,54 +1870,6 @@ def test_run_one_allows_graph_resume_after_context_changes():
     assert calls == ["run_commit"]
     assert "retryable" not in result
     assert "next_action" not in result
-
-
-def test_create_raw_relationship_edge_ensures_missing_raw_nodes():
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        original_repo = module.REPO
-        try:
-            module.REPO = root
-            database = root / "graph.db"
-            conn = sqlite3.connect(database)
-            conn.executescript("""
-                CREATE TABLE nodes (path TEXT PRIMARY KEY, title TEXT, type TEXT, entity_subtype TEXT,
-                    source_type TEXT, date TEXT, status TEXT, has_raw_source INTEGER);
-                CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT NOT NULL,
-                    predicate TEXT NOT NULL, object TEXT NOT NULL, confidence TEXT, source TEXT,
-                    is_sr INTEGER DEFAULT 0, FOREIGN KEY (subject) REFERENCES nodes(path),
-                    FOREIGN KEY (object) REFERENCES nodes(path));
-                CREATE TABLE edge_evidence (edge_id INTEGER NOT NULL, source TEXT NOT NULL,
-                    evidence_quote TEXT DEFAULT '', is_sr INTEGER DEFAULT 0, PRIMARY KEY (edge_id, source),
-                    FOREIGN KEY (edge_id) REFERENCES edges(id) ON DELETE CASCADE);
-            """)
-            conn.close()
-            page_dir = root / "academic/wiki/papers"
-            page_dir.mkdir(parents=True)
-            (page_dir / "new.md").write_text("---\nsources:\n  - academic/raw/new/paper.md\n---\n", encoding="utf-8")
-            (page_dir / "old.md").write_text("---\nsources:\n  - academic/raw/old/paper.md\n---\n", encoding="utf-8")
-            import graph_lib
-            original_connect = graph_lib.connect
-            original_graph_repo = graph_lib.REPO
-            graph_lib.REPO = root
-            graph_lib.connect = lambda: original_connect(database)
-            try:
-                module._create_raw_relationship_edge(
-                    {"wiki_path": "academic/wiki/papers/new"},
-                    {"type": "translation", "target_page": "academic/wiki/papers/old"},
-                )
-            finally:
-                graph_lib.connect = original_connect
-                graph_lib.REPO = original_graph_repo
-            conn = sqlite3.connect(database)
-            assert conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 2
-            assert conn.execute("SELECT subject, predicate, object, source FROM edges").fetchone() == (
-                "academic/raw/new/paper", "译自", "academic/raw/old/paper", "",
-            )
-            assert conn.execute("SELECT COUNT(*) FROM edge_evidence").fetchone()[0] == 0
-            conn.close()
-        finally:
-            module.REPO = original_repo
 
 
 def test_detect_raw_relationship_uncertain_duplicate():
@@ -2193,7 +2448,10 @@ def test_step_extract_propositions_skips_when_no_propositions():
                 ok, msg = module.step_extract_propositions(state)
                 assert ok and msg == ""
                 assert called == [], "无命题不应调 LLM"
-                assert state["proposition_details"] == {"proposition_count": 0, "llm_calls": 0}
+                assert state["proposition_details"] == {
+                    "proposition_count": 0,
+                    "execution_mode": "deterministic",
+                }
             finally:
                 module.REPO = orig_repo
     finally:
@@ -2223,7 +2481,7 @@ def test_step_extract_propositions_is_zero_llm_and_preserves_semantic():
                 assert state["proposition_status"] == "sparse: 1 propositions"
                 assert state["proposition_details"] == {
                     "proposition_count": 1,
-                    "llm_calls": 0,
+                    "execution_mode": "deterministic",
                     "concept_links": "deterministic_graph_ingest",
                 }
                 assert not state.get("quality_warnings"), "确定性未匹配不是 degraded"
@@ -2308,6 +2566,10 @@ def test_run_inbox_batch_barrier_holds_when_not_ready():
     assert sorted(calls["prepare"]) == ["a.pdf", "b.pdf"]
     assert calls["commit"] == [], "barrier must hold: no commit when a paper is not ready"
     assert '"phase": "prepare"' in out and '"status": "partial"' in out
+    payload = json.loads(out)
+    failed_item = next(item for item in payload["items"] if item["status"] == "agent_required")
+    assert failed_item["failure_disposition"]["category"] == "semantic_decision"
+    assert failed_item["failure_disposition"]["owner"] == "specialist_agent"
 
 
 def test_run_inbox_batch_commits_when_all_ready():
@@ -2504,6 +2766,8 @@ def test_sparse_slots_retry_is_bounded_and_keeps_higher_coverage():
             assert state["sparse_slots_retry"] == 1
             assert state["slots_content"] == ""
             assert state["_skip_wiki_for_slots_resume"] is True
+            assert "成功解析 2 条 Worker 三元组" in state["slots_errors"][0]
+            assert state["_sparse_slots_best"]["content"] == "first"
 
             semantic_path.write_text("worse", encoding="utf-8")
             state["slots_content"] = "worse"
@@ -2691,6 +2955,108 @@ def test_reingest_repairs_archived_bibliography_without_mutating_raw():
     ]
     assert {item["field"] for item in state["bibliographic_corrections"]} == {"title", "authors"}
     assert source_after == original_source
+
+
+def test_reingest_runs_evidence_bound_bibliographic_review():
+    """re-ingest must not bypass the candidate-id bibliography Worker gate."""
+    import re_ingest as ri
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        raw_dir = root / "academic" / "raw" / "references" / "terilla-2020-example"
+        raw_dir.mkdir(parents=True)
+        raw_md = raw_dir / "paper.md"
+        raw_md.write_text(
+            "# Modeling sequences with quantum states\n\n"
+            "Tai-Danae Bradley, E M Stoudenmire and John Terilla\n",
+            encoding="utf-8",
+        )
+        source_yaml = raw_dir / "source.yaml"
+        original_source = (
+            "bibliographic:\n"
+            "  title: Modeling sequences with quantum states\n"
+            "  authors:\n"
+            "  - Tai-Danae Bradley ,E M Stoudenmire ,John Terilla\n"
+        )
+        source_yaml.write_text(original_source, encoding="utf-8")
+        corrected = {
+            "title": "Modeling sequences with quantum states",
+            "authors": ["Tai-Danae Bradley", "E M Stoudenmire", "John Terilla"],
+            "year": "2020",
+        }
+        calls = []
+        original_repo, original_ri_repo = module.REPO, ri.REPO
+        original_temp = ri.TEMP_REINGEST
+        original_review = ri.ip.review_bibliographic_metadata
+        original_record = ri.ip._record_bibliographic_quality_warnings
+        try:
+            module.REPO = root
+            ri.REPO = root
+            ri.TEMP_REINGEST = root / "temp" / "reingest-extract"
+            state = ri.new_state_for_reingest(
+                "terilla-2020-example",
+                "academic/raw/references/terilla-2020-example/paper.md",
+            )
+            ri.ip.review_bibliographic_metadata = lambda bibliography, text, txn: (
+                calls.append((bibliography, text, txn))
+                or {
+                    "ok": True,
+                    "status": "ok",
+                    "bibliographic": corrected,
+                    "review": {"review_status": "corrected"},
+                    "decision": {"protocol_version": "candidate-id-v2"},
+                    "candidates": {},
+                    "catalog": {},
+                    "input_hash": "hash",
+                    "worker": {"api_called": True},
+                }
+            )
+            ri.ip._record_bibliographic_quality_warnings = lambda *_args: None
+            assert ri.review_reingest_bibliography(state) is True
+            source_after = source_yaml.read_text(encoding="utf-8")
+        finally:
+            module.REPO = original_repo
+            ri.REPO = original_ri_repo
+            ri.TEMP_REINGEST = original_temp
+            ri.ip.review_bibliographic_metadata = original_review
+            ri.ip._record_bibliographic_quality_warnings = original_record
+    assert len(calls) == 1
+    assert calls[0][2] == state["transaction_id"]
+    assert state["bibliographic_meta"]["authors"] == corrected["authors"]
+    assert state["bibliographic_review"]["worker"]["api_called"] is True
+    assert source_after == original_source
+
+
+def test_reingest_bibliographic_worker_escalates_without_prepare_commit():
+    import re_ingest as ri
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract_dir = root / "temp" / "reingest-extract" / "txn-review"
+        extract_dir.mkdir(parents=True)
+        (extract_dir / "paper.md").write_text("# Paper\nAlice and Bob\n", encoding="utf-8")
+        state = {
+            "transaction_id": "txn-review",
+            "status": "write_wiki",
+            "extract_dir": "temp/reingest-extract/txn-review",
+            "bibliographic_meta": {"authors": ["Alice and Bob"]},
+        }
+        original_repo = ri.REPO
+        original_review = ri.ip.review_bibliographic_metadata
+        try:
+            ri.REPO = root
+            ri.ip.review_bibliographic_metadata = lambda *_args, **_kwargs: {
+                "ok": False,
+                "status": "agent_required",
+                "agent_prompt": "review authors",
+                "input_hash": "hash",
+                "worker": {"api_called": True},
+            }
+            assert ri.review_reingest_bibliography(state) is False
+        finally:
+            ri.REPO = original_repo
+            ri.ip.review_bibliographic_metadata = original_review
+    assert state["status"] == "agent_required"
+    assert state["pre_handoff_status"] == "write_wiki"
+    assert "re_ingest.py --resume txn-review" in state["agent_prompt"]
 
 
 def test_reingest_restores_wiki_when_graph_update_fails():

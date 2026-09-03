@@ -266,6 +266,27 @@ def graph_wiki_source(path: Path | str, *terms: str) -> tuple[str, list[str]] | 
     return f"{rel}#{item.slug}", list(item.raw_citations)
 
 
+def best_raw_citation(citations, *terms: str) -> str:
+    """在已选 Wiki section 的脚注中，以文本重合选最贴近概念说明的一条。"""
+    needles = [str(term).casefold().strip() for term in terms if str(term).strip()]
+    tokens = set()
+    for needle in needles:
+        tokens.update(re.findall(r"[a-z0-9]{3,}|[\u3400-\u9fff]{2,}", needle))
+
+    def score(locator: str) -> tuple[int, int]:
+        path, fragment = raw_locator.split_locator(locator)
+        target = raw_locator.resolve_path(path)
+        if target is None or raw_locator.locator_status(fragment, target) != "present":
+            return -1, 0
+        excerpt = raw_locator.read_locator_text(target, fragment).casefold()
+        exact = sum(4 for needle in needles if needle and needle in excerpt)
+        overlap = sum(1 for token in tokens if token in excerpt)
+        return exact + overlap, -len(excerpt)
+
+    valid = [str(locator).strip() for locator in citations if str(locator).strip()]
+    return max(valid, key=score) if valid else ""
+
+
 def annotate_raw_lines(text: str, raw_path: str = "RAW") -> str:
     """Expose deterministic single-line handles to a writer without changing Raw."""
     return "\n".join(

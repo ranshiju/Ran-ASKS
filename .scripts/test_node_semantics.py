@@ -142,6 +142,23 @@ def test_embedded_english_mention_does_not_reuse_whole_concept():
         assert result["decision"] == "unmatched", (mention, result)
 
 
+def test_leading_multiword_eponym_does_not_reuse_proposition_identity():
+    conn = make_db()
+    target = "中间测量仅限计算基下完全测量"
+    add_node(conn, target, target, subtype="proposition")
+    gl.insert_aliases(conn, target, ["von Neumann"])
+    mention = "von Neumann熵量化协作协助下可获得的最大额外量子相干性"
+    result = ns.resolve_node(conn, mention, node_types=["entity"])
+    assert result["decision"] == "unmatched", result
+
+
+def test_eponym_prefixed_specific_concept_does_not_reuse_generic_remainder():
+    conn = make_db()
+    add_node(conn, "entropy", "熵")
+    result = ns.resolve_node(conn, "von Neumann 熵", node_types=["entity"])
+    assert result["decision"] == "unmatched", result
+
+
 def test_pure_english_venue_does_not_decompose_to_stopword():
     old_venue = "the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)"
     new_venue = "the 2024 Conference on Empirical Methods in Natural Language Processing"

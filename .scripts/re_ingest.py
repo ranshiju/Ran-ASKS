@@ -147,6 +147,75 @@ def new_state_for_reingest(paper_id: str, raw_md_rel: str) -> dict:
     }
 
 
+def review_reingest_bibliography(state: dict) -> bool:
+    """Run the same evidence-bound bibliography gate used by fresh ingestion."""
+    extract_dir = REPO / state["extract_dir"]
+    md_text = (extract_dir / "paper.md").read_text(encoding="utf-8")
+    result = ip.review_bibliographic_metadata(
+        state.get("bibliographic_meta"), md_text, state.get("transaction_id", ""))
+    draft_rel = str(extract_dir.relative_to(REPO) / "bibliographic-review.json")
+
+    if result.get("status") == "agent_required":
+        state["status"] = "agent_required"
+        state["agent_required"] = True
+        state["pre_handoff_status"] = "write_wiki"
+        state["agent_prompt"] = (
+            result.get("agent_prompt", "")
+            + f"\n\n请将符合 {ip.BIBLIOGRAPHIC_DECISION_PROTOCOL} schema 的书目裁决 JSON 写入 "
+            + f"`{draft_rel}`，然后运行 "
+            + f"`python3 .scripts/re_ingest.py --resume {state['transaction_id']}`。"
+        )
+        state["bibliographic_review"] = {
+            "status": "agent_required",
+            "review": result.get("review", {}),
+            "decision": result.get("decision"),
+            "candidates": result.get("candidates", {}),
+            "catalog": result.get("catalog", {}),
+            "input_hash": result.get("input_hash", ""),
+            "worker": result.get("worker", {}),
+            "draft_path": draft_rel,
+        }
+        return False
+
+    if not result.get("ok"):
+        if isinstance(result.get("review"), dict):
+            (extract_dir / "bibliographic-review.json").write_text(
+                json.dumps(result["review"], ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        state["status"] = "bibliographic_review_required"
+        state["bibliographic_review_required"] = True
+        state["bibliographic_review"] = {
+            "status": result.get("status", "bibliographic_review_required"),
+            "error": result.get("error", ""),
+            "review": result.get("review", {}),
+            "compiled_review": result.get("compiled_review", {}),
+            "candidates": result.get("candidates", {}),
+            "catalog": result.get("catalog", {}),
+            "input_hash": result.get("input_hash", ""),
+            "worker": result.get("worker", {}),
+            "draft_path": draft_rel,
+        }
+        state["retryable"] = False
+        state["next_action"] = "repair_bibliographic_review_then_resume"
+        state["errors"] = [result.get("error", "书目预审未通过，禁止 Wiki/Graph 提交")]
+        return False
+
+    state["bibliographic_meta"] = result.get("bibliographic") or {}
+    ip._record_bibliographic_quality_warnings(state, md_text)
+    state["bibliographic_review"] = {
+        "status": "ok",
+        "review": result.get("review"),
+        "decision": result.get("decision"),
+        "candidates": result.get("candidates"),
+        "catalog": result.get("catalog"),
+        "input_hash": result.get("input_hash"),
+        "worker": result.get("worker"),
+    }
+    ip.persist_bibliographic_metadata(extract_dir, state["bibliographic_meta"])
+    return True
+
+
 REINGEST_TAIL_CONFIG = {
     "doc_id_key": "paper_id",
     "get_log_path": lambda state, REPO: REPO / "academic" / "wiki" / "log.md",
@@ -249,6 +318,13 @@ def run_one(paper_id: str, raw_md_rel: str, verbose: bool) -> dict:
     try:
         progress(f"\n{'='*60}")
         progress(f"📄 re-ingest: {paper_id}")
+        progress("[3.2b] 复核归档书目（证据约束 Worker）...", flush=True, end=" ")
+        if not review_reingest_bibliography(state):
+            progress(state["status"], flush=True)
+            inbox_state.save(state["transaction_id"], state)
+            return state
+        progress("通过", flush=True)
+        inbox_state.save(state["transaction_id"], state)
         state = ip.run_prepare(state)
         if state["status"] == "propositions_done":
             state = commit_wiki_and_graph(state)
@@ -280,7 +356,7 @@ def resume_reingest(txn_id: str, verbose: bool) -> int:
     state["agent_required"] = False
     state["agent_prompt"] = ""
     state["errors"] = []
-    state["status"] = "propositions"
+    inbox_state.transition(state, "propositions", reason="resume_reingest_after_agent_fix")
     inbox_state.save(txn_id, state)
 
     set_progress_file(None)

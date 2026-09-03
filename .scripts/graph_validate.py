@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import graph_lib as gl
+import wiki_locator as wl
 
 try:
     import yaml
@@ -49,6 +50,16 @@ DEFAULTS = {
             "[可追溯]": "可追溯",
         },
     },
+    "semantic_descriptions": {
+        "required_entity_subtypes": ["keyword"],
+        "legacy_missing_severity": "warn",
+    },
+    "semantic_address": {
+        "edge_source_optional": True,
+        "wiki_locator_must_resolve_when_present": True,
+        "wiki_section_requires_raw_citation": True,
+        "legacy_invalid_severity": "warn",
+    },
 }
 
 CHECKS = {
@@ -66,6 +77,9 @@ CHECKS = {
     "managed_node_missing_origin": "error",
     "invalid_temporal_date": "error",
     "inverted_temporal_window": "error",
+    "missing_semantic_description": "warn",
+    "invalid_wiki_semantic_address": "warn",
+    "uncited_wiki_semantic_address": "warn",
 }
 
 
@@ -78,6 +92,9 @@ def _merged(config: dict) -> dict:
     merged["entity_subtypes"] = config.get("entity_subtypes", merged["entity_subtypes"])
     edge_conf = merged["edge_confidence"]
     edge_conf.update(config.get("edge_confidence") or {})
+    for key in ("semantic_descriptions", "semantic_address", "predicate_families", "traversal_profiles"):
+        if key in config:
+            merged[key] = config[key]
     return merged
 
 
@@ -117,7 +134,11 @@ def validate_graph(conn, config: dict) -> dict:
     type_counts = {key: 0 for key in CHECKS}
     sample_limit = 12
 
-    for row in conn.execute("SELECT path, type, entity_subtype FROM nodes"):
+    missing_descriptions = []
+    required_descriptions = set(
+        (config.get("semantic_descriptions") or {}).get("required_entity_subtypes", [])
+    )
+    for row in conn.execute("SELECT path, type, entity_subtype, description FROM nodes"):
         node_type = row["type"]
         subtype = row["entity_subtype"]
         if not node_type or node_type not in node_types:
@@ -129,6 +150,16 @@ def validate_graph(conn, config: dict) -> dict:
                 type_counts["unknown_entity_subtype"] += 1
                 if len(findings["errors"]) < sample_limit:
                     _add(findings, "error", "unknown_entity_subtype", f"未知 entity_subtype: {subtype}", row)
+            if subtype in required_descriptions and not str(row["description"] or "").strip():
+                missing_descriptions.append(row["path"])
+
+    if missing_descriptions:
+        type_counts["missing_semantic_description"] += len(missing_descriptions)
+        _add(
+            findings, "warn", "missing_semantic_description",
+            f"{len(missing_descriptions)} 个语义节点缺少 description（存量回填项）",
+            {"examples": missing_descriptions[:sample_limit]},
+        )
 
     for row in conn.execute("SELECT id, subject, predicate, object, confidence FROM edges"):
         predicate = (row["predicate"] or "").strip()
@@ -148,6 +179,38 @@ def validate_graph(conn, config: dict) -> dict:
                 type_counts["unknown_edge_confidence"] += 1
                 if len(findings["warnings"]) < sample_limit:
                     _add(findings, "warn", "unknown_edge_confidence", f"未知置信度: {conf!r}", row)
+
+    address_contract = config.get("semantic_address") or {}
+    if address_contract.get("wiki_locator_must_resolve_when_present", True):
+        invalid_addresses = []
+        uncited_addresses = []
+        for row in conn.execute(
+            "SELECT MIN(id) AS id,source FROM edges "
+            "WHERE source LIKE '%/wiki/%#%' GROUP BY source"
+        ):
+            source = str(row["source"] or "")
+            path_part, fragment = source.split("#", 1)
+            target = wl.resolve_wiki_path(path_part)
+            section = wl.get_wiki_section(target, fragment) if target else None
+            if section is None:
+                invalid_addresses.append({"id": row["id"], "source": source})
+            elif (address_contract.get("wiki_section_requires_raw_citation", True)
+                  and not section.raw_citations):
+                uncited_addresses.append({"id": row["id"], "source": source})
+        if invalid_addresses:
+            type_counts["invalid_wiki_semantic_address"] += len(invalid_addresses)
+            _add(
+                findings, "warn", "invalid_wiki_semantic_address",
+                f"{len(invalid_addresses)} 个 Wiki semantic address 无法解析（存量迁移项）",
+                {"examples": invalid_addresses[:sample_limit]},
+            )
+        if uncited_addresses:
+            type_counts["uncited_wiki_semantic_address"] += len(uncited_addresses)
+            _add(
+                findings, "warn", "uncited_wiki_semantic_address",
+                f"{len(uncited_addresses)} 个 Wiki semantic address 所在 section 无 Raw citation",
+                {"examples": uncited_addresses[:sample_limit]},
+            )
 
     # 孤儿边。当前建表有外键，这里是防御性检查；真实库不应出现。
     for column in ("subject", "object"):

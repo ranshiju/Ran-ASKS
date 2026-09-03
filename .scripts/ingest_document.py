@@ -27,6 +27,7 @@ import inbox_state
 import trash_util
 import ingest_common as ic
 import ingest_pipeline
+import recovery_policy as rp
 import source_locator as sl
 import wiki_locator as wl
 from llm_structured import call_text, ingest_mode
@@ -38,7 +39,14 @@ from ingest_check import (STATUS_ENUM_BY_DOMAIN, STATUS_ENUM_ALL, valid_partial_
 
 TEMP_EXTRACT = REPO / "temp" / "inbox-extract"
 NON_BLOCKING_ISSUES = ("bare_abbreviation", "descriptive_phrase")
+# Retained only for ingest_admin.py's legacy re-export; pipeline control uses RECOVERY_LIMITS.
 MAX_RETRIES = 3
+RECOVERY_LIMITS = rp.normalize_limits({
+    "wiki_revision": 1,
+    "semantic_revision": 1,
+    "deterministic_repair": 1,
+    "subagent": 1,
+})
 API_COMBINED_DOCUMENT_MAX_CHARS = 30_000
 WIKI_DELIMITER = "<<<WIKI>>>"
 SLOTS_DELIMITER = "<<<SLOTS>>>"
@@ -584,7 +592,8 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
                     context_text, state["admin_id"], state.get("date_str", ""),
                     state.get("subproject", "admin"), errors, state.get("document_type")))
             result = call_text(
-                prompt, max_tokens=8192 if combined_worker else 4096, retries=1,
+                prompt, max_tokens=8192 if combined_worker else 4096, retries=0,
+                recovery_limits=rp.LLM_DEFAULT_LIMITS,
                 operation="ingest_wiki_write",
                 reasoning_context={
                     "document_kind": "ordinary",
@@ -950,7 +959,9 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
         return True, ""
     errors = state.get("slots_errors", []) if state.get("slots_retry", 0) > 0 else None
     prompt = build_doc_slots_prompt(wiki_content, state.get("subproject", "admin"), errors)
-    result = call_text(prompt, max_tokens=4096, retries=1, operation="ingest_semantic_extract",
+    result = call_text(prompt, max_tokens=4096, retries=0,
+                       recovery_limits=rp.LLM_DEFAULT_LIMITS,
+                       operation="ingest_semantic_extract",
                        reasoning_context={
                            "document_kind": "ordinary",
                            "input_chars": len(wiki_content),
@@ -1088,9 +1099,7 @@ def step_update_graph(state: dict) -> tuple[bool, str]:
         ok, msg = ic.step_update_graph(state, REPO)
         if not ok:
             return ok, msg
-        # 2. 建 raw 关系边 + 追加 sources 到目标页
-        rel_type = state.get("relation_type", "supplementary")
-        ic.link_raw_relation(state, REPO, target, rel_type)
+        # 2. Raw 关系边已由 shared graph writer 在同一 IR/plan/commit 中写入。
         # 3. 把新 raw 追加到目标页 sources（frontmatter 解析，不依赖字段顺序）
         new_fm = gl.read_frontmatter(state["wiki_path"])
         new_sources = gl.parse_list_field(new_fm, "sources")
@@ -1116,15 +1125,10 @@ DOCUMENT_SPEC = {
     "script_name": "ingest_document.py",
     "preprocess_label": "文档提取（textutil/pandoc）",
     "completion_label_key": None,
-    "repair_fail_strategy": "retry",
     "cleanup_after": "finalize_tail",
     "rollback_fn": rollback_committed,
     "finalize_tail_failure": "hard",
-    "max_retries": MAX_RETRIES,
-    # 机械格式已由程序编译；剩余错误最多允许一次全文 API 重写。
-    "max_wiki_validation_retries": 1,
-    # 候选语义槽硬错误只允许一次基于已校验 wiki 的定向重写。
-    "max_semantic_hard_retries": 1,
+    "recovery_limits": RECOVERY_LIMITS,
     "non_blocking_issues": NON_BLOCKING_ISSUES,
     "normalize_slots": normalize_slots,
     "steps": {
@@ -1234,19 +1238,19 @@ def main() -> None:
             "transaction_id": state["transaction_id"],
         }, ensure_ascii=False, indent=2))
     elif state["status"] == "agent_required":
-        print(json.dumps({
+        print(json.dumps(inbox_state.output_payload(state, {
             "status": "agent_required",
             "message": "需要 agent 接管：读取 prompt 生成回答，写入 write_to 指定文件，然后调 --resume",
             "prompt": state.get("agent_prompt", ""),
             "write_to": state.get("agent_write_to", ""),
             "transaction_id": state["transaction_id"],
-        }, ensure_ascii=False, indent=2))
+        }), ensure_ascii=False, indent=2))
     else:
-        print(json.dumps({
+        print(json.dumps(inbox_state.output_payload(state, {
             "status": state["status"],
             "errors": state.get("errors", []),
             "transaction_id": state["transaction_id"],
-        }, ensure_ascii=False, indent=2))
+        }), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

@@ -205,9 +205,50 @@ def _decomposed_exact_candidates(
         "transformation", "method", "material", "model", "system", "theory", "algorithm",
         "hard", "complete",
     }
+    leading_latin = re.match(
+        r"^([A-Za-z][A-Za-z0-9 .:'+&/\-]*?)(?=[\u3400-\u9fff])", name,
+    )
+    if leading_latin:
+        leading_value = leading_latin.group(1).strip()
+        words = re.findall(r"[A-Za-z]+", leading_value)
+        particles = {"von", "van", "de", "del", "der", "di", "da", "la", "le"}
+        proper_name = bool(words) and all(
+            word.casefold() in particles or word[:1].isupper() for word in words
+        )
+        acronym = bool(re.fullmatch(r"[A-Z]{2,}[A-Za-z0-9\-]*", leading_value))
+        remainder = name[leading_latin.end():]
+        if proper_name and not acronym and leading_value.casefold() not in remainder.casefold():
+            return []
+
+    def is_embedded_latin_eponym(component: str) -> bool:
+        """Reject a leading proper name embedded in a Chinese proposition.
+
+        ``decompose_name_to_aliases`` deliberately exposes mixed-script name
+        components.  A component such as ``von Neumann`` in
+        ``von Neumann熵量化...`` is an eponym mention, not a bilingual name for
+        the whole proposition.  Lowercase technical translations remain valid,
+        as do all-uppercase abbreviation anchors.
+        """
+        value = component.strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9 .:'+&/\-]*", value):
+            return False
+        prefix = re.match(r"^([A-Za-z][A-Za-z0-9 .:'+&/\-]*?)(?=[\u3400-\u9fff])", name)
+        if not prefix or _normalize(prefix.group(1)) != _normalize(value):
+            return False
+        if re.fullmatch(r"[A-Z]{2,}[A-Za-z0-9\-]*", value):
+            return False
+        particles = {"von", "van", "de", "del", "der", "di", "da", "la", "le"}
+        words = re.findall(r"[A-Za-z]+", value)
+        return bool(words) and all(
+            word.casefold() in particles or word[:1].isupper()
+            for word in words
+        )
+
     def is_identity_component(component: str) -> bool:
         value = component.strip()
         if value.casefold() in generic_components:
+            return False
+        if is_embedded_latin_eponym(value):
             return False
         # A lone title-case token inside a longer Chinese phrase (for example
         # Majorana/Kitaev) is a mention, not a bilingual full-name equivalent.

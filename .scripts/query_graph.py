@@ -39,6 +39,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import graph_lib as gl
+
 GRAPH_DB = Path(__file__).resolve().parent.parent / "cross-domain" / "graph.db"
 
 # confidence 排序权重(确定性,不存边属性):可追溯 > 推断 > 存疑
@@ -51,25 +53,38 @@ def connect(db_path):
     if not Path(db_path).exists():
         print(f"错误: 图数据库不存在 {db_path}。先运行 graph_build.py --build --apply", file=sys.stderr)
         sys.exit(1)
-    import graph_lib as gl
     return gl.connect(str(db_path))
 
 
 def node_info(conn, path):
-    """节点详情。aliases 从独立 aliases 表读(主数据化 v4)。"""
+    """节点详情，含可下钻 Raw 的逐来源概念说明。"""
     row = conn.execute("SELECT * FROM nodes WHERE path=?", (path,)).fetchone()
     if not row:
         return None
     aliases = [r["alias"] for r in conn.execute(
         "SELECT alias FROM aliases WHERE node_path=?", (path,))]
+    glosses = [dict(r) for r in conn.execute(
+        "SELECT origin_page,source,description,is_primary FROM node_glosses "
+        "WHERE node_path=? ORDER BY is_primary DESC,recorded_at,origin_page,source",
+        (path,),
+    )]
+    description_reviews = [dict(r) for r in conn.execute(
+        "SELECT origin_page,source,status,reason,proposed_description,recorded_at "
+        "FROM node_description_reviews WHERE node_path=? ORDER BY id",
+        (path,),
+    )]
     return {
         "path": row["path"],
         "title": row["title"],
         "type": row["type"],
+        "entity_subtype": row["entity_subtype"],
         "source_type": row["source_type"],
         "date": row["date"],
         "status": row["status"],
         "aliases": aliases,
+        "description": row["description"] or "",
+        "glosses": glosses,
+        "description_reviews": description_reviews,
         "has_raw_source": bool(row["has_raw_source"]),
     }
 
@@ -80,11 +95,30 @@ def node_info(conn, path):
 SIMILAR_SCORE_MARGIN = 0.03
 
 
-def edge_record(row):
+def edge_record(row, family=""):
     """Expose the legacy ``source`` column as an optional edge locator."""
     edge = dict(row)
     edge["locator"] = str(edge.get("source") or "")
+    if family:
+        edge["family"] = family
     return edge
+
+
+def _node_type(conn, path, cache):
+    if path not in cache:
+        row = conn.execute("SELECT type FROM nodes WHERE path=?", (path,)).fetchone()
+        cache[path] = row[0] if row else ""
+    return cache[path]
+
+
+def _edge_record_with_family(conn, row, contract, type_cache):
+    family = gl.predicate_family(
+        row["predicate"],
+        _node_type(conn, row["subject"], type_cache),
+        _node_type(conn, row["object"], type_cache),
+        contract,
+    )
+    return edge_record(row, family), family
 
 
 def _filter_similar_edges(similar_rows, max_cap=5):
@@ -111,7 +145,8 @@ def _filter_similar_edges(similar_rows, max_cap=5):
     return kept if kept else similar_rows[:1]
 
 
-def neighbors_bfs(conn, start, depth=2, top_k=None, include_hub=False, similar_topk=5):
+def neighbors_bfs(conn, start, depth=2, top_k=None, include_hub=False, similar_topk=5,
+                  profile="", families=None):
     """关联召回 BFS。返回 (节点集, 边集)。
     BFS 沿知识边正反向遍历；Hub 节点默认按 type 过滤。
     ADR-003: 相似边优先级最低(知识边先扩散);每节点相似边由 _filter_similar_edges
@@ -122,6 +157,9 @@ def neighbors_bfs(conn, start, depth=2, top_k=None, include_hub=False, similar_t
     visited = {start}
     frontier = {start}
     edges = []
+    contract = gl.load_graph_contract()
+    allowed_families = gl.traversal_families(profile, families, contract)
+    type_cache = {}
     for d in range(depth):
         next_frontier = set()
         for node in frontier:
@@ -131,19 +169,20 @@ def neighbors_bfs(conn, start, depth=2, top_k=None, include_hub=False, similar_t
             for r in conn.execute(
                 "SELECT * FROM edges WHERE subject=? OR object=?", (node, node)
             ):
+                record, family = _edge_record_with_family(conn, r, contract, type_cache)
+                if allowed_families and family not in allowed_families:
+                    continue
                 if r["predicate"] == "相似":
-                    similar_rows.append(edge_record(r))
+                    similar_rows.append(record)
                 else:
-                    knowledge_rows.append(edge_record(r))
+                    knowledge_rows.append(record)
             # ADR-003: 相似边动态截断(按 score 分布算阈值,非固定 K)
             similar_rows = _filter_similar_edges(similar_rows, similar_topk)
             for r in knowledge_rows + similar_rows:
                 if not include_hub:
                     other = r["object"] if r["subject"] == node else r["subject"]
-                    other_type = conn.execute(
-                        "SELECT type FROM nodes WHERE path=?", (other,)
-                    ).fetchone()
-                    if other_type and other_type[0] == "hub":
+                    other_type = _node_type(conn, other, type_cache)
+                    if other_type == "hub":
                         continue
                 edges.append(r)
                 other = r["object"] if r["subject"] == node else r["subject"]
@@ -172,10 +211,11 @@ def neighbors_bfs(conn, start, depth=2, top_k=None, include_hub=False, similar_t
         ni = node_info(conn, n)
         if ni:
             nodes.append(ni)
-    return {"start": start, "depth": depth, "nodes": nodes, "edges": unique_edges}
+    return {"start": start, "depth": depth, "profile": profile or None,
+            "families": sorted(allowed_families), "nodes": nodes, "edges": unique_edges}
 
 
-def relations(conn, node, predicate=None, top_k=None):
+def relations(conn, node, predicate=None, top_k=None, profile="", families=None):
     """某节点的所有关系边(可按谓词过滤)。"""
     if predicate:
         rows = conn.execute(
@@ -189,11 +229,20 @@ def relations(conn, node, predicate=None, top_k=None):
             "ORDER BY confidence",
             (node, node)
         ).fetchall()
-    edges = [edge_record(r) for r in rows]
+    contract = gl.load_graph_contract()
+    allowed_families = gl.traversal_families(profile, families, contract)
+    type_cache = {}
+    edges = []
+    for row in rows:
+        record, family = _edge_record_with_family(conn, row, contract, type_cache)
+        if allowed_families and family not in allowed_families:
+            continue
+        edges.append(record)
     edges.sort(key=lambda e: CONF_ORDER.get(e["confidence"], 3))
     if top_k:
         edges = edges[:top_k]
-    return {"node": node, "predicate_filter": predicate, "edges": edges}
+    return {"node": node, "predicate_filter": predicate, "profile": profile or None,
+            "families": sorted(allowed_families), "edges": edges}
 
 
 def temporal_at(conn, at_date, subject=None, obj=None, predicate=None, top_k=None):
@@ -334,6 +383,18 @@ def fmt_text(result, cmd):
                  f"  status: {n['status']} | source_type: {n['source_type']} | date: {n['date']}",
                  f"  has_raw_source: {n['has_raw_source']}"]
         if n.get("aliases"): lines.append(f"  aliases: {', '.join(n['aliases'])}")
+        if n.get("description"): lines.append(f"  description: {n['description']}")
+        for gloss in n.get("glosses", []):
+            primary = " [primary]" if gloss.get("is_primary") else ""
+            lines.append(
+                f"  gloss{primary}: {gloss['description']} "
+                f"(来源: {gloss['source']}; page: {gloss['origin_page']})"
+            )
+        for review in n.get("description_reviews", []):
+            lines.append(
+                f"  description_review: {review['status']} | {review['reason']} "
+                f"(来源: {review['source']}; page: {review['origin_page']})"
+            )
         return "\n".join(lines)
     if cmd == "neighbors":
         lines = [f"关联召回(BFS depth={result['depth']}) 起点: {result['start']}",
@@ -393,6 +454,10 @@ def main():
     ap.add_argument("--similar-topk", type=int, default=5,
                     help="每节点相似边上限(动态K;0=排除,-1=全部,默认5)")
     ap.add_argument("--include-hub", action="store_true")
+    ap.add_argument("--profile", default="", choices=["", "fact", "relation", "explanation", "exploration", "lineage"],
+                    help="按查询意图选择谓词族 traversal profile")
+    ap.add_argument("--families", default="",
+                    help="逗号分隔谓词族，优先于 --profile")
     ap.add_argument("--granularity", default=None,
                    choices=["keyword", "proposition"],
                    help="按颗粒度过滤(search 命令专用):keyword=导航聚合,proposition=精确推理")
@@ -410,9 +475,11 @@ def main():
         if result is None:
             result = {"error": f"节点不存在: {args.args[0]}"}
     elif args.cmd == "neighbors":
-        result = neighbors_bfs(conn, args.args[0], args.depth, args.top_k, args.include_hub, args.similar_topk)
+        result = neighbors_bfs(conn, args.args[0], args.depth, args.top_k, args.include_hub,
+                               args.similar_topk, args.profile, args.families)
     elif args.cmd == "relations":
-        result = relations(conn, args.args[0], args.predicate, args.top_k)
+        result = relations(conn, args.args[0], args.predicate, args.top_k,
+                           args.profile, args.families)
     elif args.cmd == "hub_of":
         result = hub_of(conn, args.args[0])
     elif args.cmd == "search":

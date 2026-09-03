@@ -14,8 +14,9 @@ from dsh.harness import PreToolDecision, ToolExecution
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
-_TXN_RE = re.compile(r"^\d{8}-\d{6}-\d+-[A-Za-z0-9_-]+$")
+_TXN_RE = re.compile(r"^\d{8}-\d{6}-(?:\d+-)?[A-Za-z0-9_-]+$")
 _ALLOWED_FILE_TOOLS = {"ingest_inbox_run_file", "ingest_paper_pdf", "ingest_meeting_txt", "ingest_document_file"}
+_RESUME_TOOLS = {"ingest_paper_resume", "ingest_meeting_resume"}
 _ACADEMIC_DOCUMENT_TYPES = {"editorial", "academic-reference"}
 
 
@@ -66,7 +67,7 @@ class IngestGuard:
                 return PreToolDecision(kind="deny", reason=f"raw 必须位于 academic/raw/: {raw}")
             return None
 
-        if exec_ctx.name == "ingest_paper_resume":
+        if exec_ctx.name in _RESUME_TOOLS:
             txn = (args.get("txn") or "").strip()
             if not _TXN_RE.match(txn):
                 return PreToolDecision(kind="deny", reason=f"非法事务 ID: {txn}")

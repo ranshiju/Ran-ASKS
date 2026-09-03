@@ -2,7 +2,7 @@
 # 本文件只定义可机械验证的结构/枚举，不替代页面 SCHEMA.md。
 # 默认值已在 .scripts/graph_validate.py DEFAULTS 中重复一份；修改本文件后应同步校准测试。
 
-version: 3
+version: 4
 
 node_identity:
   id_field: path
@@ -10,6 +10,20 @@ node_identity:
   description_optional: true
   aliases_many_to_many: true
   semantic_search_implies_identity: false
+
+# 新摄入由 ingest 端强制提供；存量缺失由 graph_validate 聚合报告，避免
+# 一次升级把历史库整体判死。description 是语义召回缓存，不是事实证据。
+semantic_descriptions:
+  required_entity_subtypes:
+    - keyword
+  legacy_missing_severity: warn
+
+semantic_address:
+  scheme: wiki-section-v1
+  edge_source_optional: true
+  wiki_locator_must_resolve_when_present: true
+  wiki_section_requires_raw_citation: true
+  legacy_invalid_severity: warn
 
 node_types:
   - page
@@ -34,6 +48,61 @@ edge_confidence:
     - 存疑
   legacy_aliases:
     "[可追溯]": 可追溯
+
+# predicate family 是查询时派生的 traversal plane，不重复写入 edges。
+# Hub 端点优先归 aggregation；未列谓词默认归 semantic。
+predicate_families:
+  evidence:
+    - 来源
+    - 事实支撑
+  identity:
+    - 别名
+    - 同一
+    - 缩写
+  bibliography:
+    - 作者
+    - 第一作者
+    - 通讯作者
+    - 发表于
+    - 引用
+  lifecycle:
+    - 取代
+    - 替代
+    - 修订
+    - 废止
+    - 版本
+  structural:
+    - 包含
+    - 相似
+  aggregation:
+    - 聚类于
+    - 主要研究
+    - 紧密相关于
+    - 属于
+  default: semantic
+
+traversal_profiles:
+  fact:
+    - semantic
+    - evidence
+  relation:
+    - semantic
+    - identity
+    - structural
+  explanation:
+    - semantic
+    - structural
+    - evidence
+  exploration:
+    - semantic
+    - identity
+    - structural
+    - aggregation
+    - bibliography
+  lineage:
+    - bibliography
+    - lifecycle
+    - evidence
 
 # Edge locator is optional. Raw traceability lives in Wiki footnotes and the
 # direct Wiki→来源→Raw document-package edge, not in mandatory edge_evidence.

@@ -93,3 +93,10 @@ proposition 保留（不同颗粒度知识有价值），但拆分改程序化�
 - 阈值标定依赖 alias 清洗质量（噪声 alias 会污染分布）
 - GLM-Embedding-3 对人名跨语言对齐弱（标定分类型看，人名走 is_person_reference 独立路径）
 - 拆分→包含迁移改 graph_metrics 的未拆分检查（改为查包含边）
+
+## 2026-09-03 修订：来源局部说明与保留式 abstention
+
+- 论文 semantic Worker 为 keyword 输出一句文档局部说明，但不生成 locator；程序从已校验 Wiki section 脚注机械选择 Raw locator。
+- `node_glosses` 保存逐来源的 description + Raw locator；`nodes.description` 是可重建的主导航说明。首条合格 gloss 可初始化空描述，后续来源不得盲目覆盖非空主描述。
+- GraphDelta 身份解析优先使用当前文档局部说明作为 context。精确名称多候选仍 soft abstain 并跳过边；没有精确名称碰撞、仅 semantic identity gate 未过时，保留本地 keyword、原始边与 gloss。
+- 此修订不降低 label/semantic/combined threshold，也不授权 embedding 单独触发 merge。

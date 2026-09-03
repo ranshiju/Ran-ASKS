@@ -20,6 +20,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from llm_structured import call_json
+import recovery_policy as rp
 
 
 # ===== META 块解析与校验（LLM 读全文时的元信息交叉校验）=====
@@ -320,6 +321,253 @@ def build_semantic_patch_catalog(warnings: list[dict]) -> dict:
             "is_triple": bool(warning.get("is_triple", "|" in str(warning.get("line") or ""))),
         })
     return {"protocol_version": SEMANTIC_PATCH_PROTOCOL, "issues": issues}
+
+
+def _semantic_issue_fingerprint(issue: dict) -> str:
+    payload = {key: issue.get(key) for key in (
+        "issue_code", "section", "line", "field", "observed", "expected",
+    )}
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()[:20]
+
+
+def _locate_hard_error_line(error: str, semantic_text: str) -> tuple[str, str, str]:
+    """Return (line, field, observed) for safely targetable hard errors."""
+    match = re.search(
+        r"谓词格式不合法:\s*(.*?)\s*\((?:主体=(.*?),\s*)?客体=(.*?)\)$",
+        error,
+    )
+    if match:
+        predicate, subject, obj = (part.strip() if part else "" for part in match.groups())
+        candidates = []
+        for line in semantic_text.splitlines():
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) != 3:
+                continue
+            if parts[1] == predicate and parts[2] == obj and (not subject or parts[0] in {subject, "本文", "本研究", "本论文"}):
+                candidates.append(line.strip())
+        if len(candidates) == 1:
+            return candidates[0], "predicate", predicate
+    malformed = re.search(r"section 含无法解析的行:\s*(.+)$", error)
+    if malformed:
+        candidate = malformed.group(1).split("；", 1)[0].strip()
+        matches = [line.strip() for line in semantic_text.splitlines() if line.strip() == candidate]
+        if len(matches) == 1:
+            return matches[0], "line", candidate
+    return "", "", ""
+
+
+def build_structured_semantic_issues(hard_errors: list, warnings: list[dict],
+                                     semantic_text: str) -> list[dict]:
+    """Normalize legacy validator strings and warning dicts into actionable issues."""
+    issues = []
+    for error in hard_errors:
+        message = str(error)
+        line, field, observed = _locate_hard_error_line(message, semantic_text)
+        issue_code = (
+            "malformed_predicate" if message.startswith("谓词格式不合法:")
+            else "semantic_parse_error" if "解析失败" in message
+            else "semantic_structure_error"
+        )
+        issue = {
+            "id": f"issue-{len(issues) + 1:02d}",
+            "issue_code": issue_code,
+            "section": "三元组",
+            "line": line,
+            "field": field,
+            "observed": observed or message,
+            "expected": "可由语义槽 parser 和 validator 接受的单行结构",
+            "reason": message,
+            "suggested_actions": ["replace"] if line else ["abstain"],
+            "retryable": bool(line),
+            "is_triple": bool(line and line.count("|") == 2),
+        }
+        issue["fingerprint"] = _semantic_issue_fingerprint(issue)
+        issues.append(issue)
+    for warning in warnings:
+        line = str(warning.get("line") or "")
+        issue = {
+            "id": f"issue-{len(issues) + 1:02d}",
+            "issue_code": str(warning.get("issue") or "semantic_warning"),
+            "section": str(warning.get("section") or ""),
+            "line": line,
+            "field": str(warning.get("field") or "object"),
+            "observed": line,
+            "expected": str(warning.get("reason") or "规范语义槽值"),
+            "reason": str(warning.get("reason") or ""),
+            "suggested_actions": ["replace"] if line else ["abstain"],
+            "retryable": bool(line),
+            "is_triple": bool(warning.get("is_triple", "|" in line)),
+        }
+        issue["fingerprint"] = _semantic_issue_fingerprint(issue)
+        issues.append(issue)
+    return issues
+
+
+def _read_staged_agent_context(state: dict, repo: Path) -> tuple[str, str]:
+    wiki_text = str(state.get("wiki_content") or "")
+    extract_dir = (repo / str(state.get("extract_dir") or "")).resolve()
+    allowed_extract_root = (repo / "temp" / "inbox-extract").resolve()
+    try:
+        extract_dir.relative_to(allowed_extract_root)
+    except ValueError:
+        return wiki_text, ""
+    if not wiki_text:
+        staged_wiki = extract_dir / "wiki.md"
+        if staged_wiki.is_file():
+            wiki_text = staged_wiki.read_text(encoding="utf-8")
+    source_text = ""
+    for relative in ("paper.md", "doc.md", "extern/paper.md"):
+        candidate = extract_dir / relative
+        if candidate.is_file():
+            source_text = candidate.read_text(encoding="utf-8")
+            break
+    return wiki_text, source_text
+
+
+def _split_triple(line: str) -> list[str] | None:
+    parts = [part.strip() for part in line.split("|")]
+    return parts if len(parts) == 3 else None
+
+
+def apply_semantic_recovery_proposal(semantic_text: str, proposal: dict,
+                                     issues: list[dict]) -> str | None:
+    """Compile a typed proposal without allowing broad text replacement."""
+    by_id = {issue["id"]: issue for issue in issues}
+    patches = proposal.get("patches") or []
+    if set(by_id) != {patch.get("issue_id") for patch in patches}:
+        return None
+    lines = semantic_text.splitlines()
+    for patch in patches:
+        if patch.get("action") != "replace" or len(patch.get("replacement_lines") or []) != 1:
+            return None
+        issue = by_id[patch["issue_id"]]
+        old_line = str(issue.get("line") or "").strip()
+        replacement = patch["replacement_lines"][0].strip()
+        if not old_line:
+            return None
+        old_triple = _split_triple(old_line)
+        new_triple = _split_triple(replacement)
+        field = str(issue.get("field") or "object")
+        candidates = []
+        for index, current in enumerate(lines):
+            current_triple = _split_triple(current.strip())
+            if old_triple and current_triple:
+                if current_triple == old_triple:
+                    candidates.append(index)
+                    continue
+                field_index = {"subject": 0, "predicate": 1, "object": 2}.get(field)
+                if field_index is not None and current_triple[field_index] == old_triple[field_index]:
+                    other = [i for i in range(3) if i != field_index and i != 0]
+                    if all(current_triple[i] == old_triple[i] for i in other):
+                        candidates.append(index)
+            elif current.strip() == old_line:
+                candidates.append(index)
+        if len(candidates) != 1:
+            return None
+        target = candidates[0]
+        current_triple = _split_triple(lines[target].strip())
+        if current_triple and new_triple and field in {"subject", "predicate", "object"}:
+            field_index = {"subject": 0, "predicate": 1, "object": 2}[field]
+            current_triple[field_index] = new_triple[field_index]
+            indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
+            lines[target] = indent + " | ".join(current_triple)
+        else:
+            indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
+            lines[target] = indent + replacement
+    return "\n".join(lines) + ("\n" if semantic_text.endswith("\n") else "")
+
+
+def try_semantic_recovery(state: dict, repo: Path, hard_errors: list,
+                          warnings: list[dict], validate_fn,
+                          non_blocking_issues: tuple[str, ...] = ()) -> tuple[bool, str]:
+    """Run the bounded specialist and accept only a full validator pass."""
+    relative_path = str(state.get("semantic_path") or "")
+    if not relative_path:
+        return False, "semantic recovery 缺少 staged semantic path"
+    semantic_path = repo / relative_path
+    resolved_semantic = semantic_path.resolve()
+    allowed_roots = [
+        (repo / "temp" / "inbox-state").resolve(),
+        (repo / "temp" / "inbox-extract").resolve(),
+    ]
+    if not any(
+            resolved_semantic == root or root in resolved_semantic.parents
+            for root in allowed_roots):
+        return False, "semantic recovery 仅允许 staged temp artifact"
+    semantic_path = resolved_semantic
+    if not semantic_path.is_file():
+        return False, "semantic recovery staged semantic 不存在"
+    original = semantic_path.read_text(encoding="utf-8")
+    blocking = [warning for warning in warnings
+                if is_blocking_warning(warning, non_blocking_issues)]
+    issues = build_structured_semantic_issues(hard_errors, blocking, original)
+    state["semantic_issues"] = issues
+    if not issues or any(not issue.get("retryable") for issue in issues):
+        return False, "semantic issues 缺少唯一可修 locator"
+
+    wiki_text, source_text = _read_staged_agent_context(state, repo)
+    try:
+        repo_root = Path(__file__).resolve().parent.parent
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        from dsh.semantic_recovery_agent import SemanticRecoveryAgent, make_task_envelope
+        envelope = make_task_envelope(state, issues, original, wiki_text, source_text)
+        previous = state.get("semantic_recovery_agent") or {}
+        if previous.get("context_hash") == envelope.context_hash:
+            return False, "相同 semantic recovery context 已尝试，禁止重复调用"
+        if not rp.consume(
+                state, "subagent", detail=f"semantic issues={len(issues)}"):
+            return False, "semantic recovery subagent budget exhausted"
+        result = SemanticRecoveryAgent(
+            envelope, original, wiki_text, source_text,
+        ).run()
+    except Exception as exc:
+        state["semantic_recovery_agent"] = {
+            "status": "escalated", "reason": f"runtime_error:{type(exc).__name__}",
+        }
+        return False, "semantic recovery runtime 失败"
+
+    trace = result.trace()
+    trace.update({
+        "protocol_version": SEMANTIC_PATCH_PROTOCOL,
+        "context_hash": envelope.context_hash,
+        "initial_issue_count": len(issues),
+        "issue_fingerprints": [issue["fingerprint"] for issue in issues],
+    })
+    state["semantic_recovery_agent"] = trace
+    if result.status != "resolved" or not result.proposal:
+        return False, f"semantic recovery {result.status}: {result.reason}"
+    candidate = apply_semantic_recovery_proposal(original, result.proposal, issues)
+    if candidate is None:
+        trace["status"] = "rejected"
+        trace["reason"] = "proposal_not_safely_applicable"
+        return False, "semantic recovery proposal 无法安全应用"
+
+    semantic_path.write_text(candidate, encoding="utf-8")
+    state["slots_content"] = candidate
+    try:
+        residual_hard, residual_warnings = validate_fn(state)
+        residual_blocking = [warning for warning in residual_warnings
+                             if is_blocking_warning(warning, non_blocking_issues)]
+    except Exception:
+        semantic_path.write_text(original, encoding="utf-8")
+        state["slots_content"] = original
+        trace["status"] = "rejected"
+        trace["reason"] = "validator_exception"
+        return False, "semantic recovery 复验异常"
+    trace["final_issue_count"] = len(residual_hard) + len(residual_blocking)
+    trace["issue_delta"] = len(issues) - trace["final_issue_count"]
+    if residual_hard or residual_blocking:
+        semantic_path.write_text(original, encoding="utf-8")
+        state["slots_content"] = original
+        trace["status"] = "rejected"
+        trace["reason"] = "validator_rejected"
+        return False, "semantic recovery 复验未通过"
+    trace["status"] = "accepted"
+    trace["reason"] = "validator_passed"
+    return True, "semantic recovery validator passed"
 
 
 def _semantic_patch_input_hash(catalog: dict, semantic_text: str) -> str:
@@ -623,8 +871,6 @@ def repair_slots(
             system="你是语义槽局部修补 Worker，只按 issue ID 输出 JSON。",
         )
         worker["api_called"] = bool(result.get("history"))
-        if worker["api_called"]:
-            record_llm_call(state, "repair_slots")
         if result.get("status") == "agent_required":
             state["agent_required"] = True
             state["agent_prompt"] = (
@@ -645,17 +891,29 @@ def repair_slots(
     try:
         repaired_text = _compile_semantic_patch(decision, catalog)
     except ValueError as exc:
+        recovered, recovery_msg = try_semantic_recovery(
+            state, REPO, [], blocking, validate_fn, non_blocking_issues,
+        )
+        if recovered:
+            return True, recovery_msg
         state["agent_required"] = True
         state["agent_prompt"] = (
-            prompt + f"\n\n决策无法编译：{exc}。请直接修正 `{state['semantic_path']}` 后 resume。"
+            prompt + f"\n\n决策无法编译：{exc}。{recovery_msg}。"
+            + f"请直接修正 `{state['semantic_path']}` 后 resume。"
         )
         return False, str(exc)
     apply_patch_fn = patch_fn or patch_semantic_lines
     new_semantic = apply_patch_fn(semantic_text, repaired_text, blocking)
     if new_semantic is None:
+        recovered, recovery_msg = try_semantic_recovery(
+            state, REPO, [], blocking, validate_fn, non_blocking_issues,
+        )
+        if recovered:
+            return True, recovery_msg
         state["agent_required"] = True
         state["agent_prompt"] = (
-            prompt + f"\n\n局部 patch 无法安全应用。请直接修正 `{state['semantic_path']}` 后 resume。"
+            prompt + f"\n\n局部 patch 无法安全应用。{recovery_msg}。"
+            + f"请直接修正 `{state['semantic_path']}` 后 resume。"
         )
         return False, "semantic patch 无法安全应用"
     semantic_path.write_text(new_semantic, encoding="utf-8")
@@ -666,10 +924,16 @@ def repair_slots(
         if is_blocking_warning(warning, non_blocking_issues)
     ]
     if hard_errors or blocking:
+        recovered, recovery_msg = try_semantic_recovery(
+            state, REPO, hard_errors, blocking, validate_fn, non_blocking_issues,
+        )
+        if recovered:
+            return True, recovery_msg
         state["agent_required"] = True
         state["agent_prompt"] = (
             f"semantic-patch-v1 复验仍有 {len(hard_errors)} 个硬错误、"
-            f"{len(blocking)} 个阻断 warning。请修正 `{state['semantic_path']}` 后 resume。"
+            f"{len(blocking)} 个阻断 warning；{recovery_msg}。"
+            + f"请修正 `{state['semantic_path']}` 后 resume。"
         )
         return False, "semantic patch 复验未通过"
     return True, ""
@@ -800,17 +1064,8 @@ def run_tracked(command: list[str], REPO: Path, state: dict | None = None,
 
 def _ensure_telemetry(state: dict) -> dict:
     telemetry = state.setdefault("telemetry", {})
-    telemetry.setdefault("llm_calls", {})
     telemetry.setdefault("subprocesses", {})
     return telemetry
-
-
-def record_llm_call(state: dict, stage: str) -> None:
-    """记录 LLM 调用次数（按 stage 累计），供复盘与成本对账。"""
-    telemetry = _ensure_telemetry(state)
-    calls = telemetry["llm_calls"]
-    calls[stage] = calls.get(stage, 0) + 1
-    telemetry["llm_calls_total"] = sum(calls.values())
 
 
 def record_subprocess(state: dict, label: str, command: list[str],
@@ -932,9 +1187,36 @@ def step_fill_semantics(state: dict, REPO: Path, normalize_fn) -> tuple[bool, st
 
 
 def step_update_graph(state: dict, REPO: Path, clean: bool = False) -> tuple[bool, str]:
-    """调 graph_ingest.py ingest --semantic 写图边。clean=True 时先清旧边（re-ingest）。"""
+    """Compile every document type through Knowledge IR, then invoke the sole graph writer."""
+    transaction_id = str(state.get("transaction_id") or "").strip()
+    if not transaction_id:
+        transaction_id = "graph-" + hashlib.sha256(
+            str(state["wiki_path"]).encode("utf-8")
+        ).hexdigest()[:12]
+    state["knowledge_ir_path"] = str(
+        state.get("knowledge_ir_path")
+        or f"temp/inbox-state/{transaction_id}-knowledge-ir.json"
+    )
+    state["graph_plan_path"] = str(
+        state.get("graph_plan_path")
+        or f"temp/inbox-state/{transaction_id}-graph-plan.json"
+    )
     cmd = [sys.executable, str(REPO / ".scripts/graph_ingest.py"), "ingest",
-           "--page", state["wiki_path"], "--semantic", state["semantic_path"]]
+           "--page", state["wiki_path"], "--semantic", state["semantic_path"],
+           "--transaction-id", transaction_id,
+           "--knowledge-ir-out", state["knowledge_ir_path"],
+           "--graph-plan-out", state["graph_plan_path"]]
+    raw_relationship = state.get("raw_relationship")
+    if not raw_relationship and state.get("related_to"):
+        raw_relationship = {
+            "type": state.get("relation_type", "supplementary"),
+            "target_page": state["related_to"],
+        }
+    if raw_relationship:
+        cmd.extend([
+            "--raw-relationship-json",
+            json.dumps(raw_relationship, ensure_ascii=False, separators=(",", ":")),
+        ])
     if clean:
         cmd.append("--clean")
     telemetry = _ensure_telemetry(state)
@@ -1051,47 +1333,6 @@ def _record_abbreviation_warnings(state: dict, REPO: Path) -> None:
     state["abbreviation_warnings_recorded"] = True
 
 
-def link_raw_relation(state: dict, REPO: Path, target_page: str, relation_type: str) -> None:
-    """把本事务的 raw 节点关联到已有页面的 raw 节点（版本/补充材料关系）。
-
-    relation_type: "version" | "supplementary" | "translation"
-    只建 raw 间关系边；wiki 页面由管线 finalize 步骤创建，sources 追加由 append_source_to_page 完成。
-    """
-    import graph_lib as gl
-    new_fm = gl.read_frontmatter(state["wiki_path"])
-    new_sources = gl.parse_list_field(new_fm, "sources")
-    new_raw = _derive_raw_path(new_sources[0], state["wiki_path"]) if new_sources else ""
-    target_fm = gl.read_frontmatter(target_page)
-    target_sources = gl.parse_list_field(target_fm, "sources")
-    target_raw = _derive_raw_path(target_sources[0], target_page) if target_sources else ""
-    if not new_raw or not target_raw:
-        return
-    if relation_type == "version":
-        subj, pred, obj = target_raw, "后一版本", new_raw
-    elif relation_type == "supplementary":
-        subj, pred, obj = target_raw, "补充材料", new_raw
-    elif relation_type == "translation":
-        subj, pred, obj = new_raw, "译自", target_raw
-    else:
-        return
-    conn = gl.connect()
-    for raw_path in (subj, obj):
-        if not gl.node_exists(conn, raw_path):
-            gl.ensure_node(conn, raw_path, Path(raw_path).name or raw_path, "raw", "", "", "current", 0)
-    existing = conn.execute(
-        "SELECT id FROM edges WHERE subject=? AND predicate=? AND object=?",
-        (subj, pred, obj),
-    ).fetchone()
-    if not existing:
-        conn.execute(
-            "INSERT INTO edges (subject, predicate, object, confidence, source, is_sr) "
-            "VALUES (?,?,?,?,?,?)",
-            (subj, pred, obj, "[可追溯]", "", 0),
-        )
-    conn.commit()
-    conn.close()
-
-
 def append_source_to_page(REPO: Path, page_path: str, new_source: str) -> bool:
     """在 wiki 页 frontmatter 的 sources 列表末尾追加一条来源（幂等）。
 
@@ -1119,14 +1360,6 @@ def append_source_to_page(REPO: Path, page_path: str, new_source: str) -> bool:
         t_text[:fm_match.start(2)] + new_fm + t_text[fm_match.end(2):],
         encoding="utf-8")
     return True
-
-
-def _derive_raw_path(source_field: str, page_path: str = "") -> str:
-    """从 sources 字段推导 raw 节点路径。"""
-    if not source_field:
-        return ""
-    import graph_lib as gl
-    return gl.raw_node_path(source_field, page_path)
 
 
 def load_raw_abbr_map(page_path: str) -> dict:

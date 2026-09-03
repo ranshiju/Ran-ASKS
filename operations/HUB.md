@@ -33,6 +33,8 @@ status: active
 
 Scope 保持单段 20–300 字，不写成员清单、论文结论或临时分类结果。
 
+Scope 的语义来源是 Hub 内代表性成员的 profile：keyword 使用 `title + description`，proposition 使用 canonical statement，People 使用 `## 人物画像`。主 Agent 综合代表成员、必要的图结构信号及父 Hub Scope 写成稳定定义；不得把全体成员文本直接拼接或让 API LLM 摘要生成 canonical Scope。每次 create、define、split、merge 的 Scope 写入都在 `hub_scope_history` 保存当时的成员 profile 快照、相关 Hub 及前后 Scope，供生命周期审计；该记录是导航定义来源，不是事实证据。legacy Hub 尚无 `聚类于` membership 时，`legacy-scope-plan` 给出的代表论文必须由 `define-scope --evidence-node <page>` 显式传入，不能以空 evidence history 代替。
+
 ## 参与节点与 profile
 
 当前程序直接支持三类普通节点：
@@ -85,17 +87,17 @@ People page 没有画像时只是暂不参与 Hub，不得报错或告警。
 
 代码按类型化成员 profile 做 K=2 二分聚类，生成稳定多簇候选与每簇代表成员（top-5）。节点数量只触发分析，不构成分裂依据。**成员级区分度闸**：两簇质心 cosine < 0.85（`SPLIT_DISTINCTION_THRESHOLD`）才有效；≥ 0.85 判为不可分。
 
-Agent 依据代表成员（揭示簇语义）+ 父 Hub Scope（子 Scope 须是父 Scope 的特化）为每子簇生成 title + Scope，写成 JSON plan 后 `split-apply --agent-confirmed` 运行三道验证闸：① Scope 区分度（两子 Scope cosine < 0.85）；② 路由探针（success ≥ 0.80, margin ≥ 0.03）；③ 通过后创建子 Hub + 迁移 membership。单文件底层 ingest 只产候选；统一 `ingest_inbox.py` 收尾把达标分裂候选交给主 Agent，并在同一摄入任务中执行该受控入口。
+Agent 依据代表成员（揭示簇语义）+ 父 Hub Scope（子 Scope 须是父 Scope 的特化）为每子簇生成 title + Scope，写成 JSON plan 后 `split-apply --agent-confirmed` 运行三道验证闸：① Scope 区分度（两子 Scope cosine < 0.85）；② 路由探针（success ≥ 0.80, margin ≥ 0.03）；③ 通过后创建子 Hub，把 plan 中成员的直接 membership 从父 Hub 迁至对应子 Hub。family 外的重叠 membership 保留。单文件底层 ingest 只产候选；统一 `ingest_inbox.py` 收尾把达标分裂候选交给主 Agent，并在同一摄入任务中执行该受控入口。
 
 ## 血亲机制
 
 三代 `子方向` 血亲 Hub 对禁止合并（`hub_semantics.has_blood_relation`），防合并-分裂死循环。`hub_consanguinity_audit.py` 已删除（dead code）；`姻亲` 边不恢复——retired Hub 不参与 merge 候选，`子方向` 三代追溯足够判定血亲。存量 `姻亲` 边为历史遗留，保留不动。
 
-Hub 成员数 > 20（`HUB_MEMBER_LIMIT`）时 `dynamics_plan` 报告 `overloaded_hubs`：有子 Hub → 重分配；无子 Hub → 触发 split 候选。父 Hub 和子 Hub 同时命中某节点时，子 Hub 获 `+0.05`（`MEMBERSHIP_CHILD_BONUS`）加分，优先吸收成员。
+根 Hub 与子 Hub 均在成员数 > 30（`HUB_MEMBER_LIMIT`）时，`dynamics_plan` 才报告 `overloaded_hubs`：有子 Hub → 重分配；无子 Hub → 触发 split 候选。父 Hub 和子 Hub 同时命中某节点时，子 Hub 获 `+0.05`（`MEMBERSHIP_CHILD_BONUS`）加分，优先吸收成员。
 
 ## 合并
 
-代码比较 Hub Scope 与成员原型，只输出候选。Agent 必须区分同义、上下位和相近但不同；仅同义重复适合合并。合并采用非破坏式 redirect：保留 retired Hub 文件和节点，建 `retired → 合并至 → survivor`。
+代码比较 Hub Scope 与成员原型，只输出候选。Agent 必须区分同义、上下位和相近但不同；仅同义重复适合合并。合并采用非破坏式 redirect：保留 retired Hub 文件、节点与原 Scope，建 `retired → 合并至 → survivor`；retired Hub 的直接 membership 迁至 survivor，family 外重叠 membership 保留，survivor 使用 Agent 确认的统一 Scope。
 
 ## Agent 与代码职责
 
@@ -108,8 +110,11 @@ Hub 成员数 > 20（`HUB_MEMBER_LIMIT`）时 `dynamics_plan` 报告 `overloaded
 - 显式确认 split/merge。
 - 摄入末期 auto-create 触发时为达标候选簇生成 title/Scope/parent（不经 API LLM）。
 - 摄入末期 auto-split 触发时按候选簇代表成员生成子 Hub title/Scope，原样保留程序给出的 members，并调用 `split-apply --agent-confirmed`。
+- 对低 margin 路由选择当前 canonical 候选，并调用 `route-apply --agent-confirmed`；对既有子 Hub 补 Scope 后调用 `redistribute --agent-confirmed`。
 
 API LLM 不决定成员、聚类、分裂、合并或 canonical Scope。普通成员变化不自动改 Scope。
+
+create、define-scope、split、merge 与 batch-create 的 apply 共享同一生命周期边界：先快照目标 Hub Markdown，再在 SQLite `SAVEPOINT` 内修改文件、节点、Scope history、membership 与关系，并校验 Hub 页存在、图节点类型以及页内 Scope 与节点 description 一致；任一步失败都会回滚 SQLite 并恢复或移除本次写入的文件。成功结果携带 `hub-lifecycle-v1` 回执，内容寻址绑定 operation、参数、目标 Hub 与前后文件 hash。`agent-confirmed` 仍只是显式授权门，回执中的 `identity_attested=false` 不冒充不可伪造身份认证；`outer_commit_required=true` 表示调用方仍负责外层 commit。
 
 ## 操作入口
 
@@ -119,9 +124,10 @@ API LLM 不决定成员、聚类、分裂、合并或 canonical Scope。普通�
 
 - unassigned 候选簇 cohesion≥0.6 且 members≥4 时写入 `temp/hub-auto-create/<session>.json`，主 Agent 生成 title/Scope/parent 后调用 `hub_semantics auto-create --apply <file>`。
 - canonical Hub 的 `聚类于` 成员数超过上限、尚无子 Hub，且 `analyze_split` 通过成员数量、小簇稳定性和质心区分度闸时，写入 `temp/hub-auto-split/<session>.json`。主 Agent 为每簇生成 title/Scope、原样使用候选 members，随后调用 `hub_semantics split-apply --parent <hub> --plan <file> --agent-confirmed`。
-- 已有子 Hub 的超限父 Hub 写入 `temp/hub-auto-redistribute/<session>.json`。handoff 必须列出每个子 Hub 的 canonical Scope readiness 与 blockers；任一子 Hub 缺正式 Scope 时禁止重分配。
-- 论文 canonical Scope 路由达到 floor 但 margin 不足时写入 `temp/hub-route-review/<session>.json`，只保留 canonical 候选交主 Agent 判断，不自动写方向边。
+- 已有子 Hub 的超限父 Hub 写入 `temp/hub-auto-redistribute/<session>.json`。handoff 列出 canonical Scope readiness、blockers 及受控命令；任一子 Hub 缺正式 Scope 时先用 `define-scope --agent-confirmed` 定义，随后才允许 `redistribute --agent-confirmed`。
+- 论文 canonical Scope 路由达到 floor 但 margin 不足时写入 `temp/hub-route-review/<session>.json`，只保留 canonical 候选和 `route-apply` 命令模板交主 Agent判断，不自动写方向边。
 - membership 先汇总并去重 profile、Scope 与 prototype 文本，再单次进入 embedding cache；provider 可按 batch 上限分块，但禁止逐节点串行请求 API。维护超过 120 秒返回可重试 `deferred`，不得改变文件摄入终态。
+- `redistribute` 在一次 Agent 确认下执行有界单调迭代；新子 Hub 成员形成 prototype 后可继续吸收残留父成员，直到无新增迁移或父 Hub降到上限。任一轮 embedding 不可用则整次回滚。
 - 紧凑摄入结果保留文件摄入终态，并另带有界的 `hub_maintenance` 交接摘要；维护候选不得把已完成文件改报为失败或 `agent_required`。
 
 不达标候选只计入 backlog，不向用户报告。canonical 定义仍只由主 Agent 确认，API LLM 不参与 Hub 生命周期决策。
@@ -149,6 +155,9 @@ python3 .scripts/hub_semantics.py dynamics-plan --node <node-id> --node <node-id
 
 # 查看 Hub Scope、类型化成员和 split candidate
 python3 .scripts/hub_semantics.py inspect <hub-path>
+
+# 列出 legacy Hub 的可用成员 profile；证据不足项保持 blocked，不猜 Scope
+python3 .scripts/hub_semantics.py legacy-scope-plan
 ```
 
 create/split/merge 保持 `--agent-confirmed` 门：
@@ -158,6 +167,9 @@ python3 .scripts/hub_semantics.py create --path <path> --title '<title>' --scope
 python3 .scripts/hub_semantics.py split-plan <hub-path>
 python3 .scripts/hub_semantics.py split-apply --parent <hub-path> --plan <agent-plan.json> --agent-confirmed
 python3 .scripts/hub_semantics.py merge --survivor <hub> --retired <hub> --scope '<scope>' --agent-confirmed
+python3 .scripts/hub_semantics.py define-scope --hub <hub> --title '<title>' --scope '<scope>' --evidence-node <representative-node> --agent-confirmed
+python3 .scripts/hub_semantics.py redistribute --parent <hub> --agent-confirmed
+python3 .scripts/hub_semantics.py route-apply --page <paper> --hub <canonical-hub> --agent-confirmed
 ```
 
 ## 兼容与迁移
@@ -167,5 +179,7 @@ python3 .scripts/hub_semantics.py merge --survivor <hub> --retired <hub> --scope
 ## 论文路由
 
 论文 Wiki 仍保留可 locate 的 `## 研究方向定位`。程序只比较该句与 active、具有正式 `## Scope` 的 canonical Hub；legacy title 只用于候选诊断。canonical top-1 同时达到 floor 与 margin 才写 `论文 Wiki → 主要研究 → Hub`，边 locator 指向该句。达到 floor 但 margin 不足时必须 abstain 并生成 route-review handoff。
+
+主 Agent 复核后，`route-apply` 仅接受当前候选榜中的 active canonical research-direction Hub，并替换该论文既有同谓词 Hub 路由边；新边同时记录 `研究方向定位` evidence 与 origin。它不降低自动 floor/margin。
 
 这条边表达“论文的主要研究方向”，与可重建的 `普通节点 → 聚类于 → Hub` 不混用。

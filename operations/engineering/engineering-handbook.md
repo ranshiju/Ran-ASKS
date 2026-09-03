@@ -16,7 +16,8 @@ WikiRan 是一个**文件型、跨域、可回溯的知识库**。其主链路�
   → LLM 只提取少量语义槽，程序建立内存文档子图
   → 确定性 attach plan + query probes 后原子融合 graph.db
   → 程序局部刷新普通节点的重叠 Hub membership，并产生生命周期候选
-  → Query 先用图/导航定位，再下钻 raw 核验
+  → Query 按意图融合 Wiki 语义召回与 Graph 结构召回，再沿 semantic address 下钻 raw 核验
+  → Graph 累积只产生 consolidation 候选，由 Agent 审核后更新 Synthesis Wiki
   → 校验、日志、同步与反哺使结构持续演化
 ```
 
@@ -31,9 +32,9 @@ WikiRan 是一个**文件型、跨域、可回溯的知识库**。其主链路�
 
 摄入流程现在是**代码驱动编排**：一个端到端 pipeline 由纯代码掌控流程控制权（去重→提取→撰写→校验→落位→写图→收尾），LLM 只在最小语义点（撰写 wiki 与语义槽）被调用，其余步骤全由程序完成；agent 启动后不全程监控，只在结束读取最终结果。论文 API 路径以摘要、定理、结论构成的确定性证据包锚定生成，要求保留主张的对象、条件和比较基准；语义槽不得推断方向边或把研究场景误作局限。结构性语义错误早停并保留可修复产物，恢复前由程序复验；描述性对象走局部修复。详见 `operations/INGEST.md` 与 `code-guidance.md` §2。
 
-写图采用一次性的内存 `GraphDelta`：先描述 Wiki、Raw 文档包和少量导航边，再用确定性名称入口与受限双视图 identity gate 连接主图，并在 SAVEPOINT 中融合。多候选名称和单一 embedding 相似都不自动 merge；query probes 只观察 anchor、Raw 到达和两跳导航效果，不因软指标未满分制造摄入错误。
+写图采用一次性的内存 `GraphDelta`：先描述 Wiki、Raw 文档包、少量导航边和带 Raw locator 的 keyword 局部说明，再用确定性名称入口与受限双视图 identity gate 连接主图，并在 SAVEPOINT 中融合。精确名称多候选和单一 embedding 相似都不自动 merge；前者无法消歧时 abstain，后者在没有名称碰撞时保留本地节点、边和 gloss。query probes 只观察 anchor、Raw 到达和两跳导航效果，不因软指标未满分制造摄入错误。
 
-节点以 `nodes.path` 作为稳定 ID，配首选 `title`、多对多 `aliases` 和可选 `description`。DSH 只暴露 `node_resolve` 与 `semantic_search` 两个语义工具：前者用名称信号和 label/semantic 双视图做受限身份解析，后者只做相关召回；裸 embedding、阈值选择和 merge 写操作不交给 LLM。
+节点以 `nodes.path` 作为稳定 ID，配首选 `title`、多对多 `aliases` 和主导航 `description`；`node_glosses` 逐来源保存局部说明与 Raw locator，后续摄入不盲目覆盖主描述。DSH 只暴露 `node_resolve` 与 `semantic_search` 两个语义工具：前者用名称信号和 label/semantic 双视图做受限身份解析，后者只做相关召回；裸 embedding、阈值选择和 merge 写操作不交给 LLM。
 
 建设 Agent 读取工程文件时采用独立的按需 locator，不混用 Raw/Wiki 证据语义：Markdown heading path、YAML JSON Pointer、Python qualified symbol 和显式行段均由代码精确截取。读取失败、歧义或超预算时直接拒绝，不回退全文；不为此维护索引或 companion。功能性任务只调用封装函数，工程 locator 不进入通用 query/DSH 工具面。具体调用见 `code-guidance.md` 的 `engineering_locator.py` 段。
 
@@ -111,6 +112,8 @@ wiki 是 LLM 编译的知识页面。它承载：
 - 域/类型所需的其他结构和关键声明锚点；
 - 人工补充的 `related`、说明和局部分析。
 
+`<wiki-page>#<heading-slug>` 是 Wiki 与 Graph 共享的 Semantic Address。Source Wiki（论文、会议、单文档摘要）保持 source-local；Synthesis Wiki（review、comparison、concept）综合多个来源。Graph context 在读取时动态 overlay，不复制进 Markdown。
+
 新页面应以 `.scripts/wiki_skeleton.py` 生成骨架，避免手写确定性字段。论文骨架会从 `paper.md` 机械提取标题、来源和作者，兼容 MinerU 的 HTML 上标与姓名断词；这只是编码辅助，LLM 仍须以 raw 核对作者完整性。标准 section 读取是查询降成本的契约：候选先读 `Navigation`，确认相关才读 `Content` 或锚点段。旧页面可能还未迁移；读取脚本报错时，LLM 必须显式决定整读并说明“该页未迁移”，不能静默回退。
 
 ### 2.4 `graph.db`：边与别名的唯一主数据
@@ -128,7 +131,9 @@ SQLite 主要表：
 | `nodes` | `path` 主键，标题、类型、来源类型、日期、状态、是否直连 raw、`ingest_version`（管道版本戳，re-ingest 判断是否需重摄入） |
 | `aliases` | 别名/缩写到节点路径的唯一映射 |
 | `edges` | `subject`、语义 `predicate`、`object`、置信、来源定位、语音识别标记 |
-| `edge_evidence` | 每条边的一到多条出处证据：来源定位、证据引文、`is_sr`、`recorded_at`、`superseded_by` |
+| `edge_evidence` | 历史兼容证据表；新摄入不写，事实回溯走 Wiki section 脚注 |
+| `edge_origins` / `node_origins` | 页面编译贡献 lineage；不是事实证据 |
+| `node_glosses` | keyword 的逐来源局部说明与精确 Raw locator；`nodes.description` 是可重建主导航缓存 |
 | `temporal_facts` | 独立于 `edges` 的轻量时态事实：`valid_from`/`valid_until`、`superseded_by`、`source`、`recorded_at`；默认不混入普通图导航 |
 | `metadata` | 图级元数据 |
 
@@ -136,9 +141,9 @@ SQLite 主要表：
 frontmatter `effective_from`/`effective_to` 被落成一条 `subject=page`、`predicate=生效`、`object=page`
 的 canonical 时态事实；查询用 `query_graph.py temporal --at DATE`，普通 `neighbors`/`search` 不读取它。
 
-节点常见类型：`page`、`entity`、`people`、`hub`、`timeline-summary` 和 raw 节点。`entity` 可有 person、citation-only、venue、institution 等子类型。图中的节点用相对路径/规范名定位，不能随意把同一实体写成多个裸字符串。`people` 页统一归 `academic/wiki/authors/`，不按来源域分库；admin 来源人物也建在 academic，通过 raw→事实支撑边关联来源域；admin 域的 profile 文件仅作资料页保留，不作为人物图节点重复建入。
+节点常见类型：`page`、`entity`、`people`、`hub`、`timeline-summary` 和 Raw 文档包节点。`entity` 可有 keyword、proposition、person、citation-only、venue、institution 等子类型。图中的节点用相对路径/规范名定位，不能随意把同一实体写成多个裸字符串。Wiki 通过机械 `来源` 边直连 Raw 文档包；人物、概念和 Hub 主要与 Wiki 相连。
 
-概念节点不再从 Hub `## 关键词` 取名称集。摄入先走 GraphDelta/node_semantics 的名称门：同名候选全部纳入消歧，唯一候选才可复用；再用节点 title + 简要 description 做语义门。多候选或语义不足时 abstain，不得以单一 embedding 分数强制合并。
+概念节点不再从 Hub `## 关键词` 取名称集。摄入先走 GraphDelta/node_semantics 的名称门：同名候选全部纳入消歧，唯一候选才可复用；再用当前文档局部说明与节点 title + 主 description 做语义门。精确同名多候选无法消歧时 abstain；无名称碰撞但语义门不足时保留本地节点和来源，不得以单一 embedding 分数强制合并或丢弃文档关系。
 
 Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群落。canonical 身份来自稳定 path、简短 title 与唯一 `## Scope`；arXiv 方向只作初始化模板。程序结合节点 profile、同类成员原型和图邻接 affinity，幂等维护派生 `聚类于` 边并生成 new/split/merge candidates。People page 以可定位 `## 人物画像` 参与：研究、行政、学生及其他角色按实际对象/职责/阶段描述；无 page 的 person entity 不参与。未归类、歧义和候选都不构成错误或告警，create/split/merge 仍由主 Agent 确认。
 
@@ -149,6 +154,8 @@ Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群
 - `存疑`：低置信、待审关系。
 
 没有“图中直接事实”这一档。即便 `可追溯` 也是派生编码，事实回答仍回 raw。
+
+查询时 predicate family 由谓词和端点类型确定性派生，不写入 `edges`。`fact/relation/explanation/exploration/lineage` profile 只控制遍历平面；联合召回对 Wiki/Graph 排名使用 weighted RRF，section capsule 和 Graph neighbor 都只是候选信号。
 
 ### 2.5 派生物不是主数据
 

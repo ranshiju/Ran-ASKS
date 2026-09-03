@@ -9,8 +9,14 @@ Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+from functools import wraps
+import hashlib
+import inspect
 import json
+import os
 import re
+import tempfile
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -38,9 +44,10 @@ AUTO_CREATE_COHESION = 0.60
 AUTO_CREATE_MIN_MEMBERS = 4
 MERGE_CANDIDATE_SIMILARITY = 0.88
 SPLIT_DISTINCTION_THRESHOLD = 0.85
-HUB_MEMBER_LIMIT = 20
+HUB_MEMBER_LIMIT = 30
 MEMBERSHIP_CHILD_BONUS = 0.05
 PROFILE_MEMBER_LIMIT = 24
+HUB_LIFECYCLE_PROTOCOL_VERSION = "hub-lifecycle-v1"
 DIRECTION_PREDICATES = {
     "主要研究", "涉及", "应用于", "基于", "贡献于", "延伸至", "探索", "属于",
 }
@@ -98,6 +105,136 @@ def _page_file(path: str | Path) -> Path:
     if not target.suffix:
         target = target.with_suffix(".md")
     return target
+
+
+def _atomic_write_bytes(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    finally:
+        if os.path.exists(temp_name):
+            os.remove(temp_name)
+
+
+def _file_sha256(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def _stable_context(value):
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _stable_context(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
+    if isinstance(value, (list, tuple)):
+        return [_stable_context(item) for item in value]
+    if isinstance(value, set):
+        return sorted(_stable_context(item) for item in value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _restore_hub_files(snapshots: dict[Path, bytes | None]) -> None:
+    for path, content in snapshots.items():
+        if content is None:
+            if path.exists():
+                path.unlink()
+        else:
+            _atomic_write_bytes(path, content)
+
+
+def _validate_hub_file_graph_sync(conn, hub_paths: list[str], *, require_all: bool) -> None:
+    errors = []
+    for hub_path in hub_paths:
+        target = _page_file(hub_path)
+        row = conn.execute(
+            "SELECT type,status,description FROM nodes WHERE path=?", (hub_path,),
+        ).fetchone()
+        if row is None and not target.exists() and not require_all:
+            continue
+        if row is None or row["type"] != "hub":
+            errors.append(f"Hub graph node missing: {hub_path}")
+            continue
+        if not target.is_file():
+            errors.append(f"Hub page missing: {hub_path}")
+            continue
+        scope = read_hub_scope(hub_path)
+        if str(row["status"] or "") not in {"retired", "archived"} and validate_scope(scope):
+            errors.append(f"Hub Scope invalid after lifecycle apply: {hub_path}")
+        if scope and str(row["description"] or "").strip() != scope:
+            errors.append(f"Hub page/graph Scope mismatch: {hub_path}")
+    if errors:
+        raise ValueError("; ".join(errors))
+
+
+def _hub_lifecycle_boundary(operation: str, paths_fn, *, require_all: bool = True):
+    """Couple Hub page changes to a SQLite SAVEPOINT with file compensation."""
+    def decorate(func):
+        signature = inspect.signature(func)
+
+        @wraps(func)
+        def wrapped(conn, *args, **kwargs):
+            bound = signature.bind(conn, *args, **kwargs)
+            bound.apply_defaults()
+            hub_paths = sorted({
+                str(path).removesuffix(".md") for path in paths_fn(bound.arguments)
+                if str(path or "").strip()
+            })
+            files = [_page_file(path) for path in hub_paths]
+            snapshots = {path: path.read_bytes() if path.is_file() else None for path in files}
+            before_hashes = {
+                hub_path: _file_sha256(_page_file(hub_path)) for hub_path in hub_paths
+            }
+            context = {
+                key: _stable_context(value)
+                for key, value in bound.arguments.items() if key != "conn"
+            }
+            context_sha256 = hashlib.sha256(json.dumps(
+                {"operation": operation, "arguments": context},
+                ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest()
+            savepoint = "hub_lifecycle_" + uuid.uuid4().hex
+            conn.execute(f"SAVEPOINT {savepoint}")
+            try:
+                result = func(conn, *args, **kwargs)
+                _validate_hub_file_graph_sync(conn, hub_paths, require_all=require_all)
+                receipt = {
+                    "protocol_version": HUB_LIFECYCLE_PROTOCOL_VERSION,
+                    "operation": operation,
+                    "context_sha256": context_sha256,
+                    "targets": hub_paths,
+                    "before_file_sha256": before_hashes,
+                    "after_file_sha256": {
+                        hub_path: _file_sha256(_page_file(hub_path)) for hub_path in hub_paths
+                    },
+                    "authorization": {
+                        "agent_confirmed": bool(bound.arguments.get("agent_confirmed", False)),
+                        "content_bound": True,
+                        "identity_attested": False,
+                    },
+                    "status": "validated",
+                    "savepoint": "released",
+                    "outer_commit_required": True,
+                }
+                if isinstance(result, dict):
+                    result["lifecycle_receipt"] = receipt
+                conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+                return result
+            except Exception:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+                finally:
+                    _restore_hub_files(snapshots)
+                raise
+
+        return wrapped
+    return decorate
 
 
 def _section_body(path: str | Path, heading: str) -> tuple[str, object | None]:
@@ -284,6 +421,72 @@ def route_paper(conn, page: str, **kwargs) -> dict:
     return result
 
 
+def apply_paper_route(
+    conn,
+    *,
+    page: str,
+    hub: str,
+    agent_confirmed: bool = False,
+) -> dict:
+    """Apply an Agent-reviewed paper route without weakening automatic gates."""
+    if not agent_confirmed:
+        raise PermissionError("论文 Hub 路由必须由 Agent 确认")
+    definitions = list_hubs(conn, subtype="research-direction")
+    by_path = {item.path: item for item in definitions}
+    target = by_path.get(hub)
+    if target is None or not target.canonical or target.status in {"retired", "archived"}:
+        raise ValueError("目标必须是 active canonical research-direction Hub")
+    page_row = conn.execute("SELECT type FROM nodes WHERE path=?", (page,)).fetchone()
+    if page_row is None:
+        raise ValueError(f"论文节点不存在: {page}")
+    if page_row["type"] != "page":
+        raise ValueError("路由来源必须是 page 节点")
+
+    review = route_paper(conn, page, top_k=max(5, len(definitions)))
+    candidate_paths = {
+        str(item.get("path") or "") for item in review.get("candidates", [])
+        if item.get("canonical")
+    }
+    if hub not in candidate_paths:
+        raise ValueError("目标 Hub 不在当前 canonical route candidates 中")
+    profile = review["profile"]
+    previous = [row[0] for row in conn.execute(
+        "SELECT e.object FROM edges e JOIN nodes n ON n.path=e.object "
+        "WHERE e.subject=? AND e.predicate='主要研究' AND n.type='hub' ORDER BY e.object",
+        (page,),
+    )]
+    edge_ids = [row[0] for row in conn.execute(
+        "SELECT e.id FROM edges e JOIN nodes n ON n.path=e.object "
+        "WHERE e.subject=? AND e.predicate='主要研究' AND n.type='hub'",
+        (page,),
+    )]
+    for edge_id in edge_ids:
+        conn.execute("DELETE FROM edge_evidence WHERE edge_id=?", (edge_id,))
+        conn.execute("DELETE FROM edge_origins WHERE edge_id=?", (edge_id,))
+        conn.execute("DELETE FROM edges WHERE id=?", (edge_id,))
+    cursor = conn.execute(
+        "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr,score) "
+        "VALUES(?, '主要研究', ?, '推断', ?, 0, NULL)",
+        (page, hub, profile["locator"]),
+    )
+    gl.add_edge_evidence(
+        conn, cursor.lastrowid, profile["locator"], profile.get("text", ""), False,
+    )
+    gl.add_edge_origin(conn, cursor.lastrowid, page, profile["locator"])
+    return {
+        "applied": True,
+        "page": page,
+        "hub": hub,
+        "previous_hubs": previous,
+        "evidence": profile["locator"],
+        "automatic_gate": {
+            "decision": review.get("decision"),
+            "reason": review.get("reason"),
+            "margin": review.get("margin"),
+        },
+    }
+
+
 def read_people_profile(path: str | Path) -> NodeProfile | None:
     """Read the one locatable portrait sentence of a canonical People page.
 
@@ -369,6 +572,91 @@ def member_node_profiles(conn, hub_path: str, kind: str = "") -> list[NodeProfil
     )]
     profiles = ordinary_profiles(conn, members)
     return [item for item in profiles if not kind or item.kind == kind]
+
+
+def _scope_evidence(conn, node_ids: Iterable[str]) -> list[dict]:
+    """Snapshot representative member profiles used to define a Hub Scope."""
+    evidence = []
+    for node_id in dict.fromkeys(str(value) for value in node_ids if value):
+        profile = node_profile(conn, node_id) or read_paper_profile(node_id)
+        if profile is None:
+            continue
+        item = asdict(profile)
+        item["node_id"] = node_id
+        evidence.append(item)
+        if len(evidence) >= PROFILE_MEMBER_LIMIT:
+            break
+    return evidence
+
+
+def _definition_evidence_nodes(definition: dict) -> list[str]:
+    representatives = definition.get("representatives") or []
+    representative_ids = [
+        str(item.get("node_id") or item.get("page") or "")
+        for item in representatives if isinstance(item, dict)
+    ]
+    return [item for item in representative_ids if item] or list(definition.get("members", []))
+
+
+def _hub_snapshot(conn, path: str) -> dict:
+    row = conn.execute(
+        "SELECT path,title,status,description FROM nodes WHERE path=? AND type='hub'",
+        (path,),
+    ).fetchone()
+    if row is None:
+        return {"path": path}
+    return {
+        "path": str(row["path"]),
+        "title": str(row["title"] or ""),
+        "status": str(row["status"] or ""),
+        "scope": str(row["description"] or read_hub_scope(path) or ""),
+    }
+
+
+def _record_scope_history(
+    conn,
+    *,
+    hub_path: str,
+    operation: str,
+    scope: str,
+    previous_scope: str = "",
+    related_hubs: Iterable[str] = (),
+    evidence_nodes: Iterable[str] = (),
+) -> None:
+    related = [_hub_snapshot(conn, path) for path in dict.fromkeys(related_hubs) if path]
+    evidence = _scope_evidence(conn, evidence_nodes)
+    conn.execute(
+        "INSERT INTO hub_scope_history "
+        "(hub_path,operation,previous_scope,scope,related_hubs_json,evidence_json) "
+        "VALUES(?,?,?,?,?,?)",
+        (
+            hub_path,
+            operation,
+            previous_scope,
+            scope,
+            json.dumps(related, ensure_ascii=False, sort_keys=True),
+            json.dumps(evidence, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+
+
+def scope_history(conn, hub_path: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT operation,previous_scope,scope,related_hubs_json,evidence_json,recorded_at "
+        "FROM hub_scope_history WHERE hub_path=? ORDER BY id",
+        (hub_path,),
+    ).fetchall()
+    return [
+        {
+            "operation": str(row["operation"]),
+            "previous_scope": str(row["previous_scope"] or ""),
+            "scope": str(row["scope"]),
+            "related_hubs": json.loads(row["related_hubs_json"] or "[]"),
+            "evidence": json.loads(row["evidence_json"] or "[]"),
+            "recorded_at": str(row["recorded_at"] or ""),
+        }
+        for row in rows
+    ]
 
 
 def _neighbors(conn, node_id: str, cache: dict[str, set[str]] | None = None) -> set[str]:
@@ -595,6 +883,8 @@ def _replace_frontmatter_and_scope(path: str, fm_updates: dict, scope: str) -> N
     body = text[match.end():] if match else text
     if not body.strip() and fm_updates.get("title"):
         body = f"# {fm_updates['title']}\n\n"
+    elif fm_updates.get("title"):
+        body = re.sub(r"(?m)^# .*$", f"# {fm_updates['title']}", body, count=1)
     scope_block = f"## Scope\n\n{scope.strip()}\n"
     section = re.search(r"(?ms)^## Scope\s*\n.*?(?=^## |\Z)", body)
     if section:
@@ -606,10 +896,11 @@ def _replace_frontmatter_and_scope(path: str, fm_updates: dict, scope: str) -> N
         suffix = body[position:].lstrip("\n")
         body = f"{prefix}\n\n{scope_block}\n{suffix}".rstrip() + "\n"
     rendered = yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).strip()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(f"---\n{rendered}\n---\n\n{body.lstrip()}", encoding="utf-8")
+    content = f"---\n{rendered}\n---\n\n{body.lstrip()}".encode("utf-8")
+    _atomic_write_bytes(target, content)
 
 
+@_hub_lifecycle_boundary("create", lambda values: [values["path"]])
 def create_hub(
     conn,
     *,
@@ -618,6 +909,9 @@ def create_hub(
     scope: str,
     parent: str = "",
     agent_confirmed: bool = False,
+    lifecycle_operation: str = "create",
+    evidence_nodes: Iterable[str] = (),
+    related_hubs: Iterable[str] = (),
 ) -> dict:
     if not agent_confirmed:
         raise PermissionError("canonical Hub 创建必须由 Agent 确认")
@@ -647,7 +941,79 @@ def create_hub(
             "VALUES(?, '子方向', ?, '推断', '', 0)",
             (parent, path),
         )
+    _record_scope_history(
+        conn,
+        hub_path=path,
+        operation=lifecycle_operation,
+        scope=scope,
+        related_hubs=related_hubs or ([parent] if parent else []),
+        evidence_nodes=evidence_nodes,
+    )
     return {"created": path, "title": title, "scope": scope, "parent": parent}
+
+
+@_hub_lifecycle_boundary("define_scope", lambda values: [values["path"]])
+def define_hub_scope(
+    conn,
+    *,
+    path: str,
+    scope: str,
+    title: str = "",
+    agent_confirmed: bool = False,
+    evidence_nodes: Iterable[str] = (),
+) -> dict:
+    """Define the canonical Scope of an existing Hub after Agent review."""
+    if not agent_confirmed:
+        raise PermissionError("canonical Hub Scope 必须由 Agent 确认")
+    errors = validate_scope(scope)
+    if errors:
+        raise ValueError("; ".join(errors))
+    row = conn.execute(
+        "SELECT title,type,status,description FROM nodes WHERE path=?", (path,),
+    ).fetchone()
+    if row is None or row["type"] != "hub" or not _page_file(path).is_file():
+        raise ValueError(f"既有 Hub 不存在: {path}")
+    fm = _frontmatter(path)
+    if row["status"] in {"retired", "archived"} or str(fm.get("status") or "") in {
+        "retired", "archived",
+    }:
+        raise ValueError("retired/archived Hub 不能重新定义 Scope")
+    canonical_title = str(title or row["title"] or fm.get("title") or Path(path).name).strip()
+    conflict = conn.execute(
+        "SELECT path FROM nodes WHERE type='hub' AND title=? AND path<>?",
+        (canonical_title, path),
+    ).fetchone()
+    if conflict:
+        raise ValueError(f"Hub title 已存在: {canonical_title}")
+    today = __import__("datetime").date.today().isoformat()
+    _replace_frontmatter_and_scope(path, {
+        "title": canonical_title,
+        "status": "active",
+        "updated": today,
+    }, scope)
+    conn.execute(
+        "UPDATE nodes SET title=?,description=?,status='active' WHERE path=?",
+        (canonical_title, scope, path),
+    )
+    _record_scope_history(
+        conn,
+        hub_path=path,
+        operation="define",
+        previous_scope=str(row["description"] or ""),
+        scope=scope,
+        evidence_nodes=(
+            list(evidence_nodes)
+            or [item.node_id for item in member_node_profiles(conn, path)]
+        ),
+    )
+    return {
+        "updated": True,
+        "path": path,
+        "title": canonical_title,
+        "scope": scope,
+        "previous_title": str(row["title"] or ""),
+        "previous_scope": str(row["description"] or ""),
+    }
 
 
 def sync_hub_scope(conn, path: str) -> dict:
@@ -692,10 +1058,12 @@ def migrate_root_scopes(conn, *, apply: bool = False) -> dict:
             action = "create_root"
         planned.append({"action": action, "path": path, "title": title, "scope": scope})
         if apply and action == "add_scope":
-            _replace_frontmatter_and_scope(path, {
-                "updated": __import__("datetime").date.today().isoformat(),
-            }, scope)
-            sync_hub_scope(conn, path)
+            define_hub_scope(
+                conn,
+                path=path,
+                scope=scope,
+                agent_confirmed=True,
+            )
         elif apply:
             create_hub(
                 conn, path=path, title=title, scope=scope, agent_confirmed=True,
@@ -881,13 +1249,14 @@ def _check_hub_overload(conn) -> list[dict]:
         if not hub.canonical:
             continue
         count = _hub_member_count(conn, hub.path)
-        if count <= HUB_MEMBER_LIMIT:
+        limit = HUB_MEMBER_LIMIT
+        if count <= limit:
             continue
         children = get_child_hubs(conn, hub.path)
         overloaded.append({
             "hub": hub.path,
             "member_count": count,
-            "limit": HUB_MEMBER_LIMIT,
+            "limit": limit,
             "children": children,
             "action": "redistribute" if children else "split_candidate",
         })
@@ -961,12 +1330,51 @@ def inspect_hub(conn, hub: str) -> dict:
         "member_kinds": {kind: sum(item.kind == kind for item in members)
                          for kind in ("keyword", "proposition", "people")},
         "split": analyze_split(conn, hub),
+        "scope_history": scope_history(conn, hub),
     }
 
 
+def legacy_scope_plan(conn) -> dict:
+    """Expose member-profile evidence for legacy Hubs; never invent or write Scope."""
+    candidates = []
+    for hub in list_hubs(conn):
+        if hub.canonical:
+            continue
+        dynamic_members = member_node_profiles(conn, hub.path)
+        members = dynamic_members or member_profiles(conn, hub.path)
+        fm = _frontmatter(hub.path)
+        parent = str(fm.get("parent") or "")
+        candidates.append({
+            "hub": hub.path,
+            "title": hub.title,
+            "parent": _hub_snapshot(conn, parent) if parent else None,
+            "member_count": len(members),
+            "source_mode": "dynamic_membership" if dynamic_members else "legacy_direction_edges",
+            "representative_profiles": [asdict(item) for item in members[:8]],
+            "decision": "agent_scope_required" if members else "insufficient_member_evidence",
+        })
+    ready = sum(item["decision"] == "agent_scope_required" for item in candidates)
+    return {
+        "decision": "agent_scope_required" if candidates else "no_action",
+        "candidate_count": len(candidates),
+        "ready_count": ready,
+        "blocked_count": len(candidates) - ready,
+        "candidates": candidates,
+    }
+
+
+@_hub_lifecycle_boundary(
+    "split",
+    lambda values: [values["parent"], *[child.get("path", "") for child in values["children"]]],
+)
 def apply_split(conn, parent: str, children: list[dict], *, agent_confirmed: bool = False) -> dict:
     if not agent_confirmed:
         raise PermissionError("Hub 分裂必须由 Agent 确认子 Scope")
+    parent_definition = next(
+        (item for item in list_hubs(conn) if item.path == parent), None,
+    )
+    if parent_definition is None or not parent_definition.canonical:
+        raise ValueError("分裂父节点必须是 active canonical Hub")
     definitions = []
     all_profiles: list[tuple[str, NodeProfile | DirectionProfile]] = []
     for child in children:
@@ -1012,12 +1420,13 @@ def apply_split(conn, parent: str, children: list[dict], *, agent_confirmed: boo
     for child in children:
         created.append(create_hub(
             conn, path=child["path"], title=child["title"], scope=child["scope"],
-            parent=parent, agent_confirmed=True,
+            parent=parent, agent_confirmed=True, lifecycle_operation="split",
+            evidence_nodes=_definition_evidence_nodes(child), related_hubs=[parent],
         ))
         for page in child.get("members", []):
             conn.execute(
-                "DELETE FROM edges WHERE subject=? AND predicate=? AND object=?",
-                (page, MEMBERSHIP_PREDICATE, child["path"]),
+                "DELETE FROM edges WHERE subject=? AND predicate=? AND object IN (?,?)",
+                (page, MEMBERSHIP_PREDICATE, parent, child["path"]),
             )
             conn.execute(
                 "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr,score) "
@@ -1031,6 +1440,9 @@ def apply_split(conn, parent: str, children: list[dict], *, agent_confirmed: boo
     }
 
 
+@_hub_lifecycle_boundary(
+    "merge", lambda values: [values["survivor"], values["retired"]],
+)
 def merge_hubs(
     conn,
     *,
@@ -1046,8 +1458,27 @@ def merge_hubs(
     errors = validate_scope(scope)
     if errors:
         raise ValueError("; ".join(errors))
-    if survivor == retired or not gl.node_exists(conn, survivor) or not gl.node_exists(conn, retired):
+    definitions = {item.path: item for item in list_hubs(conn)}
+    if (
+        survivor == retired
+        or survivor not in definitions
+        or retired not in definitions
+        or not definitions[survivor].canonical
+        or not definitions[retired].canonical
+    ):
         raise ValueError("survivor/retired Hub 无效")
+    if has_blood_relation(conn, survivor, retired):
+        raise ValueError("三代子方向血亲 Hub 禁止合并")
+    previous_scope = read_hub_scope(survivor)
+    retired_members = conn.execute(
+        "SELECT subject,MAX(score) AS score FROM edges "
+        "WHERE predicate=? AND object=? GROUP BY subject ORDER BY subject",
+        (MEMBERSHIP_PREDICATE, retired),
+    ).fetchall()
+    evidence_nodes = [str(row["subject"]) for row in retired_members]
+    evidence_nodes.extend(
+        item.node_id for item in member_node_profiles(conn, survivor)
+    )
     survivor_fm = _frontmatter(survivor)
     survivor_title = title or str(survivor_fm.get("title") or Path(survivor).name)
     _replace_frontmatter_and_scope(survivor, {
@@ -1063,12 +1494,53 @@ def merge_hubs(
         "updated": __import__("datetime").date.today().isoformat(),
     }, read_hub_scope(retired) or str(retired_fm.get("title") or Path(retired).name))
     conn.execute("UPDATE nodes SET status='retired' WHERE path=?", (retired,))
+    migrated_members = 0
+    for row in retired_members:
+        member = str(row["subject"])
+        existing = conn.execute(
+            "SELECT 1 FROM edges WHERE subject=? AND predicate=? AND object=?",
+            (member, MEMBERSHIP_PREDICATE, survivor),
+        ).fetchone()
+        conn.execute(
+            "DELETE FROM edges WHERE subject=? AND predicate=? AND object=?",
+            (member, MEMBERSHIP_PREDICATE, retired),
+        )
+        if existing is None:
+            conn.execute(
+                "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr,score) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (
+                    member,
+                    MEMBERSHIP_PREDICATE,
+                    survivor,
+                    "推断",
+                    "",
+                    0,
+                    row["score"],
+                ),
+            )
+        migrated_members += 1
     conn.execute(
         "INSERT OR IGNORE INTO edges(subject,predicate,object,confidence,source,is_sr) "
         "VALUES(?, '合并至', ?, '推断', '', 0)",
         (retired, survivor),
     )
-    return {"survivor": survivor, "retired": retired, "scope": scope, "redirect": True}
+    _record_scope_history(
+        conn,
+        hub_path=survivor,
+        operation="merge",
+        previous_scope=previous_scope,
+        scope=scope,
+        related_hubs=[retired],
+        evidence_nodes=evidence_nodes,
+    )
+    return {
+        "survivor": survivor,
+        "retired": retired,
+        "scope": scope,
+        "redirect": True,
+        "memberships_migrated": migrated_members,
+    }
 
 
 def _print(value):
@@ -1128,11 +1600,13 @@ def _eligible_auto_splits(conn, overloaded_hubs: list[dict]) -> tuple[list[dict]
 
 
 def _redistribution_handoffs(
-    overloaded_hubs: list[dict], definitions: Iterable[HubDefinition]
-) -> list[dict]:
+    conn, overloaded_hubs: list[dict], definitions: Iterable[HubDefinition]
+) -> tuple[list[dict], list[dict], int]:
     """Keep existing-child overloads visible without mutating membership in --check."""
     by_path = {hub.path: hub for hub in definitions}
     handoffs = []
+    residual_splits = []
+    backlog_count = 0
     for overload in overloaded_hubs:
         if overload.get("action") != "redistribute":
             continue
@@ -1156,6 +1630,24 @@ def _redistribution_handoffs(
                         else "missing_canonical_scope"
                     ),
                 })
+        if not blockers:
+            plan = plan_redistribution(conn, str(overload.get("hub") or ""))
+            movable = sum(
+                overload.get("hub") not in item.get("after", [])
+                for item in plan.get("nodes", [])
+            ) if plan.get("write_safe") else 0
+            if plan.get("write_safe") and movable == 0:
+                split = analyze_split(conn, str(overload.get("hub") or ""))
+                if split.get("decision") == "agent_definition_required":
+                    residual_splits.append({
+                        **split,
+                        "trigger": "member_limit_after_redistribution",
+                        "member_count": overload.get("member_count", split.get("count", 0)),
+                        "limit": overload.get("limit", HUB_MEMBER_LIMIT),
+                    })
+                else:
+                    backlog_count += 1
+                continue
         handoffs.append({
             **overload,
             "decision": (
@@ -1164,6 +1656,7 @@ def _redistribution_handoffs(
             ),
             "trigger": "member_limit",
             "ready_for_redistribution": not blockers,
+            "movable_member_count": movable if not blockers else None,
             "child_scopes": child_scopes,
             "blockers": blockers,
             "agent_task": (
@@ -1171,8 +1664,187 @@ def _redistribution_handoffs(
                 if not blockers
                 else "define and validate missing child Hub scopes before redistribution"
             ),
+            "required_actions": [
+                {
+                    "action": "define_scope",
+                    "hub": blocker["path"],
+                    "command_template": (
+                        "python3 .scripts/hub_semantics.py define-scope "
+                        f"--hub '{blocker['path']}' --scope '<agent-confirmed-scope>' "
+                        "--agent-confirmed"
+                    ),
+                }
+                for blocker in blockers
+            ] + [{
+                "action": "redistribute",
+                "parent": overload.get("hub", ""),
+                "command": (
+                    "python3 .scripts/hub_semantics.py redistribute "
+                    f"--parent '{overload.get('hub', '')}' --agent-confirmed"
+                ),
+                "blocked": bool(blockers),
+            }],
         })
-    return handoffs
+    return handoffs, residual_splits, backlog_count
+
+
+def plan_redistribution(conn, parent: str) -> dict:
+    """Plan membership changes within one parent/direct-child Hub family."""
+    definitions = {item.path: item for item in list_hubs(conn)}
+    parent_def = definitions.get(parent)
+    if parent_def is None or not parent_def.canonical:
+        raise ValueError("父 Hub 必须是 active canonical Hub")
+    children = get_child_hubs(conn, parent)
+    if not children:
+        raise ValueError("父 Hub 没有直接子 Hub")
+    blockers = [
+        child for child in children
+        if child not in definitions or not definitions[child].canonical
+    ]
+    if blockers:
+        raise ValueError("直接子 Hub 缺 canonical Scope: " + ", ".join(blockers))
+    family = [parent_def, *[definitions[child] for child in children]]
+    member_ids = [row[0] for row in conn.execute(
+        "SELECT subject FROM edges WHERE predicate=? AND object=? ORDER BY subject",
+        (MEMBERSHIP_PREDICATE, parent),
+    )]
+    profiles = [profile for node_id in member_ids if (profile := node_profile(conn, node_id))]
+    member_cache: dict[tuple[str, str], list[NodeProfile]] = {}
+    contexts = [
+        _prepare_membership_context(conn, profile, family, member_cache)
+        for profile in profiles
+    ]
+    unique_texts = list(dict.fromkeys(
+        text for context in contexts if context is not None for text in context.texts
+    ))
+    embedded = _embed(unique_texts) if unique_texts else np.empty((0, 0))
+    if unique_texts and (embedded is None or len(embedded) != len(unique_texts)):
+        return {
+            "decision": "degraded",
+            "write_safe": False,
+            "reason": "embedding_unavailable",
+            "parent": parent,
+            "children": children,
+            "member_count": len(profiles),
+            "nodes": [],
+        }
+    vectors_by_text = dict(zip(unique_texts, embedded)) if unique_texts else {}
+    nodes = []
+    neighbor_cache: dict[str, set[str]] = {}
+    family_paths = {parent, *children}
+    for profile, context in zip(profiles, contexts):
+        vectors = np.asarray([vectors_by_text[text] for text in context.texts])
+        ranked, reason = _score_membership_candidates(
+            conn, profile, context, vectors, neighbor_cache,
+        )
+        if reason != "scored":
+            return {
+                "decision": "degraded",
+                "write_safe": False,
+                "reason": reason,
+                "parent": parent,
+                "children": children,
+                "member_count": len(profiles),
+                "nodes": [],
+            }
+        selected_children = [
+            item for item in ranked
+            if item["hub"] in children and item["score"] >= item["threshold"]
+        ][:MEMBERSHIP_MAX_HUBS]
+        before_all = sorted(_existing_memberships(conn, profile.node_id))
+        before_family = [item for item in before_all if item in family_paths]
+        after_family = [item["hub"] for item in selected_children] or [parent]
+        nodes.append({
+            "node_id": profile.node_id,
+            "before": before_family,
+            "after": after_family,
+            "preserved_outside": [item for item in before_all if item not in family_paths],
+            "candidates": ranked,
+        })
+    return {
+        "decision": "planned",
+        "write_safe": True,
+        "parent": parent,
+        "children": children,
+        "member_count": len(profiles),
+        "nodes": nodes,
+    }
+
+
+def redistribute_hub_members(
+    conn,
+    *,
+    parent: str,
+    agent_confirmed: bool = False,
+) -> dict:
+    """Apply bounded monotonic redistribution within one canonical Hub family."""
+    if not agent_confirmed:
+        raise PermissionError("Hub 成员重分配必须由 Agent 确认")
+    before_parent = _hub_member_count(conn, parent)
+    rounds = []
+    changes = []
+    children = []
+    conn.execute("SAVEPOINT hub_redistribute")
+    try:
+        for round_index in range(1, 9):
+            plan = plan_redistribution(conn, parent)
+            if not plan.get("write_safe"):
+                conn.execute("ROLLBACK TO hub_redistribute")
+                conn.execute("RELEASE hub_redistribute")
+                return {
+                    "applied": False,
+                    "reason": plan.get("reason", "plan_not_write_safe"),
+                    "parent": parent,
+                    "member_count": before_parent,
+                }
+            children = plan["children"]
+            family = {parent, *children}
+            moved_this_round = 0
+            for item in plan["nodes"]:
+                node_id = item["node_id"]
+                for hub in family:
+                    conn.execute(
+                        "DELETE FROM edges WHERE subject=? AND predicate=? AND object=?",
+                        (node_id, MEMBERSHIP_PREDICATE, hub),
+                    )
+                score_map = {
+                    candidate["hub"]: candidate.get("score")
+                    for candidate in item["candidates"]
+                }
+                for hub in item["after"]:
+                    conn.execute(
+                        "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr,score) "
+                        "VALUES(?,?,?,?,?,?,?)",
+                        (node_id, MEMBERSHIP_PREDICATE, hub, "推断", "", 0, score_map.get(hub)),
+                    )
+                if parent not in item["after"]:
+                    moved_this_round += 1
+                    changes.append(item)
+            remaining = _hub_member_count(conn, parent)
+            rounds.append({
+                "round": round_index,
+                "considered": plan["member_count"],
+                "moved": moved_this_round,
+                "remaining_parent": remaining,
+            })
+            if moved_this_round == 0 or remaining <= HUB_MEMBER_LIMIT:
+                break
+        conn.execute("RELEASE hub_redistribute")
+    except Exception:
+        conn.execute("ROLLBACK TO hub_redistribute")
+        conn.execute("RELEASE hub_redistribute")
+        raise
+    remaining_parent = _hub_member_count(conn, parent)
+    return {
+        "applied": True,
+        "parent": parent,
+        "children": children,
+        "before_parent": before_parent,
+        "moved": before_parent - remaining_parent,
+        "remaining_parent": remaining_parent,
+        "rounds": rounds,
+        "changes": changes,
+    }
 
 
 def auto_create_check(conn, node_ids: Iterable[str] | None = None) -> dict:
@@ -1202,7 +1874,11 @@ def auto_create_check(conn, node_ids: Iterable[str] | None = None) -> dict:
             backlog_count += 1
     overloaded_hubs = _check_hub_overload(conn)
     split_candidates, split_backlog_count = _eligible_auto_splits(conn, overloaded_hubs)
-    redistribution_candidates = _redistribution_handoffs(overloaded_hubs, list_hubs(conn))
+    redistribution_candidates, residual_splits, residual_backlog = _redistribution_handoffs(
+        conn, overloaded_hubs, list_hubs(conn),
+    )
+    split_candidates.extend(residual_splits)
+    split_backlog_count += residual_backlog
     return {
         "status": (
             "agent_required"
@@ -1250,6 +1926,14 @@ def _suggest_parent(conn, candidate: dict) -> dict:
     }
 
 
+@_hub_lifecycle_boundary(
+    "batch_create",
+    lambda values: [
+        f"academic/wiki/hubs/{str(item.get('title') or '').strip()}"
+        for item in values["definitions"] if isinstance(item, dict) and item.get("title")
+    ],
+    require_all=False,
+)
 def create_hubs_from_definitions(conn, definitions: list[dict]) -> dict:
     """Agent 生成定义后，validate + create_hub + apply membership。
 
@@ -1297,6 +1981,7 @@ def create_hubs_from_definitions(conn, definitions: list[dict]) -> dict:
             result = create_hub(
                 conn, path=path, title=title, scope=scope,
                 parent=parent, agent_confirmed=True,
+                evidence_nodes=_definition_evidence_nodes(definition),
             )
             created.append(result)
             all_members.extend(members)
@@ -1319,6 +2004,10 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     route = sub.add_parser("route")
     route.add_argument("page")
+    route_apply = sub.add_parser("route-apply")
+    route_apply.add_argument("--page", required=True)
+    route_apply.add_argument("--hub", required=True)
+    route_apply.add_argument("--agent-confirmed", action="store_true")
     profile = sub.add_parser("profile")
     profile.add_argument("node")
     inspect = sub.add_parser("inspect")
@@ -1330,12 +2019,23 @@ def main():
     split.add_argument("hub")
     migrate = sub.add_parser("migrate-root-scopes")
     migrate.add_argument("--apply", action="store_true")
+    sub.add_parser("legacy-scope-plan")
     create = sub.add_parser("create")
     create.add_argument("--path", required=True)
     create.add_argument("--title", required=True)
     create.add_argument("--scope", required=True)
     create.add_argument("--parent", default="")
+    create.add_argument("--evidence-node", action="append", default=[])
     create.add_argument("--agent-confirmed", action="store_true")
+    define_scope = sub.add_parser("define-scope")
+    define_scope.add_argument("--hub", required=True)
+    define_scope.add_argument("--scope", required=True)
+    define_scope.add_argument("--title", default="")
+    define_scope.add_argument("--evidence-node", action="append", default=[])
+    define_scope.add_argument("--agent-confirmed", action="store_true")
+    redistribute = sub.add_parser("redistribute")
+    redistribute.add_argument("--parent", required=True)
+    redistribute.add_argument("--agent-confirmed", action="store_true")
     merge = sub.add_parser("merge")
     merge.add_argument("--survivor", required=True)
     merge.add_argument("--retired", required=True)
@@ -1355,6 +2055,13 @@ def main():
     try:
         if args.command == "route":
             _print(route_paper(conn, args.page))
+        elif args.command == "route-apply":
+            result = apply_paper_route(
+                conn, page=args.page, hub=args.hub,
+                agent_confirmed=args.agent_confirmed,
+            )
+            conn.commit()
+            _print(result)
         elif args.command == "profile":
             value = node_profile(conn, args.node) or read_paper_profile(args.node)
             _print(asdict(value) if value else {"node_id": args.node, "profile": None})
@@ -1374,10 +2081,26 @@ def main():
             if args.apply:
                 conn.commit()
             _print(result)
+        elif args.command == "legacy-scope-plan":
+            _print(legacy_scope_plan(conn))
         elif args.command == "create":
             result = create_hub(
                 conn, path=args.path, title=args.title, scope=args.scope, parent=args.parent,
+                agent_confirmed=args.agent_confirmed, evidence_nodes=args.evidence_node,
+            )
+            conn.commit()
+            _print(result)
+        elif args.command == "define-scope":
+            result = define_hub_scope(
+                conn, path=args.hub, scope=args.scope, title=args.title,
                 agent_confirmed=args.agent_confirmed,
+                evidence_nodes=args.evidence_node,
+            )
+            conn.commit()
+            _print(result)
+        elif args.command == "redistribute":
+            result = redistribute_hub_members(
+                conn, parent=args.parent, agent_confirmed=args.agent_confirmed,
             )
             conn.commit()
             _print(result)
@@ -1399,7 +2122,7 @@ def main():
                 result = create_hubs_from_definitions(conn, definitions)
                 conn.commit()
                 _print(result)
-        else:
+        elif args.command == "split-apply":
             children = json.loads(Path(args.plan).read_text(encoding="utf-8"))
             if isinstance(children, dict):
                 children = children.get("children", [])
@@ -1408,6 +2131,8 @@ def main():
             )
             conn.commit()
             _print(result)
+        else:
+            parser.error(f"unsupported command: {args.command}")
     finally:
         conn.close()
 

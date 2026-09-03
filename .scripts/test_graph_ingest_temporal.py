@@ -251,6 +251,46 @@ def test_clean_page_edges_only_collects_unowned_managed_nodes():
     assert conn.execute("SELECT 1 FROM nodes WHERE path='historical'").fetchone()
 
 
+def test_clean_page_edges_removes_membership_only_managed_orphan():
+    conn = make_db()
+    page = "academic/wiki/papers/a"
+    add_node(conn, page, "page")
+    gl.ensure_node(conn, "old-concept", "Old Concept", "entity", entity_subtype="keyword")
+    gl.add_node_origin(conn, "old-concept", page, "raw/a#L1", managed=True)
+    gl.ensure_node(conn, "academic/wiki/hubs/example", "Example", "hub")
+    conn.execute(
+        "INSERT INTO edges(subject,predicate,object,confidence,source) VALUES(?,?,?,?,?)",
+        ("old-concept", "聚类于", "academic/wiki/hubs/example", "推断", ""),
+    )
+    conn.commit()
+
+    result = module.clean_page_edges(conn, page)
+    assert result["managed_nodes_removed"] == 1
+    assert result["derived_memberships_removed"] == 1
+    assert not conn.execute("SELECT 1 FROM nodes WHERE path='old-concept'").fetchone()
+    assert not conn.execute(
+        "SELECT 1 FROM edges WHERE subject='old-concept' AND predicate='聚类于'"
+    ).fetchone()
+
+
+def test_cleanup_orphan_references_collects_existing_membership_only_orphan():
+    conn = make_db()
+    gl.ensure_node(conn, "old-concept", "Old Concept", "entity", entity_subtype="keyword")
+    gl.add_node_origin(conn, "old-concept", "academic/wiki/papers/a", "raw/a#L1", managed=True)
+    gl.ensure_node(conn, "academic/wiki/hubs/example", "Example", "hub")
+    conn.execute(
+        "INSERT INTO edges(subject,predicate,object,confidence,source) VALUES(?,?,?,?,?)",
+        ("old-concept", "聚类于", "academic/wiki/hubs/example", "推断", ""),
+    )
+    conn.execute("DELETE FROM node_origins WHERE node_path='old-concept'")
+    conn.commit()
+
+    result = module.cleanup_orphan_references(conn)
+    assert result["managed_orphan_nodes"] == 1
+    assert result["derived_memberships"] == 1
+    assert not conn.execute("SELECT 1 FROM nodes WHERE path='old-concept'").fetchone()
+
+
 def test_cmd_ingest_writes_temporal_fact_end_to_end():
     """完整 graph_ingest 命令链路：frontmatter → cmd_ingest → temporal_facts → query。"""
     with tempfile.TemporaryDirectory() as directory:

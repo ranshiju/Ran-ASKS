@@ -74,15 +74,15 @@ graph.db 是边唯一源（不再有 `triples*.md`/`keyword-index*.md` 派生文
 
 venue / institution 的「内容」是它的边本身（不另写正文）；具体期刊/单位各为一个 entity 节点，ingest 时首次遇到按需自动建。期刊与单位维度独立。有属性需记时建极简 md（frontmatter only），无属性时仅 entity 节点。
 
-### raw 节点与事实支撑（2026-07-26）
+### Raw 文档包与 Wiki 语义地址（2026-09-03）
 
-- **raw 节点**：所有 raw 文件（论文 paper.md / 会议 corrected.md / 简历 md 等）建 `raw` 类型节点进图，是结构节点（非知识节点）
-- **事实支撑边**：`raw节点 → 事实支撑 → 主消费节点`（1 条边/raw），保证事实连通性在图结构里可 BFS 遍历
-- **source 字段**：事实边的 `source` 存 `raw节点path#section`（段落级精确，不是裸文件路径）
-- **source locator**：统一格式为 `path#locator`；文本源 locator 需能对应 heading/锚点，PDF/DOCX locator 使用页码但允许标记为不可机械核验；外部 `synology://` 源在当前环境不可访问时单独记录为外部缺口。
-- **简历特殊**：简历不建 wiki 摘要页，raw 直接充当 wiki；people 节点是主消费节点
-- **查询过滤**：`raw` 类型节点和 `事实支撑` 谓词在语义查询时默认过滤，LINT 连通性检查时启用
-- 详见 `operations/INGEST.md`「raw 节点与证据完整性」
+- **Raw 文档包节点**：同 stem 原件与可定位 companion 共用一个 `raw` 结构节点；Raw 是事实证据唯一所有者。
+- **来源边**：由 Wiki frontmatter `sources` 机械生成 `Wiki → 来源 → Raw 文档包`，是新摄入的标准跨层骨架。旧 `raw → 事实支撑 → 消费节点` 仅作迁移兼容，不得继续生成。
+- **Semantic Address**：`<wiki-page>#<heading-slug>` 标识 Wiki section。知识边 `source` 可写该地址或精确 Raw locator，也可为空；填写 Wiki 地址时必须能解析到真实 section，新摄入 section 必须含可下钻的 Raw 脚注。
+- **双重 provenance**：semantic address 标识“这条关系在 Wiki 中如何表达”，Raw locator 标识“事实由哪段原文支持”；两者不得互相替代。`edge_origins`/`node_origins` 只记录编译 lineage，不是事实证据。
+- **查询过滤**：Raw 与 evidence family 默认不参与语义扩散；事实核验从 Wiki section 的 `raw_citations` 下钻 Raw。
+- **历史兼容**：无法解析或无脚注的旧 semantic address 由 `graph_validate.py` 聚合为 WARN，修复任务不得改写 `raw/`。
+- 详见 `operations/INGEST.md`「Raw 文档包节点与 Wiki 直连」及 `operations/QUERY.md`「section 读取」。
 
 ### 动态 hub 生长机制（2026-07-26）
 
@@ -133,12 +133,12 @@ venue / institution 的「内容」是它的边本身（不另写正文）；具
 ### 拒绝判断
 
 LLM 判断原型时可输出 `type: unknown`（无法归类）。此时：
-- **ingest 端**：建 raw 节点 + 事实支撑边（保证连通），文档进待归一队列，不强行提取关系/keyword
+- **ingest 端**：建 Raw 文档包节点；已有 Wiki 时机械建立 `Wiki → 来源 → Raw`，文档进待归一队列，不强行提取关系/keyword
 - **query 端**：命中 unknown 文档时，仍返回图里已有的最相关连通信息，标注"该文档结构尚未完全识别"——**拒绝判断 ≠ 拒绝提供已有信息**
 
 ### 证据先于关系
 
-ingest 时 LLM 先定位原文证据段，再从证据段推导关系。source 字段自然非空（关系从证据段推导，不是先想出边再找来源）。
+ingest 时 LLM 基于程序提供的 Raw evidence card 编写 Wiki 与语义槽；程序把知识边定位到 Wiki semantic address，并由该 section 脚注下钻 Raw。边 `source` 允许为空，不能把 locator 完整率当图质量门。
 
 ### qualifier 字段（edges 表，可选）
 
@@ -154,7 +154,7 @@ LLM 读全文后统一指代（"张教授"和"冉仕举"是否同人），再 re
 
 ### 兜底机制
 
-无法归入任何原型时走"通用文档"兜底：建轻量 document 节点（只存标题/类型/日期/状态/raw 指针）+ raw 事实支撑 + keyword 进 catch-all（待归一队列）。
+无法归入任何原型时走“通用文档”兜底：建轻量 Wiki/document 页与 Raw 文档包来源边；不强行生成 keyword、关系或 Hub 归属。
 
 ### 开源扩展
 

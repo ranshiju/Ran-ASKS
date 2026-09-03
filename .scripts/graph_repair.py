@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -26,6 +27,11 @@ MISSING_CONFIDENCE_VALUES = (None, "")
 CONFIDENCE_REPAIRS = {
     "[可追溯]": "可追溯",
     "medium": "推断",
+}
+GENERIC_SYMBOL_NAMES = {
+    "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+    "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho",
+    "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega",
 }
 
 
@@ -313,6 +319,194 @@ def targeted_orphan_nodes(conn, node_paths, apply=False):
     return results
 
 
+def keyword_description_issue(title, description):
+    """Return a conservative defect label; valid short domain definitions survive."""
+    title = str(title or "").strip()
+    description = str(description or "").strip()
+    if not description:
+        return "missing"
+    normalized_title = re.sub(r"[\W_]+", "", title, flags=re.UNICODE).casefold()
+    normalized_description = re.sub(
+        r"[\W_]+", "", description, flags=re.UNICODE,
+    ).casefold()
+    if normalized_description == normalized_title:
+        return "title_only"
+    if re.match(
+        r"^(?:在)?(?:本文|本论文|本研究|该文档|该论文|该文章|该研究)"
+        r"(?:中|里|所|的|提出|研究|关于|用于|建议|使用)",
+        description,
+    ):
+        return "deictic_context"
+    if re.match(r"^Agent-confirmed abbreviation kind\s*:", description, re.I):
+        return "identity_metadata"
+    if re.search(r"TODO|待补充|待完善|暂无说明|unknown|placeholder|<--", description, re.I):
+        return "placeholder"
+    if "\n" in description or description.startswith(("-", "*", "#")):
+        return "not_single_sentence"
+    if len(description) > 300:
+        return "too_long"
+    return ""
+
+
+def keyword_identity_issue(title):
+    """Reject only deterministic non-concept labels from description generation."""
+    text = str(title or "").strip()
+    if not text:
+        return "empty_title"
+    if re.fullmatch(r"(?:19|20)\d{2}", text):
+        return "year_label"
+    if re.fullmatch(r"[\d\W_]+", text, re.UNICODE):
+        return "numeric_or_symbol_label"
+    if (
+        re.fullmatch(r"[A-Za-z]", text)
+        or re.fullmatch(r"[\u0370-\u03ff]", text)
+        or text.casefold() in GENERIC_SYMBOL_NAMES
+    ):
+        return "generic_symbol_label"
+    if re.match(r"https?://", text, re.I):
+        return "url_label"
+    return ""
+
+
+def _keyword_identity_issues(rows):
+    """Return deterministic and review-only identity defects keyed by node path."""
+    issues = {}
+    titles = {}
+    for row in rows:
+        path = str(row["path"])
+        title = str(row["title"] or "").strip()
+        issue = keyword_identity_issue(title) or keyword_identity_issue(path)
+        if issue:
+            issues[path] = issue
+        if title:
+            titles.setdefault(title.casefold(), []).append(path)
+
+    for paths in titles.values():
+        if len(paths) > 1:
+            for path in paths:
+                issues.setdefault(path, "duplicate_title")
+
+    # Historical ingestion sometimes created both the Chinese label and a second
+    # node whose title concatenates that label with its English rendering.  This
+    # is a review gate only: it blocks description generation but never merges.
+    for row in rows:
+        path = str(row["path"])
+        title = str(row["title"] or "").strip()
+        match = re.fullmatch(
+            r"(?P<prefix>.*[\u3400-\u9fff])(?P<suffix>[^\u3400-\u9fff]+)",
+            title,
+        )
+        if not match or len(re.findall(r"[A-Za-z]", match.group("suffix"))) < 3:
+            continue
+        peers = [candidate for candidate in titles.get(match.group("prefix").casefold(), []) if candidate != path]
+        if not peers:
+            continue
+        issues.setdefault(path, "possible_bilingual_duplicate")
+        for peer in peers:
+            issues.setdefault(peer, "possible_bilingual_duplicate")
+    return issues
+
+
+def _node_origin_pages(conn, node_path):
+    pages = [str(row[0]) for row in conn.execute(
+        "SELECT origin_page FROM node_origins WHERE node_path=? ORDER BY origin_page",
+        (node_path,),
+    )]
+    pages.extend(str(row[0]) for row in conn.execute(
+        "SELECT DISTINCT eo.origin_page FROM edge_origins eo "
+        "JOIN edges e ON e.id=eo.edge_id "
+        "WHERE e.subject=? OR e.object=? ORDER BY eo.origin_page",
+        (node_path, node_path),
+    ))
+    pages.extend(str(row[0]) for row in conn.execute(
+        "SELECT DISTINCT CASE WHEN e.subject=? THEN e.object ELSE e.subject END AS page "
+        "FROM edges e JOIN nodes n ON n.path=CASE WHEN e.subject=? THEN e.object ELSE e.subject END "
+        "WHERE (e.subject=? OR e.object=?) AND n.type='page' ORDER BY page",
+        (node_path, node_path, node_path, node_path),
+    ))
+    return list(dict.fromkeys(page for page in pages if page))
+
+
+def _page_raw_inputs(page):
+    target = gl.REPO / f"{page}.md"
+    if not target.is_file():
+        return []
+    fm = gl.read_frontmatter(target)
+    inputs = []
+    for source in gl.parse_list_field(fm, "sources"):
+        source_file = gl.raw_file_path(source, page)
+        if not source_file or not (gl.REPO / source_file).is_file():
+            continue
+        inputs.append(source_file)
+    return list(dict.fromkeys(inputs))
+
+
+def semantic_description_audit(conn, details=False):
+    """Audit legacy keyword descriptions and produce a source-backed re-ingest set."""
+    rows = conn.execute(
+        "SELECT path,title,description FROM nodes "
+        "WHERE type='entity' AND entity_subtype='keyword' ORDER BY path"
+    ).fetchall()
+    reason_counts = {}
+    identity_issue_counts = {}
+    items = []
+    reingest_pages = {}
+    identity_issues = _keyword_identity_issues(rows)
+    for row in rows:
+        reason = keyword_description_issue(row["title"], row["description"])
+        if not reason:
+            continue
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        identity_issue = identity_issues.get(str(row["path"]), "")
+        if identity_issue:
+            identity_issue_counts[identity_issue] = identity_issue_counts.get(identity_issue, 0) + 1
+        gloss_count = conn.execute(
+            "SELECT COUNT(*) FROM node_glosses WHERE node_path=?", (row["path"],)
+        ).fetchone()[0]
+        origins = _node_origin_pages(conn, row["path"])
+        backed_origins = []
+        for page in (origins if not identity_issue else []):
+            raw_inputs = _page_raw_inputs(page)
+            if not raw_inputs:
+                continue
+            backed_origins.append({"page": page, "raw_inputs": raw_inputs})
+            reingest_pages.setdefault(page, set()).update(raw_inputs)
+        items.append({
+            "node": str(row["path"]),
+            "title": str(row["title"] or ""),
+            "issue": reason,
+            "identity_issue": identity_issue,
+            "gloss_count": gloss_count,
+            "origin_count": len(origins),
+            "source_backed_origins": backed_origins,
+            "decision": (
+                "identity_review" if identity_issue else
+                "reingest_sources" if backed_origins else
+                "insufficient_lineage"
+            ),
+        })
+    recoverable = sum(item["decision"] == "reingest_sources" for item in items)
+    lineage_blocked = sum(item["decision"] == "insufficient_lineage" for item in items)
+    result = {
+        "keyword_count": len(rows),
+        "valid_description_count": len(rows) - len(items),
+        "issue_count": len(items),
+        "issues": reason_counts,
+        "identity_issues": identity_issue_counts,
+        "identity_review_nodes": sum(item["decision"] == "identity_review" for item in items),
+        "source_recoverable_nodes": recoverable,
+        "lineage_blocked_nodes": lineage_blocked,
+        "reingest_page_count": len(reingest_pages),
+    }
+    if details:
+        result["nodes"] = items
+        result["reingest_pages"] = [
+            {"page": page, "raw_inputs": sorted(raw_inputs)}
+            for page, raw_inputs in sorted(reingest_pages.items())
+        ]
+    return result
+
+
 def execute_targeted_orphans(conn, node_paths, apply=False):
     if not apply:
         return targeted_orphan_nodes(conn, node_paths, False)
@@ -413,6 +607,9 @@ def main(argv=None):
                         help="只迁移/补齐文件节点与 Wiki→来源→Raw 模型")
     parser.add_argument("--orphan-node", action="append", default=[],
                         help="显式检查无边、无时态事实的 entity；可重复，配合 --apply 删除")
+    parser.add_argument("--description-audit", action="store_true",
+                        help="只读审计 keyword description/gloss 与可重摄入来源")
+    parser.add_argument("--details", action="store_true", help="审计时输出逐节点详情")
     args = parser.parse_args(argv)
 
     db_path = Path(args.db) if args.db else gl.GRAPH_DB
@@ -421,7 +618,13 @@ def main(argv=None):
         return 2
     conn = gl.connect(str(db_path))
     try:
-        if args.orphan_node:
+        if args.description_audit:
+            print(json.dumps(
+                semantic_description_audit(conn, details=args.details),
+                ensure_ascii=False,
+                indent=2,
+            ))
+        elif args.orphan_node:
             apply = args.apply and not args.dry_run
             result = execute_targeted_orphans(conn, args.orphan_node, apply)
             print(json.dumps({"applied": apply, "nodes": result}, ensure_ascii=False, indent=2))

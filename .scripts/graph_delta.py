@@ -9,11 +9,17 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from collections import deque
+import hashlib
+import json
 import re
 from typing import Callable, Iterable
 
 import graph_lib as gl
 import node_semantics as ns
+
+
+GRAPH_DELTA_CONTRACT_VERSION = "graph-delta-v1"
+GRAPH_DELTA_VALIDATOR_VERSION = "graph-delta-validator-v1"
 
 
 @dataclass
@@ -25,6 +31,7 @@ class GraphDelta:
     boundary_mentions: list[str]
     deterministic_edges: int
     semantic_edges: int
+    concept_glosses: list[dict] = field(default_factory=list)
     canonical_endpoints: list[str] = field(default_factory=list)
     deterministic_metadata_endpoints: dict[str, str] = field(default_factory=dict)
     hard_errors: list[str] = field(default_factory=list)
@@ -35,6 +42,13 @@ class GraphDelta:
 
 class DeltaContractError(ValueError):
     """GraphDelta 的最小硬结构不满足，禁止进入融合。"""
+
+
+def _content_hash(value: object) -> str:
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _clean_edge(edge: dict, page: str) -> tuple[dict | None, str | None]:
@@ -65,6 +79,7 @@ def build_document_delta(
     frontmatter: dict,
     triples: Iterable[dict],
     deterministic_triple_count: int = 0,
+    concept_glosses: Iterable[dict] | None = None,
 ) -> GraphDelta:
     """构造纯内存文档子图；只检查端点、来源骨架和完全重复边。"""
     page = str(page or "").removesuffix(".md").strip()
@@ -150,6 +165,24 @@ def build_document_delta(
         for endpoint, kinds in metadata_modes.items() if len(kinds) == 1
     }
 
+    cleaned_glosses = []
+    seen_glosses = set()
+    for gloss in concept_glosses or []:
+        mention = str(gloss.get("mention") or gloss.get("name") or "").strip()
+        description = str(gloss.get("description") or "").strip()
+        source = str(gloss.get("source") or "").strip()
+        if not mention or not description or not source:
+            continue
+        key = (mention, source)
+        if key in seen_glosses:
+            continue
+        seen_glosses.add(key)
+        cleaned_glosses.append({
+            "mention": mention,
+            "description": description,
+            "source": source,
+        })
+
     deterministic_triple_count = max(0, min(int(deterministic_triple_count), len(cleaned_triples)))
     return GraphDelta(
         page=page,
@@ -159,6 +192,7 @@ def build_document_delta(
         boundary_mentions=mentions,
         deterministic_edges=len(source_edges) + deterministic_triple_count,
         semantic_edges=len(cleaned_triples) - deterministic_triple_count,
+        concept_glosses=cleaned_glosses,
         canonical_endpoints=canonical_endpoints,
         deterministic_metadata_endpoints=deterministic_metadata_endpoints,
         hard_errors=hard_errors,
@@ -184,7 +218,10 @@ def _exact_candidates(name: str, title_idx: dict, alias_idx: dict, suffix_idx: d
 
 
 def _mention_context(delta: GraphDelta, mention: str) -> str:
-    lines = []
+    lines = [
+        gloss["description"] for gloss in delta.concept_glosses
+        if gloss.get("mention") == mention and gloss.get("description")
+    ]
     for edge in knowledge_edges(delta):
         if mention not in (edge["subject"], edge["object"]):
             continue
@@ -201,6 +238,30 @@ def _mention_node_types(delta: GraphDelta, mention: str) -> list[str] | None:
     if related and all(edge.get("predicate") == "引用" for edge in related):
         return None
     return ["entity"]
+
+
+PROPOSITION_PREDICATES = {"核心创新点", "局限性", "未来展望"}
+
+
+def _mention_is_proposition(delta: GraphDelta, mention: str) -> bool:
+    """Return whether the edge contract assigns this mention proposition identity."""
+    for edge in knowledge_edges(delta):
+        predicate = edge.get("predicate")
+        if edge.get("object") == mention and predicate in PROPOSITION_PREDICATES:
+            return True
+        if edge.get("subject") == mention and predicate == "包含":
+            return True
+    return False
+
+
+def _proposition_candidates(conn, candidates: list[str]) -> list[str]:
+    """Keep exact candidates that are already proposition nodes."""
+    return [
+        candidate for candidate in candidates
+        if (row := conn.execute(
+            "SELECT entity_subtype FROM nodes WHERE path=?", (candidate,)
+        ).fetchone()) is not None and row["entity_subtype"] == "proposition"
+    ]
 
 
 def _venue_identity_key(value: str) -> str:
@@ -288,6 +349,36 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
                     "reason": resolution.get("reason", "canonical_id_not_found"),
                 })
             continue
+        if _mention_is_proposition(delta, mention):
+            candidates = _proposition_candidates(
+                conn, _exact_candidates(mention, title_idx, alias_idx, suffix_idx))
+            if len(candidates) == 1:
+                target = candidates[0]
+                decisions.append({
+                    "mention": mention,
+                    "action": "reuse_unique_proposition",
+                    "target": target,
+                    "candidate_count": 1,
+                })
+                merge_map[mention] = target
+            elif len(candidates) > 1:
+                item = {
+                    "mention": mention,
+                    "action": "abstain_ambiguous_proposition",
+                    "candidates": candidates,
+                    "candidate_count": len(candidates),
+                }
+                decisions.append(item)
+                ambiguous.append(item)
+            else:
+                decisions.append({
+                    "mention": mention,
+                    "action": "create_local_proposition",
+                    "target": mention,
+                    "reason": "proposition_identity_preserved",
+                })
+                new_nodes.append(mention)
+            continue
         candidates = _exact_candidates(mention, title_idx, alias_idx, suffix_idx)
         if len(candidates) == 1:
             resolved = candidates[0]
@@ -344,13 +435,15 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
                 semantic_candidates = resolution.get("candidates", [])
                 item = {
                     "mention": mention,
-                    "action": "abstain_ambiguous",
+                    "action": "keep_local_ambiguous",
+                    "target": mention,
                     "candidates": [candidate.get("node_id", "") for candidate in semantic_candidates],
                     "candidate_count": len(semantic_candidates),
                     "reason": resolution.get("reason", "semantic_identity_ambiguous"),
                 }
                 decisions.append(item)
                 ambiguous.append(item)
+                new_nodes.append(mention)
             else:
                 decisions.append({
                     "mention": mention,
@@ -461,6 +554,23 @@ def run_query_probes(conn, delta: GraphDelta, attach_plan: dict) -> dict:
 def inspect_delta(conn, delta: GraphDelta, attach_plan: dict | None = None) -> dict:
     attach_plan = attach_plan or plan_attachment(conn, delta)
     probes = run_query_probes(conn, delta, attach_plan)
+    receipt = {
+        "contract_version": GRAPH_DELTA_CONTRACT_VERSION,
+        "validator_version": GRAPH_DELTA_VALIDATOR_VERSION,
+        "delta_sha256": _content_hash(delta.to_dict()),
+        "attach_plan_sha256": _content_hash(attach_plan),
+        "status": "prevalidated" if not delta.hard_errors else "rejected",
+        "checks": {
+            "hard_structure": not delta.hard_errors,
+            "query_overlay_usable": bool(probes.get("usable")),
+            "wiki_anchor_discriminable": bool(probes.get("anchor_discriminable")),
+            "raw_reachable_when_applicable": (
+                probes.get("raw_reachable_one_hop")
+                if probes.get("raw_probe_applicable") else None
+            ),
+        },
+        "outer_commit_required": True,
+    }
     return {
         "subgraph": {
             "page": delta.page,
@@ -473,6 +583,7 @@ def inspect_delta(conn, delta: GraphDelta, attach_plan: dict | None = None) -> d
         },
         "attach_plan": attach_plan,
         "query_probes": probes,
+        "validation_receipt": receipt,
     }
 
 
@@ -516,8 +627,23 @@ def fuse_with_savepoint(
         raise
     inspection["fusion"] = {
         "committed": True,
+        "transaction_state": "savepoint_released",
+        "outer_commit_required": True,
         "sqlite_changes": conn.total_changes - before_changes,
         "hard_errors": [],
         "soft_probe_blocking": False,
     }
+    receipt = inspection.setdefault("validation_receipt", {})
+    receipt.update({
+        "contract_version": GRAPH_DELTA_CONTRACT_VERSION,
+        "validator_version": GRAPH_DELTA_VALIDATOR_VERSION,
+        "delta_sha256": receipt.get("delta_sha256") or _content_hash(delta.to_dict()),
+        "status": "validated",
+        "savepoint": "released",
+        "sqlite_changes": conn.total_changes - before_changes,
+        "postconditions": {
+            "wiki_anchor_and_raw_lineage": True,
+        },
+        "outer_commit_required": True,
+    })
     return result, inspection

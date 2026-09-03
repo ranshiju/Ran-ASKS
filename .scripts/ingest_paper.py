@@ -34,19 +34,24 @@ from predicate_governance import DEFAULT_CONFIG, govern as govern_predicates, no
 from llm_structured import call_json, call_text, ingest_mode
 import ingest_common as ic
 import ingest_pipeline
+import recovery_policy as rp
 import source_fingerprints as sf
 import wiki_locator as wl
-from ingest_common import (parse_meta_block, validate_meta, extract_year_from_meta,
-                           has_type_mismatch, has_year_mismatch,
+from ingest_common import (parse_meta_block, validate_meta,
                            progress, parse_delimited, parse_check_errors,
                            set_progress_file, set_progress_log_path, get_progress_log_path,
                            close_progress_file)
 from wiki_skeleton import extract_authors_from_text
 
 TEMP_EXTRACT = REPO / "temp" / "inbox-extract"
-MAX_RETRIES = 3
 MIN_SEMANTIC_TRIPLES = 4
 MAX_SPARSE_SLOT_RETRIES = 1
+PAPER_RECOVERY_LIMITS = rp.normalize_limits({
+    "wiki_revision": 1,
+    "semantic_revision": 1,
+    "deterministic_repair": 1,
+    "subagent": 1,
+})
 _PAPER_CONTEXT_PROFILE = ic.CONTEXT_PROFILES["paper"]
 FULL_TEXT_MAX_CHARS = _PAPER_CONTEXT_PROFILE["full_text_max_chars"]
 REDUCED_CONTEXT_MAX_CHARS = _PAPER_CONTEXT_PROFILE["reduced_context_max_chars"]
@@ -66,10 +71,15 @@ SLOTS_DELIMITER = "<<<SLOTS>>>"
 STOP_WORDS = {"of", "and", "the", "a", "an", "in", "on", "for", "to", "with",
               "from", "by", "at", "as", "is", "are", "via", "using"}
 
-KNOWN_SECTIONS = {"期刊", "研究基础", "核心方法", "核心创新点", "局限性",
-                  "未来展望", "研究关键词", "对比方法", "通讯作者", "自由边",
-                  "研究方向"}
-KNOWN_SECTIONS = {"期刊", "第一作者", "其他作者", "通讯作者", "三元组"}
+LEGACY_SLOT_SECTIONS = {
+    "期刊", "研究基础", "核心方法", "核心创新点", "局限性", "未来展望",
+    "研究关键词", "对比方法", "通讯作者", "自由边", "研究方向",
+}
+CURRENT_SLOT_SECTIONS = {
+    "期刊", "第一作者", "其他作者", "通讯作者", "三元组", "概念说明",
+}
+KNOWN_SECTIONS = LEGACY_SLOT_SECTIONS | CURRENT_SLOT_SECTIONS
+PAPER_SEMANTIC_CONTRACT_VERSION = "paper-semantic-v1"
 SEMANTIC_PREDICATES = {
     "作者", "通讯作者", "引用", "发表于", "主要研究", "涉及", "研究基础", "核心方法",
     "核心创新点", "局限性", "未来展望", "研究关键词", "对比方法", "所属", "就读", "导师",
@@ -88,7 +98,7 @@ PIPELINE_PLAN_AGENT = [
     {"step": "判断重复 + 提取全文", "needs_agent": False,
      "desc": "dedup(查图+查raw/DOI/arxiv匹配) → MinerU 解析 PDF 为 paper.md，一次程序调用完成"},
     {"step": "书目预审门", "needs_agent": True,
-     "desc": "agent 接管：仅裁决程序候选并向 temp/<txn>/bibliographic-review.json 输出受约束 JSON；manual_required 禁止落位"},
+     "desc": "agent 接管：裁决程序候选或提交 Raw 定位约束的作者修正，并向 temp/<txn>/bibliographic-review.json 输出受约束 JSON；manual_required 禁止落位"},
     {"step": "撰写 wiki 与语义槽", "needs_agent": True,
      "desc": "agent 接管：读 paper.md → 填骨架 Navigation/Content → 抽取语义槽，一次输出 <<<WIKI>>> + <<<SLOTS>>>"},
     {"step": "更新 Graph + 校验 + 收尾", "needs_agent": False,
@@ -737,7 +747,7 @@ def _resume_relationship_review(state: dict) -> bool:
         "worker": review_state.get("worker") or {},
     }
     persist_bibliographic_metadata(REPO / state["extract_dir"], state.get("bibliographic_meta"))
-    state["status"] = "write_wiki"
+    inbox_state.transition(state, "write_wiki", reason="relationship_review_accepted")
     state["agent_required"] = False
     state["agent_prompt"] = ""
     state["agent_write_to"] = ""
@@ -1030,6 +1040,7 @@ def salvage_slots_without_delimiter(text: str) -> str:
         r"(?im)^\s*<+\s*\n\s*/?SLOTS\s*>+\s*$", "", candidate,
     ).strip()
     candidate = re.sub(r"(?im)^\s*<+\s*/?SLOTS\s*>+\s*$", "", candidate).strip()
+    candidate = re.sub(r"(?im)^\s*<<<END>>>\s*$", "", candidate).strip()
     if re.search(r"(?m)^三元组[:：]\s*$", candidate) and re.search(
             r"(?m)^\s*[^|\n]+\|[^|\n]+\|[^|\n]+\s*$", candidate):
         return candidate
@@ -1039,7 +1050,7 @@ def salvage_slots_without_delimiter(text: str) -> str:
         and all(parts)
         for line in lines
     ):
-        return candidate
+        return "三元组:\n" + candidate
     return ""
 
 
@@ -1092,7 +1103,7 @@ def load_bibliographic_metadata(raw_dir: Path) -> dict:
 
 BIBLIOGRAPHIC_REVIEW_OPERATION = "ingest_bibliographic_review"
 BIBLIOGRAPHIC_REVIEW_FIELDS = ("title", "authors", "year", "venue", "doi", "arxiv_id")
-BIBLIOGRAPHIC_DECISION_PROTOCOL = "candidate-id-v1"
+BIBLIOGRAPHIC_DECISION_PROTOCOL = "candidate-id-v2"
 BIBLIOGRAPHIC_SCALAR_FIELDS = ("title", "year", "venue", "doi", "arxiv_id")
 AFFILIATION_HINT_RE = re.compile(
     r"\b(?:university|universit[aä]t|institute|institution|laborator(?:y|ies)|lab\.?|"
@@ -1129,20 +1140,30 @@ def _repeated_title_authors(md_text: str) -> list[str]:
         candidate_title = _clean_title_candidate(line[2:])
         if " ".join(candidate_title.casefold().split()) != normalized_title:
             continue
-        author_line = next((item.strip() for item in lines[index + 1:] if item.strip()), "")
-        if not author_line or re.search(r"\bTo cite this article\b", author_line, re.I):
-            continue
-        author_line = re.sub(r"<sup\b[^>]*>.*?</sup>", "", author_line, flags=re.I)
-        authors = []
-        for value in re.split(r",\s*|\s+and\s+", author_line):
-            value = " ".join(value.split()).strip(" ,")
-            tokens = value.split()
-            if not 2 <= len(tokens) <= 5 or AFFILIATION_HINT_RE.search(value):
+        for item in lines[index + 1:index + 12]:
+            author_line = item.strip()
+            if not author_line:
                 continue
-            if all(_AUTHOR_TOKEN_RE.fullmatch(token) for token in tokens):
-                authors.append(value)
-        if authors:
-            groups.append(authors)
+            if author_line.startswith("#") or re.fullmatch(
+                    r"(?:PAPER|OPEN ACCESS|ARTICLE|RESEARCH ARTICLE)", author_line, re.I):
+                continue
+            if re.search(
+                    r"\b(?:To cite this article|RECEIVED|REVISED|ACCEPTED|PUBLISHED)\b",
+                    author_line, re.I):
+                break
+            author_line = re.sub(r"<sup\b[^>]*>.*?</sup>", "", author_line, flags=re.I)
+            authors = []
+            for value in re.split(r",\s*|\s+and\s+", author_line):
+                value = " ".join(value.split()).strip(" ,")
+                value = re.sub(r"[^\wÀ-ÿ'’.\-\s]+$", "", value).strip()
+                tokens = value.split()
+                if not 2 <= len(tokens) <= 5 or AFFILIATION_HINT_RE.search(value):
+                    continue
+                if all(_AUTHOR_TOKEN_RE.fullmatch(token) for token in tokens):
+                    authors.append(value)
+            if authors:
+                groups.append(authors)
+            break
     return max(groups, key=len, default=[])
 
 
@@ -1221,8 +1242,8 @@ def _first_page_venue_candidates(evidence_lines) -> list[str]:
 def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> dict:
     """从 PDF 近端证据与 MinerU 文本生成程序候选。
 
-    PDF metadata 与 paper.md 机械提取都可能混入机构，因此后续 Worker 只能
-    选择候选 ID；最终值、rejected 与 evidence 均由程序按候选目录编译。
+    PDF metadata 与 paper.md 机械提取都可能混入机构，因此后续 Worker 优先
+    选择候选 ID；只有作者候选不完整时才可提交带 Raw locator 的逐人修正。
     """
     bibliography = bibliography or {}
     pdf_authors = [str(author).strip() for author in (bibliography.get("authors") or [])]
@@ -1307,7 +1328,7 @@ def bibliographic_review_schema(value) -> bool:
 
 
 def bibliographic_decision_schema(value) -> bool:
-    """Validate the compact candidate-ID worker response."""
+    """Validate the compact candidate-ID plus evidence-bound author response."""
     if not isinstance(value, dict) or set(value) != {
         "protocol_version", "doc_type", "review_status", "selections",
         "conflicts", "review_notes",
@@ -1351,7 +1372,7 @@ def bibliographic_decision_schema(value) -> bool:
         return False
     authors = selections.get("authors")
     if not isinstance(authors, dict) or set(authors) != {
-        "accepted_ids", "rejected_ids", "status",
+        "accepted_ids", "rejected_ids", "proposed", "status",
     }:
         return False
     if not isinstance(authors.get("accepted_ids"), list) or not isinstance(
@@ -1361,6 +1382,17 @@ def bibliographic_decision_schema(value) -> bool:
     if not all(isinstance(item, str) for item in authors.get("accepted_ids", [])):
         return False
     if not all(isinstance(item, str) for item in authors.get("rejected_ids", [])):
+        return False
+    proposed = authors.get("proposed")
+    if not isinstance(proposed, list) or not all(
+        isinstance(item, dict)
+        and set(item) == {"value", "evidence"}
+        and isinstance(item.get("value"), str)
+        and bool(item["value"].strip())
+        and isinstance(item.get("evidence"), str)
+        and bool(item["evidence"].strip())
+        for item in proposed
+    ):
         return False
     return authors.get("status") in {"confirmed", "corrected", "ambiguous"}
 
@@ -1405,8 +1437,10 @@ def build_bibliographic_candidate_catalog(
     return {"protocol_version": BIBLIOGRAPHIC_DECISION_PROTOCOL, "fields": fields}
 
 
-def compile_bibliographic_decision(decision: dict, catalog: dict) -> dict:
-    """Compile candidate IDs into the existing locked-review representation."""
+def compile_bibliographic_decision(
+    decision: dict, catalog: dict, md_text: str = "",
+) -> dict:
+    """Compile candidate IDs and validated author proposals into locked metadata."""
     if not bibliographic_decision_schema(decision):
         raise ValueError("candidate-id 书目裁决不符合 schema")
     indexes = {
@@ -1448,13 +1482,27 @@ def compile_bibliographic_decision(decision: dict, catalog: dict) -> dict:
     }
     accepted_ids = selections["authors"]["accepted_ids"]
     rejected_ids = selections["authors"]["rejected_ids"]
+    proposed = selections["authors"]["proposed"]
     if len(set(accepted_ids)) != len(accepted_ids) or len(set(rejected_ids)) != len(rejected_ids):
         raise ValueError("authors candidate_id 不得重复")
     if set(accepted_ids) & set(rejected_ids):
         raise ValueError("同一 author candidate_id 不能同时接受和拒绝")
-    if not accepted_ids and selections["authors"]["status"] != "ambiguous":
-        raise ValueError("authors 未接受 candidate_id 时 status 必须为 ambiguous")
-    accepted = [selected("authors", candidate_id) for candidate_id in accepted_ids]
+    if proposed and accepted_ids:
+        raise ValueError("authors.proposed 非空时 accepted_ids 必须为空")
+    if proposed and (
+            selections["authors"]["status"] != "corrected"
+            or decision["review_status"] != "corrected"):
+        raise ValueError("authors.proposed 必须将 authors.status 与 review_status 标为 corrected")
+    if not accepted_ids and not proposed and selections["authors"]["status"] != "ambiguous":
+        raise ValueError("authors 未接受 candidate_id 或 proposed 时 status 必须为 ambiguous")
+    proposal_errors = _validate_author_proposals(proposed, md_text)
+    if proposal_errors:
+        raise ValueError("authors.proposed 校验失败: " + "; ".join(proposal_errors))
+    accepted = (
+        [(item["value"].strip(), item["evidence"].strip()) for item in proposed]
+        if proposed else
+        [selected("authors", candidate_id) for candidate_id in accepted_ids]
+    )
     rejected = [selected("authors", candidate_id) for candidate_id in rejected_ids]
     author_evidence = ", ".join(dict.fromkeys(
         evidence for _value, evidence in accepted + rejected if evidence
@@ -1507,6 +1555,7 @@ def _deterministic_bibliographic_decision(
             "authors": {
                 "accepted_ids": [item["id"] for item in fields["authors"]],
                 "rejected_ids": [],
+                "proposed": [],
                 "status": "confirmed",
             },
             "year": {
@@ -1618,6 +1667,58 @@ def _bibliographic_evidence_contains(value: str, locator: str, md_text: str) -> 
     needle = _bibliographic_text_key(value)
     haystack = _bibliographic_text_key(_bibliographic_evidence_text(lines[start - 1:end]))
     return len(needle) >= 2 and needle in haystack
+
+
+def _author_value_issue(value: str) -> str:
+    """Return a deterministic reason when one author value is not one person."""
+    text = " ".join(str(value or "").split()).strip()
+    if not text:
+        return "empty author"
+    if re.search(r"\bet\s+al\.?\b", text, re.I):
+        return "et al is not an author identity"
+    if AFFILIATION_HINT_RE.search(text):
+        return "affiliation-like author"
+    if re.search(r"\s+(?:and|&)\s+", text, re.I) or ";" in text or "、" in text:
+        return "multiple authors in one value"
+    if text.count(",") + text.count("，") >= 2:
+        return "multiple authors in one comma-delimited value"
+    comma_parts = [part.strip() for part in re.split(r"[,，]", text)]
+    if len(comma_parts) == 2 and all(len(part.split()) >= 2 for part in comma_parts):
+        return "multiple authors in one comma-delimited value"
+    return ""
+
+
+def _validate_author_proposals(proposed: list[dict], md_text: str) -> list[str]:
+    """Validate Worker author expansions against the bounded title-page evidence."""
+    errors = []
+    seen = set()
+    order_keys = []
+    lines = md_text.splitlines()
+    for item in proposed:
+        value = str(item.get("value") or "").strip()
+        evidence = str(item.get("evidence") or "").strip()
+        match = re.fullmatch(r"paper\.md#L(\d+)(?:-L?(\d+))?", evidence)
+        if not match or int(match.group(2) or match.group(1)) > 40:
+            errors.append(f"{value}: evidence 必须位于 Worker 标题邻域前 40 行")
+            continue
+        if not _bibliographic_evidence_contains(value, evidence, md_text):
+            errors.append(f"{value}: 未在 {evidence} 逐字命中")
+        else:
+            start = int(match.group(1))
+            end = int(match.group(2) or start)
+            haystack = _bibliographic_text_key(
+                _bibliographic_evidence_text(lines[start - 1:end]))
+            order_keys.append((start, haystack.find(_bibliographic_text_key(value))))
+        issue = _author_value_issue(value)
+        if issue:
+            errors.append(f"{value}: {issue}")
+        key = _bibliographic_text_key(value)
+        if key in seen:
+            errors.append(f"{value}: proposed 作者重复")
+        seen.add(key)
+    if len(order_keys) == len(proposed) and order_keys != sorted(order_keys):
+        errors.append("proposed 作者顺序与 Raw 证据不一致")
+    return errors
 
 
 def repair_bibliographic_evidence_locators(review: dict, md_text: str) -> list[dict]:
@@ -1763,6 +1864,14 @@ def validate_bibliographic_review(
         errors.append("rejected 包含未出现在作者候选项中的片段: " + ", ".join(sorted(unknown_rejected)))
     if accepted & rejected:
         errors.append("authors 不能同时出现在 value 和 rejected")
+    for author in authors.get("value") or []:
+        issue = _author_value_issue(author)
+        if issue:
+            errors.append(f"authors 值不是单一人物: {author} ({issue})")
+    expected_authors = _repeated_title_authors(md_text)
+    missing_authors = [author for author in expected_authors if author not in accepted]
+    if missing_authors:
+        errors.append("authors 缺少标题作者块中的姓名: " + ", ".join(missing_authors))
     if (review.get("doc_type") == "paper"
             and review.get("review_status") != "manual_required"
             and not bib.get("title", {}).get("value", "").strip()):
@@ -1794,7 +1903,7 @@ def _paper_md_review_view(md_text: str) -> tuple[str, str]:
 
 def build_bibliographic_review_prompt(catalog: dict, md_text: str) -> str:
     title_view, evidence_view = _paper_md_review_view(md_text)
-    return f"""你是受程序约束的论文书目候选裁决 Worker。一次处理整篇书目，只能返回候选 ID，不得复制、改写或生成书目字符串，也不得生成 evidence locator。
+    return f"""你是受程序约束的论文书目裁决 Worker。一次处理整篇书目，优先返回候选 ID；只有作者候选不完整时可从给定标题邻域逐字提出带 evidence locator 的作者。其他字段不得复制、改写或生成候选外字符串或 locator。
 
 目标：锁定本篇论文的书目事实；排除机构/实验室/大学/公司等 affiliation 片段；year 区分 published/accepted/received/revised，发表年份优先。
 
@@ -1814,7 +1923,7 @@ def build_bibliographic_review_prompt(catalog: dict, md_text: str) -> str:
   "review_status": "clean|corrected|ambiguous|manual_required",
   "selections": {{
     "title": {{"candidate_id": "title-01", "status": "confirmed|corrected|ambiguous"}},
-    "authors": {{"accepted_ids": ["author-01"], "rejected_ids": ["author-02"], "status": "confirmed|corrected|ambiguous"}},
+    "authors": {{"accepted_ids": ["author-01"], "rejected_ids": ["author-02"], "proposed": [{{"value": "Raw 中的单个作者名", "evidence": "paper.md#L12"}}], "status": "confirmed|corrected|ambiguous"}},
     "year": {{"candidate_id": "year-01", "kind": "published|accepted|received|revised|unknown", "status": "confirmed|corrected|ambiguous"}},
     "venue": {{"candidate_id": "", "status": "ambiguous"}},
     "doi": {{"candidate_id": "", "status": "ambiguous"}},
@@ -1827,9 +1936,11 @@ def build_bibliographic_review_prompt(catalog: dict, md_text: str) -> str:
 约束：
 1. 只能引用候选目录中对应字段的 id；不选择时 candidate_id 写空字符串。
 2. authors.accepted_ids/rejected_ids 只能引用 author-*，不得重复或交叉。
-3. rejected_ids 只标记候选目录中误识别为作者的机构；候选外机构仅可在 review_notes 描述。
-4. 无法裁决时对应 status=ambiguous 且 review_status=manual_required。
-5. 一次返回所有字段，禁止建议后续逐字段调用。"""
+3. 候选作者完整时 proposed=[]；候选缺失或含多人合并值时，accepted_ids=[]，proposed 必须给出标题邻域中完整、有序、逐人拆分的作者列表，每项 value 必须逐字出现在 evidence 指向的前 40 行窗口。
+4. proposed 不得包含 et al、机构或多人合并值；使用 proposed 时 authors.status 与 review_status 都必须为 corrected。
+5. rejected_ids 只标记候选目录中误识别为作者的机构或多人合并值；候选外机构仅可在 review_notes 描述。
+6. 无法裁决时对应 status=ambiguous 且 review_status=manual_required；不要猜测。
+7. 一次返回所有字段，禁止建议后续逐字段调用。"""
 
 
 def merge_bibliographic_review(bibliography: dict | None, review: dict) -> dict:
@@ -1867,7 +1978,7 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
     返回字典中的 status：
     - ok: merged 为锁定书目
     - agent_required: 应由当前 agent 处理 prompt
-    - bibliographic_review_required: LLM 无法裁决或类型不是 paper
+    - bibliographic_review_required: 类型不是 paper 或无法形成可恢复裁决
     - validation_error: 结构/候选边界未通过
     """
     bibliography = bibliography or {}
@@ -1900,7 +2011,10 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
             retries=0,
             operation=BIBLIOGRAPHIC_REVIEW_OPERATION,
             transaction_id=transaction_id,
-            system="你是书目候选 ID 裁决 Worker，只引用候选 ID 并输出 JSON。",
+            system=(
+                "你是证据约束的书目裁决 Worker。优先引用候选 ID；仅作者候选不完整时，"
+                "可从给定 paper.md 标题邻域逐字提出带 locator 的作者，并输出 JSON。"
+            ),
         )
         worker["api_called"] = bool(result.get("history"))
         if result.get("status") == "agent_required":
@@ -1927,7 +2041,7 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
             }
         decision = result.get("parsed")
     try:
-        review = compile_bibliographic_decision(decision, catalog)
+        review = compile_bibliographic_decision(decision, catalog, md_text)
     except ValueError as exc:
         return {
             "ok": False,
@@ -1958,8 +2072,27 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
         }
     if not worker["skipped"]:
         _save_bibliographic_decision_cache(transaction_id, input_hash, decision)
+    if review.get("doc_type") == "paper" and review.get("review_status") == "manual_required":
+        return {
+            "ok": False,
+            "status": "agent_required",
+            "agent_prompt": (
+                prompt
+                + "\n\nWorker 无法锁定作者或书目字段。请作为 Agent 复核上述有限证据，"
+                + f"仍按 {BIBLIOGRAPHIC_DECISION_PROTOCOL} schema 输出；"
+                + "作者候选不完整时可使用 evidence-bound proposed。"
+                + "\n\nWorker 未决裁决：\n"
+                + json.dumps(decision, ensure_ascii=False, indent=2)
+            ),
+            "review": review,
+            "decision": decision,
+            "candidates": candidates,
+            "catalog": catalog,
+            "input_hash": input_hash,
+            "worker": worker,
+        }
     if (review.get("doc_type") != "paper"
-            or review.get("review_status") in {"ambiguous", "manual_required"}):
+            or review.get("review_status") == "ambiguous"):
         reason = f"review_status={review.get('review_status')}" if review.get("doc_type") == "paper" else f"doc_type={review.get('doc_type')}"
         return {
             "ok": False,
@@ -2027,7 +2160,7 @@ def _resume_bibliographic_review(state: dict) -> bool:
     decision = review if bibliographic_decision_schema(review) else None
     if decision:
         try:
-            review = compile_bibliographic_decision(decision, catalog)
+            review = compile_bibliographic_decision(decision, catalog, md_text)
         except ValueError as exc:
             state["errors"] = [str(exc)]
             return False
@@ -2042,7 +2175,10 @@ def _resume_bibliographic_review(state: dict) -> bool:
     if (review.get("doc_type") != "paper"
             or review.get("review_status") in {"ambiguous", "manual_required"}):
         state["bibliographic_review_required"] = True
-        state["status"] = "bibliographic_review_required"
+        inbox_state.transition(
+            state, "bibliographic_review_required",
+            reason="bibliographic_review_requires_human_decision",
+        )
         state["errors"] = ["书目预审无法锁定论文书目"]
         return True
     state["bibliographic_meta"] = merge_bibliographic_review(state.get("bibliographic_meta"), review)
@@ -2061,7 +2197,7 @@ def _resume_bibliographic_review(state: dict) -> bool:
         "worker": review_state.get("worker", {}),
     }
     state["bibliographic_review_required"] = False
-    state["status"] = "write_wiki"
+    inbox_state.transition(state, "write_wiki", reason="bibliographic_review_accepted")
     state["agent_required"] = False
     state["agent_prompt"] = ""
     state["pre_handoff_status"] = ""
@@ -2302,19 +2438,19 @@ def step_extract(state: dict) -> tuple[bool, str]:
     md_text = paper_md.read_text(encoding="utf-8")
     review_result = review_bibliographic_metadata(
         state.get("bibliographic_meta"), md_text, state.get("transaction_id", ""))
-    if (review_result.get("worker") or {}).get("api_called"):
-        ic.record_llm_call(state, "bibliographic_review")
     if review_result.get("status") == "agent_required":
         draft_rel = str(extract_dir.relative_to(REPO) / "bibliographic-review.json")
         state["agent_required"] = True
         state["pre_handoff_status"] = "extract"
         state["agent_prompt"] = (
             review_result.get("agent_prompt", "")
-            + f"\n\n请将符合 candidate-id-v1 schema 的候选 ID 裁决 JSON 写入 `{draft_rel}`，"
+            + f"\n\n请将符合 {BIBLIOGRAPHIC_DECISION_PROTOCOL} schema 的书目裁决 JSON 写入 `{draft_rel}`，"
             + f"然后运行 `{_resume_cmd(state)}`。"
         )
         state["bibliographic_review"] = {
             "status": "agent_required",
+            "review": review_result.get("review", {}),
+            "decision": review_result.get("decision"),
             "candidates": review_result.get("candidates", {}),
             "catalog": review_result.get("catalog", {}),
             "input_hash": review_result.get("input_hash", ""),
@@ -2370,8 +2506,6 @@ def step_extract(state: dict) -> tuple[bool, str]:
     pending_relation = state.get("raw_relationship") or {}
     if pending_relation.get("uncertain") and state.get("relation_candidates"):
         relationship_result = review_uncertain_relationship(state, paper_md)
-        if (relationship_result.get("worker") or {}).get("api_called"):
-            ic.record_llm_call(state, "relationship_review")
         if not relationship_result.get("ok"):
             draft_path = extract_dir / "relationship-review.json"
             if isinstance(relationship_result.get("decision"), dict):
@@ -2483,16 +2617,27 @@ def build_wiki_prompt(md_text: str, skeleton: str, errors: list[str] | None = No
 7. 骨架 frontmatter 中带 `# <-- LLM 填 -->` 注释的字段由你填实值，填完后删除该注释；程序已确定性填好的 date/venue 等字段必须原样保留；`related` 若本次无可填 `[]`。
 8. 上下文每个可引用行前都有程序提供的 `<raw-path#Lx>`。每个事实段落或事实列表项末尾用 `[^rN]` 引用一个或多个这些 handle；不得自造行号，也不得引用 `#全篇`。
 9. 页面末尾写 `## Sources`，每个定义严格为单独一行 `[^rN]: raw-path#Lx`。定义只能复制上下文中实际出现的 handle，正文不复制 `<...>` 标记。
-10. 输出完整 wiki markdown（含 frontmatter），用 <<<WIKI>>> 分隔符包裹。
+10. 输出完整 wiki markdown（含 frontmatter），用 <<<WIKI>>> 分隔符包裹；不要另行输出元信息块，程序只采用已锁定书目。
 
 [输出格式]
-<<<META>>>
-doc_date: <论文发表年份，如 2022；从论文内容提取，有什么提什么>
-title: <论文标题>
-doc_type: paper
-<<</META>>>
 <<<WIKI>>>
 （完整 wiki markdown，含 frontmatter）"""
+
+
+def build_paper_semantic_contract() -> str:
+    """Compile the backend-independent paper-to-Graph semantic policy."""
+    return f"""[CONTRACT {PAPER_SEMANTIC_CONTRACT_VERSION}]
+1. 关系类型决定 object 形态：
+   - `研究基础`、`核心方法`、`对比方法`指向可复用的规范概念名；
+   - `核心创新点`、`局限性`、`未来展望`指向论文明确陈述的完整、简洁 proposition，不把其中片段另建概念；
+   - 核心概念之间的自由关系，subject/object 都必须是可独立指代的规范概念名。
+2. 规范概念使用「中文英文(缩写)」格式，如 矩阵乘积态matrix product state(MPS)；无公认缩写不写括号，无对应中文或英文时只保留存在的一种。缩写及全称必须来自论文，不得编造。
+3. 只抽取 Wiki 明确陈述且论文证据支持的核心关系，宁少勿多；不得从“关联/构造/表示”自行推导“基于”等方向关系。旧式“叙述节点 + 拆分边”不再生成。
+4. `局限性`只记录作者明确说明的限制或近似代价；研究对象、模型维度、实验设置和适用场景不得标为局限性。
+5. 期刊、作者、日期由程序从锁定书目生成，禁止在语义槽中重复填写或猜测；研究方向也不写入三元组，由程序使用 Wiki 定位句匹配 Hub Scope。
+6. 为三元组中的每个 keyword 概念写一句文档局部说明，只概括当前 Wiki 有 Raw 脚注支持的定义、角色或适用语境；不为 proposition 写 gloss，不输出 locator，locator 由程序机械绑定。
+7. 主体用“本论文”代表当前论文。论文到概念建议谓词：研究基础/核心方法/对比方法；论文到 proposition 建议谓词：核心创新点/局限性/未来展望；概念间建议谓词：基于/改进/结合/对比/推广/替代/扩展。
+8. 优先使用以下已登记谓词：{semantic_predicate_guide()}。确有必要的新谓词只能是 1-12 个汉字或英文字母组成的简短关系词，不得是句子、短语或带标点描述。"""
 
 
 def build_agent_wiki_slots_prompt(paper_md_path: Path, skeleton: str, errors: list[str] | None = None) -> str:
@@ -2530,73 +2675,71 @@ A. 撰写 wiki（填充骨架中的 Navigation + 研究方向定位 + Content）
    5. 每个事实段落或事实列表项末尾用 `[^rN]` 引用读取工具实际显示的 Raw 行号；页面末尾写 `## Sources`，定义严格为 `[^rN]: {raw_source}#Lx`。不得自造行号或使用 `#全篇`。
 
 B. 抽取语义槽（基于你刚写好的 wiki）：
-   1. 三元组客体须为规范概念名/实体名：不含逗号、卷号页码、年份或描述性短语；
-      核心词格式统一为「中文英文(缩写)」，如 矩阵乘积态matrix product state(MPS)；
-      无公认缩写则不写括号；无对应中文则只写英文，无对应英文则只写中文。
-      缩写须按论文原文展开为全称，不得自行编造缩写或全称。
-   2. 三元组只填论文明确涉及的核心概念，宁少勿多。
-   3. 期刊、作者、日期由程序从 PDF/source metadata 与 wiki frontmatter 确定性生成，禁止重复填写或猜测。
-   4. 只输出以下短格式：
+{build_paper_semantic_contract()}
+
+只输出以下短格式：
 
 三元组:
 <主体|谓词|客体，每行一条>
-主体用"本论文"代表这篇论文；核心词之间的关系直接写核心词名作主体。
-论文→概念 建议谓词: 研究基础/核心方法/核心创新点/局限性/未来展望/对比方法
-研究方向不要写入三元组；程序只读取 wiki 的“研究方向定位”与 Hub Scope 匹配。
-核心词→核心词 建议谓词: 基于/改进/结合/对比/推广/替代/扩展
-优先使用以下已登记谓词：{semantic_predicate_guide()}。
-如确有必要使用新谓词，只能填写 1–12 个汉字或英文字母组成的简短关系词；不要写句子、短语或带标点的描述。合格的新谓词会记录为待审议候选，不会自动进入正式谓词清单。
+
+概念说明:
+<概念名 | 一句文档局部说明，每个 keyword 概念一行；不要填写 locator>
 
 [输出格式]
-<<<META>>>
-doc_date: <论文发表年份，如 2022；从论文内容提取>
-title: <论文标题>
-doc_type: paper
-<<</META>>>
 <<<WIKI>>>
 （完整 wiki markdown，含 frontmatter）
 <<<SLOTS>>>
 （语义槽）"""
 
 
-def build_slots_prompt(wiki_content: str, errors: list[str] | None = None) -> str:
+def record_legacy_paper_meta(state: dict, text: str) -> None:
+    """Keep old transaction META as audit-only data; never mutate locked identity."""
+    meta = parse_meta_block(text)
+    if not meta:
+        return
+    bibliography = state.get("bibliographic_meta") or {}
+    expected_year = str(bibliography.get("year") or "")
+    if not expected_year:
+        parts = str(state.get("paper_id") or "").split("-")
+        expected_year = parts[1] if len(parts) > 1 and parts[1].isdigit() else ""
+    state["legacy_meta_audit"] = {
+        "ignored": True,
+        "reason": "deterministic_bibliography_is_authoritative",
+        "meta": meta,
+        "mismatches": validate_meta(meta, {"doc_type": "paper", "year": expected_year}),
+    }
+
+
+def build_slots_prompt(
+        wiki_content: str, errors: list[str] | None = None,
+        previous_slots: str = "") -> str:
     """第二次对话 prompt：基于已写好的 wiki 抽取语义槽。不带 paper.md 全文。"""
     error_section = ""
     if errors:
         error_section = "\n\n[上次语义槽的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
+    previous_section = ""
+    if previous_slots:
+        previous_section = (
+            "\n\n[上次语义槽输出]\n"
+            "保留其中正确关系，只修正上述问题并补足缺失关系：\n"
+            f"{previous_slots.strip()}"
+        )
     return f"""基于你刚写好的 wiki 页面，为这篇论文抽取语义槽。
 
 [已写好的 wiki 页面]
 <<<WIKI>>>
 {wiki_content}
 {error_section}
+{previous_section}
+
+[语义契约]
+{build_paper_semantic_contract()}
 
 [要求]
-1. 三元组客体须为规范概念名/实体名：不含逗号、卷号页码、年份或描述性短语；核心词格式统一为「中文英文(缩写)」，如 矩阵乘积态matrix product state(MPS)；无公认缩写则不写括号，如 量子计算quantum computing；无对应中文则只写英文，无对应英文则只写中文。缩写须按论文原文展开为全称，不得自行编造缩写或全称。
-   关键：客体/主体须是可独立指代的名词，不得是带主谓宾的整句。若一个概念本身含主谓宾结构（如「用MPS参数化监督学习模型权重」「基于自动微分的变分iPEPS方法」），必须输出 4 组三元组而非整句当一个客体：
-   - 原行保留（如实记录论文表述）
-   - 原节点 | 拆分 | <主概念>（拆分边，主概念=句中"做什么"的名词，如"监督学习模型权重参数化"）
-   - 原节点 | 拆分 | <工具/方法概念>（拆分边，如"MPS"）
-   - <工具/方法概念> | <原句动词> | <宾概念>（语义边，谓词从原句提取，如"参数化"）
-   示例：「用MPS参数化监督学习模型权重」→
-     本论文 | 核心方法 | 用MPS参数化监督学习模型权重
-     用MPS参数化监督学习模型权重 | 拆分 | 监督学习模型权重参数化
-     用MPS参数化监督学习模型权重 | 拆分 | 矩阵乘积态matrix product state(MPS)
-     矩阵乘积态matrix product state(MPS) | 参数化 | 监督学习模型权重
-   拆分出的概念节点正常写规范名（中文英文缩写），去重由程序处理。
-2. 三元组只填 wiki 中明确陈述且论文明确支持的核心概念，宁少勿多。不得从“关联/构造/表示”自行推导“基于”等有方向关系；原文未明示方向时不要填核心词→核心词边。
-3. “局限性”仅填写作者明确说明的限制或近似代价；研究对象、模型维度、实验设置和适用场景不得标为局限性。
-4. 期刊、作者、日期由程序从 PDF/source metadata 与 wiki frontmatter 确定性生成，禁止重复填写或猜测。
-5. 用 <<<SLOTS>>> 分隔符包裹输出语义槽，只输出以下短格式：
+用 <<<SLOTS>>> 分隔符包裹输出语义槽，只输出以下短格式：
 
 三元组:
 <主体|谓词|客体，每行一条>
-主体用"本论文"代表这篇论文；核心词之间的关系直接写核心词名作主体。
-论文→概念 建议谓词: 研究基础/核心方法/核心创新点/局限性/未来展望/对比方法
-研究方向不要写入三元组；程序只读取 wiki 的“研究方向定位”与 Hub Scope 匹配。
-核心词→核心词 建议谓词: 基于/改进/结合/对比/推广/替代/扩展
-优先使用以下已登记谓词：{semantic_predicate_guide()}。
-如确有必要使用新谓词，只能填写 1–12 个汉字或英文字母组成的简短关系词；不要写句子、短语或带标点的描述。合格的新谓词会记录为待审议候选，不会自动进入正式谓词清单。
 
 [语义槽填写示例（仅示格式，内容勿照搬）]
 三元组:
@@ -2610,9 +2753,18 @@ def build_slots_prompt(wiki_content: str, errors: list[str] | None = None) -> st
 横向光锥收缩transverse light cone contraction(TLCC) | 基于 | 矩阵乘积态matrix product state(MPS)
 Miguel Frías-Pérez | 所属 | Max-Planck-Institut für Quantenoptik
 
-[输出格式]
+概念说明:
+矩阵乘积态matrix product state(MPS) | 本文用作沿时间方向压缩影响泛函及相关对象的张量网络表示。
+横向光锥收缩transverse light cone contraction(TLCC) | 本文用于利用精确光锥结构缩减需要收缩的张量网络区域。
+
+[输出格式：必须逐字保留开标记、section 标头和闭标记]
 <<<SLOTS>>>
-（语义槽）"""
+三元组:
+<主体 | 谓词 | 客体，每行一条>
+概念说明:
+<概念名 | 一句文档局部说明，每个 keyword 概念一行；不要填写 locator>
+<<</SLOTS>>>
+不得输出 `<<<END>>>`，不得省略 `三元组:`。"""
 # parse_delimited → ic.parse_delimited (shared)
 
 
@@ -2663,7 +2815,9 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     else:
         prompt = (build_agent_wiki_slots_prompt(paper_md, skeleton, errors) if is_agent
                   else build_wiki_prompt(md_text, skeleton, errors, paper_md))
-        result = call_text(prompt, max_tokens=32768, retries=1, operation="ingest_wiki_write",
+        result = call_text(prompt, max_tokens=32768, retries=0,
+                           recovery_limits=rp.LLM_DEFAULT_LIMITS,
+                           operation="ingest_wiki_write",
                            reasoning_context={
                                "document_kind": "paper",
                                "input_chars": len(md_text),
@@ -2682,30 +2836,9 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         if not result.get("ok"):
             return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
         text = result.get("text", "")
-    # META 交叉校验：LLM 读全文后反馈的元信息，与程序推导值比对
-    meta = parse_meta_block(text)
-    if meta:
-        expected_year = state.get("paper_id", "").split("-")[1] if "-" in state.get("paper_id", "") else ""
-        mismatches = validate_meta(meta, {"doc_type": "paper", "year": expected_year})
-        if has_type_mismatch(mismatches):
-            state["type_mismatch"] = True
-            state["meta_mismatches"] = mismatches
-            state["meta_info"] = meta
-            return False, f"doc_type 不一致（程序=paper, LLM={meta.get('doc_type', '')}），跳过待 agent 判断"
-        if has_year_mismatch(mismatches) and not (state.get("reingest") or state.get("from_raw")):
-            # 年份不一致→自动修正 paper-id（LLM 读全文比正则可靠）
-            # re-ingest 跳过：raw 目录名不可变（红线），原 paper-id 必须保持，
-            # 且历史目录名非 surname-year-slug 三段式，parts[1] 非年份会导致畸形 id
-            llm_year = extract_year_from_meta(meta)
-            if llm_year:
-                old_id = state["paper_id"]
-                parts = old_id.split("-")
-                parts[1] = llm_year  # surname-year-slug → 替换 year
-                corrected_id = ensure_unique_paper_id("-".join(parts))
-                state["paper_id"] = corrected_id
-                state["raw_dir"] = f"academic/raw/references/{corrected_id}"
-                state["wiki_path"] = f"academic/wiki/papers/{corrected_id}"
-                state["meta_year_corrected"] = {"from": expected_year, "to": llm_year, "old_id": old_id}
+    # Old agent/API artifacts may still contain META. It is no longer independent
+    # evidence and therefore cannot override the locked bibliography or identity.
+    record_legacy_paper_meta(state, text)
     wiki_content = parse_delimited(text, WIKI_DELIMITER)
     if not wiki_content:
         wiki_content = salvage_wiki_without_delimiter(text)
@@ -2758,8 +2891,13 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
             return False, f"agent 输出尚未写入: {agent_output.relative_to(REPO)}"
         text = agent_output.read_text(encoding="utf-8")
     else:
-        prompt = build_slots_prompt(wiki_content, errors)
-        result = call_text(prompt, max_tokens=32768, retries=1, operation="ingest_semantic_extract",
+        previous_slots = str(
+            (state.get("_sparse_slots_best") or {}).get("content") or ""
+        )
+        prompt = build_slots_prompt(wiki_content, errors, previous_slots)
+        result = call_text(prompt, max_tokens=32768, retries=0,
+                           recovery_limits=rp.LLM_DEFAULT_LIMITS,
+                           operation="ingest_semantic_extract",
                            reasoning_context={
                                "document_kind": "paper",
                                "input_chars": len(wiki_content),
@@ -2852,9 +2990,12 @@ def normalize_slots(text: str) -> str:
     lines = text.splitlines()
     result = []
     seen_triples = set()
+    current_section = ""
     for line in lines:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
+            continue
+        if stripped in {"<<<SLOTS>>>", "<<</SLOTS>>>", "<<<END>>>"}:
             continue
         m = re.match(r"^(\S+?)\s*[:：]\s*(\S.*)$", stripped)
         if m and "|" not in stripped:
@@ -2863,10 +3004,13 @@ def normalize_slots(text: str) -> str:
             if header in KNOWN_SECTIONS:
                 result.append(f"{header}:")
                 result.append(content)
+                current_section = header
                 continue
+        if re.match(r"^.+[:：]\s*$", stripped) and "|" not in stripped:
+            current_section = stripped.rstrip(":：").strip()
         if "|" in stripped:
             parts = [part.strip() for part in stripped.split("|")]
-            if len(parts) == 3:
+            if len(parts) == 3 and current_section != "概念说明":
                 normalized_predicate = normalize_predicate(parts[1], DEFAULT_CONFIG)
                 if normalized_predicate != parts[1]:
                     parts[1] = normalized_predicate
@@ -2887,6 +3031,14 @@ def normalize_slots(text: str) -> str:
                     continue
                 seen_triples.add(key)
         result.append(stripped)
+    has_section = any(re.match(r"^三元组[:：]\s*$", line) for line in result)
+    bare_triples = [
+        line for line in result
+        if len(parts := [part.strip() for part in line.split("|", 2)]) == 3
+        and all(parts)
+    ]
+    if not has_section and result and len(bare_triples) == len(result):
+        result.insert(0, "三元组:")
     return "\n".join(result) + "\n"
 
 
@@ -2943,9 +3095,29 @@ def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
         import graph_ingest
         from graph_ingest import is_descriptive_phrase, is_bare_abbreviation, KW_PREDICATES
         page_path = state["wiki_path"]
+        sections, diagnostics = graph_ingest.parse_semantic_sections(sem_text)
+        state["semantic_slot_diagnostics"] = diagnostics
+        if (not diagnostics["triple_section_present"]
+                and not diagnostics["bare_triples_recovered"]):
+            hard_errors.append(
+                "语义槽缺少 `三元组:` section；"
+                f"检测到 {len(diagnostics['triple_like_outside_section'])} 条 section 外三元组形状行、"
+                f"共 {diagnostics['meaningful_line_count']} 条有效文本行"
+            )
+        if diagnostics["malformed_triple_lines"]:
+            hard_errors.append(
+                "`三元组:` section 含无法解析的行: "
+                + "；".join(diagnostics["malformed_triple_lines"][:3])
+            )
+        if diagnostics["malformed_gloss_lines"]:
+            hard_errors.append(
+                "`概念说明:` section 必须为 `概念名 | 一句局部说明`: "
+                + "；".join(diagnostics["malformed_gloss_lines"][:3])
+            )
         triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = \
             graph_ingest.parse_semantic_text(sem_text, page_path)
-        state["semantic_triple_count"] = len(triples)
+        state["semantic_triple_count"] = diagnostics["semantic_triple_count"]
+        state["concept_gloss_count"] = diagnostics["concept_gloss_count"]
         # 登记谓词直接通过；格式合格的新谓词进入候选池，异常文本仍是硬错误。
         allowed = set(SEMANTIC_PREDICATES)
         registry = REPO / ".scripts" / "predicate-registry.json"
@@ -3063,11 +3235,17 @@ def _handle_sparse_slots(state: dict) -> str:
         state["_sparse_slots_best"] = best
 
     attempts = int(state.get("sparse_slots_retry") or 0)
-    if count < MIN_SEMANTIC_TRIPLES and attempts < MAX_SPARSE_SLOT_RETRIES:
+    if (count < MIN_SEMANTIC_TRIPLES
+            and attempts < MAX_SPARSE_SLOT_RETRIES
+            and rp.consume(
+                state, "semantic_revision", PAPER_RECOVERY_LIMITS,
+                f"semantic coverage {count} < {MIN_SEMANTIC_TRIPLES}",
+            )):
         state["sparse_slots_retry"] = attempts + 1
-        state["slots_retry"] = int(state.get("slots_retry") or 0) + 1
         state["slots_errors"] = [
-            f"语义槽覆盖不足：仅 {count} 条三元组，至少输出 {MIN_SEMANTIC_TRIPLES} 条由 Wiki 明确支持的核心关系"
+            "语义槽内容覆盖不足：格式校验已通过，"
+            f"成功解析 {count} 条 Worker 三元组，至少需要 {MIN_SEMANTIC_TRIPLES} 条。"
+            "请保留上版正确关系，仅补充 Wiki 明确支持的核心关系"
         ]
         state["slots_content"] = ""
         state["_skip_wiki_for_slots_resume"] = True
@@ -3290,13 +3468,16 @@ def step_extract_propositions(state: dict) -> tuple[bool, str]:
                     propositions.append(part)
     if not propositions:
         state["proposition_status"] = "no_propositions"
-        state["proposition_details"] = {"proposition_count": 0, "llm_calls": 0}
+        state["proposition_details"] = {
+            "proposition_count": 0,
+            "execution_mode": "deterministic",
+        }
         return True, ""
     progress(f"[3.6c] 稀疏命题编译（{len(propositions)}条，零 LLM）", flush=True)
     state["proposition_status"] = f"sparse: {len(propositions)} propositions"
     state["proposition_details"] = {
         "proposition_count": len(propositions),
-        "llm_calls": 0,
+        "execution_mode": "deterministic",
         "concept_links": "deterministic_graph_ingest",
     }
     return True, ""
@@ -3390,67 +3571,12 @@ def _record_graph_quality_warnings(state: dict) -> None:
 
 
 def step_update_graph(state: dict) -> tuple[bool, str]:
-    """调 graph_ingest 写图边 + 建 raw 关系边（版本/补充材料/翻译）。"""
+    """Route semantic and Raw relationships through the shared graph writer."""
     ok, msg = ic.step_update_graph(state, REPO, clean=state.get("reingest", False))
     if not ok:
         return False, msg
     _record_graph_quality_warnings(state)
-    rel = state.get("raw_relationship") or {}
-    if rel.get("type") in ("version", "supplementary", "translation"):
-        _create_raw_relationship_edge(state, rel)
     return True, ""
-
-
-def _derive_raw_path(source_field: str, page_path: str = "") -> str:
-    """从 sources 字段推导 raw 节点路径（与 graph_ingest.ensure_raw_support_edge 一致）。"""
-    if not source_field:
-        return ""
-    import graph_lib as gl
-    return gl.raw_node_path(source_field, page_path)
-
-
-def _create_raw_relationship_edge(state: dict, rel: dict):
-    """建 raw 节点之间的关系边（版本/补充材料/翻译）。"""
-    import graph_lib as gl
-    new_fm = gl.read_frontmatter(state["wiki_path"])
-    new_sources = gl.parse_list_field(new_fm, "sources")
-    new_raw = _derive_raw_path(new_sources[0], state["wiki_path"]) if new_sources else ""
-    target_page = rel.get("target_page", "")
-    if target_page:
-        target_fm = gl.read_frontmatter(target_page)
-        target_sources = gl.parse_list_field(target_fm, "sources")
-        target_raw = _derive_raw_path(target_sources[0], target_page) if target_sources else ""
-    else:
-        target_dir = str(rel.get("target_raw_dir") or "")
-        target_source = f"academic/raw/references/{target_dir}/paper.md" if target_dir else ""
-        target_raw = _derive_raw_path(target_source) if target_source else ""
-    if not new_raw or not target_raw:
-        return
-    rel_type = rel["type"]
-    if rel_type == "version":
-        subj, pred, obj = target_raw, "后一版本", new_raw
-    elif rel_type == "supplementary":
-        subj, pred, obj = target_raw, "补充材料", new_raw
-    elif rel_type == "translation":
-        subj, pred, obj = new_raw, "译自", target_raw
-    else:
-        return
-    conn = gl.connect()
-    for raw_path in (subj, obj):
-        if not gl.node_exists(conn, raw_path):
-            gl.ensure_node(conn, raw_path, Path(raw_path).name or raw_path, "raw", "", "", "current", 0)
-    existing = conn.execute(
-        "SELECT id FROM edges WHERE subject=? AND predicate=? AND object=?",
-        (subj, pred, obj),
-    ).fetchone()
-    if not existing:
-        conn.execute(
-            "INSERT INTO edges (subject, predicate, object, confidence, source, is_sr) "
-            "VALUES (?,?,?,?,?,?)",
-            (subj, pred, obj, "[可追溯]", "", 0),
-        )
-    conn.commit()
-    conn.close()
 
 
 def resume_after_semantic_fix(state: dict) -> bool:
@@ -3469,7 +3595,10 @@ def resume_after_semantic_fix(state: dict) -> bool:
     state["agent_prompt"] = ""
     state["errors"] = []
     # 恢复到 handoff 前阶段：落位后(graph_ready)handoff 不重跑落位
-    state["status"] = state.get("pre_handoff_status", "finalize")
+    inbox_state.transition(
+        state, state.get("pre_handoff_status", "finalize"),
+        reason="resume_after_semantic_fix",
+    )
     return True
 
 
@@ -3488,10 +3617,16 @@ def resume_after_agent_generation(state: dict) -> bool:
     if not expected.is_file():
         state["errors"] = [f"agent 输出尚未写入: {state.get('agent_write_to', '')}"]
         return False
-    state["status"] = state.get("pre_handoff_status") or resume_status
+    inbox_state.transition(
+        state, state.get("pre_handoff_status") or resume_status,
+        reason="consume_agent_generation",
+    )
     if resume_status == "write_slots":
         # run_prepare 的循环入口仍是 write_wiki；用一次性标记跳过生成并直接进入 slots。
-        state["status"] = "write_wiki"
+        inbox_state.transition(
+            state, "write_wiki", reason="route_slots_resume_through_loop_entry",
+            allowed_from={"write_slots"},
+        )
         state["_skip_wiki_for_slots_resume"] = True
     state["agent_required"] = False
     state["errors"] = []
@@ -3531,6 +3666,7 @@ def run_prepare(state: dict) -> dict:
     避免部分论文已入图、部分卡在 warning 的半提交中间态。单篇（--pdf/--resume）由 run_one
     串联 prepare+commit，行为与原 run_pipeline 等价。
     """
+    rp.ensure_state(state, PAPER_RECOVERY_LIMITS)
     # agent wiki/slots 生成交接只恢复到精确阶段，输出由对应 step 消费。
     if state["status"] == "agent_required" and (
             state.get("_awaiting_agent_wiki_slots") or state.get("_awaiting_agent_slots")):
@@ -3601,14 +3737,13 @@ def run_prepare(state: dict) -> dict:
     if state["status"] == "write_wiki":
         state.setdefault("wiki_retry", 0)
         state.setdefault("slots_retry", 0)
-    while state["status"] == "write_wiki" and (state.get("wiki_retry", 0) + state.get("slots_retry", 0)) <= MAX_RETRIES:
+    while state["status"] == "write_wiki":
         # --- 第一阶段：写 wiki ---
         if state.get("wiki_retry", 0) == 0 and not state.get("wiki_content"):
             progress("\n[3.3a] 撰写 wiki（调用LLM，约1-2分钟）...", flush=True)
             progress(f"  paper-id: {state.get('paper_id', '?')}", flush=True)
         elif state.get("wiki_retry", 0) > 0:
-            progress(f"\n[3.3a] 撰写 wiki（重试第{state['wiki_retry']}/3次）...", flush=True)
-        ic.record_llm_call(state, "write_wiki")
+            progress(f"\n[3.3a] 撰写 wiki（修订第{state['wiki_retry']}/{PAPER_RECOVERY_LIMITS['wiki_revision']}次）...", flush=True)
         success, msg = step_write_wiki(state)
         if state.get("agent_required"):
             state["status"] = "agent_required"
@@ -3620,18 +3755,38 @@ def run_prepare(state: dict) -> dict:
             inbox_state.save(state["transaction_id"], state)
             return state
         if not success:
-            state["wiki_retry"] += 1
             state["errors"] = [msg]
             progress(f"  ↳ wiki LLM调用失败: {msg}", flush=True)
+            if ("缺少 <<<" in msg and rp.consume(
+                    state, "wiki_revision", PAPER_RECOVERY_LIMITS, msg)):
+                state["wiki_content"] = ""
+                inbox_state.save(state["transaction_id"], state)
+                continue
+            state["status"] = "failed"
             inbox_state.save(state["transaction_id"], state)
-            continue
+            return state
         state["errors"] = []
         progress("[3.4] wiki结构校验...", flush=True, end=" ")
         wiki_errors = step_validate_wiki(state)
         progress("通过" if not wiki_errors else f"{len(wiki_errors)}个错误", flush=True)
         if wiki_errors:
             state["wiki_errors"] = wiki_errors
-            state["wiki_retry"] += 1
+            if not rp.consume(
+                    state, "wiki_revision", PAPER_RECOVERY_LIMITS,
+                    "; ".join(wiki_errors)):
+                wiki_path = REPO / state["extract_dir"] / "wiki.md"
+                state["status"] = "agent_required"
+                state["pre_handoff_status"] = "write_wiki"
+                state["agent_required"] = True
+                state["_awaiting_agent_wiki"] = True
+                state["agent_write_to"] = str(wiki_path.relative_to(REPO))
+                state["agent_prompt"] = (
+                    "API wiki 已达格式重写上限。只修复 write_to 现有草稿：\n- "
+                    + "\n- ".join(wiki_errors)
+                )
+                state["errors"] = wiki_errors
+                inbox_state.save(state["transaction_id"], state)
+                return state
             state["wiki_content"] = ""  # 清空，强制重写
             state["slots_content"] = ""  # agent 合并模式下同步清空
             inbox_state.save(state["transaction_id"], state)
@@ -3641,19 +3796,25 @@ def run_prepare(state: dict) -> dict:
         if state.get("slots_retry", 0) == 0:
             progress("[3.3b] 抽取语义槽（续接对话，调用LLM）...", flush=True, end=" ")
         else:
-            progress(f"[3.3b] 抽取语义槽（重试第{state['slots_retry']}/3次）...", flush=True, end=" ")
-        ic.record_llm_call(state, "write_slots")
+            progress(f"[3.3b] 抽取语义槽（修订第{state['slots_retry']}/{PAPER_RECOVERY_LIMITS['semantic_revision']}次）...", flush=True, end=" ")
         success, msg = step_write_slots(state)
         if state.get("agent_required"):
             state["status"] = "agent_required"
             inbox_state.save(state["transaction_id"], state)
             return state
         if not success:
-            state["slots_retry"] += 1
             state["errors"] = [msg]
             progress(f"失败: {msg}", flush=True)
+            if ("缺少 <<<" in msg and rp.consume(
+                    state, "semantic_revision", PAPER_RECOVERY_LIMITS, msg)):
+                state["slots_content"] = ""
+                state["slots_errors"] = [msg]
+                state["_skip_wiki_for_slots_resume"] = True
+                inbox_state.save(state["transaction_id"], state)
+                continue
+            state["status"] = "failed"
             inbox_state.save(state["transaction_id"], state)
-            continue
+            return state
         state["errors"] = []
         progress("完成", flush=True)
         progress("[3.5] 语义槽格式化...", flush=True, end=" ")
@@ -3691,6 +3852,14 @@ def run_prepare(state: dict) -> dict:
             continue
         # 无硬错误且有阻断 warning → 机械修复优先，剩余项至多一次 Worker。
         if not sem_hard and blocking:
+            if not rp.consume(
+                    state, "deterministic_repair", PAPER_RECOVERY_LIMITS,
+                    f"blocking_warnings={len(blocking)}"):
+                state["status"] = "agent_required"
+                state["agent_required"] = True
+                state["errors"] = ["deterministic repair budget exhausted"]
+                inbox_state.save(state["transaction_id"], state)
+                return state
             repaired, repair_msg = step_repair_slots(state, blocking)
             if state.get("agent_required"):
                 state["status"] = "agent_required"
@@ -3708,17 +3877,20 @@ def run_prepare(state: dict) -> dict:
             break
         # 结构错误不会因同一提示词重试而自行消失；早停并交接受控修复。
         if sem_hard:
+            recovered, recovery_msg = ic.try_semantic_recovery(
+                state, REPO, sem_hard, slot_warnings,
+                step_validate_semantics, NON_BLOCKING_ISSUES,
+            )
+            if recovered:
+                progress("  ↳ bounded semantic recovery 通过复验", flush=True)
+                state["status"] = "finalize"
+                inbox_state.save(state["transaction_id"], state)
+                break
             progress(f"  ↳ 语义槽结构错误 {len(sem_hard)} 个，停止重复生成并交接修复", flush=True)
             ic.stop_for_semantic_errors(state, sem_hard, _resume_cmd(state))
+            state["semantic_recovery_message"] = recovery_msg
             inbox_state.save(state["transaction_id"], state)
             return state
-    else:
-        if state["status"] == "write_wiki":
-            state["status"] = "failed"
-            state["errors"] = [*state.get("errors", []), "修复循环超过最大重试次数"]
-            inbox_state.save(state["transaction_id"], state)
-            return state
-
     # 落位
     if state["status"] in ("finalize", "propositions"):
         # 3.6c 子图构建：保留完整命题；概念链接由 graph_ingest 唯一精确匹配。
@@ -3763,13 +3935,12 @@ PAPER_COMMIT_SPEC = {
     "script_name": "ingest_paper.py",
     "preprocess_label": "MinerU PDF 提取",
     "completion_label_key": "paper_id",
-    "repair_fail_strategy": "handoff",
     "cleanup_after": "validate_graph",
     "skip_source_cleanup_if": "from_raw",
     "rollback_fn": None,
     "retry_graph_with_clean": True,
     "finalize_tail_failure": "warn",
-    "max_retries": MAX_RETRIES,
+    "recovery_limits": PAPER_RECOVERY_LIMITS,
     "non_blocking_issues": NON_BLOCKING_ISSUES,
     "normalize_slots": normalize_slots,
     "steps": {
@@ -3795,6 +3966,27 @@ def run_commit(state: dict) -> dict:
     避免部分入图、部分卡 warning 的半提交中间态。
     """
     return ingest_pipeline.run_pipeline(state, PAPER_COMMIT_SPEC, progress)
+
+
+def _batch_item_payload(state: dict) -> dict:
+    """Build one batch result using the same failure contract as single-item output."""
+    payload = {
+        "source": state["source"], "status": state["status"],
+        "paper_id": state.get("paper_id"), "transaction_id": state["transaction_id"],
+        "raw_dir": state.get("raw_dir"), "wiki_path": state.get("wiki_path"),
+        "engine": state.get("engine"), "graph_report": state.get("graph_report"),
+        "errors": state.get(
+            "errors", [state["dedup_reason"]] if state.get("dedup_reason") else []),
+        "proposition_status": state.get("proposition_status"),
+        "proposition_details": state.get("proposition_details"),
+        "bibliographic_worker": (state.get("bibliographic_review") or {}).get("worker"),
+        "relationship_worker": (state.get("relationship_review") or {}).get("worker"),
+        "semantic_repair_worker": state.get("semantic_repair_worker"),
+        "quality_status": "degraded" if state.get("quality_warnings") else "complete",
+        "quality_warnings": state.get("quality_warnings", []),
+    }
+    return inbox_state.output_payload(state, payload)
+
 
 def run_inbox_batch(verbose: bool) -> int:
     """两阶段批量摄入：Phase 1 全部准备到 graph_ready 屏障；全部就绪后 Phase 2 批量写图。
@@ -3841,20 +4033,7 @@ def run_inbox_batch(verbose: bool) -> int:
             s["dedup_reason"] = f"批内重复: {seen_titles[norm]}"
         else:
             seen_titles[norm] = s.get("paper_id", s["source"])
-    items = [{
-        "source": s["source"], "status": s["status"],
-        "paper_id": s.get("paper_id"), "transaction_id": s["transaction_id"],
-        "raw_dir": s.get("raw_dir"), "wiki_path": s.get("wiki_path"),
-        "engine": s.get("engine"), "graph_report": s.get("graph_report"),
-        "errors": s.get("errors", [s["dedup_reason"]] if s.get("dedup_reason") else []),
-        "proposition_status": s.get("proposition_status"),
-        "proposition_details": s.get("proposition_details"),
-        "bibliographic_worker": (s.get("bibliographic_review") or {}).get("worker"),
-        "relationship_worker": (s.get("relationship_review") or {}).get("worker"),
-        "semantic_repair_worker": s.get("semantic_repair_worker"),
-        "quality_status": "degraded" if s.get("quality_warnings") else "complete",
-        "quality_warnings": s.get("quality_warnings", []),
-    } for s in prepared]
+    items = [_batch_item_payload(state) for state in prepared]
     # 屏障：任一未就绪则不写任何图，交 agent 介入解决 warning 后再写图
     if any(s["status"] not in {"graph_ready", "duplicate_found"} for s in prepared):
         print(json.dumps({
@@ -3868,20 +4047,7 @@ def run_inbox_batch(verbose: bool) -> int:
     for state in prepared:
         if state["status"] == "graph_ready":
             state = _run_phase(state, verbose, run_commit)
-        results.append({
-            "source": state["source"], "status": state["status"],
-            "paper_id": state.get("paper_id"), "transaction_id": state["transaction_id"],
-            "raw_dir": state.get("raw_dir"), "wiki_path": state.get("wiki_path"),
-            "engine": state.get("engine"), "graph_report": state.get("graph_report"),
-            "errors": state.get("errors", []),
-            "proposition_status": state.get("proposition_status"),
-            "proposition_details": state.get("proposition_details"),
-            "bibliographic_worker": (state.get("bibliographic_review") or {}).get("worker"),
-            "relationship_worker": (state.get("relationship_review") or {}).get("worker"),
-            "semantic_repair_worker": state.get("semantic_repair_worker"),
-            "quality_status": "degraded" if state.get("quality_warnings") else "complete",
-            "quality_warnings": state.get("quality_warnings", []),
-        })
+        results.append(_batch_item_payload(state))
     print(json.dumps({
         "status": "completed" if all(r["status"] in {"completed", "duplicate_found"} for r in results) else "partial",
         "phase": "commit", "items": results,
@@ -4072,9 +4238,9 @@ def print_result(state: dict) -> None:
         }
         if review_path:
             payload["review_path"] = review_path
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(json.dumps(inbox_state.output_payload(state, payload), ensure_ascii=False, indent=2))
     else:
-        print(json.dumps({
+        print(json.dumps(inbox_state.output_payload(state, {
             "status": state["status"],
             "errors": state.get("errors", []),
             "bibliographic_review": state.get("bibliographic_review"),
@@ -4083,7 +4249,7 @@ def print_result(state: dict) -> None:
             "retryable": state.get("retryable"),
             "next_action": state.get("next_action"),
             "failure_signature": state.get("failure_signature"),
-        }, ensure_ascii=False, indent=2))
+        }), ensure_ascii=False, indent=2))
         # 失败时 quiet 模式自动展开进度日志到 stdout，agent 无需额外读日志文件
         log_path = get_progress_log_path()
         if log_path is not None:

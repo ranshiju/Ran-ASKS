@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import graph_lib as gl
 import graph_delta as gd
 import hub_semantics as hs
+import knowledge_ir as kir
 import wiki_locator as wl
 
 
@@ -280,7 +281,7 @@ def is_fragment_token(name):
     return s.isascii() and s.isalpha() and s.islower()
 
 
-def cleanup_ghost_hubs(conn):
+def cleanup_ghost_hubs(conn, *, commit=True):
     """清理 ghost hub：.md 已不存在但 graph.db 仍残留的 type='hub' 节点 + 关联边。
     返回被清理的 hub path 列表。hub 合并/删除应经 merge_hubs（已清节点），此函数兜底任何遗漏路径。"""
     cleaned = []
@@ -290,12 +291,12 @@ def cleanup_ghost_hubs(conn):
         conn.execute("DELETE FROM edges WHERE subject=? OR object=?", (path, path))
         conn.execute("DELETE FROM nodes WHERE path=?", (path,))
         cleaned.append(path)
-    if cleaned:
+    if cleaned and commit:
         conn.commit()
     return cleaned
 
 
-def cleanup_orphan_references(conn):
+def cleanup_orphan_references(conn, *, commit=True):
     """图健康前置检查：清理无效 alias、孤儿 alias 与孤儿边。
 
     防止上一篇摄入/回滚遗留的脏数据阻塞下一篇的外键约束（FK constraint failed）。
@@ -304,6 +305,7 @@ def cleanup_orphan_references(conn):
     cleaned = {
         "invalid_aliases": 0, "orphan_aliases": 0,
         "orphan_edges": 0, "fk_violations": 0,
+        "derived_memberships": 0, "managed_orphan_nodes": 0,
     }
     # 1. 历史名称拆解可能留下 ``the`` 等无身份信息 alias。
     for row in conn.execute("SELECT alias, node_path FROM aliases").fetchall():
@@ -330,11 +332,33 @@ def cleanup_orphan_references(conn):
         elif table == "edge_evidence":
             conn.execute("DELETE FROM edge_evidence WHERE rowid=?", (rowid,))
             cleaned["orphan_edges"] += 1
-    if any(cleaned.values()):
+    # 4. 摄入管理节点失去全部来源后，纯 Hub membership 不能冒充事实依赖。
+    managed_orphans = conn.execute(
+        "SELECT mn.node_path FROM managed_nodes mn JOIN nodes n ON n.path=mn.node_path "
+        "WHERE n.type='entity' AND COALESCE(n.description, '')='' "
+        "AND NOT EXISTS (SELECT 1 FROM node_origins no WHERE no.node_path=mn.node_path) "
+        "AND NOT EXISTS (SELECT 1 FROM node_glosses ng WHERE ng.node_path=mn.node_path) "
+        "AND NOT EXISTS (SELECT 1 FROM temporal_facts tf "
+        "WHERE tf.subject=mn.node_path OR tf.object=mn.node_path) "
+        "AND NOT EXISTS (SELECT 1 FROM edges e "
+        "WHERE (e.subject=mn.node_path OR e.object=mn.node_path) "
+        "AND NOT (e.subject=mn.node_path AND e.predicate='聚类于'))"
+    ).fetchall()
+    for row in managed_orphans:
+        node_path = row["node_path"]
+        cleaned["derived_memberships"] += conn.execute(
+            "DELETE FROM edges WHERE subject=? AND predicate='聚类于'", (node_path,)
+        ).rowcount
+        conn.execute("DELETE FROM aliases WHERE node_path=?", (node_path,))
+        conn.execute("DELETE FROM managed_nodes WHERE node_path=?", (node_path,))
+        cleaned["managed_orphan_nodes"] += conn.execute(
+            "DELETE FROM nodes WHERE path=?", (node_path,)
+        ).rowcount
+    if any(cleaned.values()) and commit:
         conn.commit()
     return cleaned
 
-def clean_page_edges(conn, page: str) -> dict:
+def clean_page_edges(conn, page: str, *, commit=True) -> dict:
     """re-ingest:撤销本页贡献的边，并回收可证明由摄入管理的孤儿节点。
 
     新摄入用 edge_origins 精确追踪；历史边没有 lineage 时，以本页 raw source
@@ -351,6 +375,13 @@ def clean_page_edges(conn, page: str) -> dict:
         "SELECT node_path FROM node_origins WHERE origin_page=?", (page,)
     ))
     node_candidates = {row[0] for row in node_origin_rows}
+    gloss_rows = list(conn.execute(
+        "SELECT node_path,is_primary,description FROM node_glosses WHERE origin_page=?", (page,)
+    ))
+    primary_gloss_nodes = {row[0] for row in gloss_rows if row[1]}
+    removed_primary_descriptions = {
+        row[0]: row[2] for row in gloss_rows if row[1]
+    }
 
     fm = gl.read_frontmatter(page)
     raw_sources = set()
@@ -378,6 +409,31 @@ def clean_page_edges(conn, page: str) -> dict:
     node_origins_removed = conn.execute(
         "DELETE FROM node_origins WHERE origin_page=?", (page,)
     ).rowcount
+    node_glosses_removed = conn.execute(
+        "DELETE FROM node_glosses WHERE origin_page=?", (page,)
+    ).rowcount
+    for node_path in primary_gloss_nodes:
+        current = conn.execute(
+            "SELECT description FROM nodes WHERE path=?", (node_path,)
+        ).fetchone()
+        if not current or current[0] != removed_primary_descriptions[node_path]:
+            continue
+        replacement = conn.execute(
+            "SELECT origin_page,source,description FROM node_glosses "
+            "WHERE node_path=? ORDER BY recorded_at,origin_page,source LIMIT 1", (node_path,)
+        ).fetchone()
+        if replacement:
+            conn.execute(
+                "UPDATE node_glosses SET is_primary=CASE "
+                "WHEN origin_page=? AND source=? THEN 1 ELSE 0 END WHERE node_path=?",
+                (replacement[0], replacement[1], node_path),
+            )
+            conn.execute(
+                "UPDATE nodes SET description=? WHERE path=?",
+                (replacement[2], node_path),
+            )
+        else:
+            conn.execute("UPDATE nodes SET description='' WHERE path=?", (node_path,))
 
     removed_evidence = 0
     for edge_id, source in origin_rows:
@@ -420,6 +476,7 @@ def clean_page_edges(conn, page: str) -> dict:
         "DELETE FROM temporal_facts WHERE subject=? OR object=?", (page, page)
     ).rowcount
     managed_nodes_removed = 0
+    derived_memberships_removed = 0
     for node_path in node_candidates:
         managed = conn.execute(
             "SELECT 1 FROM managed_nodes WHERE node_path=?", (node_path,)
@@ -429,8 +486,10 @@ def clean_page_edges(conn, page: str) -> dict:
         has_origin = conn.execute(
             "SELECT 1 FROM node_origins WHERE node_path=? LIMIT 1", (node_path,)
         ).fetchone()
-        has_edge = conn.execute(
-            "SELECT 1 FROM edges WHERE subject=? OR object=? LIMIT 1", (node_path, node_path)
+        has_substantive_edge = conn.execute(
+            "SELECT 1 FROM edges WHERE (subject=? OR object=?) "
+            "AND NOT (subject=? AND predicate='聚类于') LIMIT 1",
+            (node_path, node_path, node_path),
         ).fetchone()
         has_temporal = conn.execute(
             "SELECT 1 FROM temporal_facts WHERE subject=? OR object=? LIMIT 1",
@@ -439,22 +498,28 @@ def clean_page_edges(conn, page: str) -> dict:
         node = conn.execute(
             "SELECT type FROM nodes WHERE path=?", (node_path,)
         ).fetchone()
-        if has_origin or has_edge or has_temporal or not node or node[0] != "entity":
+        if has_origin or has_substantive_edge or has_temporal or not node or node[0] != "entity":
             continue
+        derived_memberships_removed += conn.execute(
+            "DELETE FROM edges WHERE subject=? AND predicate='聚类于'", (node_path,)
+        ).rowcount
         conn.execute("DELETE FROM aliases WHERE node_path=?", (node_path,))
         conn.execute("DELETE FROM node_origins WHERE node_path=?", (node_path,))
         conn.execute("DELETE FROM managed_nodes WHERE node_path=?", (node_path,))
         managed_nodes_removed += conn.execute(
             "DELETE FROM nodes WHERE path=?", (node_path,)
         ).rowcount
-    conn.commit()
+    if commit:
+        conn.commit()
     return {
         "edges_removed": edges_removed,
         "lineage_edges_removed": lineage_edges_removed,
         "edge_evidence_removed": removed_evidence,
         "temporal_facts_removed": temporal,
         "node_origins_removed": node_origins_removed,
+        "node_glosses_removed": node_glosses_removed,
         "managed_nodes_removed": managed_nodes_removed,
+        "derived_memberships_removed": derived_memberships_removed,
     }
 
 
@@ -780,6 +845,80 @@ def _frontmatter_authors(fm):
             if str(name).strip() and not is_placeholder_value(name)]
 
 
+_SEMANTIC_ENVELOPE_MARKERS = {
+    "<<<SLOTS>>>", "<<</SLOTS>>>", "<<<END>>>",
+}
+
+
+def parse_semantic_sections(text):
+    """Parse semantic sections and retain machine-actionable structure diagnostics."""
+    sections = {}
+    current_section = None
+    current_items = []
+    meaningful_lines = []
+    triple_like_outside_section = []
+    malformed_triple_lines = []
+    malformed_gloss_lines = []
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if (not stripped or stripped.startswith("#")
+                or stripped in _SEMANTIC_ENVELOPE_MARKERS):
+            continue
+        meaningful_lines.append(stripped)
+        if re.match(r'^.+[:：]$', stripped):
+            header = re.sub(r'\s*[（(].*$', '', stripped).rstrip(":：").strip()
+            if header and "|" not in header:
+                if current_section:
+                    sections[current_section] = current_items
+                current_section = header
+                current_items = []
+                continue
+        parts = [x.strip() for x in stripped.split("|", 2)]
+        triple_like = len(parts) == 3 and all(parts)
+        if current_section:
+            current_items.append(stripped)
+            if current_section == "三元组" and not triple_like:
+                malformed_triple_lines.append(stripped)
+            elif current_section == "概念说明":
+                gloss_parts = [part.strip() for part in stripped.split("|")]
+                if len(gloss_parts) != 2 or not all(gloss_parts):
+                    malformed_gloss_lines.append(stripped)
+        elif triple_like:
+            triple_like_outside_section.append(stripped)
+    if current_section:
+        sections[current_section] = current_items
+
+    triple_section_present = "三元组" in sections
+    bare_triples_recovered = 0
+    if (not triple_section_present and meaningful_lines
+            and len(triple_like_outside_section) == len(meaningful_lines)):
+        sections["三元组"] = list(triple_like_outside_section)
+        bare_triples_recovered = len(triple_like_outside_section)
+
+    semantic_triple_count = sum(
+        1 for item in sections.get("三元组", [])
+        if len(parts := [x.strip() for x in item.split("|", 2)]) == 3
+        and all(parts)
+    )
+    concept_gloss_count = sum(
+        1 for item in sections.get("概念说明", [])
+        if len(parts := [part.strip() for part in item.split("|")]) == 2
+        and all(parts)
+    )
+    diagnostics = {
+        "triple_section_present": triple_section_present,
+        "bare_triples_recovered": bare_triples_recovered,
+        "semantic_triple_count": semantic_triple_count,
+        "triple_like_outside_section": triple_like_outside_section,
+        "malformed_triple_lines": malformed_triple_lines,
+        "malformed_gloss_lines": malformed_gloss_lines,
+        "concept_gloss_count": concept_gloss_count,
+        "meaningful_line_count": len(meaningful_lines),
+    }
+    return sections, diagnostics
+
+
 def parse_semantic_text(text, page_path):
     """解析 LLM 填的语义槽文本。
     返回 (triples, keywords, main_direction, corresponding, cross_directions, direction_predicates)
@@ -790,26 +929,7 @@ def parse_semantic_text(text, page_path):
     direction_predicates: [(direction, predicate), ...] 方向+语义谓词(用于 keyword 归属判断)
     """
     triples = []
-    sections = {}
-    current_section = None
-    current_items = []
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if re.match(r'^.+[:：]$', stripped):
-            header = re.sub(r'\s*[（(].*$', '', stripped).rstrip(":：").strip()
-            if header and "|" not in header:
-                if current_section:
-                    sections[current_section] = current_items
-                current_section = header
-                current_items = []
-                continue
-        if current_section:
-            current_items.append(stripped)
-    if current_section:
-        sections[current_section] = current_items
+    sections, _diagnostics = parse_semantic_sections(text)
 
     # 通用文档域: admin/teaching/business — 统一三元组格式
     domain = _get_domain_from_path(page_path)
@@ -956,6 +1076,54 @@ def parse_semantic_text(text, page_path):
     keywords = list(dict.fromkeys(keywords))
 
     return triples, keywords, main_direction, corresponding, cross_directions, direction_predicates
+
+
+def parse_concept_glosses(text):
+    """解析 ``概念说明:`` 中的 ``概念名 | 文档局部说明``。"""
+    sections, _diagnostics = parse_semantic_sections(text)
+    glosses = []
+    seen = set()
+    for item in sections.get("概念说明", []):
+        parts = [part.strip() for part in item.split("|", 1)]
+        if len(parts) != 2 or not all(parts):
+            continue
+        mention, description = parts
+        if mention in seen or is_placeholder_value(description):
+            continue
+        seen.add(mention)
+        glosses.append({"mention": mention, "description": description})
+    return glosses
+
+
+def attach_concept_gloss_sources(glosses, page_path):
+    """从 Wiki 被引 section 机械选择 Raw locator；无定位说明不进入图。"""
+    page_file = gl.REPO / str(page_path)
+    if not page_file.suffix:
+        page_file = page_file.with_suffix(".md")
+    if not page_file.is_file():
+        return [], {"located_glosses": 0, "unlocated_glosses": len(glosses)}
+    errors = wl.validate_wiki_page(page_file)
+    if errors:
+        raise ValueError("Wiki locator 校验失败: " + "; ".join(errors[:5]))
+    located = []
+    for gloss in glosses:
+        _wiki_source, raw_citations = wl.graph_wiki_source(
+            page_file, gloss.get("mention", ""), gloss.get("description", "")
+        )
+        raw_source = wl.best_raw_citation(
+            raw_citations, gloss.get("mention", ""), gloss.get("description", "")
+        )
+        if not raw_source:
+            continue
+        located.append({
+            "mention": gloss["mention"],
+            "description": gloss["description"],
+            "source": raw_source,
+        })
+    return located, {
+        "located_glosses": len(located),
+        "unlocated_glosses": len(glosses) - len(located),
+    }
 
 
 def attach_wiki_section_sources(triples, page_path):
@@ -1736,7 +1904,10 @@ def _sparse_proposition_targets(prop_text, confirmed_concepts, existing_surfaces
     return targets
 
 
-def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_plan=None):
+def add_knowledge_edges(
+    conn, page_path, triples, page_source_note="", attach_plan=None,
+    concept_glosses=None,
+):
     """按 GraphDelta attach plan 编译节点并写知识边。
 
     GraphDelta 已在调用方完成规范化、确定性对齐计划和 query probes；本函数负责：
@@ -1812,8 +1983,9 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
     propositions = []  # (prop_path,完整 prop_text)
     flat = []
     created_node_paths = set()
+    resolved_mentions = {}
     resolve_hits = nodes_created = 0
-    resolve_ambig = len(skipped_ambiguous_mentions)
+    resolve_ambig = len((attach_plan or {}).get("ambiguous", []))
     for t in normalized_triples:
         t = dict(t)
         subj_raw = t.get("subject", "").strip()
@@ -1848,6 +2020,8 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                         "(entity_subtype IS NULL OR entity_subtype='')",
                         (target,),
                     )
+                if not _is_proposition_slot(name, t, key):
+                    resolved_mentions[name] = target
                 resolve_hits += 1
                 continue
             if decision and decision["action"].startswith("abstain"):
@@ -1869,6 +2043,8 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                         "(entity_subtype IS NULL OR entity_subtype='')",
                         (name,),
                     )
+                if not _is_proposition_slot(name, t, key):
+                    resolved_mentions[name] = name
                 continue
             if decision:
                 # create_local 不做近似匹配或自动 merge。
@@ -1908,7 +2084,10 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                         created_node_paths.add(t[key])
                 else:
                     # keyword 节点
-                    keyword_id = gl.extract_keyword_id(name)
+                    keyword_id = (
+                        name if decision and decision.get("action") == "keep_local_ambiguous"
+                        else gl.extract_keyword_id(name)
+                    )
                     if keyword_id != name:
                         existing_title = conn.execute(
                             "SELECT title FROM nodes WHERE path=?", (keyword_id,)
@@ -1926,6 +2105,7 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                     nodes_created += 1
             if not _is_proposition_slot(name, t, key):
                 concept_map[name] = t[key]
+                resolved_mentions[name] = t[key]
         origin_source = str(t.get("source") or page_source_note or "")
         for endpoint in {t.get("subject", ""), t.get("object", "")}:
             row = conn.execute(
@@ -1940,6 +2120,20 @@ def add_knowledge_edges(conn, page_path, triples, page_source_note="", attach_pl
                 and _is_proposition_slot(obj_raw, t, "object"):
             propositions.append((t["object"], obj_raw))
         flat.append((page_path, t))
+    for gloss in concept_glosses or []:
+        mention = str(gloss.get("mention") or "").strip()
+        node_path = resolved_mentions.get(mention)
+        source = str(gloss.get("source") or "").strip()
+        if not node_path or "/raw/" not in source.split("#", 1)[0]:
+            continue
+        row = conn.execute(
+            "SELECT type,entity_subtype FROM nodes WHERE path=?", (node_path,)
+        ).fetchone()
+        if not row or row[0] != "entity" or row[1] not in ("keyword", "concept"):
+            continue
+        gl.add_node_gloss(
+            conn, node_path, page_path, source, gloss.get("description", "")
+        )
     skip_dedup = gl.dedup_batch(flat, conn)
     added = skipped_dup = 0
     for i, (_, t) in enumerate(flat):
@@ -2070,6 +2264,40 @@ def merge_nodes(conn, src_node, tgt_node):
         "SELECT origin_page,source FROM node_origins WHERE node_path=?", (src_node,)
     )):
         gl.add_node_origin(conn, tgt_node, row["origin_page"], row["source"])
+    gloss_rows = list(conn.execute(
+        "SELECT origin_page,source,description,is_primary FROM node_glosses "
+        "WHERE node_path=? ORDER BY is_primary DESC,recorded_at,origin_page,source",
+        (src_node,),
+    ))
+    for row in gloss_rows:
+        conn.execute(
+            "INSERT OR IGNORE INTO node_glosses "
+            "(node_path,origin_page,source,description,is_primary,recorded_at) "
+            "VALUES (?,?,?,?,0,datetime('now'))",
+            (tgt_node, row["origin_page"], row["source"], row["description"]),
+        )
+    target_description = conn.execute(
+        "SELECT description FROM nodes WHERE path=?", (tgt_node,)
+    ).fetchone()
+    source_description = conn.execute(
+        "SELECT description FROM nodes WHERE path=?", (src_node,)
+    ).fetchone()
+    if target_description and not str(target_description[0] or "").strip():
+        primary = next((row for row in gloss_rows if row["is_primary"]), None)
+        description = (
+            primary["description"] if primary
+            else str(source_description[0] or "").strip() if source_description else ""
+        )
+        if description:
+            conn.execute(
+                "UPDATE nodes SET description=? WHERE path=?", (description, tgt_node)
+            )
+        if primary:
+            conn.execute(
+                "UPDATE node_glosses SET is_primary=CASE "
+                "WHEN origin_page=? AND source=? THEN 1 ELSE 0 END WHERE node_path=?",
+                (primary["origin_page"], primary["source"], tgt_node),
+            )
     conn.execute("DELETE FROM aliases WHERE node_path=?", (src_node,))
     conn.execute("DELETE FROM node_origins WHERE node_path=?", (src_node,))
     conn.execute("DELETE FROM managed_nodes WHERE node_path=?", (src_node,))
@@ -2079,30 +2307,181 @@ def merge_nodes(conn, src_node, tgt_node):
 
 # ===== 命令入口 =====
 
+def _plan_raw_relationship(args, page, fm=None):
+    raw_value = getattr(args, "raw_relationship_json", None)
+    if not raw_value:
+        return []
+    try:
+        relation = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid --raw-relationship-json: {exc}") from exc
+    if not isinstance(relation, dict):
+        raise ValueError("--raw-relationship-json must be an object")
+    relation_type = str(relation.get("type") or "").strip()
+    predicate_by_type = {
+        "version": "后一版本",
+        "supplementary": "补充材料",
+        "translation": "译自",
+    }
+    if relation_type not in predicate_by_type:
+        raise ValueError(f"unsupported raw relationship type: {relation_type}")
+    fm = fm if fm is not None else gl.read_frontmatter(page)
+    sources = gl.parse_list_field(fm, "sources")
+    current_raw = gl.raw_node_path(sources[0], page) if sources else ""
+    target_page = str(relation.get("target_page") or "").removesuffix(".md")
+    if target_page:
+        target_fm = gl.read_frontmatter(target_page)
+        target_sources = gl.parse_list_field(target_fm, "sources")
+        target_raw = gl.raw_node_path(target_sources[0], target_page) if target_sources else ""
+    else:
+        target_source = str(relation.get("target_source") or "").strip()
+        target_dir = str(relation.get("target_raw_dir") or "").strip()
+        if not target_source and target_dir:
+            domain = page.split("/", 1)[0]
+            target_source = f"{domain}/raw/references/{target_dir}/paper.md"
+        target_raw = gl.raw_node_path(target_source, page) if target_source else ""
+    if not current_raw or not target_raw:
+        raise ValueError("raw relationship endpoints could not be derived from sources")
+    predicate = predicate_by_type[relation_type]
+    if relation_type == "translation":
+        subject, object_name = current_raw, target_raw
+    else:
+        subject, object_name = target_raw, current_raw
+    return [{
+        "subject": subject,
+        "predicate": predicate,
+        "object": object_name,
+        "confidence": "[可追溯]",
+        "source": "",
+        "is_sr": 0,
+        "subject_is_canonical": True,
+        "object_is_canonical": True,
+    }]
+
+
+def apply_ir_structural_relations(conn, ir, origin_page):
+    added = 0
+    for relation in ir.get("structural_relations", []):
+        if relation.get("kind") != "raw_relationship":
+            raise ValueError(f"unsupported structural relation kind: {relation.get('kind')}")
+        subject = relation["subject"]
+        predicate = relation["predicate"]
+        object_name = relation["object"]
+        for raw_path in (subject, object_name):
+            if not gl.node_exists(conn, raw_path):
+                gl.ensure_node(
+                    conn, raw_path, Path(raw_path).name or raw_path,
+                    "raw", "", "", "current", 0,
+                )
+        existing = conn.execute(
+            "SELECT id FROM edges WHERE subject=? AND predicate=? AND object=?",
+            (subject, predicate, object_name),
+        ).fetchone()
+        if existing:
+            edge_id = existing["id"]
+        else:
+            conn.execute(
+                "INSERT INTO edges (subject, predicate, object, confidence, source, is_sr) "
+                "VALUES (?,?,?,?,?,?)",
+                (
+                    subject, predicate, object_name,
+                    relation.get("confidence") or "[可追溯]",
+                    relation.get("source") or "",
+                    int(bool(relation.get("is_sr", 0))),
+                ),
+            )
+            edge_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            added += 1
+        gl.add_edge_origin(conn, edge_id, origin_page, relation.get("source") or "")
+    return added
+
+
+def _compile_knowledge_ir(
+    args, page, fm, triples, deterministic_count, concept_glosses, report,
+    structural_relations=None,
+):
+    if structural_relations is None:
+        structural_relations = _plan_raw_relationship(args, page, fm)
+    ir = kir.build_knowledge_ir(
+        page,
+        fm,
+        triples,
+        deterministic_relation_count=deterministic_count,
+        concept_glosses=concept_glosses,
+        structural_relations=structural_relations,
+        transaction_id=getattr(args, "transaction_id", "") or "",
+    )
+    output_path = getattr(args, "knowledge_ir_out", None)
+    if output_path:
+        kir.write_json(output_path, ir)
+    summary = kir.summarize_knowledge_ir(ir)
+    if output_path:
+        summary["path"] = str(output_path)
+    report["knowledge_ir"] = summary
+    return ir, kir.relations_from_ir(ir)
+
+
+def _record_graph_plan(args, ir, inspection, report):
+    plan = kir.build_graph_plan(ir, inspection)
+    output_path = getattr(args, "graph_plan_out", None)
+    if output_path:
+        kir.write_json(output_path, plan)
+    summary = kir.summarize_graph_plan(plan)
+    if output_path:
+        summary["path"] = str(output_path)
+    report["graph_plan"] = summary
+    return plan
+
+
 def cmd_ingest(args):
-    conn = _connect_for(args)
     page = args.page.removesuffix(".md")
+    fm = gl.read_frontmatter(page)
+    direct_ir_path = getattr(args, "knowledge_ir", None)
+    semantic_path = getattr(args, "semantic", None)
+    legacy_inputs = [
+        semantic_path,
+        getattr(args, "citations", None),
+        getattr(args, "triples", None),
+        getattr(args, "triples_json", None),
+    ]
+    if direct_ir_path and any(legacy_inputs):
+        raise ValueError(
+            "--knowledge-ir cannot be combined with semantic/triples/citations inputs"
+        )
+    direct_ir = kir.load_knowledge_ir(direct_ir_path) if direct_ir_path else None
+    if direct_ir is not None:
+        # Validate the untrusted proposal before opening graph.db. Canonical page
+        # metadata and all deterministic relations are rebuilt below.
+        direct_semantic, direct_glosses = kir.semantic_proposal_content(
+            direct_ir, page, fm
+        )
+    else:
+        direct_semantic, direct_glosses = None, None
+    structural_relations = _plan_raw_relationship(args, page, fm)
+    conn = _connect_for(args)
     # --clean: re-ingest 模式，清本页旧边后重建（单事务原子，无风险窗口）
     if getattr(args, "clean", False):
-        clean_report = clean_page_edges(conn, page)
+        clean_report = clean_page_edges(conn, page, commit=False)
         report = {"cleaned_page": page, **clean_report}
     else:
         report = {}
     # 同步 keyword 别名（幂等），确保 resolve 命中已知变体
     try:
         import sync_keyword_aliases
-        _g, _a, _s = sync_keyword_aliases.sync(conn, apply=True)
+        _g, _a, _s = sync_keyword_aliases.sync(
+            conn, apply=True, commit=False
+        )
         if _a:
             report["keyword_aliases_synced"] = _a
     except Exception:
         pass
     # 兜底清理 ghost hub（.md 已删但节点残留），每次摄入前清扫保持图整洁
-    ghost = cleanup_ghost_hubs(conn)
+    ghost = cleanup_ghost_hubs(conn, commit=False)
     if ghost:
         report["ghost_hubs_cleaned"] = ghost
     # 图健康前置检查：清理孤儿 alias（指向已删节点）+ 孤儿边（引用已删节点）
    # 防止上一篇摄入/回滚遗留的脏数据阻塞下一篇的外键约束
-    integrity = cleanup_orphan_references(conn)
+    integrity = cleanup_orphan_references(conn, commit=False)
     if integrity:
         report["graph_integrity_cleaned"] = integrity
     node_type, conflicts = upsert_page_node(conn, page)
@@ -2153,14 +2532,43 @@ def cmd_ingest(args):
     if merged:
         report["auto_merged"] = merged
 
-    if args.semantic:
+    if semantic_path or direct_ir is not None:
         # 预填+语义模式
         fm = gl.read_frontmatter(page)
         text = (gl.REPO / (page + ".md")).read_text(encoding="utf-8")
         nav = extract_section_text(text, "Navigation")
         mechanical = extract_mechanical_edges(page)
-        sem_text = Path(args.semantic).read_text(encoding="utf-8")
-        sem_triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = parse_semantic_text(sem_text, page)
+        if direct_ir is not None:
+            sem_text = ""
+            sem_triples = direct_semantic
+            concept_glosses = direct_glosses
+            corresponding = {
+                triple["subject"] for triple in sem_triples
+                if triple.get("object") == page
+                and triple.get("predicate") in {"第一作者", "通讯作者"}
+            }
+            keywords = [
+                triple["object"] for triple in sem_triples
+                if triple.get("subject") == page
+                and triple.get("predicate") in CONCEPT_KW_PREDICATES
+            ]
+            dir_preds = [
+                (triple["object"], triple["predicate"])
+                for triple in sem_triples
+                if triple.get("subject") == page
+                and triple.get("predicate") in DIRECTION_PREDICATES
+            ]
+            main_dir = dir_preds[0][0] if dir_preds else None
+            cross_dirs = [item[0] for item in dir_preds[1:]]
+            report["knowledge_ir_input"] = {
+                "path": str(direct_ir_path),
+                "sha256": kir.knowledge_ir_hash(direct_ir),
+                "role": "semantic_proposal",
+            }
+        else:
+            sem_text = Path(semantic_path).read_text(encoding="utf-8")
+            sem_triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = parse_semantic_text(sem_text, page)
+            concept_glosses = parse_concept_glosses(sem_text)
         _is_paper = fm.get("type") == "paper-summary" or page.startswith("academic/wiki/papers/")
         if _is_paper:
             # 新论文不接受语义槽自报方向或通用“研究关键词”标签。方向只由可定位的
@@ -2182,7 +2590,7 @@ def cmd_ingest(args):
         elif not _get_domain_from_path(page) and fm.get("type") != "conference-summary":
             _doc_text = f"{fm.get('title', '')}\n{nav}"
             sem_triples, dir_preds = normalize_semantic_directions(conn, sem_triples, keywords, page, _doc_text)
-        sem_format_warns = detect_inline_section_headers(sem_text)
+        sem_format_warns = detect_inline_section_headers(sem_text) if sem_text else []
         # proposition 对齐: 统一对齐框架覆盖 proposition 颗粒度
         # >0.98 合并节点, 0.9-0.98 建关联边(比 keyword 更保守,防污染事实层)
         _prop_report = _align_propositions(sem_triples, conn, page)
@@ -2226,7 +2634,21 @@ def cmd_ingest(args):
         # 合并 + 可选 Wiki section locator + 补默认值。
         all_triples = mechanical + sem_triples
         report["edge_locators"] = attach_wiki_section_sources(all_triples, page)
+        concept_glosses, gloss_locator_report = attach_concept_gloss_sources(
+            concept_glosses, page
+        )
+        report["node_gloss_locators"] = gloss_locator_report
         fill_defaults(all_triples, fm)
+        knowledge_ir_doc, all_triples = _compile_knowledge_ir(
+            args,
+            page,
+            fm,
+            all_triples,
+            len(mechanical),
+            concept_glosses,
+            report,
+            structural_relations,
+        )
         # 稀疏导航：命题内部概念只经 proposition/包含边可达，不提升成论文级关键词。
         navigation_candidates = navigation_connectivity_candidates(all_triples, page, corresponding)
         if navigation_candidates:
@@ -2237,16 +2659,20 @@ def cmd_ingest(args):
             fm,
             all_triples,
             deterministic_triple_count=len(mechanical),
+            concept_glosses=concept_glosses,
         )
         writer_triples = gd.knowledge_edges(delta)
         attach_plan = gd.plan_attachment(conn, delta)
+        inspection = gd.inspect_delta(conn, delta, attach_plan=attach_plan)
+        _record_graph_plan(args, knowledge_ir_doc, inspection, report)
         _ir, delta_report = gd.fuse_with_savepoint(
             conn,
             delta,
             lambda: add_knowledge_edges(
-                conn, page, writer_triples, attach_plan=attach_plan
+                conn, page, writer_triples, attach_plan=attach_plan,
+                concept_glosses=delta.concept_glosses,
             ),
-            inspection=gd.inspect_delta(conn, delta, attach_plan=attach_plan),
+            inspection=inspection,
         )
         report["graph_delta"] = delta_report
         report.update({
@@ -2285,18 +2711,30 @@ def cmd_ingest(args):
         report["edge_locators"] = attach_wiki_section_sources(triples, page)
         fill_defaults(triples, fm)
         deterministic_count = len(triples) if args.citations else 0
+        knowledge_ir_doc, triples = _compile_knowledge_ir(
+            args,
+            page,
+            fm,
+            triples,
+            deterministic_count,
+            [],
+            report,
+            structural_relations,
+        )
         delta = gd.build_document_delta(
             page, fm, triples, deterministic_triple_count=deterministic_count
         )
         writer_triples = gd.knowledge_edges(delta)
         attach_plan = gd.plan_attachment(conn, delta)
+        inspection = gd.inspect_delta(conn, delta, attach_plan=attach_plan)
+        _record_graph_plan(args, knowledge_ir_doc, inspection, report)
         _ir, delta_report = gd.fuse_with_savepoint(
             conn,
             delta,
             lambda: add_knowledge_edges(
                 conn, page, writer_triples, attach_plan=attach_plan
             ),
-            inspection=gd.inspect_delta(conn, delta, attach_plan=attach_plan),
+            inspection=inspection,
         )
         report["graph_delta"] = delta_report
         report.update({
@@ -2305,7 +2743,20 @@ def cmd_ingest(args):
             "descriptive_warnings": _ir.descriptive_warnings,
         })
 
-    conn.commit()
+    try:
+        structural_added = apply_ir_structural_relations(
+            conn, knowledge_ir_doc, page
+        )
+        if knowledge_ir_doc.get("structural_relations"):
+            report["structural_relations"] = {
+                "planned": len(knowledge_ir_doc["structural_relations"]),
+                "added": structural_added,
+            }
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
     # Hub 动力学只局部刷新可重建的“普通节点→聚类于→Hub”边。生命周期
     # 始终只产候选；embedding 不可用或节点无画像时静默保留原归属。
     try:
@@ -2401,10 +2852,19 @@ def main():
     p_pf.set_defaults(func=cmd_prefill)
     p_g = sub.add_parser("ingest", help="ingest 一页建边")
     p_g.add_argument("--page", required=True)
-    p_g.add_argument("--triples", help="LLM 临时片段文件路径(JSON,兼容模式)")
-    p_g.add_argument("--triples-json", help="LLM 临时 JSON 字符串(兼容模式)")
-    p_g.add_argument("--semantic", help="LLM 填的语义槽文件(预填模式)")
-    p_g.add_argument("--citations", help="引文 JSON(含 title),用于跨论文补全")
+    input_group = p_g.add_mutually_exclusive_group()
+    input_group.add_argument("--triples", help="LLM 临时片段文件路径(JSON,兼容模式)")
+    input_group.add_argument("--triples-json", help="LLM 临时 JSON 字符串(兼容模式)")
+    input_group.add_argument("--semantic", help="LLM 填的语义槽文件(预填模式)")
+    input_group.add_argument("--citations", help="引文 JSON(含 title),用于跨论文补全")
+    input_group.add_argument(
+        "--knowledge-ir",
+        help="semantic worker 输出的 knowledge-ir-v1 提案；程序重编译确定性字段",
+    )
+    p_g.add_argument("--transaction-id", default="", help="调用方事务 ID，仅写入审计 IR")
+    p_g.add_argument("--knowledge-ir-out", help="写出经校验的 knowledge-ir-v1")
+    p_g.add_argument("--graph-plan-out", help="写出绑定 Knowledge IR hash 的 graph-plan-v1")
+    p_g.add_argument("--raw-relationship-json", help="纳入同一 IR/plan/commit 的 Raw 版本关系 JSON")
     p_g.add_argument("--clean", action="store_true", help="re-ingest 模式:先删本页旧边再重建(原子)")
     p_g.set_defaults(func=cmd_ingest)
     args = ap.parse_args()

@@ -14,12 +14,18 @@ import re
 import sqlite3
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 REPO = Path(__file__).resolve().parent.parent
 SUBPROJECTS = ["academic", "admin", "teaching", "business"]  # 主聚合清单;private 物理隔离,不纳入
 PRIVATE_DIR = REPO / "private"
 HUB_DIR = REPO / "cross-domain" / "topics"
 GRAPH_DB = REPO / "cross-domain" / "graph.db"
 PRIVATE_GRAPH_DB = PRIVATE_DIR / "graph.db"
+GRAPH_SCHEMA_CONFIG = REPO / "operations" / "config" / "graph-schema.yaml"
 
 # 域 → 所属 graph.db。主库四域统一用 cross-domain/graph.db(聚合);
 # private 物理隔离,独立 graph.db,不进主聚合。
@@ -55,10 +61,45 @@ def domain_of_path(page_path):
 CONFIDENCE_VALUES = {"可追溯", "推断", "存疑"}
 DEFAULT_CONFIDENCE = "可追溯"
 
+
+def load_graph_contract(path=None):
+    """Load the shared machine contract used by ingest, query and lint."""
+    target = Path(path or GRAPH_SCHEMA_CONFIG)
+    if yaml is None or not target.is_file():
+        return {}
+    return yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+
+
+def predicate_family(predicate, subject_type="", object_type="", contract=None):
+    """Derive a query traversal family without duplicating it into edges."""
+    contract = contract or load_graph_contract()
+    families = contract.get("predicate_families") or {}
+    predicate = base_predicate(predicate)
+    for family, predicates in families.items():
+        if family == "default" or not isinstance(predicates, list):
+            continue
+        if predicate in predicates:
+            return family
+    if "hub" in {subject_type, object_type}:
+        return "aggregation"
+    return str(families.get("default") or "semantic")
+
+
+def traversal_families(profile="", families=None, contract=None):
+    """Resolve an explicit family list or a named traversal profile."""
+    contract = contract or load_graph_contract()
+    if families:
+        values = families if isinstance(families, (list, tuple, set)) else str(families).split(",")
+        return {str(value).strip() for value in values if str(value).strip()}
+    if profile:
+        values = (contract.get("traversal_profiles") or {}).get(str(profile), [])
+        return {str(value).strip() for value in values if str(value).strip()}
+    return set()
+
 # 管道版本号：影响 wiki/图边输出的建设变更才 bump。
 # 纯改名/重构不 bump；skeleton 模板/建边逻辑/prompt 调整等影响已入库内容的 bump。
 # re_ingest --outdated 据此判断哪些论文需重新摄入。
-CURRENT_PIPELINE_VERSION = 9  # v9: bounded sparse retry + node-origin lineage
+CURRENT_PIPELINE_VERSION = 12  # v12: shared paper semantic contract across API and Agent backends
 
 RAW_DOCUMENT_SUFFIXES = {
     ".md", ".txt", ".pdf", ".doc", ".docx", ".ppt", ".pptx",
@@ -217,8 +258,52 @@ def connect(db_path=None):
             FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS node_glosses (
+            node_path TEXT NOT NULL,
+            origin_page TEXT NOT NULL,
+            source TEXT NOT NULL,
+            description TEXT NOT NULL,
+            is_primary INTEGER DEFAULT 0,
+            recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (node_path, origin_page, source),
+            FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+        )
+    """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_managed_nodes_origin ON managed_nodes(created_origin_page)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_node_origins_page ON node_origins(origin_page)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_node_glosses_page ON node_glosses(origin_page)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS node_description_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_path TEXT NOT NULL,
+            origin_page TEXT NOT NULL,
+            source TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            proposed_description TEXT NOT NULL DEFAULT '',
+            recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_node_description_reviews_source "
+        "ON node_description_reviews(node_path, source, id)"
+    )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS hub_scope_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hub_path TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            previous_scope TEXT NOT NULL DEFAULT '',
+            scope TEXT NOT NULL,
+            related_hubs_json TEXT NOT NULL DEFAULT '[]',
+            evidence_json TEXT NOT NULL DEFAULT '[]',
+            recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (hub_path) REFERENCES nodes(path) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hub_scope_history_hub ON hub_scope_history(hub_path, id)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS temporal_facts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -316,6 +401,41 @@ def init_schema(conn):
         FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS node_glosses (
+        node_path TEXT NOT NULL,
+        origin_page TEXT NOT NULL,
+        source TEXT NOT NULL,
+        description TEXT NOT NULL,
+        is_primary INTEGER DEFAULT 0,
+        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (node_path, origin_page, source),
+        FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS node_description_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_path TEXT NOT NULL,
+        origin_page TEXT NOT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        proposed_description TEXT NOT NULL DEFAULT '',
+        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS hub_scope_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hub_path TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        previous_scope TEXT NOT NULL DEFAULT '',
+        scope TEXT NOT NULL,
+        related_hubs_json TEXT NOT NULL DEFAULT '[]',
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (hub_path) REFERENCES nodes(path) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS temporal_facts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         subject TEXT NOT NULL,
@@ -341,6 +461,9 @@ def init_schema(conn):
     CREATE INDEX IF NOT EXISTS idx_edge_origins_page ON edge_origins(origin_page);
     CREATE INDEX IF NOT EXISTS idx_managed_nodes_origin ON managed_nodes(created_origin_page);
     CREATE INDEX IF NOT EXISTS idx_node_origins_page ON node_origins(origin_page);
+    CREATE INDEX IF NOT EXISTS idx_node_glosses_page ON node_glosses(origin_page);
+    CREATE INDEX IF NOT EXISTS idx_node_description_reviews_source ON node_description_reviews(node_path, source, id);
+    CREATE INDEX IF NOT EXISTS idx_hub_scope_history_hub ON hub_scope_history(hub_path, id);
     CREATE INDEX IF NOT EXISTS idx_temporal_facts_subject ON temporal_facts(subject);
     CREATE INDEX IF NOT EXISTS idx_temporal_facts_object ON temporal_facts(object);
     CREATE INDEX IF NOT EXISTS idx_temporal_facts_valid ON temporal_facts(valid_from, valid_until);
@@ -394,6 +517,65 @@ def add_node_origin(conn, node_path, origin_page, source="", managed=False):
         "(node_path, origin_page, source, recorded_at) VALUES (?,?,?,datetime('now'))",
         (node_path, origin_page, source or ""),
     )
+
+
+def add_node_gloss(conn, node_path, origin_page, source, description, promote=False):
+    """保存经 Raw locator 约束的局部说明；显式 promote 仅供无效主描述修复。"""
+    source = str(source or "").strip()
+    description = str(description or "").strip()
+    if not node_path or not origin_page or not source or not description:
+        return False
+    node = conn.execute(
+        "SELECT description FROM nodes WHERE path=?", (node_path,)
+    ).fetchone()
+    if not node:
+        return False
+    existing_gloss = conn.execute(
+        "SELECT is_primary,description FROM node_glosses "
+        "WHERE node_path=? AND origin_page=? AND source=?",
+        (node_path, origin_page, source),
+    ).fetchone()
+    is_primary = int(bool(existing_gloss and existing_gloss[0]))
+    if promote or not str(node[0] or "").strip():
+        conn.execute(
+            "UPDATE node_glosses SET is_primary=0 WHERE node_path=?", (node_path,)
+        )
+        conn.execute(
+            "UPDATE nodes SET description=? WHERE path=?", (description, node_path)
+        )
+        is_primary = 1
+    elif (existing_gloss and existing_gloss[0]
+          and str(node[0] or "") == str(existing_gloss[1] or "")):
+        conn.execute(
+            "UPDATE nodes SET description=? WHERE path=?", (description, node_path)
+        )
+    conn.execute(
+        "INSERT INTO node_glosses "
+        "(node_path,origin_page,source,description,is_primary,recorded_at) "
+        "VALUES (?,?,?,?,?,datetime('now')) "
+        "ON CONFLICT(node_path,origin_page,source) DO UPDATE SET "
+        "description=excluded.description,is_primary=excluded.is_primary,recorded_at=excluded.recorded_at",
+        (node_path, origin_page, source, description, is_primary),
+    )
+    return True
+
+
+def add_node_description_review(
+    conn, node_path, origin_page, source, status, reason="", proposed_description="",
+):
+    """Append an auditable legacy-description decision for one Raw locator."""
+    if not node_path or not origin_page or not source or not status:
+        return False
+    conn.execute(
+        "INSERT INTO node_description_reviews "
+        "(node_path,origin_page,source,status,reason,proposed_description,recorded_at) "
+        "VALUES (?,?,?,?,?,?,datetime('now'))",
+        (
+            str(node_path), str(origin_page), str(source), str(status),
+            str(reason or ""), str(proposed_description or ""),
+        ),
+    )
+    return True
 
 
 def base_predicate(predicate):

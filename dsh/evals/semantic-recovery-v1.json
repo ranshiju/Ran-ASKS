@@ -1,0 +1,105 @@
+{
+  "protocol_version": "semantic-recovery-exam-v1",
+  "task_type": "semantic_recovery_agent",
+  "pass_threshold": 0.85,
+  "gates": {
+    "max_average_latency_sec": 45,
+    "max_total_tokens": 6000,
+    "max_safety_violations": 0,
+    "require_route_purity": true
+  },
+  "cases": [
+    {
+      "id": "predicate-compound-to-single",
+      "tags": ["malformed_predicate", "resolve"],
+      "semantic_text": "三元组:\n本文 | 实验/结果 | 纠缠熵增长\n",
+      "wiki_text": "## 数值实验\n数值实验验证了纠缠熵随时间增长。\n",
+      "source_text": "The numerical experiment verifies the growth of entanglement entropy over time.\n",
+      "issues": [
+        {
+          "id": "issue-01",
+          "issue_code": "malformed_predicate",
+          "section": "三元组",
+          "line": "本文 | 实验/结果 | 纠缠熵增长",
+          "field": "predicate",
+          "observed": "实验/结果",
+          "expected": "单一、无标点谓词",
+          "reason": "谓词包含斜杠",
+          "suggested_actions": ["replace"],
+          "retryable": true,
+          "is_triple": true,
+          "fingerprint": "exam-predicate-01"
+        }
+      ],
+      "expected": {
+        "status": "resolved",
+        "accepted_replacements": {
+          "issue-01": [
+            "本文 | 验证 | 纠缠熵增长",
+            "本文 | 得到 | 纠缠熵增长",
+            "本文 | 发现 | 纠缠熵增长"
+          ]
+        }
+      }
+    },
+    {
+      "id": "descriptive-object-to-concept",
+      "tags": ["descriptive_phrase", "resolve"],
+      "semantic_text": "三元组:\n本文 | 使用 | 通过截断低权重奇异值来压缩张量网络，降低计算开销\n",
+      "wiki_text": "## 方法\n本文使用张量网络截断压缩方法降低计算开销。\n",
+      "source_text": "We reduce the computational cost with tensor-network truncation compression.\n",
+      "issues": [
+        {
+          "id": "issue-01",
+          "issue_code": "descriptive_phrase",
+          "section": "三元组",
+          "line": "本文 | 使用 | 通过截断低权重奇异值来压缩张量网络，降低计算开销",
+          "field": "object",
+          "observed": "通过截断低权重奇异值来压缩张量网络，降低计算开销",
+          "expected": "规范概念名",
+          "reason": "客体是多从句描述",
+          "suggested_actions": ["replace"],
+          "retryable": true,
+          "is_triple": true,
+          "fingerprint": "exam-object-01"
+        }
+      ],
+      "expected": {
+        "status": "resolved",
+        "accepted_replacements": {
+          "issue-01": [
+            "本文 | 使用 | 张量网络截断压缩",
+            "本文 | 使用 | 张量网络截断方法"
+          ]
+        }
+      }
+    },
+    {
+      "id": "insufficient-evidence-must-abstain",
+      "tags": ["evidence_insufficient", "abstain"],
+      "semantic_text": "三元组:\n本文 | 优于 | 未注明的基线模型\n",
+      "wiki_text": "## 结果\n本文报告了性能提升，但本节没有给出比较基线。\n",
+      "source_text": "The method improves performance.\n",
+      "issues": [
+        {
+          "id": "issue-01",
+          "issue_code": "unsupported_comparison_target",
+          "section": "三元组",
+          "line": "本文 | 优于 | 未注明的基线模型",
+          "field": "object",
+          "observed": "未注明的基线模型",
+          "expected": "来源明确支持的比较对象",
+          "reason": "staged Wiki 和 source 都没有基线名称",
+          "suggested_actions": ["replace", "abstain"],
+          "retryable": true,
+          "is_triple": true,
+          "fingerprint": "exam-abstain-01"
+        }
+      ],
+      "expected": {
+        "status": "abstained",
+        "accepted_replacements": {}
+      }
+    }
+  ]
+}

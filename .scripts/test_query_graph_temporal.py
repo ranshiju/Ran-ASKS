@@ -85,6 +85,49 @@ def test_invalid_date_returns_error():
         assert set(result) == {"error"}
 
 
+def test_node_info_exposes_description_and_raw_located_glosses():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = make_db(directory)
+        gl.ensure_node(
+            conn, "concept", "Concept", "entity", entity_subtype="keyword"
+        )
+        gl.add_node_gloss(
+            conn, "concept", "academic/wiki/papers/example",
+            "academic/raw/references/example/paper.md#L55", "局部概念说明",
+        )
+        result = module.node_info(conn, "concept")
+        conn.close()
+    assert result["entity_subtype"] == "keyword"
+    assert result["description"] == "局部概念说明"
+    assert result["glosses"] == [{
+        "origin_page": "academic/wiki/papers/example",
+        "source": "academic/raw/references/example/paper.md#L55",
+        "description": "局部概念说明",
+        "is_primary": 1,
+    }]
+
+
+def test_relations_profile_filters_derived_predicate_families():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = make_db(directory)
+        gl.ensure_node(conn, "raw-a", "Raw A", "raw")
+        gl.ensure_node(conn, "hub-a", "Hub A", "hub")
+        gl.ensure_node(conn, "author-a", "Author A", "entity", entity_subtype="person")
+        conn.executemany(
+            "INSERT INTO edges (subject,predicate,object,confidence) VALUES (?,?,?,?)",
+            [
+                ("page-a", "来源", "raw-a", "可追溯"),
+                ("page-a", "核心方法", "page-b", "可追溯"),
+                ("page-a", "主要研究", "hub-a", "可追溯"),
+                ("author-a", "作者", "page-a", "可追溯"),
+            ],
+        )
+        result = module.relations(conn, "page-a", profile="explanation")
+        conn.close()
+    assert {edge["family"] for edge in result["edges"]} == {"evidence", "semantic"}
+    assert {edge["predicate"] for edge in result["edges"]} == {"来源", "核心方法"}
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
     for test in tests:

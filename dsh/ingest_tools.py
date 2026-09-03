@@ -16,6 +16,7 @@ SCRIPTS = REPO / ".scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from dsh.harness import ToolDefinition
+import inbox_state
 
 
 _ERROR_CATEGORIES = {
@@ -60,6 +61,34 @@ def _classify_error_text(text: str) -> str:
     return "unknown"
 
 
+def _dsh_category(failure: dict | None) -> str:
+    if not failure:
+        return "unknown"
+    domain = str(failure.get("domain") or "")
+    category = str(failure.get("category") or "")
+    if domain == "api" and category in {"api_rate_limit", "api_network_transient"}:
+        return "api_timeout"
+    if domain == "extraction":
+        return "extraction_failed"
+    if domain == "graph":
+        return "graph_failed"
+    if domain in {"semantic", "worker", "policy"}:
+        return "semantic_failed"
+    return "unknown"
+
+
+def _structured_failure(stderr: str, stdout: str) -> dict | None:
+    combined = f"{stderr}\n{stdout}"
+    for payload in reversed(_json_objects(combined)):
+        explicit_failure = payload.get("failure_disposition") or payload.get("failure")
+        if isinstance(explicit_failure, dict) and explicit_failure.get("category"):
+            return explicit_failure
+        failure = inbox_state.classify_failure(payload)
+        if failure:
+            return failure
+    return None
+
+
 def _classify_error(returncode: int, stderr: str, stdout: str) -> str:
     """Prefer structured terminal state; use narrow text patterns as fallback."""
     combined = f"{stderr}\n{stdout}"
@@ -72,6 +101,14 @@ def _classify_error(returncode: int, stderr: str, stdout: str) -> str:
             return explicit
         if status in _ERROR_CATEGORIES:
             return status
+        explicit_failure = payload.get("failure_disposition") or payload.get("failure")
+        mapped = _dsh_category(explicit_failure if isinstance(explicit_failure, dict) else None)
+        if mapped != "unknown":
+            return mapped
+        canonical = inbox_state.classify_failure(payload)
+        mapped = _dsh_category(canonical)
+        if mapped != "unknown":
+            return mapped
         if status in {"agent_required", "bibliographic_review_required", "type_mismatch"}:
             return "semantic_failed"
         errors = payload.get("errors", [])
@@ -93,7 +130,12 @@ def _ingest_call(args: list[str], timeout: int = 1800) -> str:
     err = p.stderr or ""
     if p.returncode != 0:
         category = _classify_error(p.returncode, err, out)
-        return f"[ERROR category={category} script={args[0]} code={p.returncode}]\n{err}\n{out}".strip()
+        failure = _structured_failure(err, out)
+        disposition = (
+            "\n" + json.dumps({"failure_disposition": failure}, ensure_ascii=False)
+            if failure else ""
+        )
+        return f"[ERROR category={category} script={args[0]} code={p.returncode}]{disposition}\n{err}\n{out}".strip()
     return f"{out}\n{err}".strip()
 
 
@@ -151,6 +193,15 @@ def build_ingest_tools() -> list[ToolDefinition]:
                 "required": ["file"]},
             execute_fn=lambda args: _ingest_call(["ingest_meeting.py", "--txt", args.get("file", "")]
                 + (["--subproject", args["subproject"]] if args.get("subproject") else [])),
+        ),
+        ToolDefinition(
+            name="ingest_meeting_resume",
+            description="Meeting Compiler 输出写入 write_to 后恢复同一会议摄入事务",
+            input_schema={"type": "object", "properties": {
+                "txn": {"type": "string", "description": "事务 ID"}},
+                "required": ["txn"]},
+            execute_fn=lambda args: _ingest_call([
+                "ingest_meeting.py", "--resume", args.get("txn", "")]),
         ),
         ToolDefinition(
             name="ingest_document_file",

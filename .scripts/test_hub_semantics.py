@@ -337,15 +337,15 @@ def test_auto_create_check_surfaces_stable_overload_split():
     conn = make_db()
     overloaded = [{
             "hub": "academic/wiki/hubs/big",
-            "member_count": 21,
-            "limit": 20,
+            "member_count": 31,
+            "limit": 30,
             "children": [],
             "action": "split_candidate",
         }]
     candidate = {
         "decision": "agent_definition_required",
         "hub": "academic/wiki/hubs/big",
-        "count": 21,
+        "count": 31,
         "clusters": [{"members": ["a"]}, {"members": ["b"]}],
     }
     old_plan = hs.plan_memberships
@@ -367,15 +367,15 @@ def test_auto_create_check_surfaces_stable_overload_split():
     assert check["eligible"] == []
     assert len(check["split_candidates"]) == 1
     assert check["split_candidates"][0]["trigger"] == "member_limit"
-    assert check["split_candidates"][0]["member_count"] == 21
+    assert check["split_candidates"][0]["member_count"] == 31
 
 
 def test_auto_create_check_surfaces_existing_child_redistribution():
     conn = make_db()
     overloaded = [{
         "hub": "academic/wiki/hubs/parent",
-        "member_count": 23,
-        "limit": 20,
+        "member_count": 33,
+        "limit": 30,
         "children": ["academic/wiki/hubs/child"],
         "action": "redistribute",
     }]
@@ -406,6 +406,7 @@ def test_auto_create_check_surfaces_existing_child_redistribution():
         "decision": "canonical_scope_required",
         "trigger": "member_limit",
         "ready_for_redistribution": False,
+        "movable_member_count": None,
         "child_scopes": [{
             "path": "academic/wiki/hubs/child",
             "title": "Legacy child",
@@ -418,7 +419,60 @@ def test_auto_create_check_surfaces_existing_child_redistribution():
             "reason": "missing_canonical_scope",
         }],
         "agent_task": "define and validate missing child Hub scopes before redistribution",
+        "required_actions": [{
+            "action": "define_scope",
+            "hub": "academic/wiki/hubs/child",
+            "command_template": (
+                "python3 .scripts/hub_semantics.py define-scope "
+                "--hub 'academic/wiki/hubs/child' --scope '<agent-confirmed-scope>' "
+                "--agent-confirmed"
+            ),
+        }, {
+            "action": "redistribute",
+            "parent": "academic/wiki/hubs/parent",
+            "command": (
+                "python3 .scripts/hub_semantics.py redistribute "
+                "--parent 'academic/wiki/hubs/parent' --agent-confirmed"
+            ),
+            "blocked": True,
+        }],
     }]
+
+
+def test_auto_create_check_does_not_repeat_exhausted_redistribution():
+    conn = make_db()
+    overload = {
+        "hub": "parent", "member_count": 39, "limit": 30,
+        "children": ["child"], "action": "redistribute",
+    }
+    definitions = [
+        hs.HubDefinition("parent", "Parent", "研究父方向中的基础理论、方法与问题。", "", "active", True, "scope"),
+        hs.HubDefinition("child", "Child", "研究子方向中的专门理论、方法与问题。", "parent", "active", True, "scope"),
+    ]
+    old_values = (
+        hs.plan_memberships, hs.analyze_new_hubs, hs._check_hub_overload,
+        hs.list_hubs, hs.plan_redistribution, hs.analyze_split,
+    )
+    hs.plan_memberships = lambda _conn, _nodes=None: {"node_count": 0, "nodes": []}
+    hs.analyze_new_hubs = lambda _conn, _nodes=None: {"candidates": []}
+    hs._check_hub_overload = lambda _conn: [overload]
+    hs.list_hubs = lambda _conn: definitions
+    hs.plan_redistribution = lambda _conn, _parent: {
+        "write_safe": True, "nodes": [{"after": ["parent"]}],
+    }
+    hs.analyze_split = lambda _conn, _parent: {
+        "decision": "no_split", "reason": "clusters_not_distinct",
+    }
+    try:
+        check = hs.auto_create_check(conn)
+    finally:
+        (
+            hs.plan_memberships, hs.analyze_new_hubs, hs._check_hub_overload,
+            hs.list_hubs, hs.plan_redistribution, hs.analyze_split,
+        ) = old_values
+    assert check["status"] == "no_action"
+    assert check["redistribution_candidates"] == []
+    assert check["split_backlog_count"] == 1
 
 
 def test_auto_create_check_is_incremental_and_read_only():
@@ -505,6 +559,81 @@ def test_scope_route_rejects_close_canonical_tie():
     assert result["margin"] < hs.ROUTE_MARGIN
 
 
+def test_agent_confirmed_route_apply_replaces_hub_edge_with_evidence():
+    conn = make_db()
+    with TempRepo() as root:
+        page = "academic/wiki/papers/paper"
+        target = "academic/wiki/hubs/condensed"
+        previous = "academic/wiki/hubs/mesoscopic"
+        write_page(root, page, paper_text("研究分形晶格中的电子态与局域态密度。"))
+        gl.ensure_node(conn, page, "Paper", "page")
+        add_hub(conn, root, target, "凝聚态材料", "研究凝聚态材料中的电子结构、局域态密度与量子态调控问题。")
+        add_hub(conn, root, previous, "介观与输运", "研究介观系统中的电子输运、散射与非平衡动力学问题。")
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES(?, '主要研究', ?, '推断', '', 0)", (page, previous),
+        )
+        old_embed = hs._embed
+        hs._embed = lambda texts: np.array(
+            [[1.0, 0.0] if "分形晶格" in text or "电子结构" in text else [0.99, 0.01]
+             for text in texts], dtype=float,
+        )
+        try:
+            report = hs.apply_paper_route(
+                conn, page=page, hub=target, agent_confirmed=True,
+            )
+        finally:
+            hs._embed = old_embed
+        assert report["previous_hubs"] == [previous]
+        edge = conn.execute(
+            "SELECT id,object,source FROM edges WHERE subject=? AND predicate='主要研究'",
+            (page,),
+        ).fetchone()
+        assert edge["object"] == target
+        assert edge["source"].endswith("#研究方向定位")
+        assert conn.execute(
+            "SELECT 1 FROM edge_evidence WHERE edge_id=?", (edge["id"],)
+        ).fetchone()
+        assert conn.execute(
+            "SELECT 1 FROM edge_origins WHERE edge_id=? AND origin_page=?",
+            (edge["id"], page),
+        ).fetchone()
+
+
+def test_define_scope_updates_existing_hub_only():
+    conn = make_db()
+    with TempRepo() as root:
+        path = "academic/wiki/hubs/placeholder"
+        write_page(root, path, hub_text("子方向-abc123"))
+        gl.ensure_node(conn, path, "子方向-abc123", "hub", description="")
+        gl.ensure_node(
+            conn, "时变变分", "时变变分", "entity", entity_subtype="keyword",
+            description="以时变变分原理优化量子系统的受控演化过程。",
+        )
+        scope = "研究介观量子系统电子动力学的时变变分模拟、最优控制与张量网络时间演化方法。"
+        report = hs.define_hub_scope(
+            conn, path=path, title="时变变分模拟", scope=scope,
+            agent_confirmed=True, evidence_nodes=["时变变分"],
+        )
+        assert report["updated"]
+        assert hs.read_hub_scope(path) == scope
+        text = (root / f"{path}.md").read_text(encoding="utf-8")
+        assert "# 时变变分模拟" in text
+        row = conn.execute(
+            "SELECT title,description,status FROM nodes WHERE path=?", (path,),
+        ).fetchone()
+        assert tuple(row) == ("时变变分模拟", scope, "active")
+        history = hs.scope_history(conn, path)
+        assert history[-1]["evidence"][0]["node_id"] == "时变变分"
+        try:
+            hs.define_hub_scope(
+                conn, path="academic/wiki/hubs/missing", scope=scope,
+                agent_confirmed=True,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("define-scope must not create a new Hub")
 def test_legacy_title_is_candidate_not_canonical_identity():
     definitions = [
         hs.HubDefinition("legacy", "张量网络", "张量网络", "", "active", False, "legacy_title"),
@@ -564,20 +693,65 @@ def test_agent_confirmed_create_writes_scope_without_seeds_or_keywords():
         assert "## Scope" in text
         assert "seeds:" not in text and "## 关键词" not in text
         assert row[0] == "研究开放量子系统中的非平衡动力学、耗散与纠缠演化问题。"
+        history = hs.scope_history(conn, report["created"])
+        assert len(history) == 1
+        assert history[0]["operation"] == "create"
+        assert history[0]["scope"] == row[0]
+        receipt = report["lifecycle_receipt"]
+        assert receipt["protocol_version"] == "hub-lifecycle-v1"
+        assert receipt["operation"] == "create"
+        assert receipt["authorization"] == {
+            "agent_confirmed": True,
+            "content_bound": True,
+            "identity_attested": False,
+        }
+        assert receipt["before_file_sha256"][report["created"]] is None
+        assert len(receipt["after_file_sha256"][report["created"]]) == 64
+
+
+def test_lifecycle_failure_restores_file_and_graph():
+    conn = make_db()
+    with TempRepo() as root:
+        path = "academic/wiki/hubs/rollback"
+        original_history = hs._record_scope_history
+        hs._record_scope_history = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("history write failed")
+        )
+        try:
+            try:
+                hs.create_hub(
+                    conn, path=path, title="回滚方向",
+                    scope="研究生命周期提交失败时 Hub 页面与图节点的一致性恢复问题。",
+                    agent_confirmed=True,
+                )
+            except RuntimeError as exc:
+                assert "history write failed" in str(exc)
+            else:
+                raise AssertionError("lifecycle failure must propagate")
+        finally:
+            hs._record_scope_history = original_history
+        assert not (root / f"{path}.md").exists()
+        assert conn.execute("SELECT 1 FROM nodes WHERE path=?", (path,)).fetchone() is None
 
 
 def test_split_requires_agent_scopes_and_passes_code_route_probe():
     conn = make_db()
     with TempRepo() as root:
         parent = "academic/wiki/hubs/parent"
-        write_page(root, parent, hub_text("父方向", "研究两类不同的量子动力学与表示问题。"))
-        gl.ensure_node(conn, parent, "父方向", "hub", description="研究两类不同的量子动力学与表示问题。")
+        parent_scope = "研究开放量子系统动力学与张量网络状态表示这两类不同对象、方法及其计算问题。"
+        write_page(root, parent, hub_text("父方向", parent_scope))
+        gl.ensure_node(conn, parent, "父方向", "hub", description=parent_scope)
         members = []
         for prefix, profile in (("a", "研究开放系统的耗散动力学。"), ("b", "研究张量网络态的数值表示。")):
             for index in range(2):
                 page = f"academic/wiki/papers/{prefix}{index}"
                 write_page(root, page, paper_text(profile))
                 members.append((prefix, page))
+                conn.execute(
+                    "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+                    "VALUES(?, ?, ?, '推断', '', 0)",
+                    (page, hs.MEMBERSHIP_PREDICATE, parent),
+                )
         children = [
             {"path": "academic/wiki/hubs/a", "title": "耗散动力学",
              "scope": "研究开放量子系统中的耗散、退相干和非平衡动力学问题。",
@@ -600,6 +774,14 @@ def test_split_requires_agent_scopes_and_passes_code_route_probe():
         assert len(report["created"]) == 2
         assert report["route_success"] == 1.0
         assert conn.execute("SELECT COUNT(*) FROM edges WHERE predicate='子方向'").fetchone()[0] == 2
+        assert conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE predicate=? AND object=?",
+            (hs.MEMBERSHIP_PREDICATE, parent),
+        ).fetchone()[0] == 0
+        history = hs.scope_history(conn, "academic/wiki/hubs/a")
+        assert history[0]["operation"] == "split"
+        assert history[0]["related_hubs"][0]["path"] == parent
+        assert len(history[0]["evidence"]) == 2
 
 
 def test_merge_is_non_destructive_and_updates_survivor_scope():
@@ -608,6 +790,19 @@ def test_merge_is_non_destructive_and_updates_survivor_scope():
         for path, title in (("academic/wiki/hubs/a", "方向A"), ("academic/wiki/hubs/b", "方向B")):
             write_page(root, path, hub_text(title, "研究量子系统中的动力学、表示与计算问题。"))
             gl.ensure_node(conn, path, title, "hub", description="研究量子系统中的动力学、表示与计算问题。")
+        for node_id, description, hub in (
+            ("member-a", "量子系统的状态表示与数值计算。", "academic/wiki/hubs/a"),
+            ("member-b", "量子系统的动力学演化与模拟。", "academic/wiki/hubs/b"),
+        ):
+            gl.ensure_node(
+                conn, node_id, node_id, "entity",
+                entity_subtype="keyword", description=description,
+            )
+            conn.execute(
+                "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr,score) "
+                "VALUES(?, ?, ?, '推断', '', 0, 0.8)",
+                (node_id, hs.MEMBERSHIP_PREDICATE, hub),
+            )
         report = hs.merge_hubs(
             conn, survivor="academic/wiki/hubs/a", retired="academic/wiki/hubs/b",
             scope="研究量子系统中的动力学、状态表示及其数值计算问题。",
@@ -618,6 +813,45 @@ def test_merge_is_non_destructive_and_updates_survivor_scope():
         assert conn.execute("SELECT status FROM nodes WHERE path='academic/wiki/hubs/b'").fetchone()[0] == "retired"
         assert conn.execute("SELECT 1 FROM edges WHERE subject=? AND predicate='合并至' AND object=?",
                             ("academic/wiki/hubs/b", "academic/wiki/hubs/a")).fetchone()
+        assert report["memberships_migrated"] == 1
+        assert report["lifecycle_receipt"]["operation"] == "merge"
+        assert conn.execute(
+            "SELECT object FROM edges WHERE subject='member-b' AND predicate=?",
+            (hs.MEMBERSHIP_PREDICATE,),
+        ).fetchone()[0] == "academic/wiki/hubs/a"
+        assert conn.execute(
+            "SELECT description FROM nodes WHERE path='academic/wiki/hubs/a'"
+        ).fetchone()[0] == report["scope"]
+        retired_scope = conn.execute(
+            "SELECT description FROM nodes WHERE path='academic/wiki/hubs/b'"
+        ).fetchone()[0]
+        assert retired_scope == "研究量子系统中的动力学、表示与计算问题。"
+        history = hs.scope_history(conn, "academic/wiki/hubs/a")
+        assert history[0]["operation"] == "merge"
+        assert {item["node_id"] for item in history[0]["evidence"]} == {"member-a", "member-b"}
+
+
+def test_legacy_scope_plan_uses_member_descriptions_without_writing_scope():
+    conn = make_db()
+    with TempRepo() as root:
+        hub = "academic/wiki/hubs/legacy"
+        write_page(root, hub, hub_text("旧方向"))
+        gl.ensure_node(conn, hub, "旧方向", "hub", description="")
+        gl.ensure_node(
+            conn, "concept", "影响泛函", "entity",
+            entity_subtype="keyword",
+            description="描述开放量子系统环境作用对系统路径的非局域影响。",
+        )
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES('concept', ?, ?, '推断', '', 0)",
+            (hs.MEMBERSHIP_PREDICATE, hub),
+        )
+        report = hs.legacy_scope_plan(conn)
+        assert report["candidate_count"] == 1
+        candidate = report["candidates"][0]
+        assert "开放量子系统" in candidate["representative_profiles"][0]["text"]
+        assert hs.read_hub_scope(hub) == ""
 
 
 def test_blood_relation_traces_direction_edges():
@@ -654,10 +888,10 @@ def test_blood_relation_traces_direction_edges():
 def test_hub_overload_detects_split_and_redistribute():
     conn = make_db()
     with TempRepo() as root:
-        # Hub with 21 members, no children -> split_candidate
+        # Hub with 31 members, no children -> split_candidate
         add_hub(conn, root, "academic/wiki/hubs/big", "大Hub",
                 "研究量子信息科学中的纠缠、退相干与量子纠错问题。")
-        for i in range(21):
+        for i in range(31):
             nid = f"kw{i}"
             gl.ensure_node(conn, nid, f"关键词{i}", "entity", entity_subtype="keyword",
                            description=f"第{i}个测试关键词的语义描述。")
@@ -669,7 +903,7 @@ def test_hub_overload_detects_split_and_redistribute():
         result = hs._check_hub_overload(conn)
         assert len(result) == 1
         assert result[0]["hub"] == "academic/wiki/hubs/big"
-        assert result[0]["member_count"] == 21
+        assert result[0]["member_count"] == 31
         assert result[0]["action"] == "split_candidate"
 
         # Add child -> action becomes redistribute
@@ -685,13 +919,139 @@ def test_hub_overload_detects_split_and_redistribute():
         assert big["action"] == "redistribute"
 
 
+def test_child_hub_overload_starts_above_thirty_members():
+    conn = make_db()
+    with TempRepo() as root:
+        parent = "academic/wiki/hubs/root"
+        child = "academic/wiki/hubs/child"
+        add_hub(conn, root, parent, "根方向", "研究量子科学中的基础理论、核心结构与关键方法问题。")
+        add_hub(conn, root, child, "子方向", "研究量子科学子领域中的专门结构、动力学与数值方法问题。")
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES(?, '子方向', ?, '推断', '', 0)", (parent, child),
+        )
+        for index in range(30):
+            node_id = f"child-member-{index}"
+            gl.ensure_node(conn, node_id, node_id, "entity", entity_subtype="keyword")
+            conn.execute(
+                "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+                "VALUES(?, ?, ?, '推断', '', 0)",
+                (node_id, hs.MEMBERSHIP_PREDICATE, child),
+            )
+        assert not any(item["hub"] == child for item in hs._check_hub_overload(conn))
+        gl.ensure_node(conn, "child-member-30", "child-member-30", "entity", entity_subtype="keyword")
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES('child-member-30', ?, ?, '推断', '', 0)",
+            (hs.MEMBERSHIP_PREDICATE, child),
+        )
+        overload = next(item for item in hs._check_hub_overload(conn) if item["hub"] == child)
+        assert overload["member_count"] == 31
+        assert overload["limit"] == hs.HUB_MEMBER_LIMIT
+
+
+def test_redistribution_preserves_outside_membership_and_retains_unmatched_parent():
+    conn = make_db()
+    with TempRepo() as root:
+        parent = "academic/wiki/hubs/parent"
+        child_a = "academic/wiki/hubs/child-a"
+        child_b = "academic/wiki/hubs/child-b"
+        unrelated = "academic/wiki/hubs/unrelated"
+        add_hub(conn, root, parent, "父方向", "研究量子系统中的互补结构、动力学与数值方法问题。")
+        add_hub(conn, root, child_a, "甲方向", "研究甲类量子结构、局域电子态与相应数值表征问题。")
+        add_hub(conn, root, child_b, "乙方向", "研究乙类量子动力学、控制过程与相应数值模拟问题。")
+        add_hub(conn, root, unrelated, "无关方向", "研究经典系统中的统计规律、复杂网络与数据分析问题。")
+        conn.executemany(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES(?, '子方向', ?, '推断', '', 0)",
+            [(parent, child_a), (parent, child_b)],
+        )
+        for node_id, title in (("n-a", "甲类节点"), ("n-b", "乙类节点"), ("n-none", "边界节点")):
+            gl.ensure_node(conn, node_id, title, "entity", entity_subtype="keyword")
+            conn.execute(
+                "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+                "VALUES(?, ?, ?, '推断', '', 0)",
+                (node_id, hs.MEMBERSHIP_PREDICATE, parent),
+            )
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES('n-a', ?, ?, '推断', '', 0)",
+            (hs.MEMBERSHIP_PREDICATE, unrelated),
+        )
+        calls = []
+        old_embed = hs._embed
+
+        def fake_embed(texts):
+            calls.append(list(texts))
+            rows = []
+            for text in texts:
+                if "甲类节点" in text or "甲类量子结构" in text:
+                    rows.append([1.0, 0.0])
+                elif "乙类节点" in text or "乙类量子动力学" in text:
+                    rows.append([0.0, 1.0])
+                elif "边界节点" in text:
+                    rows.append([-1.0, 0.0])
+                else:
+                    rows.append([0.7, 0.7])
+            return np.array(rows, dtype=float)
+
+        hs._embed = fake_embed
+        try:
+            report = hs.redistribute_hub_members(conn, parent=parent, agent_confirmed=True)
+        finally:
+            hs._embed = old_embed
+        assert report["applied"]
+        assert report["moved"] == 2
+        assert report["remaining_parent"] == 1
+        assert len(calls) == 1
+        memberships = {}
+        for node_id in ("n-a", "n-b", "n-none"):
+            memberships[node_id] = {row[0] for row in conn.execute(
+                "SELECT object FROM edges WHERE subject=? AND predicate=?",
+                (node_id, hs.MEMBERSHIP_PREDICATE),
+            )}
+        assert memberships["n-a"] == {child_a, unrelated}
+        assert memberships["n-b"] == {child_b}
+        assert memberships["n-none"] == {parent}
+
+
+def test_redistribution_embedding_failure_is_read_only():
+    conn = make_db()
+    with TempRepo() as root:
+        parent = "academic/wiki/hubs/parent"
+        child = "academic/wiki/hubs/child"
+        add_hub(conn, root, parent, "父方向", "研究父方向中的基础理论、核心结构与关键科学问题。")
+        add_hub(conn, root, child, "子方向", "研究子方向中的专门结构、动力学与数值模拟问题。")
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES(?, '子方向', ?, '推断', '', 0)", (parent, child),
+        )
+        gl.ensure_node(conn, "node", "测试节点", "entity", entity_subtype="keyword")
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES('node', ?, ?, '推断', '', 0)", (hs.MEMBERSHIP_PREDICATE, parent),
+        )
+        old_embed = hs._embed
+        hs._embed = lambda _texts: None
+        try:
+            report = hs.redistribute_hub_members(conn, parent=parent, agent_confirmed=True)
+        finally:
+            hs._embed = old_embed
+        assert report["applied"] is False
+        assert report["reason"] == "embedding_unavailable"
+        assert conn.execute(
+            "SELECT object FROM edges WHERE subject='node' AND predicate=?",
+            (hs.MEMBERSHIP_PREDICATE,),
+        ).fetchone()[0] == parent
+
+
 def test_split_rejects_indistinct_scopes():
     conn = make_db()
     with TempRepo() as root:
         parent = "academic/wiki/hubs/parent"
-        write_page(root, parent, hub_text("父方向", "研究两类不同的量子动力学与表示问题。"))
-        gl.ensure_node(conn, parent, "父方向", "hub",
-                       description="研究两类不同的量子动力学与表示问题。")
+        parent_scope = "研究开放量子系统动力学与张量网络状态表示这两类不同对象、方法及其计算问题。"
+        write_page(root, parent, hub_text("父方向", parent_scope))
+        gl.ensure_node(conn, parent, "父方向", "hub", description=parent_scope)
         members = []
         for prefix, profile in (("a", "研究开放系统的耗散动力学。"),
                                 ("b", "研究张量网络态的数值表示。")):
@@ -753,6 +1113,18 @@ def test_merge_excludes_blood_related_hubs():
             or ("academic/wiki/hubs/other", "academic/wiki/hubs/parent") == (c["left"], c["right"])
             for c in candidates
         )
+        try:
+            hs.merge_hubs(
+                conn,
+                survivor="academic/wiki/hubs/parent",
+                retired="academic/wiki/hubs/child",
+                scope="研究量子多体系统中的基本理论、纠缠结构与动力学问题。",
+                agent_confirmed=True,
+            )
+        except ValueError as exc:
+            assert "血亲" in str(exc)
+        else:
+            raise AssertionError("direct merge apply must reject blood-related Hubs")
 
 
 

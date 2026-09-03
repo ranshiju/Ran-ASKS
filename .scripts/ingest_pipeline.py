@@ -9,13 +9,14 @@ spec 字段：
   script_name            resume_cmd 里的脚本名（如 "ingest_meeting.py"）
   preprocess_label       [3.2] 进度文本
   completion_label_key   完成时打印的 state key（如 "meeting_id"）；None 则不打印
-  repair_fail_strategy   "handoff"（repair 失败→交 agent）/ "retry"（增 slots_retry 续循环）
+  recovery_limits        typed RecoveryPolicy 各类别在首轮后的恢复次数
   cleanup_after          "validate_graph" / "finalize_tail"：清理 source/extract_dir 的时机
   rollback_fn            validate_graph 失败时的回滚函数；None 则不回滚
   finalize_tail_failure  "warn"（失败仍 completed）/ "hard"（失败→failed）
   steps                  dict：dedup_check/preprocess/write_wiki/validate_wiki/
                          write_slots/validate_semantics/repair_slots/finalize/
-                         update_graph/validate_graph/finalize_tail
+                         update_graph/validate_graph/finalize_tail；统一语义 Worker
+                         可另提供 prepare_unified_handoff
 
 step 签名约定：
   dedup_check(state)->(bool,str); preprocess(state)->(bool,str)
@@ -35,6 +36,7 @@ sys.path.insert(0, str(REPO / ".scripts"))
 
 import inbox_state
 import ingest_common as ic
+import recovery_policy as rp
 import trash_util
 
 
@@ -46,14 +48,22 @@ def _save(state: dict) -> None:
     inbox_state.save(state["transaction_id"], state)
 
 
+def _revisionable_protocol_error(message: str) -> bool:
+    return "缺少 <<<" in str(message or "")
+
+
 def run_pipeline(state: dict, spec: dict, progress) -> dict:
     """运行全流程，处理修复循环。progress 为进度打印函数。"""
     steps = spec["steps"]
     txn = state["transaction_id"]
+    recovery_limits = rp.limits_from_spec(spec)
+    rp.ensure_state(state, recovery_limits)
 
     # A failed post-finalize transaction may be resumed after the temp artifact is repaired.
     if state.get("status") == "failed" and state.get("resume_from"):
-        state["status"] = state.pop("resume_from")
+        resume_target = state.get("resume_from")
+        inbox_state.transition(state, resume_target, reason="resume_after_post_finalize_failure")
+        state.pop("resume_from", None)
         state["errors"] = []
         _save(state)
 
@@ -70,7 +80,11 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                 state["errors"] = [f"agent 输出尚未写入: {state.get('agent_write_to', '')}"]
                 _save(state)
                 return state
-            state["status"] = "write_wiki" if awaiting_wiki or awaiting_wiki_slots else "write_slots"
+            inbox_state.transition(
+                state,
+                "write_wiki" if awaiting_wiki or awaiting_wiki_slots else "write_slots",
+                reason="consume_agent_generation",
+            )
             state.pop("agent_required", None)
             state["errors"] = []
         elif semantic_path.is_file():
@@ -82,13 +96,17 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                 _save(state)
                 return state
             resume_status = state.get("pre_handoff_status", "")
-            state["status"] = resume_status if resume_status in {
+            resume_target = resume_status if resume_status in {
                 "finalize", "update_graph", "validate_graph", "finalize_tail", "graph_ready"
             } else "finalize"
+            inbox_state.transition(state, resume_target, reason="resume_after_semantic_validation")
             state.pop("agent_required", None)
             state["errors"] = []
         else:
-            state["status"] = state.get("pre_handoff_status") or "write_wiki"
+            inbox_state.transition(
+                state, state.get("pre_handoff_status") or "write_wiki",
+                reason="resume_agent_handoff_without_semantic_artifact",
+            )
             state.pop("agent_required", None)
             state["errors"] = []
         _save(state)
@@ -134,16 +152,13 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
     if state["status"] in {"write_wiki", "write_slots"}:
         state.setdefault("wiki_retry", 0)
         state.setdefault("slots_retry", 0)
-    max_retries = spec.get("max_retries", 3)
-    while state["status"] in {"write_wiki", "write_slots"} and \
-            (state.get("wiki_retry", 0) + state.get("slots_retry", 0)) <= max_retries:
+    while state["status"] in {"write_wiki", "write_slots"}:
         # 第一阶段：写 wiki
         if state["status"] == "write_wiki":
             if state.get("wiki_retry", 0) == 0 and not state.get("wiki_content"):
                 progress("\n[3.3a] 撰写 wiki（调用LLM）...", flush=True)
             elif state.get("wiki_retry", 0) > 0:
-                progress(f"\n[3.3a] 撰写 wiki（重试第{state['wiki_retry']}/{max_retries}次）...", flush=True)
-            ic.record_llm_call(state, "write_wiki")
+                progress(f"\n[3.3a] 撰写 wiki（修订第{state['wiki_retry']}/{recovery_limits['wiki_revision']}次）...", flush=True)
             success, msg = steps["write_wiki"](state)
             if state.get("agent_required"):
                 state["pre_handoff_status"] = "write_wiki"
@@ -156,19 +171,45 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                 _save(state)
                 return state
             if not success:
-                state["wiki_retry"] += 1
                 state["errors"] = [msg]
                 progress(f"  ↳ 失败: {msg}", flush=True)
+                if (_revisionable_protocol_error(msg)
+                        and rp.consume(state, "wiki_revision", recovery_limits, msg)):
+                    state["wiki_content"] = ""
+                    _save(state)
+                    continue
+                state["status"] = "failed"
                 _save(state)
-                continue
+                return state
             progress("[3.4] wiki结构校验...", flush=True, end=" ")
             wiki_errors = steps["validate_wiki"](state)
             progress("通过" if not wiki_errors else f"{len(wiki_errors)}个错误", flush=True)
             if wiki_errors:
                 state["wiki_errors"] = wiki_errors
-                state["wiki_retry"] += 1
-                validation_retry_limit = spec.get("max_wiki_validation_retries", max_retries)
-                if state["wiki_retry"] > validation_retry_limit:
+                if not rp.consume(
+                        state, "wiki_revision", recovery_limits,
+                        "; ".join(wiki_errors)):
+                    if spec.get("unified_semantic_worker"):
+                        prepare_handoff = steps.get("prepare_unified_handoff")
+                        if prepare_handoff is None:
+                            state["status"] = "failed"
+                            state["errors"] = [
+                                "unified_semantic_worker 缺少 prepare_unified_handoff 契约"
+                            ]
+                            _save(state)
+                            return state
+                        prepared, prepare_msg = prepare_handoff(state, wiki_errors)
+                        if not prepared:
+                            state["status"] = "failed"
+                            state["errors"] = [prepare_msg or "统一语义 Worker handoff 准备失败"]
+                            _save(state)
+                            return state
+                        state["status"] = "agent_required"
+                        state["pre_handoff_status"] = "write_wiki"
+                        state["agent_required"] = True
+                        state["errors"] = wiki_errors
+                        _save(state)
+                        return state
                     wiki_path = Path(state.get("extract_dir", "")) / "wiki.md"
                     state["status"] = "agent_required"
                     state["pre_handoff_status"] = "write_wiki"
@@ -183,6 +224,9 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                     _save(state)
                     return state
                 state["wiki_content"] = ""
+                if spec.get("unified_semantic_worker"):
+                    state["slots_content"] = ""
+                    state["compiler_errors"] = list(wiki_errors)
                 _save(state)
                 continue
             state["status"] = "write_slots"
@@ -191,8 +235,7 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         if state.get("slots_retry", 0) == 0:
             progress("[3.3b] 抽取语义槽（续接对话）...", flush=True, end=" ")
         else:
-            progress(f"[3.3b] 抽取语义槽（重试第{state['slots_retry']}/{max_retries}次）...", flush=True, end=" ")
-        ic.record_llm_call(state, "write_slots")
+            progress(f"[3.3b] 抽取语义槽（修订第{state['slots_retry']}/{recovery_limits['semantic_revision']}次）...", flush=True, end=" ")
         success, msg = steps["write_slots"](state)
         if state.get("agent_required"):
             state["pre_handoff_status"] = "write_slots"
@@ -200,11 +243,16 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             _save(state)
             return state
         if not success:
-            state["slots_retry"] += 1
             state["errors"] = [msg]
             progress(f"失败: {msg}", flush=True)
+            if (_revisionable_protocol_error(msg)
+                    and rp.consume(state, "semantic_revision", recovery_limits, msg)):
+                state["slots_content"] = ""
+                _save(state)
+                continue
+            state["status"] = "failed"
             _save(state)
-            continue
+            return state
         progress("完成", flush=True)
         progress("[3.5] 语义槽格式化...", flush=True, end=" ")
         try:
@@ -219,8 +267,22 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             slot_warnings = []
             progress(f"异常: {exc}", flush=True)
         _save(state)
-        if not sem_hard and slot_warnings:
-            repaired, repair_msg = steps["repair_slots"](state, slot_warnings)
+        blocking_warnings = [
+            warning for warning in slot_warnings
+            if ic.is_blocking_warning(warning, spec.get("non_blocking_issues", ()))
+        ]
+        if not sem_hard and slot_warnings and not blocking_warnings:
+            slot_warnings = []
+        if not sem_hard and blocking_warnings:
+            if not rp.consume(
+                    state, "deterministic_repair", recovery_limits,
+                    f"blocking_warnings={len(blocking_warnings)}"):
+                state["status"] = "agent_required"
+                state["agent_required"] = True
+                state["errors"] = ["deterministic repair budget exhausted"]
+                _save(state)
+                return state
+            repaired, repair_msg = steps["repair_slots"](state, blocking_warnings)
             if state.get("agent_required"):
                 state["status"] = "agent_required"
                 _save(state)
@@ -237,40 +299,47 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             break
         # 结构错误早停
         if sem_hard:
-            semantic_retry_limit = spec.get("max_semantic_hard_retries", 0)
-            semantic_retries = state.get("semantic_hard_retry", 0)
-            if semantic_retries < semantic_retry_limit and \
-                    state.get("slots_retry", 0) + state.get("wiki_retry", 0) < max_retries:
-                state["semantic_hard_retry"] = semantic_retries + 1
-                state["slots_retry"] = state.get("slots_retry", 0) + 1
+            if rp.consume(
+                    state, "semantic_revision", recovery_limits,
+                    "; ".join(str(item) for item in sem_hard)):
+                state["semantic_hard_retry"] = state["recovery"]["attempts"].get(
+                    "semantic_revision", 0)
                 state["slots_errors"] = sem_hard
                 state["slots_content"] = ""
                 state["errors"] = sem_hard
-                state["status"] = "write_slots"
-                progress("  ↳ 语义槽硬错误，启动一次受限定向重写", flush=True)
+                if spec.get("unified_semantic_worker"):
+                    state["wiki_content"] = ""
+                    state["compiler_errors"] = list(sem_hard)
+                    state["status"] = "write_wiki"
+                    progress("  ↳ 语义槽硬错误，回到统一语义 Worker 定向重写", flush=True)
+                else:
+                    state["status"] = "write_slots"
+                    progress("  ↳ 语义槽硬错误，启动一次受限定向重写", flush=True)
                 _save(state)
                 continue
+            recovered, recovery_msg = ic.try_semantic_recovery(
+                state, Path(spec.get("repo") or REPO),
+                sem_hard, slot_warnings, steps["validate_semantics"],
+                tuple(spec.get("non_blocking_issues", ())),
+            )
+            if recovered:
+                progress("  ↳ bounded semantic recovery 通过复验", flush=True)
+                state["errors"] = []
+                state["status"] = "finalize"
+                _save(state)
+                break
             progress(f"  ↳ 语义槽结构错误 {len(sem_hard)} 个，停止重复生成并交接修复", flush=True)
             ic.stop_for_semantic_errors(state, sem_hard,
                 _resume_cmd(spec, txn), slot_warnings)
+            state["semantic_recovery_message"] = recovery_msg
             _save(state)
             return state
-        # repair_fail_strategy=retry：增 slots_retry 续循环
-        if spec.get("repair_fail_strategy") == "retry":
-            if state.get("slots_retry", 0) + state.get("wiki_retry", 0) >= max_retries:
-                break
-            state["slots_retry"] += 1
-            _save(state)
-        else:  # handoff（meeting 默认）：repair 未完全→交 agent
-            state["status"] = "agent_required"
-            _save(state)
-            return state
-    else:
-        if state["status"] in {"write_wiki", "write_slots"}:
-            state["status"] = "failed"
-            state["errors"] = ["修复循环超过最大重试次数", *state.get("errors", [])]
-            _save(state)
-            return state
+        # A failed bounded repair changes strategy to specialist/manual handoff.
+        state["status"] = "agent_required"
+        state["agent_required"] = True
+        state["errors"] = [repair_msg or "semantic repair did not resolve blocking warnings"]
+        _save(state)
+        return state
 
     # 落位
     if state["status"] == "finalize":

@@ -11,6 +11,16 @@ import api_ingest
 import llm_structured
 
 
+def isolated_call_json(*args, **kwargs):
+    original_events = llm_structured.EVENTS_DIR
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            llm_structured.EVENTS_DIR = Path(directory)
+            return llm_structured.call_json(*args, **kwargs)
+    finally:
+        llm_structured.EVENTS_DIR = original_events
+
+
 def test_claim_validation_rejects_unquoted_claims():
     cards = [
         {"id": "E1", "raw_locator": "abstract", "evidence_quote": "FermiNet improves VMC accuracy."},
@@ -120,6 +130,25 @@ def test_proposition_profile_prefers_dedicated_then_generation_then_primary():
     ]
 
 
+def test_semantic_recovery_profile_is_optional_and_falls_back_to_primary():
+    primary = {
+        "LLM_API_BASE": "primary-base", "LLM_API_KEY": "primary-key",
+        "LLM_MODEL": "GLM-5.3-Flash",
+    }
+    assert [profile["model"] for profile in llm_structured.api_profiles(
+        primary, "ingest_semantic_recovery"
+    )] == ["GLM-5.3-Flash"]
+    configured = dict(primary)
+    configured.update({
+        "SEMANTIC_RECOVERY_API_BASE": "agent-base",
+        "SEMANTIC_RECOVERY_API_KEY": "agent-key",
+        "SEMANTIC_RECOVERY_MODEL": "AWS-GPT-5.6-Terra",
+    })
+    assert [profile["model"] for profile in llm_structured.api_profiles(
+        configured, "ingest_semantic_recovery"
+    )] == ["AWS-GPT-5.6-Terra", "GLM-5.3-Flash"]
+
+
 def test_reasoning_profile_mapping_and_validation():
     config = {}
     assert llm_structured.reasoning_profile(config, "ingest_api_keywords") == "fast"
@@ -205,7 +234,7 @@ def test_specialist_schema_failure_falls_back_to_primary_without_agent(monkeypat
     llm_structured.load_env = lambda: config
     llm_structured.urllib.request.urlopen = lambda *_args, **_kwargs: Response(next(responses))
     try:
-        result = llm_structured.call_json(
+        result = isolated_call_json(
             "test", api_ingest.keyword_schema(["known"]), retries=0, operation="ingest_api_keywords",
         )
     finally:
@@ -242,7 +271,7 @@ def test_reasoning_profile_preserves_call_budget_and_records_audit_fields():
     llm_structured.load_env = lambda: config
     llm_structured.urllib.request.urlopen = urlopen
     try:
-        result = llm_structured.call_json(
+        result = isolated_call_json(
             "test", api_ingest.keyword_schema(["known"]), max_tokens=4000, retries=2, operation="ingest_api_keywords",
         )
     finally:
@@ -300,7 +329,7 @@ def test_reasoning_exhaustion_carries_low_effort_into_model_fallback():
     llm_structured.load_env = lambda: config
     llm_structured.urllib.request.urlopen = urlopen
     try:
-        result = llm_structured.call_json(
+        result = isolated_call_json(
             "test", lambda obj: isinstance(obj, dict) and obj.get("answer") == 4,
             max_tokens=120, retries=0, operation="ingest_proposition", reasoning="deep",
         )
@@ -546,6 +575,7 @@ def main():
     test_env_reference_expansion_reuses_primary_credentials()
     test_specialist_profiles_precede_primary_when_complete()
     test_proposition_profile_prefers_dedicated_then_generation_then_primary()
+    test_semantic_recovery_profile_is_optional_and_falls_back_to_primary()
     test_reasoning_profile_mapping_and_validation()
     test_adaptive_reasoning_only_escalates_semantic_retry()
     test_reasoning_request_options_require_explicit_provider_config()
