@@ -955,11 +955,11 @@ python3 .scripts/visual_to_editable_ppt.py <figure.png|document.pdf> \
 
 ## 6. 开源发布：`.scripts/open_source_release.py`
 
-- **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。中英文 README 与根 `CHANGELOG.md` 均由公开资产生成；发布时同步写入版本标记、验证双向语言入口，并要求 changelog 当前版本标题与 `VERSION` 一致。每次 GitHub 更新还必须让中英文 README、带日期的中文说明 PDF 及其版本范围说明同时进入本次 diff，且内容反映受影响的机制、能力、配置或使用方式；同一发布边界内的文档同步可保持 `VERSION` 不变。
+- **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。中英文 README 与根 `CHANGELOG.md` 均由公开资产生成；发布时同步写入版本标记、验证双向语言入口，并要求 changelog 当前版本标题与 `VERSION` 一致。每次 GitHub 更新还必须让中英文 README、带日期的中文说明 Markdown 及其版本范围说明同时进入本次 diff，且内容反映受影响的机制、能力、配置或使用方式；PDF 是下载/打印版，在中文说明读者内容变化时同步更新；同一发布边界内的文档同步可保持 `VERSION` 不变。
 - **先读**：`operations/engineering/open-source-release.md` 与 `operations/engineering/open-source-manifest.yaml`。
 - **调用**：`python3 .scripts/open_source_release.py build <目标目录> --clean --force`；随后 `python3 .scripts/open_source_release.py verify <目标目录>`。
 - **边界**：只复制 manifest 批准文件和公开资产；不读取或复制业务知识内容。DSH 作为公开执行层随 `dsh/**` 发布；active `projects/` 与 `.project/` 节点从公开工程图移除。目标非空时必须同时显式给出 `--clean --force`；脚本保留目标的 `.git` 元数据。
-- **验证**：`python3 .scripts/test_open_source_release.py`；发布前再运行 `verify`，并在生成树内运行 `python3 .scripts/engineering_graph.py validate` 与相关工程回归。目标是 Git 工作树时，`verify` 还会拒绝任何被目标 `.gitignore` 隐藏的白名单文件，确保生成树与实际可提交树一致。中文介绍 PDF 还须包含 Ghostscript 标准化标记并通过逐页渲染对比，避免本地可读但 GitHub 嵌入式查看器拒绝。
+- **验证**：`python3 .scripts/test_open_source_release.py`；发布前再运行 `verify`，并在生成树内运行 `python3 .scripts/engineering_graph.py validate` 与相关工程回归。目标是 Git 工作树时，`verify` 还会拒绝任何被目标 `.gitignore` 隐藏的白名单文件，确保生成树与实际可提交树一致。中文介绍 Markdown 必须使用公开相对路径并能解析图片；PDF 还须包含 Ghostscript 标准化标记并通过逐页渲染对比，保证下载版可移植。
 
 ## 7. 论文数据产物：`.scripts/paper_artifact.py`
 

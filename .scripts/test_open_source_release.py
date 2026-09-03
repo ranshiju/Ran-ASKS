@@ -40,16 +40,38 @@ def main() -> None:
         assert "MINERU_API_TOKEN" in (
             destination / "README.zh-CN.md"
         ).read_text(encoding="utf-8")
-        introduction_relative = "docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf"
-        introduction = destination / introduction_relative
-        assert introduction.is_file()
-        assert introduction.stat().st_size > 100_000
-        assert b"GPL Ghostscript" in introduction.read_bytes()
+        introduction_markdown_relative = (
+            "docs/introduction/ASKS-Chinese-Introduction-2026-09-03.md"
+        )
+        introduction_pdf_relative = (
+            "docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf"
+        )
+        introduction_markdown = destination / introduction_markdown_relative
+        introduction_pdf = destination / introduction_pdf_relative
+        assert introduction_markdown.is_file()
+        assert introduction_markdown.stat().st_size > 10_000
+        introduction_text = introduction_markdown.read_text(encoding="utf-8")
+        assert introduction_text.startswith("# ASKS 智能知识系统\n")
+        assert "assets/knowledge-compilation-zh.png" in introduction_text
+        assert "assets/author-research-portrait.png" in introduction_text
+        assert introduction_pdf_relative.rsplit("/", 1)[-1] in introduction_text
+        assert "/tmp/" not in introduction_text
+        assert (destination / "docs/introduction/assets/knowledge-compilation-zh.png").is_file()
+        assert (destination / "docs/introduction/assets/author-research-portrait.png").is_file()
+        assert introduction_pdf.is_file()
+        assert introduction_pdf.stat().st_size > 100_000
+        assert b"GPL Ghostscript" in introduction_pdf.read_bytes()
         assert (destination / "docs/introduction/README.md").is_file()
-        assert introduction_relative in (
+        assert introduction_markdown_relative in (
             destination / "README.md"
         ).read_text(encoding="utf-8")
-        assert introduction_relative in (
+        assert introduction_markdown_relative in (
+            destination / "README.zh-CN.md"
+        ).read_text(encoding="utf-8")
+        assert introduction_pdf_relative in (
+            destination / "README.md"
+        ).read_text(encoding="utf-8")
+        assert introduction_pdf_relative in (
             destination / "README.zh-CN.md"
         ).read_text(encoding="utf-8")
         assert "sjran@cnu.edu.cn" in (destination / "README.md").read_text(encoding="utf-8")
@@ -57,11 +79,13 @@ def main() -> None:
             destination / "README.zh-CN.md"
         ).read_text(encoding="utf-8")
 
-        original_introduction = introduction.read_bytes()
-        introduction.write_bytes(original_introduction.replace(b"GPL Ghostscript", b"Word PDF export"))
+        original_introduction = introduction_pdf.read_bytes()
+        introduction_pdf.write_bytes(
+            original_introduction.replace(b"GPL Ghostscript", b"Word PDF export")
+        )
         unnormalized = run("verify", str(destination), expected=1)
-        assert "public introduction PDF is not browser-normalized" in unnormalized.stderr
-        introduction.write_bytes(original_introduction)
+        assert "public introduction PDF is not normalized" in unnormalized.stderr
+        introduction_pdf.write_bytes(original_introduction)
         assert (destination / "THIRD_PARTY_NOTICES.md").is_file()
         assert (destination / "VERSION").is_file()
         assert (destination / "VERSION").read_text(encoding="utf-8").strip() == expected_version
@@ -156,7 +180,7 @@ def main() -> None:
             destination / "README.md",
             destination / "README.zh-CN.md",
             destination / "docs/introduction/README.md",
-            introduction,
+            introduction_markdown,
         ]
         synchronized_originals = {path: path.read_bytes() for path in synchronized_paths}
         for path in synchronized_paths:

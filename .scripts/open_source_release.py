@@ -25,7 +25,7 @@ RELEASE_DOCUMENTATION_PATHS = {
     "README.zh-CN.md",
     "docs/introduction/README.md",
 }
-INTRODUCTION_PDF_PREFIX = "docs/introduction/ASKS-Chinese-Introduction-"
+INTRODUCTION_PREFIX = "docs/introduction/ASKS-Chinese-Introduction-"
 NORMALIZED_PDF_PRODUCER = b"GPL Ghostscript"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 PRIVATE_PREFIXES = (
@@ -94,18 +94,27 @@ def expected_files(manifest: dict) -> set[str]:
     return files
 
 
-def documentation_sync_paths(manifest: dict) -> set[str]:
-    """Return the reader-facing documents that must move with each public update."""
-    introduction_pdfs = {
+def dated_introduction_paths(manifest: dict, suffix: str) -> set[str]:
+    return {
         path
         for path in manifest.get("public_assets", {})
-        if path.startswith(INTRODUCTION_PDF_PREFIX) and path.endswith(".pdf")
+        if path.startswith(INTRODUCTION_PREFIX) and path.endswith(suffix)
     }
+
+
+def documentation_sync_paths(manifest: dict) -> set[str]:
+    """Return the reader-facing Markdown documents required in every update."""
+    introduction_markdown = dated_introduction_paths(manifest, ".md")
+    introduction_pdfs = dated_introduction_paths(manifest, ".pdf")
+    if len(introduction_markdown) != 1:
+        raise ValueError(
+            "public_assets must declare exactly one dated ASKS Chinese introduction Markdown"
+        )
     if len(introduction_pdfs) != 1:
         raise ValueError(
             "public_assets must declare exactly one dated ASKS Chinese introduction PDF"
         )
-    return RELEASE_DOCUMENTATION_PATHS | introduction_pdfs
+    return RELEASE_DOCUMENTATION_PATHS | introduction_markdown
 
 
 def git_publication_changes(destination: Path) -> set[str]:
@@ -357,16 +366,16 @@ def verify(destination: Path) -> int:
         if publication_changes and missing_documentation:
             failures.append(
                 "public update must synchronize README.md, README.zh-CN.md, the Chinese "
-                "introduction PDF, and its scope note; missing from this update: "
+                "introduction Markdown, and its scope note; missing from this update: "
                 + ", ".join(sorted(missing_documentation))
             )
-        for path in sorted(required_documentation):
-            if not path.endswith(".pdf") or path not in actual:
+        for path in sorted(dated_introduction_paths(manifest, ".pdf")):
+            if path not in actual:
                 continue
             content = (destination / path).read_bytes()
             if not content.startswith(b"%PDF-") or NORMALIZED_PDF_PRODUCER not in content:
                 failures.append(
-                    f"public introduction PDF is not browser-normalized: {path}"
+                    f"public introduction PDF is not normalized: {path}"
                 )
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         failures.append(f"unable to verify release documentation synchronization: {error}")

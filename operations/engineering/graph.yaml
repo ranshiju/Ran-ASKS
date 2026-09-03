@@ -1984,8 +1984,9 @@ script_contracts:
     preconditions:
     - 根目录 VERSION 是当前 MAJOR.MINOR.PATCH 发布边界；仅发布新 tag/Release 时递增，同一版本内的文档同步提交保持版本号不变；白名单 manifest 已覆盖本期公开文件
     - 根目录 CHANGELOG.md 由公开资产生成，且最新版本标题与 VERSION 一致
-    - 每次 GitHub 公开树更新均须内容级审阅并同步英文 README、中文 README、带日期的中文说明 PDF 及其版本范围说明；相关机制、能力、配置或使用方式不得只写 changelog
-    - 中文说明 PDF 在进入公开资产前已经过 Ghostscript 标准化，确保 GitHub 嵌入式 PDF 查看器可解析；Word/Quartz 原始导出只作为生成输入
+    - 每次 GitHub 公开树更新均须内容级审阅并同步英文 README、中文 README、带日期的中文说明 Markdown 及其版本范围说明；相关机制、能力、配置或使用方式不得只写 changelog
+    - 中文说明 Markdown 是 GitHub 默认在线阅读入口，图片使用公开相对路径；PDF 保留用于下载和打印，在读者内容变化时从同一已审阅来源同步更新
+    - 中文说明 PDF 在进入公开资产前已经过 Ghostscript 标准化并完成逐页渲染对比；Word/Quartz 原始导出只作为生成输入
     - 中英文 README 公开资产均存在，包含双向语言入口与公开联系邮箱
     - 公开 capability 的 required 节点均存在于 allowlisted 目标树；active projects/.project 路径只保留在私有工程图
     - 已发布的冻结 paper-artifacts 版本全部保留，并分别通过其声明的版本化验证器
@@ -1998,8 +1999,9 @@ script_contracts:
     - VERSION 缺失、非 semver，或 README release badge 与 VERSION 不一致时仍验证通过
     - CHANGELOG.md 缺失当前 VERSION 标题时仍验证通过
     - 只更新英文 README 的版本标记，造成中英文版本信息漂移
-    - 公开代码、规范或能力已变化，但本次 Git diff 未同时更新中英文 README、中文说明 PDF 与版本范围说明
-    - 将未经浏览器兼容标准化的 Word/Quartz PDF 直接发布到 GitHub
+    - 公开代码、规范或能力已变化，但本次 Git diff 未同时更新中英文 README、中文说明 Markdown 与版本范围说明
+    - README 把 PDF 预览器作为中文说明的默认阅读入口，或中文说明正文变化后未同步下载/打印 PDF
+    - 将未经标准化和渲染对比的 Word/Quartz PDF 直接发布到 GitHub
     - 目标 `.gitignore` 隐藏白名单文件，导致生成树通过但 Git 提交缺件
     - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
     verify:

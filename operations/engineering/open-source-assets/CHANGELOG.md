@@ -7,10 +7,13 @@ manifests and checksums.
 
 ## [Unreleased]
 
+- Published the Chinese introduction as a native Markdown reading view with
+  inline figures and made it the default README link. The PDF remains available
+  for download and printing.
 - Kept the public READMEs and Chinese introduction synchronized with the unified
-  ingestion architecture, and added a release gate requiring those reader-facing
-  documents to accompany every GitHub update. The introduction PDF is now
-  normalized for GitHub's embedded viewer.
+  ingestion architecture, and extended the release gate to require the Markdown
+  guide and its version-scope note on every GitHub update. Minor release-policy
+  and validation details were updated accordingly.
 
 ## [0.3.0] - 2026-09-03
 

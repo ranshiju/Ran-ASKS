@@ -10,14 +10,15 @@
 
 **Project updates:** [CHANGELOG.md](CHANGELOG.md)
 
-**General-reader introduction (Chinese PDF):** [ASKS Chinese introduction, 2026-09-03 revision](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
-([version scope](docs/introduction/README.md))
+**General-reader introduction (Chinese):** [Read on GitHub](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.md) |
+[Download or print the PDF](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf) |
+[Version scope](docs/introduction/README.md)
 
-The PDF is published as a browser-compatible normalized export so the link can
-open directly in GitHub's embedded viewer.
+The Markdown edition is the default online reading view. The PDF is retained as
+a downloadable, printable rendering and does not depend on GitHub's PDF preview.
 
 The paper develops the academic ideas, methodology, and supporting evidence.
-The Chinese PDF is a more accessible, use-oriented project introduction for
+The Chinese introduction is a more accessible, use-oriented project guide for
 general readers who want to understand what ASKS does and how to approach it.
 
 **ASKS (Agent-Driven Scientific Knowledge System)** is a persistent,
@@ -89,15 +90,17 @@ immutable Git tag and GitHub Release.
 | [Initial arXiv submission, arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | Frozen arXiv v1 boundary |
 | Post-arXiv submission manuscript | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | Adds the external audits; arXiv v1 remains unchanged |
 
-The dated [Chinese introduction](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
+The dated [Chinese introduction](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.md)
 is a reader-facing project and outreach document. Its initial content edition
 was published with `v0.2.2`, and `v0.2.3` supplied the corrected user-produced
-rendering. The 2026-09-03 revision keeps the experimental scope unchanged while
+PDF rendering. The 2026-09-03 revision keeps the experimental scope unchanged while
 bringing the engineering description in line with `v0.3.0`: unified document
 graph compilation, a single Meeting Compiler, bounded semantic recovery, and
 separate ingestion model roles. This documentation synchronization does not
 create a new Ran-ASKS release, arXiv version, or frozen paper artifact. See the
-[version-scope note](docs/introduction/README.md).
+[version-scope note](docs/introduction/README.md), or
+[download the PDF](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
+for printing.
 
 The manuscript formulates *scientific knowledge compilation* and presents a
 worked chronological demonstration on 56 formally published papers from one
