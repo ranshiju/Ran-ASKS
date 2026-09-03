@@ -40,14 +40,19 @@ def main() -> None:
         assert "MINERU_API_TOKEN" in (
             destination / "README.zh-CN.md"
         ).read_text(encoding="utf-8")
-        introduction = destination / "docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf"
+        introduction_relative = "docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf"
+        introduction = destination / introduction_relative
         assert introduction.is_file()
         assert introduction.stat().st_size > 100_000
         assert (destination / "docs/introduction/README.md").is_file()
-        assert "docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf" in (
+        assert introduction_relative in (
             destination / "README.md"
         ).read_text(encoding="utf-8")
-        assert "docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf" in (
+        assert introduction_relative in (
+            destination / "README.zh-CN.md"
+        ).read_text(encoding="utf-8")
+        assert "sjran@cnu.edu.cn" in (destination / "README.md").read_text(encoding="utf-8")
+        assert "sjran@cnu.edu.cn" in (
             destination / "README.zh-CN.md"
         ).read_text(encoding="utf-8")
         assert (destination / "THIRD_PARTY_NOTICES.md").is_file()
@@ -124,6 +129,36 @@ def main() -> None:
             cwd=destination, text=True, capture_output=True,
         )
         assert graph_check.returncode == 0, graph_check.stdout + graph_check.stderr
+
+        subprocess.run(["git", "config", "user.name", "release-test"], cwd=destination, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "release-test@example.invalid"],
+            cwd=destination,
+            check=True,
+        )
+        subprocess.run(["git", "add", "-A"], cwd=destination, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=destination, check=True)
+
+        changed_path = destination / "AGENTS.md"
+        original_changed = changed_path.read_bytes()
+        changed_path.write_bytes(original_changed + b"\n")
+        unsynchronized = run("verify", str(destination), expected=1)
+        assert "public update must synchronize" in unsynchronized.stderr
+
+        synchronized_paths = [
+            destination / "README.md",
+            destination / "README.zh-CN.md",
+            destination / "docs/introduction/README.md",
+            introduction,
+        ]
+        synchronized_originals = {path: path.read_bytes() for path in synchronized_paths}
+        for path in synchronized_paths:
+            path.write_bytes(path.read_bytes() + b"\n")
+        synchronized = run("verify", str(destination))
+        assert "Public release verified" in synchronized.stdout
+        changed_path.write_bytes(original_changed)
+        for path, content in synchronized_originals.items():
+            path.write_bytes(content)
 
         gitignore = destination / ".gitignore"
         original_gitignore = gitignore.read_text(encoding="utf-8")

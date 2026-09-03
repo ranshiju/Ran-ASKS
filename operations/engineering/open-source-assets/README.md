@@ -2,13 +2,15 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+**Contact:** [sjran@cnu.edu.cn](mailto:sjran@cnu.edu.cn)
+
 **Paper:** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
 
 **Repository:** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
 
 **Project updates:** [CHANGELOG.md](CHANGELOG.md)
 
-**General-reader introduction (Chinese PDF):** [ASKS Chinese introduction, 2026-09-01 edition](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+**General-reader introduction (Chinese PDF):** [ASKS Chinese introduction, 2026-09-03 revision](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
 ([version scope](docs/introduction/README.md))
 
 The paper develops the academic ideas, methodology, and supporting evidence.
@@ -84,13 +86,14 @@ immutable Git tag and GitHub Release.
 | [Initial arXiv submission, arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | Frozen arXiv v1 boundary |
 | Post-arXiv submission manuscript | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | Adds the external audits; arXiv v1 remains unchanged |
 
-The dated [Chinese introduction](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
-is a reader-facing project and outreach document. Its content edition was first
-published with `v0.2.2`; `v0.2.3` replaces the PDF with the corrected
-user-produced rendering without changing its scope. It covers the `v0.2.0`
-core demonstration, the `v0.2.1` external audits, and a clearly marked
-post-arXiv order-reconstruction result. It is not a new arXiv version or a
-replacement for either frozen paper artifact. See the
+The dated [Chinese introduction](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
+is a reader-facing project and outreach document. Its initial content edition
+was published with `v0.2.2`, and `v0.2.3` supplied the corrected user-produced
+rendering. The 2026-09-03 revision keeps the experimental scope unchanged while
+bringing the engineering description in line with `v0.3.0`: unified document
+graph compilation, a single Meeting Compiler, bounded semantic recovery, and
+separate ingestion model roles. This documentation synchronization does not
+create a new Ran-ASKS release, arXiv version, or frozen paper artifact. See the
 [version-scope note](docs/introduction/README.md).
 
 The manuscript formulates *scientific knowledge compilation* and presents a
@@ -139,27 +142,37 @@ python3 paper-artifacts/v0.2.1/verify.py
 ## How it works
 
 1. Preserve each received source and its stable addressing metadata.
-2. Use an LLM to produce a readable Wiki view and machine-facing semantic slots.
-3. Validate a document-local `GraphDelta` before persistent graph writes.
-4. Use embedding geometry together with explicit identity, routing, membership,
-   and lifecycle rules to integrate the delta into accumulated graph state.
+2. Run a source-type compiler that produces a readable Wiki view and
+   machine-facing semantic slots. For meeting transcripts, one Meeting Compiler
+   performs transcript normalization, Wiki composition, and slot extraction.
+3. Validate the source-local output and compile it into a versioned Knowledge IR
+   plus a deterministic graph plan.
+4. Send every document type through the same transactional graph writer, which
+   applies explicit identity, routing, membership, provenance, and lifecycle rules.
 5. Let researchers and agents navigate the compiled structure, then return to
    source-addressed evidence for factual use.
 
 In compact form:
 
 ```text
-source record -> local interpretation -> validated GraphDelta
+source record -> type-specific compiler -> validated Knowledge IR
+              -> deterministic graph plan -> one transactional graph writer
               -> persistent Wiki + evolving graph -> source-traceable use
 ```
 
-Ingestion is resumable and graph fusion is transactional. Construction
-decisions, validation results, and checkpoints make the state transition
-inspectable and recoverable.
+Paper, meeting, and general-document preprocessing and prompts remain specialized,
+but their graph persistence uses one contract and one writer. Validation failures
+enter bounded recovery that repairs only failed semantic slots and records request
+diagnostics; it does not silently rerun the whole ingestion transaction.
 
 ## Selected capabilities
 
-- Resumable paper and document ingestion with provenance-preserving graph fusion.
+- Resumable paper, meeting, and general-document ingestion through a unified,
+  provenance-preserving graph compilation path.
+- A single Meeting Compiler for transcript normalization, Wiki composition, and
+  semantic-slot extraction, with one bounded directed revision when required.
+- Per-source descriptions and provenance that improve identity matching,
+  navigation, cleanup, and Hub maintenance.
 - Graph-first navigation that returns to Raw evidence for factual answers.
 - Persistent Hubs for research structure, lineage, and cross-source navigation.
 - Project-scoped research memory and a Frontier overlay for open questions and
@@ -185,7 +198,11 @@ cp .env.example .env
 python3 .scripts/engineering_graph.py validate
 ```
 
-Configure model backends in `.env` only for workflows that need them. Then read
+Configure model backends in `.env` only for workflows that need them. Ingestion
+orchestration is selected independently with `INGEST_BACKEND`; API ingestion can
+also assign separate generation and proposition models through
+`INGEST_GENERATION_*` and `INGEST_PROPOSITION_*`, while unset values reuse the
+main LLM settings. Then read
 `AGENTS.md`: it is the operating contract that classifies a request, protects
 the Raw layer, and dispatches the relevant workflow. For example, the query
 dispatcher can be inspected with:

@@ -19,6 +19,13 @@ MANIFEST_PATH = REPO / "operations/engineering/open-source-manifest.yaml"
 VERSION_PATH = REPO / "VERSION"
 MARKER = ".wikigraph-public-release"
 PUBLIC_GRAPH_PATH = "operations/engineering/graph.yaml"
+PUBLIC_CONTACT = "sjran@cnu.edu.cn"
+RELEASE_DOCUMENTATION_PATHS = {
+    "README.md",
+    "README.zh-CN.md",
+    "docs/introduction/README.md",
+}
+INTRODUCTION_PDF_PREFIX = "docs/introduction/ASKS-Chinese-Introduction-"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 PRIVATE_PREFIXES = (
     "academic/raw/", "academic/wiki/", "academic/outputs/",
@@ -84,6 +91,77 @@ def expected_files(manifest: dict) -> set[str]:
     files.update(f"{directory}/.gitkeep" for directory in manifest["template_dirs"])
     files.add(MARKER)
     return files
+
+
+def documentation_sync_paths(manifest: dict) -> set[str]:
+    """Return the reader-facing documents that must move with each public update."""
+    introduction_pdfs = {
+        path
+        for path in manifest.get("public_assets", {})
+        if path.startswith(INTRODUCTION_PDF_PREFIX) and path.endswith(".pdf")
+    }
+    if len(introduction_pdfs) != 1:
+        raise ValueError(
+            "public_assets must declare exactly one dated ASKS Chinese introduction PDF"
+        )
+    return RELEASE_DOCUMENTATION_PATHS | introduction_pdfs
+
+
+def git_publication_changes(destination: Path) -> set[str]:
+    """Return the pending release diff, or the latest committed diff when clean."""
+    inside = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=destination,
+        text=True,
+        capture_output=True,
+    )
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return set()
+    has_head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=destination,
+        text=True,
+        capture_output=True,
+    )
+    if has_head.returncode != 0:
+        return set()
+    tracked = subprocess.run(
+        ["git", "diff", "HEAD", "--name-only", "--"],
+        cwd=destination,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=destination,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    pending = {
+        path
+        for path in (*tracked.stdout.splitlines(), *untracked.stdout.splitlines())
+        if path and path != MARKER
+    }
+    if pending:
+        return pending
+    has_parent = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD^"],
+        cwd=destination,
+        text=True,
+        capture_output=True,
+    )
+    if has_parent.returncode != 0:
+        return set()
+    latest = subprocess.run(
+        ["git", "diff", "HEAD^", "HEAD", "--name-only", "--"],
+        cwd=destination,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return {path for path in latest.stdout.splitlines() if path and path != MARKER}
 
 
 def projected_engineering_graph(destination: Path) -> dict:
@@ -272,6 +350,17 @@ def verify(destination: Path) -> int:
     for path in sorted(actual - expected):
         failures.append(f"unexpected file: {path}")
     try:
+        publication_changes = git_publication_changes(destination)
+        missing_documentation = documentation_sync_paths(manifest) - publication_changes
+        if publication_changes and missing_documentation:
+            failures.append(
+                "public update must synchronize README.md, README.zh-CN.md, the Chinese "
+                "introduction PDF, and its scope note; missing from this update: "
+                + ", ".join(sorted(missing_documentation))
+            )
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        failures.append(f"unable to verify release documentation synchronization: {error}")
+    try:
         for path in git_ignored_files(destination, actual):
             failures.append(f"release file ignored by destination .gitignore: {path}")
     except ValueError as error:
@@ -297,6 +386,7 @@ def verify(destination: Path) -> int:
             ".csv", ".example", ".json", ".jsonl", ".md", ".py", ".sh", ".txt", ".yaml", ".yml"
         }:
             text = content_path.read_text(encoding="utf-8", errors="ignore").lower()
+            text = text.replace(PUBLIC_CONTACT, "")
             for pattern in SENSITIVE_PATTERNS:
                 if pattern.search(text):
                     failures.append(f"sensitive marker '{pattern.pattern}' in {path}")

@@ -7,7 +7,11 @@ start using it. The paper remains the academic source for the project's ideas,
 methodology, and supporting evidence. The content edition was first published
 with the documentation-only Ran-ASKS `v0.2.2` release. Ran-ASKS `v0.2.3`
 replaces the PDF with the corrected user-produced rendering without changing
-the content or version scope below.
+the experimental scope below. The 2026-09-03 revision synchronizes the
+engineering description with the existing `v0.3.0` boundary, including unified
+document graph compilation, the single Meeting Compiler, bounded semantic
+recovery, and separate ingestion model roles. This documentation update does
+not increment `VERSION` or alter a frozen paper artifact.
 
 | Content described in the PDF | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
@@ -25,7 +29,9 @@ artifact directories linked from the repository README.
 什么问题、主要知识界面的作用、工程特点和基本使用方式。论文仍是阐述项目学术
 思想、方法论与实验依据的正式来源。该内容版首次随仅更新文档的 Ran-ASKS
 `v0.2.2` 发布。Ran-ASKS `v0.2.3` 将 PDF 替换为用户重新生成的正确版本，下面
-列出的内容和版本范围保持不变。
+列出的实验内容和版本范围保持不变。2026年9月3日修订版把工程说明同步到现有
+`v0.3.0` 边界，包括统一文档落图、单一 Meeting Compiler、受限语义恢复和分离
+的摄入模型角色。本次文档更新不改变 `VERSION`，也不改变冻结论文数据产物。
 
 | PDF 涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

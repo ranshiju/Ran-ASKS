@@ -3,13 +3,15 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+**联系邮箱：** [sjran@cnu.edu.cn](mailto:sjran@cnu.edu.cn)
+
 **论文：** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)
 
 **GitHub：** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
 
 **项目更新日志：** [CHANGELOG.md](CHANGELOG.md)
 
-**面向一般使用者的中文介绍（PDF）：** [ASKS 中文介绍（2026年9月1日版）](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
+**面向一般使用者的中文介绍（PDF）：** [ASKS 中文介绍（2026年9月3日修订版）](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
 （[版本对应关系](docs/introduction/README.md)）
 
 论文侧重阐述学术思想、方法论与实验依据。中文 PDF 更侧重项目介绍和传播，帮助
@@ -73,11 +75,12 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 | [首次 arXiv 投稿，arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [`v0.2.0`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0) | [`1.0.0`](paper-artifacts/v0.2.0/) | 冻结的 arXiv v1 边界 |
 | arXiv 后的投稿工作稿 | [`v0.2.1`](https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.1) | [`1.1.0`](paper-artifacts/v0.2.1/) | 增加外部审计；arXiv v1 保持不变 |
 
-带日期的 [ASKS 中文介绍](docs/introduction/ASKS-Chinese-Introduction-2026-09-01.pdf)
-是面向一般使用者的项目介绍和传播材料。其内容版首次随 `v0.2.2` 发布，`v0.2.3`
-替换为用户重新生成的正确 PDF，内容范围不变。它涵盖 `v0.2.0` 的核心展示、`v0.2.1`
-的外部审计，以及明确标注为 arXiv 之后工作结果的顺序重建实验。它不是新的
-arXiv 版本，也不替代两个冻结论文数据产物。详细边界见
+带日期的 [ASKS 中文介绍](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
+是面向一般使用者的项目介绍和传播材料。初版内容随 `v0.2.2` 发布，`v0.2.3`
+提供了用户重新生成的正确 PDF。2026年9月3日修订版保持实验范围不变，同时将
+工程说明同步到 `v0.3.0`：统一文档落图、单一 Meeting Compiler、受限语义恢复，
+以及彼此分离的摄入模型角色。这次文档同步不建立新的 Ran-ASKS Release、arXiv
+版本或冻结论文数据产物。详细边界见
 [版本对应关系](docs/introduction/README.md)。
 
 论文提出了“科学知识编译”，并以一个研究计划中正式发表的 56 篇论文进行按时间
@@ -119,24 +122,28 @@ python3 paper-artifacts/v0.2.1/verify.py
 ## 工作原理
 
 1. 保存每份接收来源及其稳定的寻址元数据。
-2. 使用大语言模型生成可读 Wiki 界面和面向机器的语义槽位。
-3. 在持久化写图前验证文档局部的 `GraphDelta`。
-4. 将嵌入几何与显式的身份、路由、成员关系和生命周期规则结合，把增量融合到累计图状态中。
+2. 运行按来源类型适配的编译器，生成可读 Wiki 和机器语义槽；会议纪要由同一个 Meeting Compiler 完成口语文本整理、Wiki 编译与语义槽抽取。
+3. 校验来源局部输出，并将其编译为版本化 Knowledge IR 和确定性 graph plan。
+4. 所有文档类型都通过同一个事务性写图器，执行身份、路由、成员关系、来源和生命周期规则。
 5. 研究者和智能体使用编译结构进行导航，并在事实使用时返回具有来源地址的证据。
 
 简化表示如下：
 
 ```text
-来源记录 -> 局部解释 -> 经过验证的 GraphDelta
+来源记录 -> 按类型适配的编译器 -> 经过验证的 Knowledge IR
+         -> 确定性 graph plan -> 唯一事务性写图器
          -> 持久化 Wiki + 演化中的图 -> 来源可追溯的使用
 ```
 
-摄入支持断点续做，图融合采用事务机制。构建决策、验证结果和检查点使状态转换
-能够被检查和恢复。
+论文、会议纪要和普通文档仍可使用不同的预处理与提示词，但落图共享同一契约和
+唯一写入器。校验失败只进入受限恢复，定向修复失败的语义槽并记录请求诊断，
+不会静默重跑整条摄入事务。
 
 ## 主要能力
 
-- 支持断点续做的论文和文档摄入，以及保留来源关系的图融合。
+- 论文、会议纪要和普通文档通过统一的知识编译路径完成可断点续做、保留来源的落图。
+- 单一 Meeting Compiler 完成口语文本整理、Wiki 编译和语义槽抽取，必要时只进行一次定向修订。
+- 按来源保存的描述与来源关系用于改善身份匹配、导航、清理和 Hub 维护。
 - 以图为先的导航，并在事实回答时返回 Raw 证据。
 - 用于研究结构、谱系和跨来源导航的持久化 Hub。
 - 项目范围的研究记忆，以及管理开放问题和演化轨迹的 Frontier 覆盖层。
@@ -158,7 +165,10 @@ cp .env.example .env
 python3 .scripts/engineering_graph.py validate
 ```
 
-只有需要模型的工作流才需要在 `.env` 中配置模型后端。随后阅读 `AGENTS.md`：
+只有需要模型的工作流才需要在 `.env` 中配置模型后端。摄入编排由独立的
+`INGEST_BACKEND` 选择；API 摄入还可以通过 `INGEST_GENERATION_*` 和
+`INGEST_PROPOSITION_*` 分别设置生成模型与命题抽取模型，未设置时复用主 LLM。
+随后阅读 `AGENTS.md`：
 它是项目运行契约，负责识别请求类型、保护 Raw 层并派发对应工作流。例如，可以
 使用以下命令查看查询任务的派发结果：
 

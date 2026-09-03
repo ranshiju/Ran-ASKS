@@ -115,5 +115,6 @@ Query 回答中不应将会议纪要作为唯一权威来源，引用需注明"�
 
 - 构建与审计入口：`.scripts/open_source_release.py build <目标目录> --clean --force`，随后执行 `verify <目标目录>`；目标目录会写入 `.wikigraph-public-release` 标记。
 - 公开发布版本号以根目录 `VERSION` 为唯一来源（`MAJOR.MINOR.PATCH`）；构建器把它写入发布树并同步到公开 `README.md` 的 `> Current release: v<version>` 行，`verify` 会拒绝来源、发布树、README 三者不一致。该版本与摄入管线 `CURRENT_PIPELINE_VERSION` 分离。
+- 每次 GitHub 公开树更新都必须按相对当前 GitHub 状态的 diff 做内容级文档审阅，并同步英文 README、中文 README、带日期的中文说明 PDF 及其版本范围说明中的相关机制、能力、配置和使用方式；`verify` 会拒绝未同时进入本次 diff 的文档。仅同步文档且不建立新 tag/Release 边界时可保持 `VERSION` 不变。
 - 工程规则与个人信息混在同一文档时，必须先拆分：稳定、通用的机制放公开工程文件；真实状态、实验、身份信息或业务上下文放私有 `*.private.md` 或私有项目状态文件。
 - 新增可公开工程文件时，同步更新 manifest、发布资产（如有）和 `.scripts/test_open_source_release.py`；不得手工向生成的公开树补入业务文件。

@@ -20,12 +20,14 @@ The public release is an engineering template, never a copy of the personal know
 - `open_source_release.py verify` rejects a version mismatch between source `VERSION`, destination `VERSION`, and the README release badge.
 - The root `CHANGELOG.md` records public project updates; its newest release heading must match `VERSION` before publication.
 - Keep the changelog human-readable: prioritize important user-facing capabilities, behavior or contract changes, compatibility, quality, and security; summarize minor fixes and internal adjustments instead of listing them individually.
+- Every GitHub update requires a content-level documentation review. Synchronize the English README, Chinese README, dated Chinese introduction PDF, and its version-scope note with any affected capabilities, configuration, workflow, or user guidance. The release verifier rejects a pending or latest committed public diff that does not include all four reader-facing documents.
+- A documentation synchronization commit on `main` may retain the current `VERSION`; increment it only when establishing a new tag/Release boundary. Keeping the version does not waive the documentation review.
 - This number is separate from pipeline versioning: `CURRENT_PIPELINE_VERSION` in `.scripts/graph_lib.py` tracks content-pipeline upgrades and is never the public release number.
 - Increment PATCH for compatible fixes or documentation-only releases, MINOR for backward-compatible public capabilities, and MAJOR for breaking public contracts.
 
 ## Release workflow
 
-1. Update the manifest when a public engineering file is added or moved; update `VERSION` and the newest `CHANGELOG.md` entry when the public release changes.
+1. Review the diff against the current GitHub state. Update the manifest when a public engineering file is added or moved, synchronize both READMEs and the Chinese introduction PDF plus its scope note, and update the changelog. Update `VERSION` only when creating a new release boundary.
 2. Build a clean tree; the command only copies manifest-approved files.
 3. Verify the tree before staging or publishing.
 4. Verify every included paper artifact with its declared verifier. The base
@@ -33,7 +35,7 @@ The public release is an engineering template, never a copy of the personal know
    extensions such as `v0.2.1` use their versioned `verify.py`.
 5. In a Git worktree, verify that no manifest-approved release file is excluded
    by the destination `.gitignore`.
-6. Review the staged diff and run the normal engineering regressions.
+6. Review the staged diff and confirm that documentation describes the affected behavior rather than merely changing dates or version badges; then run the normal engineering regressions.
 
 ```bash
 python3 .scripts/open_source_release.py build /path/to/WikiGraph_clean --clean --force
