@@ -16,7 +16,7 @@ spec 字段：
   steps                  dict：dedup_check/preprocess/write_wiki/validate_wiki/
                          write_slots/validate_semantics/repair_slots/finalize/
                          update_graph/validate_graph/finalize_tail；统一语义 Worker
-                         可另提供 prepare_unified_handoff
+                         可另提供 prepare_unified_handoff(state, errors, handoff_reason)
 
 step 签名约定：
   dedup_check(state)->(bool,str); preprocess(state)->(bool,str)
@@ -49,7 +49,11 @@ def _save(state: dict) -> None:
 
 
 def _revisionable_protocol_error(message: str) -> bool:
-    return "缺少 <<<" in str(message or "")
+    text = str(message or "").lower()
+    return any(marker in text for marker in (
+        "缺少 <<<", "missing <<<", "invalid preprocess json",
+        "invalid meeting-compiler-v1 preprocess proposal",
+    ))
 
 
 def run_pipeline(state: dict, spec: dict, progress) -> dict:
@@ -58,6 +62,29 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
     txn = state["transaction_id"]
     recovery_limits = rp.limits_from_spec(spec)
     rp.ensure_state(state, recovery_limits)
+
+    # Migrate legacy meeting transactions that were incorrectly terminalized when
+    # the API returned a malformed unified compiler envelope.
+    if (state.get("status") == "failed" and spec.get("unified_semantic_worker")
+            and any(_revisionable_protocol_error(error) for error in state.get("errors", []))):
+        prepare_handoff = steps.get("prepare_unified_handoff")
+        errors = [str(error) for error in state.get("errors", [])]
+        prepared, prepare_msg = (
+            prepare_handoff(state, errors, "legacy_worker_protocol_failure")
+            if prepare_handoff else (False, "")
+        )
+        if prepared:
+            inbox_state.transition(
+                state, "agent_required", reason="migrate_legacy_protocol_failure",
+                allowed_targets={"agent_required"},
+            )
+            state["pre_handoff_status"] = "write_wiki"
+            state["agent_required"] = True
+            state["errors"] = errors
+            _save(state)
+        elif prepare_handoff:
+            state["errors"] = [prepare_msg or "统一语义 Worker handoff 准备失败"]
+            _save(state)
 
     # A failed post-finalize transaction may be resumed after the temp artifact is repaired.
     if state.get("status") == "failed" and state.get("resume_from"):
@@ -89,7 +116,9 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             state["errors"] = []
         elif semantic_path.is_file():
             validation_errors = ic.validate_before_commit(
-                state, steps["validate_semantics"], spec.get("non_blocking_issues", ()))
+                state, steps["validate_semantics"], spec.get("non_blocking_issues", ()),
+                spec.get("record_semantic_warnings"),
+            )
             if validation_errors:
                 ic.handoff_to_agent(state, "恢复前语义槽校验未通过",
                                     steps["validate_semantics"], resume_cmd)
@@ -114,7 +143,9 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
     # 恢复或手工修复后，落位前全量复验（resume 安全网）
     if state["status"] in {"finalize", "update_graph", "validate_graph", "finalize_tail", "graph_ready"}:
         validation_errors = ic.validate_before_commit(
-            state, steps["validate_semantics"], spec.get("non_blocking_issues", ()))
+            state, steps["validate_semantics"], spec.get("non_blocking_issues", ()),
+            spec.get("record_semantic_warnings"),
+        )
         if validation_errors:
             ic.handoff_to_agent(state, "恢复前语义槽校验未通过",
                                 steps["validate_semantics"], _resume_cmd(spec, txn))
@@ -176,8 +207,27 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                 if (_revisionable_protocol_error(msg)
                         and rp.consume(state, "wiki_revision", recovery_limits, msg)):
                     state["wiki_content"] = ""
+                    if spec.get("unified_semantic_worker"):
+                        state["slots_content"] = ""
+                        state["compiler_errors"] = [str(msg)]
                     _save(state)
                     continue
+                if _revisionable_protocol_error(msg) and spec.get("unified_semantic_worker"):
+                    prepare_handoff = steps.get("prepare_unified_handoff")
+                    prepared, prepare_msg = (
+                        prepare_handoff(
+                            state, [str(msg)], "worker_protocol_revision_exhausted",
+                        ) if prepare_handoff else (False, "")
+                    )
+                    if prepared:
+                        state["status"] = "agent_required"
+                        state["pre_handoff_status"] = "write_wiki"
+                        state["agent_required"] = True
+                        state["errors"] = [str(msg)]
+                        _save(state)
+                        return state
+                    if prepare_handoff:
+                        state["errors"] = [prepare_msg or "统一语义 Worker handoff 准备失败"]
                 state["status"] = "failed"
                 _save(state)
                 return state
@@ -198,7 +248,9 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                             ]
                             _save(state)
                             return state
-                        prepared, prepare_msg = prepare_handoff(state, wiki_errors)
+                        prepared, prepare_msg = prepare_handoff(
+                            state, wiki_errors, "wiki_revision_budget_exhausted",
+                        )
                         if not prepared:
                             state["status"] = "failed"
                             state["errors"] = [prepare_msg or "统一语义 Worker handoff 准备失败"]

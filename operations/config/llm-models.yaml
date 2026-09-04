@@ -22,6 +22,36 @@ preferred:
   semantic_recovery_agent: GLM-5.3-Flash
 fallback:
   visual_qa: GLM-4.5V
+image_generation:
+  status: pending_probe
+  api_profile: COMIC_IMAGE
+  endpoint_kind: openai_images
+  default_model: null
+  notes:
+    - 候选来自用户提供的 provider catalog；必须经 API 探测后才可设为默认模型。
+    - 图像生成与 chat/completions 分离；远程生成须显式指定模型并允许远程调用。
+  candidates:
+    - model: GLM-CogView3-Flash
+      task: text_to_image
+      probe_status: pending
+    - model: Doubao-Seedream-3.0-T2I
+      task: text_to_image
+      probe_status: pending
+    - model: Doubao-Seedream-4.0
+      task: text_to_image
+      probe_status: pending
+    - model: Doubao-Seedream-4.5
+      task: text_to_image
+      probe_status: pending
+    - model: Doubao-Seedream-5.0-lite
+      task: text_to_image
+      probe_status: pending
+    - model: WanX2.1-T2I-Turbo
+      task: text_to_image
+      probe_status: pending
+    - model: WanX2.1-T2I-Plus
+      task: text_to_image
+      probe_status: pending
 agent_profiles:
   meeting_compiler_agent:
     status: active

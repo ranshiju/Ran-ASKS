@@ -39,6 +39,7 @@ def validate_status(state: dict) -> str:
 
 
 def transition(state: dict, target: str, *, reason: str,
+               allowed_targets: set[str] | frozenset[str] | None = None,
                allowed_from: set[str] | frozenset[str] | None = None) -> None:
     """Apply a guarded non-linear recovery transition.
 
@@ -50,7 +51,12 @@ def transition(state: dict, target: str, *, reason: str,
     target = str(target or "")
     if target not in KNOWN_STATUSES:
         raise ValueError(f"unknown ingest transition target: {target or '(empty)'}")
-    permitted = frozenset(allowed_from) if allowed_from is not None else RESUME_TRANSITIONS.get(source, frozenset())
+    if allowed_targets is not None and allowed_from is not None:
+        raise ValueError("pass allowed_targets, not both recovery override names")
+    # allowed_from was the original, misleading name. Keep it for old callers while
+    # making the checked value explicit: this is a set of permitted target stages.
+    override = allowed_targets if allowed_targets is not None else allowed_from
+    permitted = frozenset(override) if override is not None else RESUME_TRANSITIONS.get(source, frozenset())
     if source != target and target not in permitted:
         raise ValueError(f"illegal ingest recovery transition: {source} -> {target}")
     state["status"] = target
@@ -95,7 +101,10 @@ def classify_failure(state: dict) -> dict | None:
             "api_network_transient", "api", "bounded_client_retry", True,
             "resume_after_network_recovers",
         )
-    elif any(marker in text for marker in ("空输出", "schema 校验", "缺少 <<<")):
+    elif any(marker in text for marker in (
+            "空输出", "schema 校验", "缺少 <<<", "missing <<<",
+            "invalid preprocess json", "invalid meeting-compiler-v1 preprocess proposal",
+    )):
         category = "worker_output_invalid"
         domain = "worker"
         disposition = "revise_output"
@@ -127,7 +136,7 @@ def classify_failure(state: dict) -> dict | None:
             "semantic_decision", "semantic", "specialist_review", "specialist_agent",
             str(state.get("next_action") or "review_handoff_then_resume"),
         )
-    elif status in {"failed", "validation_error", "write_wiki"} or errors:
+    elif status in {"failed", "validation_error"} or errors:
         category = "unknown_failure"
     if not category:
         return None

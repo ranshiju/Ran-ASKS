@@ -674,6 +674,39 @@ def test_bibliographic_fast_path_skips_worker_call():
     assert result["worker"]["api_called"] is False
 
 
+def test_bibliographic_front_matter_fast_path_skips_worker_without_pdf_authors():
+    bibliography = {
+        "title": "Stable Paper", "authors": [], "year": "2024",
+        "venue": "Journal", "doi": "10.1234/stable", "arxiv_id": "",
+        "evidence": {"title": "pdf_metadata.title", "year": "pdf_first_page.published"},
+    }
+    md_text = "# Stable Paper\n\nAlice Example, Bob Example\n\n## Abstract\nBody text.\n"
+    original_call = module.call_json
+    module.call_json = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("front-matter deterministic fast path must not call worker"))
+    try:
+        result = module.review_bibliographic_metadata(
+            bibliography, md_text, "txn-front-matter-fast")
+    finally:
+        module.call_json = original_call
+    assert result["ok"] is True
+    assert result["bibliographic"]["authors"] == ["Alice Example", "Bob Example"]
+    assert result["worker"]["skip_reason"] == "deterministic_front_matter_fast_path"
+    assert result["worker"]["api_called"] is False
+
+
+def test_bibliographic_review_view_stops_before_abstract_body():
+    md_text = (
+        "# Stable Paper\n\nAlice Example, Bob Example\n\n"
+        "## Abstract\n" + "unrelated abstract sentence " * 300
+        + "\nPublished 1 January 2024\n"
+    )
+    title_view, evidence_view = module._paper_md_review_view(md_text)
+    assert "Alice Example" in title_view
+    assert "unrelated abstract sentence" not in title_view
+    assert "Published 1 January 2024" in evidence_view
+
+
 def test_bibliographic_worker_cache_prevents_resume_recall():
     with tempfile.TemporaryDirectory() as directory:
         bibliography = {
@@ -2383,6 +2416,7 @@ def test_validate_transaction_reports_warnings():
     assert report["status"] == "pass", f"全非阻断应 pass，got {report['status']}"
     assert not any(w["line"] == "PRX Quantum" for w in report["warnings"])
     assert any("DMRG" in w["line"] for w in report["warnings"])
+    assert not any(w["issue"] == "descriptive_phrase" for w in report["warnings"])
     # 改革后所有 warning 均非阻断
     assert all(not w.get("blocking") for w in report["warnings"]), \
         f"不应有阻断型 warning: {[w for w in report['warnings'] if w.get('blocking')]}"
@@ -2428,6 +2462,41 @@ def test_validate_before_commit_proposition_object_is_nonblocking():
         finally:
            module.REPO = original_repo
     assert errors == [], f"命题 object 不应阻断，但仍返回错误: {errors}"
+
+
+def test_nonblocking_semantic_warning_persists_quality_status():
+    state = {
+        "quality_warnings": [{"issue": "bibliographic_authors_incomplete", "detail": "x"}],
+    }
+    module._record_semantic_quality_warnings(state, [{
+        "issue": "bare_abbreviation", "section": "三元组",
+        "line": "本论文 | 核心方法 | DMRG", "reason": "unresolved abbreviation",
+    }])
+    assert state["quality_status"] == "degraded"
+    assert state["semantic_warnings"][0]["issue"] == "bare_abbreviation"
+    assert {warning["issue"] for warning in state["quality_warnings"]} == {
+        "bibliographic_authors_incomplete", "semantic_bare_abbreviation",
+    }
+    module._record_semantic_quality_warnings(state, [])
+    assert state["quality_status"] == "degraded", "bibliographic warning must remain"
+    assert [warning["issue"] for warning in state["quality_warnings"]] == [
+        "bibliographic_authors_incomplete"
+    ]
+
+
+def test_validate_before_commit_records_nonblocking_semantic_warning():
+    state = {"quality_warnings": []}
+    warning = {
+        "issue": "bare_abbreviation", "section": "三元组",
+        "line": "本论文 | 核心方法 | DMRG", "reason": "unresolved abbreviation",
+    }
+    errors = module.ic.validate_before_commit(
+        state, lambda _state: ([], [warning]), module.NON_BLOCKING_ISSUES,
+        module._record_semantic_quality_warnings,
+    )
+    assert errors == []
+    assert state["semantic_warnings"] == [warning]
+    assert state["quality_status"] == "degraded"
 
 
 def test_step_extract_propositions_skips_when_no_propositions():

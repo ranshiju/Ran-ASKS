@@ -542,6 +542,39 @@ def test_scope_route_requires_canonical_scope_and_margin():
     assert result["node_id"] == "open"
 
 
+def test_scope_route_child_requires_child_specific_evidence():
+    definitions = [
+        hs.HubDefinition(
+            "time-control", "时间最优控制理论",
+            "研究量子信息处理中的时间最优控制、变分优化、脉冲设计及量子态制备问题。",
+            "quantum-information", "active", True, "scope",
+        ),
+        hs.HubDefinition(
+            "quantum-information", "量子信息",
+            "研究量子信息处理中的纠缠、计算、通信、模拟、纠错、测量及量子资源问题。",
+            "", "active", True, "scope",
+        ),
+    ]
+    old_embed = hs._embed
+    hs._embed = lambda _texts: np.array([[1.0, 0.0], [0.99, 0.01], [0.6, 0.8]])
+    try:
+        unsupported = hs.route_profile(
+            "本文研究量子信息处理中的自适应智能体记忆压缩问题。", definitions,
+        )
+        supported = hs.route_profile(
+            "本文研究量子信息处理中的时间最优控制与脉冲设计。", definitions,
+        )
+    finally:
+        hs._embed = old_embed
+    assert unsupported["decision"] == "candidates"
+    assert unsupported["reason"] == "child_specificity_unsupported"
+    assert unsupported["specificity_required"] is True
+    assert unsupported["specificity_matches"] == []
+    assert supported["decision"] == "resolved"
+    assert supported["node_id"] == "time-control"
+    assert supported["specificity_matches"]
+
+
 def test_scope_route_rejects_close_canonical_tie():
     definitions = [
         hs.HubDefinition("quantum-info", "量子信息", "研究量子计算、通信与模拟问题。", "", "active", True, "scope"),
@@ -592,12 +625,49 @@ def test_agent_confirmed_route_apply_replaces_hub_edge_with_evidence():
         assert edge["object"] == target
         assert edge["source"].endswith("#研究方向定位")
         assert conn.execute(
+            "SELECT 1 FROM edge_origins WHERE edge_id=? AND source LIKE 'agent-confirmed:%'",
+            (edge["id"],),
+        ).fetchone()
+        assert conn.execute(
             "SELECT 1 FROM edge_evidence WHERE edge_id=?", (edge["id"],)
         ).fetchone()
         assert conn.execute(
             "SELECT 1 FROM edge_origins WHERE edge_id=? AND origin_page=?",
             (edge["id"], page),
         ).fetchone()
+        old_embed = hs._embed
+        hs._embed = lambda texts: np.array(
+            [[1.0, 0.0] if "分形晶格" in text or "电子结构" in text else [0.99, 0.01]
+             for text in texts], dtype=float,
+        )
+        try:
+            routed = hs.route_paper(conn, page)
+        finally:
+            hs._embed = old_embed
+        assert routed["node_id"] == target
+        assert routed["reason"] == "agent_confirmed_override"
+        import graph_ingest as gi
+        cleaned = gi.clean_page_edges(conn, page)
+        assert cleaned["agent_confirmed_routes_preserved"] == 1
+        assert conn.execute(
+            "SELECT 1 FROM edges WHERE id=?", (edge["id"],)
+        ).fetchone()
+        import inbox_state
+        old_state_repo = inbox_state.REPO
+        try:
+            inbox_state.REPO = root
+            inbox_state.save("txn-route", {
+                "transaction_id": "txn-route", "status": "completed",
+                "wiki_path": page, "graph_report": {},
+            })
+            state_path = hs.record_paper_route_correction("txn-route", report)
+            amended = inbox_state.load("txn-route")
+        finally:
+            inbox_state.REPO = old_state_repo
+        assert state_path == "temp/inbox-state/txn-route.json"
+        assert amended["graph_report"]["hub_scope_route_current"]["node_id"] == target
+        assert amended["route_corrections"][0]["automatic_gate"]
+        assert amended["quality_status"] == "complete"
 
 
 def test_define_scope_updates_existing_hub_only():
@@ -1125,7 +1195,12 @@ def test_merge_excludes_blood_related_hubs():
             assert "血亲" in str(exc)
         else:
             raise AssertionError("direct merge apply must reject blood-related Hubs")
-
+def test_refresh_after_ingest_skips_non_academic_pages_before_graph_scan():
+    report = hs.refresh_after_ingest(None, "admin/wiki/meetings/部署会")
+    assert report["affected_nodes"] == []
+    assert report["membership"]["decision"] == "skipped_non_academic"
+    assert report["new_hubs"]["decision"] == "skipped_non_academic"
+    assert report["membership_apply"]["applied"] is False
 
 
 def main():

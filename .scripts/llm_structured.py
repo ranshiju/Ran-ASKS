@@ -335,7 +335,8 @@ def agent_handoff(prompt: str, schema_name: str = "structured-json") -> dict:
         "model": "current-agent",
         "prompt": prompt,
         "schema": schema_name,
-        "error": "未配置完整 LLM API；请由当前 agent 处理此结构化任务并返回 JSON",
+        "handoff_reason": "configured_agent_backend",
+        "error": None,
     }
 
 def strip_json_fence(text: str) -> str:

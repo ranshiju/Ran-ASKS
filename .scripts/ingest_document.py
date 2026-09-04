@@ -51,6 +51,9 @@ API_COMBINED_DOCUMENT_MAX_CHARS = 30_000
 WIKI_DELIMITER = "<<<WIKI>>>"
 SLOTS_DELIMITER = "<<<SLOTS>>>"
 ACADEMIC_DOCUMENT_TYPES = frozenset({"editorial", "academic-reference"})
+SOURCE_KINDS = frozenset({"ordinary", "meeting"})
+MEETING_NAME_RE = re.compile(r"会议|部署会|工作会|座谈会|研讨会|交流会")
+TRANSCRIPT_RE = re.compile(r"速记|逐字稿|会议转写")
 
 PIPELINE_PLAN_AGENT = [
     {"step": "判断重复 + 提取文本", "needs_agent": False,
@@ -179,6 +182,52 @@ def extract_doc_text(source_path: Path, extract_dir: Path | None = None) -> str:
     return ""
 
 
+def detect_document_source_kind(filename: str, doc_text: str) -> str:
+    """Conservatively recognize transcript-like documents kept on the document path."""
+    stem = Path(filename).stem
+    if MEETING_NAME_RE.search(stem) and TRANSCRIPT_RE.search(stem):
+        return "meeting"
+    if (TRANSCRIPT_RE.search(doc_text) and re.search(r"会议|参会|主持", doc_text)
+            and re.search(r"校长讲话|书记讲话|院长讲话|主任讲话|\b发言\b|汇报", doc_text)):
+        return "meeting"
+    return "ordinary"
+
+
+def source_type_for(source_kind: str) -> str:
+    return "speech-recognition" if source_kind == "meeting" else "official-doc"
+
+
+def confidence_for(source_kind: str) -> str:
+    return "medium" if source_kind == "meeting" else "high"
+
+
+def _raw_supports_exact(value, doc_text: str) -> bool:
+    values = value if isinstance(value, list) else [value]
+    compact_raw = re.sub(r"\s+", "", doc_text)
+    return bool(values) and all(
+        isinstance(item, str) and item.strip()
+        and re.sub(r"\s+", "", item.strip()) in compact_raw
+        for item in values
+    )
+
+
+def _responsibility_supported(person: str, doc_text: str) -> bool:
+    person = re.sub(r"\s+", "", person)
+    if not person:
+        return False
+    escaped = re.escape(person)
+    patterns = (
+        rf"负责人(?:是|为|[:：])?{escaped}",
+        rf"{escaped}(?:同志|校长|书记|院长|主任)?(?:是|为)?(?:项目|工作|任务)?负责人",
+        rf"(?:由|请)?{escaped}(?:同志|校长|书记|院长|主任)?负责",
+    )
+    for line in doc_text.splitlines():
+        compact = re.sub(r"\s+", "", line)
+        if any(re.search(pattern, compact) for pattern in patterns):
+            return True
+    return False
+
+
 def _is_scanned_pdf(pdf_path: Path) -> bool:
     """检测 PDF 是否为扫描件：用 pymupdf 检查每页文本量，平均 <50 字符/页视为扫描件。"""
     try:
@@ -247,7 +296,8 @@ def apply_source_date_frontmatter(markdown: str, source_date: str) -> str:
 
 def normalize_document_wiki(markdown: str, *, correct_sources: str,
                             source_date: str, doc_text: str,
-                            created_at: str) -> tuple[str, list[str]]:
+                            created_at: str,
+                            source_kind: str = "ordinary") -> tuple[str, list[str]]:
     """Compile mechanical wiki structure so the LLM only supplies semantic content."""
     match = re.match(r"^---\n(.*?)\n---", markdown, re.S)
     if not match:
@@ -262,7 +312,8 @@ def normalize_document_wiki(markdown: str, *, correct_sources: str,
     repairs = []
     deterministic = {
         "sources": [correct_sources],
-        "source_type": "official-doc",
+        "source_type": source_type_for(source_kind),
+        "confidence": confidence_for(source_kind),
         "date": source_date or None,
         "created": created_at,
         "updated": created_at,
@@ -278,6 +329,10 @@ def normalize_document_wiki(markdown: str, *, correct_sources: str,
     elif frontmatter.get("date_status") != "unknown":
         frontmatter["date_status"] = "unknown"
         repairs.append("date_status")
+    if "department" in frontmatter and not _raw_supports_exact(
+            frontmatter.get("department"), doc_text):
+        frontmatter.pop("department", None)
+        repairs.append("department_unsupported")
     for field in ("effective_from", "effective_to"):
         value = frontmatter.get(field)
         if field in frontmatter and (value in (None, "") or str(value).lower() in {"none", "null"}):
@@ -410,6 +465,10 @@ def step_preprocess(state: dict) -> tuple[bool, str]:
     if not doc_text.strip():
         return False, "文档提取失败（空文本）"
     (extract_dir / "doc.md").write_text(doc_text, encoding="utf-8")
+    source_kind = str(state.get("source_kind") or "").strip()
+    if source_kind not in SOURCE_KINDS:
+        source_kind = detect_document_source_kind(state["source_filename"], doc_text)
+    state["source_kind"] = source_kind
     native_kind = sl.native_locator_kind(source_path)
     # 文档 prompt 始终用提取文本的 RAW#Lx。PDF 的原生 page locator 与该
     # 行号空间不同，因此即使有文本层也必须保留 Markdown companion。
@@ -439,6 +498,9 @@ def build_doc_wiki_prompt(doc_text: str, doc_id: str, date_str: str,
         error_section = "\n\n[上次输出的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
     page_types = document_type if document_type else "/".join(sorted(cfg["page_types"]))
     extra_fm = "，".join(cfg["extra_frontmatter"])
+    extra_fm_note = f"如有信息加 {extra_fm}，" if extra_fm else ""
+    if subproject == "admin":
+        extra_fm_note = "仅当原文逐字出现完整部门名称时才加 department，"
     temporal_page_types = sorted(cfg.get("temporal_page_types", []))
     temporal_note = ""
     if temporal_page_types:
@@ -459,7 +521,7 @@ def build_doc_wiki_prompt(doc_text: str, doc_id: str, date_str: str,
 
 [要求]
 1. 从文档内容判断页面类型（{page_types}），写入 frontmatter type 字段。
-2. frontmatter 只需准确给出 title, type, status(枚举: active|completed|confirmed|deprecated|draft|final；协议/制度已签署生效用 confirmed，进行中用 active，草稿用 draft)。sources/source_type/date/created/updated 由程序确定性回填，不得猜测。如有信息加 {extra_fm}，如有关联文档加 related。{temporal_note}
+2. frontmatter 只需准确给出 title, type, status(枚举: active|completed|confirmed|deprecated|draft|final；协议/制度已签署生效用 confirmed，进行中用 active，草稿用 draft)。sources/source_type/confidence/date/created/updated 由程序确定性回填，不得猜测。{extra_fm_note}如有关联文档加 related。{temporal_note}
 3. 正文结构: # 标题 → ## Navigation（2-4 句导航概述）→ ## Content（用自然标题组织连贯主题，可用短段或列表，不复制原文结构做流水账）。
 4. 简写+去冗余，忠实于原文，不编造。
 5. 上下文每个非空行前都有程序提供的 `<RAW#Lx>`。每个事实段落或事实列表项末尾直接复制对应 handle（例如 `<RAW#L27>`）；不得改写为脚注、自造行号或使用 `#全篇`。
@@ -487,6 +549,9 @@ def build_doc_wiki_slots_prompt(doc_text: str, doc_id: str, date_str: str,
         error_section = "\n\n[上次输出的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
     page_types = document_type if document_type else "/".join(sorted(cfg["page_types"]))
     extra_fm = "，".join(cfg["extra_frontmatter"])
+    extra_fm_note = f"如有信息加 {extra_fm}，" if extra_fm else ""
+    if subproject == "admin":
+        extra_fm_note = "仅当原文逐字出现完整部门名称时才加 department，"
     pronoun = cfg["subject_pronoun"]
     kw_preds = "/".join(sorted(cfg["kw_predicates"]))
     rel_preds = "/".join(sorted(cfg["nav_predicates"] - cfg["kw_predicates"]))
@@ -510,13 +575,14 @@ def build_doc_wiki_slots_prompt(doc_text: str, doc_id: str, date_str: str,
 
 [要求]
 1. 从文档内容判断页面类型（{page_types}），写入 frontmatter type 字段。
-2. frontmatter 只需准确给出 title, type, status(枚举: active|completed|confirmed|deprecated|draft|final；协议/制度已签署生效用 confirmed，进行中用 active，草稿用 draft)。sources/source_type/date/created/updated 由程序确定性回填，不得猜测。如有信息加 {extra_fm}，如有关联文档加 related。{temporal_note}
+2. frontmatter 只需准确给出 title, type, status(枚举: active|completed|confirmed|deprecated|draft|final；协议/制度已签署生效用 confirmed，进行中用 active，草稿用 draft)。sources/source_type/confidence/date/created/updated 由程序确定性回填，不得猜测。{extra_fm_note}如有关联文档加 related。{temporal_note}
 3. 正文结构: # 标题 → ## Navigation（2-4 句导航概述）→ ## Content（用自然标题组织连贯主题，可用短段或列表）。
 4. 简写+去冗余，忠实于原文，不编造。
 5. 三元组客体须为规范概念名/实体名：不含逗号、卷号页码、年份或描述性短语；核心词格式统一为「中文英文(缩写)」；无公认缩写则不写括号；无对应中文则只写英文，无对应英文则只写中文。
 6. 三元组只填文档明确涉及的核心主题和导航关系，宁少勿多。
 7. 每个事实段落或事实列表项末尾直接复制上下文实际出现的 `<RAW#Lx>`；不得改写为脚注、自造行号或使用 `#全篇`。不要写 `## Sources`，程序会编译稳定脚注。
 8. 用 <<<WIKI>>> 和 <<<SLOTS>>> 两个分隔符分别包裹输出（先 wiki 后语义槽）。
+9. 负责人关系只在原文同一行明确出现“负责人”或“负责”等职责措辞时抽取；校长讲话、主讲、发言只表示发言角色，不得推断为负责人。
 
 语义槽格式：
 三元组:
@@ -699,6 +765,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         source_date=state.get("date_str", ""),
         doc_text=doc_text,
         created_at=state["ingested_on"],
+        source_kind=state.get("source_kind", "ordinary"),
     )
     if repairs:
         state.setdefault("deterministic_repairs", []).append({
@@ -725,7 +792,7 @@ def step_validate_wiki(state: dict) -> list[str]:
         errors.append("frontmatter 格式错误")
         return errors
     fm = fm_match.group(1)
-    required = ["title", "type", "sources", "source_type", "date"]
+    required = ["title", "type", "sources", "source_type", "confidence", "date"]
     for field in required:
         if field not in fm:
             errors.append(f"frontmatter 缺字段: {field}")
@@ -762,6 +829,17 @@ def step_validate_wiki(state: dict) -> list[str]:
     status_enum = STATUS_ENUM_BY_DOMAIN.get(subproject, STATUS_ENUM_ALL)
     if fm_parsed.get("status") and fm_parsed["status"] not in status_enum:
         errors.append(f"status 非法值 '{fm_parsed['status']}'，合法: {sorted(status_enum)}")
+    expected_source_type = source_type_for(state.get("source_kind", "ordinary"))
+    if fm_parsed.get("source_type") != expected_source_type:
+        errors.append(f"source_type 应为 {expected_source_type}")
+    if fm_parsed.get("confidence") not in {"high", "medium", "low"}:
+        errors.append("confidence 应为 high/medium/low")
+    if "department" in fm_parsed:
+        extract_dir = REPO / state.get("extract_dir", "")
+        doc_path = extract_dir / "doc.md"
+        doc_text = doc_path.read_text(encoding="utf-8") if doc_path.is_file() else ""
+        if not _raw_supports_exact(fm_parsed.get("department"), doc_text):
+            errors.append("department 缺少 Raw 中逐字出现的完整部门名称")
     date_unknown = fm_parsed.get("date_status") == "unknown"
     date_value = fm_parsed.get("date")
     if date_unknown:
@@ -923,6 +1001,7 @@ def build_doc_slots_prompt(wiki_content: str, subproject: str = "admin",
 1. 三元组客体须为规范概念名/实体名：不含逗号、卷号页码、年份或描述性短语；核心词格式统一为「中文英文(缩写)」，如 人才培养talent cultivation；无公认缩写则不写括号；无对应中文则只写英文，无对应英文则只写中文。
 2. 三元组只填文档明确涉及的核心主题和导航关系，宁少勿多。
 3. 用 <<<SLOTS>>> 分隔符包裹输出语义槽，格式如下：
+4. 负责人关系只在原文明确出现“负责人”或“负责”等职责措辞时抽取；讲话、主讲、发言不得推断为负责人。
 
 三元组:
 <主体|谓词|客体，每行一条>
@@ -937,7 +1016,6 @@ def build_doc_slots_prompt(wiki_content: str, subproject: str = "admin",
 {pronoun} | 涉及 | 教学改革teaching reform
 {pronoun} | 依据 | 高等教育法
 {pronoun} | 发布者 | 物理系
-{pronoun} | 负责人 | 张明远
 
 [输出格式]
 <<<SLOTS>>>
@@ -1031,7 +1109,14 @@ def _doc_allowed_predicates(state: dict) -> set[str]:
 
 def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
     """校验语义槽合法性（委托 ingest_common）。"""
-    return ic.validate_semantics(state, REPO, _doc_allowed_predicates(state))
+    errors, warnings = ic.validate_semantics(state, REPO, _doc_allowed_predicates(state))
+    doc_path = REPO / state.get("extract_dir", "") / "doc.md"
+    doc_text = doc_path.read_text(encoding="utf-8") if doc_path.is_file() else ""
+    for line in str(state.get("slots_content") or "").splitlines():
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) == 3 and parts[1] == "负责人" and not _responsibility_supported(parts[2], doc_text):
+            errors.append(f"负责人关系缺少原文同一行的明确职责措辞: {parts[2]}")
+    return errors, warnings
 
 
 def step_repair_slots(state: dict, warnings: list[dict]) -> tuple[bool, str]:
@@ -1156,6 +1241,8 @@ def main() -> None:
     parser.add_argument("--subproject", choices=["academic", "admin", "teaching", "business"], default="admin", help="子项目域")
     parser.add_argument("--document-type", choices=sorted(ACADEMIC_DOCUMENT_TYPES),
                         help="academic 非论文类型；academic 域必填")
+    parser.add_argument("--source-kind", choices=sorted(SOURCE_KINDS),
+                        help="来源种类；inbox 会议速记传 meeting，缺省由文档强标记判定")
     parser.add_argument("--resume", help="恢复已有事务 ID")
     parser.add_argument("--related-to", help="关联到已有 wiki 页面路径（版本/补充材料），不新建 wiki 页")
     parser.add_argument("--relation-type", choices=["version", "supplementary", "translation"],
@@ -1169,6 +1256,8 @@ def main() -> None:
             raise SystemExit(f"ERROR: 事务不存在: {args.resume}")
         if args.document_type:
             state["document_type"] = args.document_type
+        if args.source_kind:
+            state["source_kind"] = args.source_kind
     elif args.file:
         file_path = (REPO / args.file).resolve()
         if not file_path.is_file():
@@ -1180,6 +1269,7 @@ def main() -> None:
             "source": str(file_path.relative_to(REPO)),
             "subproject": args.subproject,
             "document_type": args.document_type,
+            "source_kind": args.source_kind or "",
             "source_filename": file_path.name,
             "date_str": "",
             "extract_dir": f"temp/inbox-extract/{txn_id}",
@@ -1217,6 +1307,7 @@ def main() -> None:
         maintenance = ic.run_resume_post_maintenance(state)
         if maintenance is not None:
             state["maintenance"] = maintenance
+            inbox_state.save(state["transaction_id"], state)
     if state["status"] == "completed":
         payload = {
             "status": "completed",

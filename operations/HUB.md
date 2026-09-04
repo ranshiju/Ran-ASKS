@@ -110,7 +110,7 @@ Agent 依据代表成员（揭示簇语义）+ 父 Hub Scope（子 Scope 须是�
 - 显式确认 split/merge。
 - 摄入末期 auto-create 触发时为达标候选簇生成 title/Scope/parent（不经 API LLM）。
 - 摄入末期 auto-split 触发时按候选簇代表成员生成子 Hub title/Scope，原样保留程序给出的 members，并调用 `split-apply --agent-confirmed`。
-- 对低 margin 路由选择当前 canonical 候选，并调用 `route-apply --agent-confirmed`；对既有子 Hub 补 Scope 后调用 `redistribute --agent-confirmed`。
+- 对低 margin 或子方向特异性不足的路由选择当前 canonical 候选，并调用 `route-apply --agent-confirmed --transaction-id <txn>`；对既有子 Hub 补 Scope 后调用 `redistribute --agent-confirmed`。
 
 API LLM 不决定成员、聚类、分裂、合并或 canonical Scope。普通成员变化不自动改 Scope。
 
@@ -178,8 +178,8 @@ python3 .scripts/hub_semantics.py route-apply --page <paper> --hub <canonical-hu
 
 ## 论文路由
 
-论文 Wiki 仍保留可 locate 的 `## 研究方向定位`。程序只比较该句与 active、具有正式 `## Scope` 的 canonical Hub；legacy title 只用于候选诊断。canonical top-1 同时达到 floor 与 margin 才写 `论文 Wiki → 主要研究 → Hub`，边 locator 指向该句。达到 floor 但 margin 不足时必须 abstain 并生成 route-review handoff。
+论文 Wiki 仍保留可 locate 的 `## 研究方向定位`。程序只比较该句与 active、具有正式 `## Scope` 的 canonical Hub；legacy title 只用于候选诊断。canonical top-1 同时达到 floor 与 margin 后，若它是子 Hub，还必须在论文 profile 中命中扣除父 Scope 后的子方向特异性词项；否则以 `child_specificity_unsupported` abstain。达到 floor 但 margin 不足时同样 abstain，二者都生成 route-review handoff。
 
-主 Agent 复核后，`route-apply` 仅接受当前候选榜中的 active canonical research-direction Hub，并替换该论文既有同谓词 Hub 路由边；新边同时记录 `研究方向定位` evidence 与 origin。它不降低自动 floor/margin。
+主 Agent 复核后，`route-apply` 仅接受当前候选榜中的 active canonical research-direction Hub，并替换该论文既有同谓词 Hub 路由边；新边同时记录 `研究方向定位` evidence、普通 origin 与 `agent-confirmed:<locator>` origin，重摄入清理时保留。传入 `--transaction-id` 时，原事务同时写入 `route_corrections`、当前路由快照和派生 `quality_status`；后续 route 查询返回 `agent_confirmed_override`，但仍保留自动门禁结果供审计。它不降低自动 floor/margin。
 
 这条边表达“论文的主要研究方向”，与可重建的 `普通节点 → 聚类于 → Hub` 不混用。

@@ -180,6 +180,7 @@ Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群
 | 把 warning 当失败回 3.3 全量重写 | 走局部修补（最小成本修复）；只有硬错误才回退重写 |
 | 把未登记谓词直接变为永久图谱契约 | 记录候选并自动归一/聚合；达到阈值才正式注册，反向关系与方向 tier 仍受控 |
 | 结构错误反复调用同一生成提示词 | 早停，保留通过产物；修正后 `--resume` 并由程序在提交前复验 |
+| resume 复验只判断能否提交、丢掉非阻断 warning | 复用同轮 validator 输出并持久化质量告警与 `quality_status` |
 | 让 agent 全程监控正常摄入 | 默认 quiet；agent 只读最终结果，遇硬错误才介入 |
 
 ## 4. 进一步阅读地图
@@ -194,6 +195,7 @@ Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群
 | 查询协议 | `operations/QUERY.md`、`query_orchestrate.py`、`query_actions.py`、`dsh/` |
 | 项目研究状态与落笔能力 | `operations/RESEARCH.md`、`operations/WRITE.md` |
 | 研究前沿问题与轨迹 | `operations/FRONTIER.md`、`.scripts/frontier.py` |
+| API 漫画与文章配图生成 | `operations/COMIC_GENERATION.md`、`.scripts/comic_generation.py`、`dsh/comic_tools.py` |
 | 图片、PDF、PPT/PPTX 视觉检查 | `operations/VISUAL_QA.md`、`.scripts/visual_qa.py` |
 | 图片/PDF 转可编辑 PPT | `operations/VISUAL_TO_EDITABLE_PPT.md`、`.scripts/visual_to_editable_ppt.py` |
 | 健康/同步 | `operations/LINT.md`、`operations/SYNC.md`、`graph_metrics.py` |

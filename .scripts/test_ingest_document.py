@@ -134,6 +134,7 @@ def test_build_doc_wiki_prompt_admin():
     assert "Content" in prompt
     assert "行政" in prompt
     assert "department" in prompt  # admin extra_frontmatter
+    assert "逐字出现完整部门名称" in prompt
     assert "effective_from" in prompt  # temporal policy/procedure/decision
     assert "effective_to" in prompt
 
@@ -165,6 +166,8 @@ def test_build_doc_slots_prompt_admin():
     assert "本文件" in prompt  # admin pronoun
     assert "涉及" in prompt
     assert "形成决策" in prompt
+    assert "讲话、主讲、发言不得推断为负责人" in prompt
+    assert "本文件 | 负责人 | 张明远" not in prompt
 
 
 def test_build_doc_slots_prompt_teaching():
@@ -195,7 +198,7 @@ def test_validate_wiki_teaching():
     """teaching wiki 校验: 合法 type 通过。"""
     state = {
         "subproject": "teaching",
-        "wiki_content": "---\ntitle: test\ntype: course\nsources:\n  - teaching/raw/courses/test.docx\nsource_type: official-doc\ndate: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
+        "wiki_content": "---\ntitle: test\ntype: course\nsources:\n  - teaching/raw/courses/test.docx\nsource_type: official-doc\nconfidence: high\ndate: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
     }
     errors = module.step_validate_wiki(state)
     assert not errors, f"should pass: {errors}"
@@ -205,7 +208,7 @@ def test_validate_wiki_business():
     """business wiki 校验: 合法 type 通过。"""
     state = {
         "subproject": "business",
-        "wiki_content": "---\ntitle: test\ntype: plan\nsources:\n  - business/raw/plans/test.docx\nsource_type: official-doc\ndate: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
+        "wiki_content": "---\ntitle: test\ntype: plan\nsources:\n  - business/raw/plans/test.docx\nsource_type: official-doc\nconfidence: high\ndate: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
     }
     errors = module.step_validate_wiki(state)
     assert not errors, f"should pass: {errors}"
@@ -215,7 +218,7 @@ def test_validate_wiki_policy_effective_dates():
     """policy 页 effective_from/effective_to 合法时通过，非法或倒置时 ERROR。"""
     state = {
         "subproject": "admin",
-        "wiki_content": "---\ntitle: test\ntype: policy\nsources:\n  - admin/raw/policies/test.md\nsource_type: official-doc\ndate: 2026-07-01\neffective_from: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
+        "wiki_content": "---\ntitle: test\ntype: policy\nsources:\n  - admin/raw/policies/test.md\nsource_type: official-doc\nconfidence: high\ndate: 2026-07-01\neffective_from: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
     }
     assert not module.step_validate_wiki(state)
     state["wiki_content"] = state["wiki_content"].replace(
@@ -230,7 +233,7 @@ def test_validate_wiki_teaching_bad_type():
     """teaching wiki 校验: 非法 type 报错。"""
     state = {
         "subproject": "teaching",
-        "wiki_content": "---\ntitle: test\ntype: policy\nsources:\n  - teaching/raw/courses/test.docx\nsource_type: official-doc\ndate: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
+        "wiki_content": "---\ntitle: test\ntype: policy\nsources:\n  - teaching/raw/courses/test.docx\nsource_type: official-doc\nconfidence: high\ndate: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
     }
     errors = module.step_validate_wiki(state)
     assert errors, "should fail for bad type"
@@ -464,7 +467,7 @@ def test_unknown_source_date_is_not_replaced_with_ingestion_date():
     wiki = (
         "---\ntitle: 专题导言\ntype: reference\n"
         "sources:\n  - admin/raw/references/undated.md\n"
-        "source_type: official-doc\ndate: 2026-09-01\nstatus: final\n"
+        "source_type: official-doc\nconfidence: high\ndate: 2026-09-01\nstatus: final\n"
         "created: 2026-09-01\nupdated: 2026-09-01\n---\n"
         "## Navigation\n\n导航。\n## Content\n\n正文。\n"
     )
@@ -500,6 +503,49 @@ def test_normalize_document_wiki_compiles_mechanical_contract():
     assert "[^r1]: admin/raw/policies/policy.md#L1" in normalized
     assert "[^r3]: admin/raw/policies/policy.md#L3" in normalized
     assert {"sources", "created", "updated", "content_heading", "source_footnotes"} <= set(repairs)
+
+
+def test_transcript_normalization_sets_provenance_and_drops_inferred_department():
+    weak_output = (
+        "---\ntitle: 新学期工作部署会\ntype: meeting-summary\n"
+        "department: 校长办公室\nstatus: final\n---\n"
+        "## Navigation\n\n方复全校长讲话。 <RAW#L1>\n\n## Content\n\n部署工作。 <RAW#L2>\n"
+    )
+    normalized, repairs = module.normalize_document_wiki(
+        weak_output,
+        correct_sources="admin/raw/meetings/新学期工作部署会 速记.md",
+        source_date="2026-09-03",
+        doc_text="方复全校长讲话\n部署工作。\n",
+        created_at="2026-09-04",
+        source_kind="meeting",
+    )
+    fm = module.yaml.safe_load(re.match(r"^---\n(.*?)\n---", normalized, re.S).group(1))
+    assert fm["source_type"] == "speech-recognition"
+    assert fm["confidence"] == "medium"
+    assert "department" not in fm
+    assert "department_unsupported" in repairs
+
+
+def test_validate_semantics_rejects_responsibility_inferred_from_speech():
+    import shutil
+    extract_dir = module.REPO / "temp" / "inbox-extract" / "test-responsibility-evidence"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    (extract_dir / "doc.md").write_text("方复全校长讲话\n", encoding="utf-8")
+    state = {
+        "extract_dir": str(extract_dir.relative_to(module.REPO)),
+        "slots_content": "三元组:\n本文件 | 负责人 | 方复全\n",
+    }
+    original_validate = module.ic.validate_semantics
+    module.ic.validate_semantics = lambda *_args, **_kwargs: ([], [])
+    try:
+        errors, _warnings = module.step_validate_semantics(state)
+        assert any("负责人关系缺少" in item for item in errors)
+        (extract_dir / "doc.md").write_text("项目负责人：方复全\n", encoding="utf-8")
+        errors, _warnings = module.step_validate_semantics(state)
+        assert not errors
+    finally:
+        module.ic.validate_semantics = original_validate
+        shutil.rmtree(extract_dir, ignore_errors=True)
 
 
 def test_sqlite_snapshot_restores_exact_graph_state():
@@ -602,6 +648,8 @@ def main():
     test_agent_required_output_has_write_to()
     test_unknown_source_date_is_not_replaced_with_ingestion_date()
     test_normalize_document_wiki_compiles_mechanical_contract()
+    test_transcript_normalization_sets_provenance_and_drops_inferred_department()
+    test_validate_semantics_rejects_responsibility_inferred_from_speech()
     test_sqlite_snapshot_restores_exact_graph_state()
     test_rollback_removes_manifest_companion_restores_graph_and_marks_receipt()
     test_preprocess_binary_creates_raw_companion()

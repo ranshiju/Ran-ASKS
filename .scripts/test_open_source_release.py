@@ -5,6 +5,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / ".scripts/open_source_release.py"
 

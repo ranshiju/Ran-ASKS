@@ -64,7 +64,7 @@ def test_build_admin_slots_prompt():
 
 def test_validate_wiki_structure():
     """wiki 校验: 缺字段报错。"""
-    state = {"wiki_content": "---\ntitle: test\ntype: policy\nsources:\n  - admin/raw/policies/test.docx\nsource_type: official-doc\ndate: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n"}
+    state = {"wiki_content": "---\ntitle: test\ntype: policy\nsources:\n  - admin/raw/policies/test.docx\nsource_type: official-doc\nconfidence: high\ndate: 2026-07-01\n---\n## Navigation\n\n测试。\n## Content\n\n内容。\n"}
     errors = module.step_validate_wiki(state)
     assert not errors, f"should pass: {errors}"
 

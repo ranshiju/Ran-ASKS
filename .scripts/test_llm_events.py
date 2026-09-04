@@ -124,12 +124,15 @@ def test_agent_handoff_logged():
         os.environ.pop("QUERY_BACKEND", None)
     assert result["status"] == "agent_required"
     assert result["mode"] == "agent"
+    assert result["handoff_reason"] == "configured_agent_backend"
+    assert result["error"] is None
     events = _read_today_events()
     agent_events = [e for e in events if e.get("operation") == "query" and e.get("status") == "agent_required"]
     assert agent_events, "agent handoff 未记事件"
     last_agent = agent_events[-1]
     assert last_agent["mode"] == "agent"
     assert last_agent["event_kind"] == "agent_handoff"
+    assert last_agent["error"] is None
     assert last_agent["prompt_len"] == len("test-prompt")
 
 

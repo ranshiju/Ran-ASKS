@@ -93,11 +93,11 @@ immutable Git tag and GitHub Release.
 The dated [Chinese introduction](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.md)
 is a reader-facing project and outreach document. Its initial content edition
 was published with `v0.2.2`, and `v0.2.3` supplied the corrected user-produced
-PDF rendering. The 2026-09-03 revision keeps the experimental scope unchanged while
-bringing the engineering description in line with `v0.3.0`: unified document
-graph compilation, a single Meeting Compiler, bounded semantic recovery, and
-separate ingestion model roles. This documentation synchronization does not
-create a new Ran-ASKS release, arXiv version, or frozen paper artifact. See the
+PDF rendering. The 2026-09-03 revision aligned the engineering description with
+`v0.3.0`. The 2026-09-04 update accompanies `v0.4.0`, covering guarded comic
+generation, agent-ingestion recovery, explicit meeting-source evidence rules,
+and child-specific Hub routing without changing the experimental scope or any
+frozen paper artifact. See the
 [version-scope note](docs/introduction/README.md), or
 [download the PDF](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf)
 for printing.
@@ -169,7 +169,12 @@ source record -> type-specific compiler -> validated Knowledge IR
 Paper, meeting, and general-document preprocessing and prompts remain specialized,
 but their graph persistence uses one contract and one writer. Validation failures
 enter bounded recovery that repairs only failed semantic slots and records request
-diagnostics; it does not silently rerun the whole ingestion transaction.
+diagnostics; it does not silently rerun the whole ingestion transaction. In the
+agent backend, semantic stages use typed `prompt + write_to + transaction_id`
+handoffs and resume the same transaction. Continuation states such as
+`agent_required` and `partial` remain workflow results rather than generic process
+errors. Meeting-like office documents retain speech-recognition provenance, while
+department and responsibility claims require explicit source wording.
 
 ## Selected capabilities
 
@@ -181,6 +186,8 @@ diagnostics; it does not silently rerun the whole ingestion transaction.
   navigation, cleanup, and Hub maintenance.
 - Graph-first navigation that returns to Raw evidence for factual answers.
 - Persistent Hubs for research structure, lineage, and cross-source navigation.
+- Child-Hub routing that requires child-specific evidence beyond the parent Scope,
+  with Agent-confirmed overrides recorded as durable, transaction-linked origins.
 - Project-scoped research memory and a Frontier overlay for open questions and
   evolving trajectories.
 - On-demand academic writing capability that combines shared writing conventions
@@ -188,6 +195,8 @@ diagnostics; it does not silently rerun the whole ingestion transaction.
 - Read-only visual QA for images, PDF pages, and static PPT/PPTX pages.
 - Image/PDF-to-editable-PPT reconstruction that favors native PowerPoint objects
   and records any raster fallback.
+- Explicit, project-scoped comic image generation through registered remote models,
+  with dry-run validation, remote-call consent, output guards, and audit receipts.
 - An optional DSH agent cockpit with guarded tools and in-memory session state.
 
 Visual QA is opt-in. It runs when the user requests it or when a layout-dependent
@@ -208,7 +217,9 @@ Configure model backends in `.env` only for workflows that need them. Ingestion
 orchestration is selected independently with `INGEST_BACKEND`; API ingestion can
 also assign separate generation and proposition models through
 `INGEST_GENERATION_*` and `INGEST_PROPOSITION_*`, while unset values reuse the
-main LLM settings. Then read
+main LLM settings. Optional comic generation uses `COMIC_IMAGE_*`, a registered
+image model, and an explicit `--allow-remote` flag for every real call; see
+`operations/COMIC_GENERATION.md`. Then read
 `AGENTS.md`: it is the operating contract that classifies a request, protects
 the Raw layer, and dispatches the relevant workflow. For example, the query
 dispatcher can be inspected with:

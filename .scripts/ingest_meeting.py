@@ -82,22 +82,46 @@ def slugify(text: str) -> str:
 
 
 def extract_meeting_date(filename: str) -> str:
-    """从文件名提取日期：0723-xxx.txt → 0723；20260723-xxx → 0723；0804.txt → 0804。"""
+    """从文件名提取 YYYYMMDD 或 MMDD，显式年份不得丢失。"""
     stem = Path(filename).stem
-    m = re.match(r"(\d{4})?(\d{4})[-_]", stem)
-    if m:
-        return m.group(2)
-    m = re.match(r"(\d{4})[-_]", stem)
+    m = re.match(r"^(\d{8})(?:[-_]|$)", stem)
     if m:
         return m.group(1)
-    # 纯 MMDD 如 "0804" → 返回 0804
-    m = re.match(r"^(\d{4})$", stem)
-    return m.group(1) if m else ""
+    m = re.match(r"^(\d{4})(?:[-_]|$)", stem)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def meeting_date_context(date_str: str, *, today: str | None = None) -> dict:
+    """Return the committed date plus an explicit provenance marker."""
+    today_value = today or datetime.now().strftime("%Y-%m-%d")
+    current_year = today_value[:4]
+    if re.fullmatch(r"\d{8}", date_str):
+        return {
+            "date": f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}",
+            "storage_year": date_str[:4],
+            "date_inferred": False,
+            "date_basis": "filename_yyyymmdd",
+        }
+    if re.fullmatch(r"\d{4}", date_str):
+        return {
+            "date": f"{current_year}-{date_str[:2]}-{date_str[2:]}",
+            "storage_year": current_year,
+            "date_inferred": True,
+            "date_basis": "filename_mmdd_plus_ingest_year",
+        }
+    return {
+        "date": today_value,
+        "storage_year": current_year,
+        "date_inferred": True,
+        "date_basis": "ingest_date",
+    }
 
 
 def generate_meeting_id(filename: str, title: str) -> str:
     """生成 meeting-id：MMDD-title-slug。"""
-    date_part = extract_meeting_date(filename)
+    date_part = extract_meeting_date(filename)[-4:]
     if not date_part:
         date_part = datetime.now().strftime("%m%d")
     slug = slugify(title)[:40] if title else slugify(Path(filename).stem)[:40]
@@ -156,15 +180,20 @@ def ensure_unique_meeting_id(meeting_id: str, subproject: str = "academic") -> s
 def step_dedup_check(state: dict) -> tuple[bool, str]:
     """查 graph.db + raw 目录是否已摄入同一会议。"""
     import graph_lib as gl
-    date_part = extract_meeting_date(state["source_filename"])
-    if not date_part:
+    date_token = extract_meeting_date(state["source_filename"])
+    if not date_token:
         return False, ""
+    date_part = date_token[-4:]
+    date_context = meeting_date_context(date_token)
+    subproject = state.get("subproject", "academic")
+    cfg = MEETING_DOMAINS.get(subproject, MEETING_DOMAINS["academic"])
     conn = gl.connect()
-    # 查 graph.db: conference-summary 节点 path 含日期
-    pattern = f"%{date_part}%"
+    # 图层按完整日期和来源域查重，避免跨年份、跨域的同月日误判。
+    path_prefix = f"{subproject}/wiki/{cfg['wiki_sub']}/%"
     rows = conn.execute(
-        "SELECT path, title FROM nodes WHERE type='conference-summary' AND path LIKE ?",
-        (pattern,),
+        "SELECT path, title FROM nodes "
+        "WHERE type='conference-summary' AND date=? AND path LIKE ?",
+        (date_context["date"], path_prefix),
     ).fetchall()
     conn.close()
     if rows:
@@ -172,9 +201,7 @@ def step_dedup_check(state: dict) -> tuple[bool, str]:
         state["dedup_title"] = rows[0][1]
         return True, f"已摄入: {rows[0][0]}"
     # 查 raw 目录（按来源域）
-    year = datetime.now().strftime("%Y")
-    subproject = state.get("subproject", "academic")
-    cfg = MEETING_DOMAINS.get(subproject, MEETING_DOMAINS["academic"])
+    year = date_context["storage_year"]
     raw_base = REPO / subproject / "raw" / cfg["raw_sub"] / year
     if raw_base.exists():
         for d in raw_base.iterdir():
@@ -289,8 +316,9 @@ def _compiler_request(state: dict, source_text: str, entity_candidates: dict, *,
                       ) -> tuple[str, str]:
     date_str = state.get("date_str", "")
     today = datetime.now().strftime("%Y-%m-%d")
-    year = datetime.now().strftime("%Y")
-    full_date = f"{year}-{date_str[:2]}-{date_str[2:]}" if len(date_str) == 4 else date_str or today
+    date_context = meeting_date_context(date_str, today=today)
+    state.update(date_context)
+    full_date = date_context["date"]
     sources_path = f"{state['raw_dir']}/{state['source_filename']}"
     errors = []
     for key in ("wiki_errors", "slots_errors", "compiler_errors"):
@@ -322,8 +350,10 @@ def _compiler_request(state: dict, source_text: str, entity_candidates: dict, *,
     return prompt, context_hash
 
 
-def step_prepare_unified_handoff(state: dict, errors: list[str]) -> tuple[bool, str]:
-    """Keep exhausted Wiki revision on the full Meeting Compiler protocol."""
+def step_prepare_unified_handoff(state: dict, errors: list[str],
+                                 handoff_reason: str = "wiki_revision_budget_exhausted"
+                                 ) -> tuple[bool, str]:
+    """Keep exhausted compiler recovery on the full Meeting Compiler protocol."""
     source_path = REPO / state["source"]
     try:
         source_text = source_path.read_text(encoding="utf-8")
@@ -343,9 +373,10 @@ def step_prepare_unified_handoff(state: dict, errors: list[str]) -> tuple[bool, 
     state["meeting_compiler"] = {
         "protocol_version": MEETING_COMPILER_PROTOCOL,
         "status": "agent_required",
-        "reason": "wiki_revision_budget_exhausted",
+        "reason": handoff_reason,
         "context_hash": context_hash,
     }
+    state["agent_required"] = True
     return True, ""
 
 
@@ -372,8 +403,10 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         base_id = generate_meeting_id(state["source_filename"], title)
         meeting_id = ensure_unique_meeting_id(base_id, subproject)
         state["meeting_id"] = meeting_id
-        year = datetime.now().strftime("%Y")
-        mp = meeting_paths(subproject, meeting_id, year)
+        state["meeting_id_source"] = "source_heading" if m else "source_fallback"
+        date_context = meeting_date_context(state.get("date_str", ""))
+        state.update(date_context)
+        mp = meeting_paths(subproject, meeting_id, date_context["storage_year"])
         state["raw_dir"] = mp["raw_dir"]
         state["wiki_path"] = mp["wiki_path"]
         state["log_path"] = mp["log"]
@@ -417,7 +450,9 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             errors=tuple(errors),
         )
         result = MeetingCompilerAgent(task).run()
-        state["meeting_compiler"] = result.trace() | {"context_hash": context_hash}
+        compiler_trace = result.trace() | {"context_hash": context_hash}
+        state["meeting_compiler"] = compiler_trace
+        state.setdefault("meeting_compiler_attempts", []).append(compiler_trace)
         if result.status == "agent_required":
             state["_awaiting_agent_wiki_slots"] = True
             state["agent_required"] = True
@@ -425,12 +460,14 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             state["agent_write_to"] = str(agent_output.relative_to(REPO))
             return False, "需要 Meeting Compiler sub-agent 接管"
         if result.status != "compiled" or result.proposal is None:
+            if result.status == "rejected":
+                state["compiler_errors"] = [str(result.reason)]
             return False, f"Meeting Compiler 失败: {result.reason}"
         proposal = result.proposal
     # META 交叉校验
     meta = proposal.get("meta") or {}
     if meta:
-        expected_year = datetime.now().strftime("%Y")
+        expected_year = "" if state.get("date_inferred") else state.get("storage_year", "")
         mismatches = validate_meta(meta, {"doc_type": "meeting", "year": expected_year})
         if has_type_mismatch(mismatches):
             state["type_mismatch"] = True
@@ -438,16 +475,25 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             state["meta_info"] = meta
             return False, f"doc_type 不一致（程序=meeting, LLM={meta.get('doc_type', '')}），跳过待 agent 判断"
         if has_year_mismatch(mismatches):
-            # 年份不一致→用 LLM 的年份修正路径（会议可能在往年召开）
-            llm_year = extract_year_from_meta(meta)
-            if llm_year:
-                old_year = expected_year
-                mp = meeting_paths(subproject, state["meeting_id"], llm_year)
-                state["raw_dir"] = mp["raw_dir"]
-                state["wiki_path"] = mp["wiki_path"]
-                state["log_path"] = mp["log"]
-                state["index_path"] = mp["index"]
-                state["meta_year_corrected"] = {"from": old_year, "to": llm_year}
+            state["meta_year_ignored"] = {
+                "authoritative_year": expected_year,
+                "compiler_year": extract_year_from_meta(meta),
+                "reason": "explicit_filename_year_is_authoritative",
+            }
+        compiler_title = str(meta.get("title") or "").strip()
+        if compiler_title and state.get("meeting_id_source") != "compiler_meta":
+            previous_id = state["meeting_id"]
+            final_id = ensure_unique_meeting_id(
+                generate_meeting_id(state["source_filename"], compiler_title), subproject,
+            )
+            state["meeting_id"] = final_id
+            state["meeting_id_source"] = "compiler_meta"
+            state["meeting_id_rebased_from"] = previous_id
+            mp = meeting_paths(subproject, final_id, state["storage_year"])
+            state["raw_dir"] = mp["raw_dir"]
+            state["wiki_path"] = mp["wiki_path"]
+            state["log_path"] = mp["log"]
+            state["index_path"] = mp["index"]
     preprocess = proposal["preprocess"]
     try:
         corrected_text = apply_transcript_replacements(
@@ -456,6 +502,14 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     except ValueError as exc:
         return False, f"Meeting Compiler PREPROCESS 无法安全应用: {exc}"
     wiki_content = proposal["wiki_markdown"]
+    wiki_content = re.sub(
+        r"(?m)^date:\s*.*$", f"date: {state['date']}", wiki_content, count=1,
+    )
+    wiki_content = re.sub(r"(?m)^date_inferred:\s*.*\n?", "", wiki_content)
+    if state.get("date_inferred"):
+        wiki_content = re.sub(
+            r"(?m)^(date:\s*.*)$", r"\1\ndate_inferred: true", wiki_content, count=1,
+        )
     # sources 回填：年份/type 纠正后 raw_dir 已变，用最终路径覆盖（与 ingest_document 一致）
     correct_source = f"{state['raw_dir']}/{state['source_filename']}"
     wiki_content = re.sub(
@@ -703,6 +757,7 @@ def main() -> None:
         maintenance = ic.run_resume_post_maintenance(state)
         if maintenance is not None:
             state["maintenance"] = maintenance
+            inbox_state.save(state["transaction_id"], state)
     if state["status"] == "completed":
         payload = {
             "status": "completed",

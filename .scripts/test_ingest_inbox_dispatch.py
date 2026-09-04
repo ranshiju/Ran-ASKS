@@ -44,6 +44,11 @@ def test_dsi_tool_routes_file_types():
                                   "document_type": "editorial"})
     assert module.dsi_tool("document", "inbox/a.md", "teaching") == \
         ("ingest_document_file", {"file": "inbox/a.md", "subproject": "teaching"})
+    assert module.dsi_tool(
+        "document", "inbox/部署会速记.docx", "admin", source_kind="meeting") == (
+            "ingest_document_file",
+            {"file": "inbox/部署会速记.docx", "subproject": "admin", "source_kind": "meeting"},
+        )
 
 
 def test_academic_document_classification_gate():
@@ -69,6 +74,7 @@ def test_uncertain_scores_request_api_review_without_changing_program_type():
         assert decision["file_type"] == "document"
         assert decision["score"] == 1
         assert decision["confidence"] == "low"
+        assert decision["source_kind"] == "ordinary"
         assert decision["needs_api_review"]
 
         module.read_pdf_text = lambda *_args, **_kwargs: "Abstract\nReferences\n" + ("正文 " * 100)
@@ -107,6 +113,24 @@ def test_uncertain_scores_request_api_review_without_changing_program_type():
         assert decision["file_type"] == "document"
         assert decision["score"] == 1
         assert decision["needs_api_review"]
+
+
+def test_docx_meeting_transcript_keeps_document_extractor_and_explicit_source_kind():
+    original_preview = module.read_document_preview
+    module.read_document_preview = lambda _path: "方复全校长讲话\n部署新学期工作。"
+    try:
+        decision = module.classify_file_details(Path("inbox/新学期工作部署会 速记.docx"))
+    finally:
+        module.read_document_preview = original_preview
+    assert decision["file_type"] == "document"
+    assert decision["source_kind"] == "meeting"
+    assert decision["confidence"] == "high"
+    assert {"filename_meeting", "filename_transcript"} <= set(decision["markers"])
+    command = module.dispatch_command(
+        "document", "inbox/新学期工作部署会 速记.docx", "admin",
+        source_kind=decision["source_kind"],
+    )
+    assert command[-2:] == ["--source-kind", "meeting"]
 
 
 def test_api_classification_review_resolves_uncertain_program_decision():
@@ -250,9 +274,12 @@ def test_auto_resolve_abbr_key_contract():
             assert summary["status"] == "agent_required"
             assert summary["prop_resolved"] == 0
             assert summary["warning_count"] == 1
+            assert summary["remaining_tokens"] == 1
+            assert summary["remaining_occurrences"] == 1
             review = module.REPO / summary["review_file"]
             payload = json.loads(review.read_text(encoding="utf-8"))
             assert payload["candidates"][0]["token"] == "CONFLICTBANK"
+            assert payload["candidate_token_count"] == 1
             assert review.name == "session-unsafe.json"
     finally:
         module.REPO = old_repo
@@ -410,6 +437,10 @@ def test_low_margin_hub_route_writes_agent_handoff_without_maintenance_scan():
             ]
             assert "route-apply" in payload[0]["apply_command_template"]
             assert "academic/wiki/papers/paper" in payload[0]["apply_command_template"]
+            assert "--transaction-id 'txn'" in payload[0]["apply_command_template"]
+            results[0]["graph_report"]["hub_scope_route"]["reason"] = \
+                "child_specificity_unsupported"
+            assert len(module._hub_route_reviews(results)) == 1
     finally:
         module.REPO = old_repo
         module.subprocess.run = old_run
@@ -536,6 +567,138 @@ def test_abbreviation_decisions_require_exact_pending_tokens_and_atomic_todo():
         assert not todo.with_name(todo.name + ".tmp").exists()
 
 
+def test_abbreviation_decisions_close_only_matching_maintenance_action():
+    spec = importlib.util.spec_from_file_location(
+        "resolve_abbreviations_receipt_test", Path(__file__).parent / "resolve_abbreviations.py"
+    )
+    resolver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(resolver)
+    old_repo = resolver.REPO
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            resolver.REPO = Path(tmp)
+            review = resolver.REPO / "temp/abbreviation-review/session.json"
+            review.parent.mkdir(parents=True)
+            review.write_text(json.dumps({
+                "candidates": [{"token": "QA", "occurrences": [{"page": "page"}]}],
+            }), encoding="utf-8")
+            receipt_path = resolver.REPO / "temp/inbox-maintenance/session.json"
+            receipt_path.parent.mkdir(parents=True)
+            receipt_path.write_text(json.dumps({
+                "status": "agent_required", "errors": [],
+                "actions": [
+                    {"component": "abbreviations", "review_file": "temp/abbreviation-review/session.json"},
+                    {"component": "hubs", "next_action": "agent_review"},
+                ],
+                "components": {
+                    "abbreviations": {
+                        "status": "agent_required",
+                        "review_file": "temp/abbreviation-review/session.json",
+                    },
+                    "hubs": {"status": "agent_required"},
+                },
+            }), encoding="utf-8")
+            path, receipt, tokens = resolver._load_maintenance_scope(
+                "temp/inbox-maintenance/session.json"
+            )
+            summary = resolver._close_maintenance_receipt(
+                path, receipt, tokens,
+                {"applied": [{"token": "QA", "resolution_kind": "alias_to_full_name"}]},
+                [],
+            )
+            updated = json.loads(receipt_path.read_text(encoding="utf-8"))
+            assert summary["remaining_tokens"] == 0
+            assert updated["components"]["abbreviations"]["status"] == "completed"
+            assert updated["status"] == "agent_required"
+            assert updated["actions"] == [{"component": "hubs", "next_action": "agent_review"}]
+    finally:
+        resolver.REPO = old_repo
+
+
+def test_abbreviation_decisions_cli_closes_linked_maintenance_receipt():
+    import contextlib
+    import io
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "resolve_abbreviations_cli_test", Path(__file__).parent / "resolve_abbreviations.py"
+    )
+    resolver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(resolver)
+    old_repo = resolver.REPO
+    old_connect = resolver.gl.connect
+    old_apply_decisions = resolver.apply_decisions
+    old_argv = sys.argv
+
+    class FakeConnection:
+        def close(self):
+            pass
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            resolver.REPO = Path(tmp).resolve()
+            todo = resolver.REPO / "cross-domain/abbreviation-todo.jsonl"
+            resolver._write_todo(todo, [{
+                "schema_version": "abbreviation-todo-v2", "token": "QA",
+                "page": "academic/wiki/papers/x", "subject": "x",
+                "predicate": "包含", "object": "QA", "field": "object",
+            }])
+            review = resolver.REPO / "temp/abbreviation-review/session.json"
+            review.parent.mkdir(parents=True)
+            review.write_text(json.dumps({
+                "candidates": [{"token": "QA", "occurrences": [{"page": "page"}]}],
+            }), encoding="utf-8")
+            receipt = resolver.REPO / "temp/inbox-maintenance/session.json"
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(json.dumps({
+                "status": "agent_required", "errors": [],
+                "actions": [
+                    {"component": "abbreviations", "next_action": "agent_review"},
+                    {"component": "hubs", "next_action": "agent_review"},
+                ],
+                "components": {
+                    "abbreviations": {
+                        "status": "agent_required",
+                        "review_file": "temp/abbreviation-review/session.json",
+                    },
+                    "hubs": {"status": "agent_required"},
+                },
+            }), encoding="utf-8")
+            decisions = resolver.REPO / "decisions.json"
+            decisions.write_text(json.dumps({"decisions": [{
+                "token": "QA", "resolution_kind": "canonical_name",
+            }]}), encoding="utf-8")
+
+            resolver.gl.connect = lambda: FakeConnection()
+            resolver.apply_decisions = lambda _conn, _decisions, _todo: {
+                "status": "completed",
+                "applied": [{"token": "QA", "resolution_kind": "canonical_name"}],
+                "remaining": [],
+            }
+            sys.argv = [
+                "resolve_abbreviations.py", "--apply-decisions", str(decisions),
+                "--todo", str(todo), "--maintenance-receipt",
+                "temp/inbox-maintenance/session.json", "--json",
+            ]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                resolver.main()
+
+            report = json.loads(stdout.getvalue())
+            updated = json.loads(receipt.read_text(encoding="utf-8"))
+            assert report["maintenance"]["remaining_tokens"] == 0
+            assert todo.read_text(encoding="utf-8") == ""
+            assert updated["components"]["abbreviations"]["status"] == "completed"
+            assert updated["actions"] == [
+                {"component": "hubs", "next_action": "agent_review"},
+            ]
+    finally:
+        resolver.REPO = old_repo
+        resolver.gl.connect = old_connect
+        resolver.apply_decisions = old_apply_decisions
+        sys.argv = old_argv
+
+
 def test_paper_batch_keeps_preclassified_fingerprint_results():
     import inspect
     source = inspect.getsource(module.main)
@@ -548,6 +711,7 @@ def main():
     test_dsi_tool_routes_file_types()
     test_academic_document_classification_gate()
     test_uncertain_scores_request_api_review_without_changing_program_type()
+    test_docx_meeting_transcript_keeps_document_extractor_and_explicit_source_kind()
     test_api_classification_review_resolves_uncertain_program_decision()
     test_plan_ingest_order_versions_last()
     test_map_paper_batch_results()
@@ -559,6 +723,8 @@ def main():
     test_zero_success_skips_global_post_ingest_scans()
     test_maintenance_error_does_not_override_completed_file_status()
     test_abbreviation_decisions_require_exact_pending_tokens_and_atomic_todo()
+    test_abbreviation_decisions_close_only_matching_maintenance_action()
+    test_abbreviation_decisions_cli_closes_linked_maintenance_receipt()
     test_paper_batch_keeps_preclassified_fingerprint_results()
     print("ingest_inbox dispatch regression: PASS")
 

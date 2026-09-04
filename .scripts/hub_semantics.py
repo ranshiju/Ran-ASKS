@@ -9,6 +9,7 @@ Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+from datetime import datetime
 from functools import wraps
 import hashlib
 import inspect
@@ -345,6 +346,24 @@ def _unit(vectors):
     return vectors / (np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-9)
 
 
+def _lexical_features(text: str) -> set[str]:
+    normalized = str(text or "").casefold()
+    features = set(re.findall(r"[a-z0-9][a-z0-9_-]{2,}", normalized))
+    for chunk in re.findall(r"[\u3400-\u9fff]+", normalized):
+        features.update(chunk[index:index + 2] for index in range(len(chunk) - 1))
+    return features
+
+
+def _child_specificity_matches(
+    profile: str, child: HubDefinition, parent: HubDefinition,
+) -> list[str]:
+    """Return child-only lexical evidence after subtracting the parent scope."""
+    profile_features = _lexical_features(profile)
+    child_features = _lexical_features(f"{child.title} {child.scope}")
+    parent_features = _lexical_features(f"{parent.title} {parent.scope}")
+    return sorted(profile_features & (child_features - parent_features))
+
+
 def route_profile(
     profile: str,
     definitions: Iterable[HubDefinition],
@@ -391,8 +410,21 @@ def route_profile(
         and first["score"] >= floor
         and observed_margin >= margin
     )
+    specificity_required = False
+    specificity_matches: list[str] = []
+    if resolved and first.get("parent"):
+        definitions_by_path = {hub.path: hub for hub in hubs}
+        parent = definitions_by_path.get(first["parent"])
+        child = definitions_by_path.get(first["path"])
+        if parent is not None and child is not None and parent.canonical:
+            specificity_required = True
+            specificity_matches = _child_specificity_matches(text, child, parent)
+            if not specificity_matches:
+                resolved = False
     if resolved:
         reason = "scope_threshold_and_margin"
+    elif specificity_required and not specificity_matches:
+        reason = "child_specificity_unsupported"
     elif not canonical_ranked:
         reason = "no_canonical_scope"
     elif first["score"] < floor:
@@ -406,6 +438,8 @@ def route_profile(
         "mode": "scope_embedding",
         "top_score": first["score"],
         "margin": observed_margin,
+        "specificity_required": specificity_required,
+        "specificity_matches": specificity_matches,
         "candidates": ranked[:top_k],
     }
 
@@ -418,6 +452,26 @@ def route_paper(conn, page: str, **kwargs) -> dict:
         profile.text, list_hubs(conn, subtype="research-direction"), **kwargs,
     )
     result["profile"] = asdict(profile)
+    for row in conn.execute(
+        "SELECT e.object,o.source FROM edges e JOIN nodes n ON n.path=e.object "
+        "JOIN edge_origins o ON o.edge_id=e.id "
+        "WHERE e.subject=? AND e.predicate='主要研究' AND n.type='hub' "
+        "AND o.source LIKE 'agent-confirmed:%' ORDER BY e.id DESC",
+        (page,),
+    ):
+        result["automatic_route"] = {
+            key: result.get(key) for key in (
+                "decision", "node_id", "reason", "top_score", "margin",
+                "specificity_required", "specificity_matches",
+            )
+        }
+        result.update({
+            "decision": "resolved",
+            "node_id": row["object"],
+            "reason": "agent_confirmed_override",
+            "route_source": "agent_confirmed",
+        })
+        break
     return result
 
 
@@ -473,6 +527,10 @@ def apply_paper_route(
         conn, cursor.lastrowid, profile["locator"], profile.get("text", ""), False,
     )
     gl.add_edge_origin(conn, cursor.lastrowid, page, profile["locator"])
+    gl.add_edge_origin(
+        conn, cursor.lastrowid, page, f"agent-confirmed:{profile['locator']}",
+    )
+    automatic = review.get("automatic_route") or review
     return {
         "applied": True,
         "page": page,
@@ -480,11 +538,49 @@ def apply_paper_route(
         "previous_hubs": previous,
         "evidence": profile["locator"],
         "automatic_gate": {
-            "decision": review.get("decision"),
-            "reason": review.get("reason"),
-            "margin": review.get("margin"),
+            "decision": automatic.get("decision"),
+            "node_id": automatic.get("node_id"),
+            "reason": automatic.get("reason"),
+            "margin": automatic.get("margin"),
         },
     }
+
+
+def record_paper_route_correction(transaction_id: str, result: dict) -> str:
+    """Attach an Agent-confirmed route amendment to its ingest transaction."""
+    import inbox_state
+    state = inbox_state.load(transaction_id)
+    if state is None:
+        raise ValueError(f"摄入事务不存在: {transaction_id}")
+    page = str(result.get("page") or "").removesuffix(".md")
+    state_page = str(state.get("wiki_path") or "").removesuffix(".md")
+    if state_page and state_page != page:
+        raise ValueError(f"事务页面不匹配: {state_page} != {page}")
+    correction = {
+        "kind": "agent_confirmed_hub_route",
+        "page": page,
+        "hub": result.get("hub"),
+        "previous_hubs": result.get("previous_hubs", []),
+        "evidence": result.get("evidence", ""),
+        "automatic_gate": result.get("automatic_gate", {}),
+        "recorded_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    corrections = [
+        item for item in state.get("route_corrections", [])
+        if item.get("kind") != correction["kind"] or item.get("page") != page
+    ]
+    corrections.append(correction)
+    state["route_corrections"] = corrections
+    state.setdefault("graph_report", {})["hub_scope_route_current"] = {
+        "decision": "resolved",
+        "node_id": result.get("hub"),
+        "reason": "agent_confirmed_override",
+        "profile": {"locator": result.get("evidence", "")},
+    }
+    state["quality_status"] = (
+        "degraded" if state.get("quality_warnings") else "complete"
+    )
+    return str(inbox_state.save(transaction_id, state).relative_to(REPO))
 
 
 def read_people_profile(path: str | Path) -> NodeProfile | None:
@@ -1293,6 +1389,21 @@ def refresh_after_ingest(conn, page: str, *, max_nodes: int = 48) -> dict:
     This hook is deliberately bounded and soft-failing at its caller.  It never
     creates/splits/merges a Hub and never scans every ordinary node.
     """
+    if not str(page).startswith("academic/wiki/"):
+        return {
+            "affected_nodes": [],
+            "membership": {
+                "decision": "skipped_non_academic",
+                "write_safe": True,
+                "node_count": 0,
+                "nodes": [],
+            },
+            "membership_apply": {"applied": False, "reason": "skipped_non_academic", "nodes": 0, "edges": 0},
+            "new_hubs": {"decision": "skipped_non_academic", "count": 0, "candidates": []},
+            "splits": [],
+            "overloaded_hubs": [],
+            "lifecycle_auto_applied": False,
+        }
     affected = {page}
     for row in conn.execute(
         "SELECT subject,object FROM edges WHERE subject=? OR object=? LIMIT ?",
@@ -2008,6 +2119,7 @@ def main():
     route_apply.add_argument("--page", required=True)
     route_apply.add_argument("--hub", required=True)
     route_apply.add_argument("--agent-confirmed", action="store_true")
+    route_apply.add_argument("--transaction-id", default="")
     profile = sub.add_parser("profile")
     profile.add_argument("node")
     inspect = sub.add_parser("inspect")
@@ -2061,6 +2173,10 @@ def main():
                 agent_confirmed=args.agent_confirmed,
             )
             conn.commit()
+            if args.transaction_id:
+                result["transaction_state"] = record_paper_route_correction(
+                    args.transaction_id, result,
+                )
             _print(result)
         elif args.command == "profile":
             value = node_profile(conn, args.node) or read_paper_profile(args.node)

@@ -364,12 +364,21 @@ def clean_page_edges(conn, page: str, *, commit=True) -> dict:
     新摄入用 edge_origins 精确追踪；历史边没有 lineage 时，以本页 raw source
     为保守后备。共享语义边只移除本页 evidence/origin，仍有其他来源则保留。
     """
+    protected_route_ids = set()
+    for row in conn.execute(
+        "SELECT DISTINCT e.id FROM edges e JOIN edge_origins o ON o.edge_id=e.id "
+        "WHERE e.subject=? AND e.predicate='主要研究' "
+        "AND o.source LIKE 'agent-confirmed:%'",
+        (page,),
+    ):
+        protected_route_ids.add(row[0])
     direct_ids = {row[0] for row in conn.execute(
         "SELECT id FROM edges WHERE subject=? OR object=?", (page, page)
-    )}
+    )} - protected_route_ids
     origin_rows = list(conn.execute(
         "SELECT edge_id, source FROM edge_origins WHERE origin_page=?", (page,)
     ))
+    origin_rows = [row for row in origin_rows if row[0] not in protected_route_ids]
     origin_ids = {row[0] for row in origin_rows}
     node_origin_rows = list(conn.execute(
         "SELECT node_path FROM node_origins WHERE origin_page=?", (page,)
@@ -404,8 +413,16 @@ def clean_page_edges(conn, page: str, *, commit=True) -> dict:
             "SELECT edge_id FROM edge_evidence WHERE source=? OR source LIKE ?", (raw_source, like)
         ))
 
+    legacy_ids -= protected_route_ids
     target_ids = direct_ids | origin_ids | legacy_ids
-    conn.execute("DELETE FROM edge_origins WHERE origin_page=?", (page,))
+    if protected_route_ids:
+        placeholders = ",".join("?" for _ in protected_route_ids)
+        conn.execute(
+            f"DELETE FROM edge_origins WHERE origin_page=? AND edge_id NOT IN ({placeholders})",
+            (page, *sorted(protected_route_ids)),
+        )
+    else:
+        conn.execute("DELETE FROM edge_origins WHERE origin_page=?", (page,))
     node_origins_removed = conn.execute(
         "DELETE FROM node_origins WHERE origin_page=?", (page,)
     ).rowcount
@@ -520,6 +537,7 @@ def clean_page_edges(conn, page: str, *, commit=True) -> dict:
         "node_glosses_removed": node_glosses_removed,
         "managed_nodes_removed": managed_nodes_removed,
         "derived_memberships_removed": derived_memberships_removed,
+        "agent_confirmed_routes_preserved": len(protected_route_ids),
     }
 
 
@@ -2231,6 +2249,8 @@ def is_person_reference(triple, role):
         return role == "subject"  # 主体是人，客体是论文/机构
     if predicate in {"参会", "汇报", "待办"}:
         return role == "subject"  # 主体是人，客体是会议/议题/任务
+    if predicate in {"负责人", "主讲人"}:
+        return role == "object"  # 文档/课程 → 人
     return False
 
 

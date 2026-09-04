@@ -1191,6 +1191,34 @@ def bibliographic_quality_warnings(bibliography: dict, md_text: str) -> list[dic
     return warnings
 
 
+def _sync_quality_status(state: dict) -> str:
+    status = "degraded" if state.get("quality_warnings") else "complete"
+    state["quality_status"] = status
+    return status
+
+
+def _record_semantic_quality_warnings(state: dict, warnings: list[dict]) -> None:
+    non_blocking = [
+        dict(warning) for warning in warnings
+        if not ic.is_blocking_warning(warning, NON_BLOCKING_ISSUES)
+    ]
+    retained = [
+        warning for warning in state.get("quality_warnings", [])
+        if not str(warning.get("issue") or "").startswith("semantic_")
+    ]
+    state["semantic_warnings"] = non_blocking
+    state["quality_warnings"] = retained + [
+        {
+            "issue": f"semantic_{warning.get('issue', 'warning')}",
+            "detail": str(warning.get("reason") or warning.get("line") or ""),
+            "section": warning.get("section", ""),
+            "line": warning.get("line", ""),
+        }
+        for warning in non_blocking
+    ]
+    _sync_quality_status(state)
+
+
 def repair_archived_bibliography(bibliography: dict, md_text: str) -> tuple[dict, list[dict]]:
     """Repair deterministic defects in a runtime copy; archived Raw stays immutable."""
     repaired = dict(bibliography or {})
@@ -1224,6 +1252,7 @@ def _record_bibliographic_quality_warnings(state: dict, md_text: str) -> None:
     state["quality_warnings"] = retained + bibliographic_quality_warnings(
         state.get("bibliographic_meta") or {}, md_text,
     )
+    _sync_quality_status(state)
 
 
 def _first_page_venue_candidates(evidence_lines) -> list[str]:
@@ -1535,11 +1564,31 @@ def _deterministic_bibliographic_decision(
         return None
     pdf_authors = _unique_nonempty(list(bibliography.get("authors") or []))
     candidate_authors = list(candidates.get("authors") or [])
-    if not pdf_authors or candidate_authors != pdf_authors:
-        return None
     if any(AFFILIATION_HINT_RE.search(author) for author in candidate_authors):
         return None
     fields = catalog["fields"]
+    author_evidence = []
+    for item in fields["authors"]:
+        match = re.fullmatch(r"paper\.md#L(\d+)(?:-L(\d+))?", str(item.get("evidence") or ""))
+        if not match:
+            author_evidence = []
+            break
+        author_evidence.extend([int(match.group(1)), int(match.group(2) or match.group(1))])
+    front_matter_authors = bool(
+        candidate_authors
+        and author_evidence
+        and min(author_evidence) <= 12
+        and max(author_evidence) <= 12
+        and max(author_evidence) - min(author_evidence) <= 4
+    )
+    if pdf_authors:
+        if candidate_authors != pdf_authors:
+            return None
+        author_source = "pdf_metadata"
+    elif front_matter_authors:
+        author_source = "paper_front_matter"
+    else:
+        return None
     year_evidence = str((bibliography.get("evidence") or {}).get("year") or "").casefold()
     year_kind = "published" if "published" in year_evidence else "unknown"
 
@@ -1575,7 +1624,10 @@ def _deterministic_bibliographic_decision(
             },
         },
         "conflicts": [],
-        "review_notes": ["deterministic_fast_path: strong identifier and singleton candidates"],
+        "review_notes": [
+            "deterministic_fast_path: strong identifier, singleton candidates, "
+            f"authors={author_source}"
+        ],
     }
 
 
@@ -1884,6 +1936,12 @@ def _paper_md_review_view(md_text: str) -> tuple[str, str]:
     lines = md_text.splitlines()
     title_lines = []
     for index, line in enumerate(lines[:40], 1):
+        if index > 1 and re.match(
+            r"^\s*#{0,6}\s*(?:abstract|introduction|摘要|引言|keywords?)\b",
+            line,
+            re.IGNORECASE,
+        ):
+            break
         title_lines.append(f"paper.md#L{index}: {line.strip()}")
     evidence_pattern = re.compile(
         r"\bDOI\b|doi\.org|10\.\d{4,}/\s|\bPublished\b|\bReceived\b|\bRevised\b|"
@@ -1996,7 +2054,11 @@ def review_bibliographic_metadata(bibliography: dict | None, md_text: str,
     decision = _deterministic_bibliographic_decision(bibliography, candidates, catalog)
     if decision:
         worker["skipped"] = True
-        worker["skip_reason"] = "deterministic_fast_path"
+        worker["skip_reason"] = (
+            "deterministic_front_matter_fast_path"
+            if not _unique_nonempty(list(bibliography.get("authors") or []))
+            else "deterministic_fast_path"
+        )
     else:
         decision = _load_bibliographic_decision_cache(transaction_id, input_hash)
         if decision:
@@ -3174,7 +3236,8 @@ def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
                     "reason": "主体含逗号/句号等标点，应为规范概念名/实体名",
                     "is_triple": is_triple,
                 })
-            if obj and is_clearly_descriptive(obj):
+            if (obj and pred not in graph_ingest.PROPOSITION_PREDICATES
+                    and is_clearly_descriptive(obj)):
                 slot_warnings.append({
                     "section": source_section or find_slot_section(pred, sem_text, obj),
                     "line": line,
@@ -3568,6 +3631,7 @@ def _record_graph_quality_warnings(state: dict) -> None:
             "detail": f"{ambiguous} boundary mentions remain ambiguous",
         })
     state["quality_warnings"] = retained
+    _sync_quality_status(state)
 
 
 def step_update_graph(state: dict) -> tuple[bool, str]:
@@ -3625,7 +3689,7 @@ def resume_after_agent_generation(state: dict) -> bool:
         # run_prepare 的循环入口仍是 write_wiki；用一次性标记跳过生成并直接进入 slots。
         inbox_state.transition(
             state, "write_wiki", reason="route_slots_resume_through_loop_entry",
-            allowed_from={"write_slots"},
+            allowed_targets={"write_slots"},
         )
         state["_skip_wiki_for_slots_resume"] = True
     state["agent_required"] = False
@@ -3655,6 +3719,7 @@ def step_finalize_tail(state: dict) -> tuple[bool, str]:
             state.setdefault("quality_warnings", []).append({
                 "issue": "fingerprint_register_failed", "detail": str(exc),
             })
+    _sync_quality_status(state)
     return True, message
 
 # ===== 主编排循环 =====
@@ -3676,7 +3741,10 @@ def run_prepare(state: dict) -> dict:
         inbox_state.save(state["transaction_id"], state)
     # 恢复或手工修复后，任何会写入最终目录/图谱的阶段都必须重新通过语义校验。
     if state["status"] in {"finalize", "update_graph", "validate_graph", "finalize_tail", "graph_ready"}:
-        validation_errors = ic.validate_before_commit(state, step_validate_semantics, NON_BLOCKING_ISSUES)
+        validation_errors = ic.validate_before_commit(
+            state, step_validate_semantics, NON_BLOCKING_ISSUES,
+            _record_semantic_quality_warnings,
+        )
         if validation_errors:
             ic.handoff_to_agent(state, "恢复前语义槽校验未通过", step_validate_semantics, _resume_cmd(state), _validate_cmd(state))
             inbox_state.save(state["transaction_id"], state)
@@ -3740,7 +3808,14 @@ def run_prepare(state: dict) -> dict:
     while state["status"] == "write_wiki":
         # --- 第一阶段：写 wiki ---
         if state.get("wiki_retry", 0) == 0 and not state.get("wiki_content"):
-            progress("\n[3.3a] 撰写 wiki（调用LLM，约1-2分钟）...", flush=True)
+            if ingest_mode() == "agent":
+                action = (
+                    "读取 Agent 交接输出"
+                    if state.get("_awaiting_agent_wiki_slots") else "生成 Agent 交接任务"
+                )
+                progress(f"\n[3.3a] 撰写 wiki 与语义槽（{action}）...", flush=True)
+            else:
+                progress("\n[3.3a] 撰写 wiki（调用 API LLM，约1-2分钟）...", flush=True)
             progress(f"  paper-id: {state.get('paper_id', '?')}", flush=True)
         elif state.get("wiki_retry", 0) > 0:
             progress(f"\n[3.3a] 撰写 wiki（修订第{state['wiki_retry']}/{PAPER_RECOVERY_LIMITS['wiki_revision']}次）...", flush=True)
@@ -3756,7 +3831,7 @@ def run_prepare(state: dict) -> dict:
             return state
         if not success:
             state["errors"] = [msg]
-            progress(f"  ↳ wiki LLM调用失败: {msg}", flush=True)
+            progress(f"  ↳ wiki 生成失败: {msg}", flush=True)
             if ("缺少 <<<" in msg and rp.consume(
                     state, "wiki_revision", PAPER_RECOVERY_LIMITS, msg)):
                 state["wiki_content"] = ""
@@ -3794,7 +3869,8 @@ def run_prepare(state: dict) -> dict:
         # wiki 通过 → 第二阶段
         # --- 第二阶段：写语义槽（续接对话，不带 paper.md） ---
         if state.get("slots_retry", 0) == 0:
-            progress("[3.3b] 抽取语义槽（续接对话，调用LLM）...", flush=True, end=" ")
+            action = "读取 Agent 合并输出" if ingest_mode() == "agent" else "调用 API LLM"
+            progress(f"[3.3b] 抽取语义槽（{action}）...", flush=True, end=" ")
         else:
             progress(f"[3.3b] 抽取语义槽（修订第{state['slots_retry']}/{PAPER_RECOVERY_LIMITS['semantic_revision']}次）...", flush=True, end=" ")
         success, msg = step_write_slots(state)
@@ -3843,6 +3919,7 @@ def run_prepare(state: dict) -> dict:
             blocking = []
             coverage_action = "accepted"
             progress(f"异常: {exc}", flush=True)
+        _record_semantic_quality_warnings(state, slot_warnings)
         inbox_state.save(state["transaction_id"], state)
         if coverage_action == "retry":
             progress(
@@ -3942,6 +4019,7 @@ PAPER_COMMIT_SPEC = {
     "finalize_tail_failure": "warn",
     "recovery_limits": PAPER_RECOVERY_LIMITS,
     "non_blocking_issues": NON_BLOCKING_ISSUES,
+    "record_semantic_warnings": _record_semantic_quality_warnings,
     "normalize_slots": normalize_slots,
     "steps": {
         "dedup_check": step_dedup_check,
@@ -3982,7 +4060,7 @@ def _batch_item_payload(state: dict) -> dict:
         "bibliographic_worker": (state.get("bibliographic_review") or {}).get("worker"),
         "relationship_worker": (state.get("relationship_review") or {}).get("worker"),
         "semantic_repair_worker": state.get("semantic_repair_worker"),
-        "quality_status": "degraded" if state.get("quality_warnings") else "complete",
+        "quality_status": state.get("quality_status") or _sync_quality_status(state),
         "quality_warnings": state.get("quality_warnings", []),
     }
     return inbox_state.output_payload(state, payload)
@@ -4093,10 +4171,12 @@ def main() -> None:
         raise SystemExit(run_inbox_batch(args.verbose))
 
     result = run_one(state, args.verbose)
+    _sync_quality_status(result)
     if is_resume:
         maintenance = ic.run_resume_post_maintenance(result)
         if maintenance is not None:
             result["maintenance"] = maintenance
+            inbox_state.save(result["transaction_id"], result)
     print_result(result)
 
 
@@ -4197,7 +4277,7 @@ def print_result(state: dict) -> None:
             "bibliographic_worker": (state.get("bibliographic_review") or {}).get("worker"),
             "relationship_worker": (state.get("relationship_review") or {}).get("worker"),
             "semantic_repair_worker": state.get("semantic_repair_worker"),
-            "quality_status": "degraded" if state.get("quality_warnings") else "complete",
+            "quality_status": state.get("quality_status") or _sync_quality_status(state),
             "quality_warnings": state.get("quality_warnings", []),
             "transaction_id": state["transaction_id"],
         }

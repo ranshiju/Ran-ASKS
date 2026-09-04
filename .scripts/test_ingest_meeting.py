@@ -168,6 +168,9 @@ def test_api_path_uses_one_compiler_for_all_semantic_outputs():
         assert "任胜泉讨论知识库" in (work / "corrected.txt").read_text(encoding="utf-8")
         assert state["slots_content"].startswith("参会者:")
         assert state["semantic_worker"] == "meeting-compiler-api"
+        assert state["meeting_id"] == "0903-测试会议"
+        assert state["meeting_id_source"] == "compiler_meta"
+        assert state["date_inferred"] is False
         resolution = json.loads((work / "entity-resolution.json").read_text(encoding="utf-8"))
         assert resolution["protocol_version"] == PROTOCOL_VERSION
         assert resolution["compiler_entity_resolutions"][0]["canonical"] == "cnu-ren-shengquan"
@@ -178,6 +181,114 @@ def test_api_path_uses_one_compiler_for_all_semantic_outputs():
     finally:
         meeting.MeetingCompilerAgent = original_agent
         meeting.ingest_mode = original_mode
+        shutil.rmtree(work)
+
+
+def test_date_context_preserves_explicit_year_and_marks_mmdd_inference():
+    assert meeting.extract_meeting_date("20250901-lab.txt") == "20250901"
+    assert meeting.generate_meeting_id("20250901-lab.txt", "组会") == "0901-组会"
+    explicit = meeting.meeting_date_context("20250901", today="2026-09-04")
+    assert explicit == {
+        "date": "2025-09-01", "storage_year": "2025",
+        "date_inferred": False, "date_basis": "filename_yyyymmdd",
+    }
+    inferred = meeting.meeting_date_context("0901", today="2026-09-04")
+    assert inferred == {
+        "date": "2026-09-01", "storage_year": "2026",
+        "date_inferred": True, "date_basis": "filename_mmdd_plus_ingest_year",
+    }
+
+
+def test_dedup_uses_full_date_and_subproject_scope():
+    import graph_lib
+
+    work = _workspace()
+    original_repo = meeting.REPO
+    original_connect = graph_lib.connect
+    queries = []
+
+    class FakeCursor:
+        def fetchall(self):
+            return []
+
+    class FakeConnection:
+        def execute(self, sql, params):
+            queries.append((sql, params))
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    try:
+        meeting.REPO = work
+        graph_lib.connect = lambda: FakeConnection()
+        duplicate, message = meeting.step_dedup_check({
+            "source_filename": "20250901-lab.txt", "subproject": "academic",
+        })
+        assert not duplicate and not message
+        assert queries[0][1] == (
+            "2025-09-01", "academic/wiki/conferences/%",
+        )
+    finally:
+        meeting.REPO = original_repo
+        graph_lib.connect = original_connect
+        shutil.rmtree(work)
+
+
+def test_mmdd_compiler_output_marks_inferred_date_and_rebases_id():
+    work = _workspace()
+    original_agent = meeting.MeetingCompilerAgent
+    try:
+        state = _state(work)
+        state["source_filename"] = "0901-test-inferred.txt"
+        state["date_str"] = "0901"
+        proposal = _proposal()
+        proposal["meta"]["title"] = "测试会议推断日期"
+
+        class FakeAgent:
+            def __init__(self, _task):
+                pass
+
+            def run(self):
+                return SimpleNamespace(
+                    status="compiled", reason="proposal_ready", proposal=proposal,
+                    trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "compiled"},
+                )
+
+        meeting.MeetingCompilerAgent = FakeAgent
+        ok, error = meeting.step_write_wiki(state)
+        assert ok, error
+        assert state["meeting_id"] == "0901-测试会议推断日期"
+        assert state["date_inferred"] is True
+        assert "date_inferred: true" in state["wiki_content"]
+    finally:
+        meeting.MeetingCompilerAgent = original_agent
+        shutil.rmtree(work)
+
+
+def test_rejected_compiler_records_attempt_and_protocol_error():
+    work = _workspace()
+    original_agent = meeting.MeetingCompilerAgent
+    try:
+        state = _state(work)
+
+        class RejectingAgent:
+            def __init__(self, _task):
+                pass
+
+            def run(self):
+                return SimpleNamespace(
+                    status="rejected", reason="invalid preprocess JSON", proposal=None,
+                    trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "rejected"},
+                )
+
+        meeting.MeetingCompilerAgent = RejectingAgent
+        ok, error = meeting.step_write_wiki(state)
+        assert not ok and "invalid preprocess JSON" in error
+        assert state["compiler_errors"] == ["invalid preprocess JSON"]
+        assert state["meeting_compiler_attempts"][-1]["status"] == "rejected"
+    finally:
+        meeting.MeetingCompilerAgent = original_agent
         shutil.rmtree(work)
 
 
@@ -330,8 +441,9 @@ def test_wiki_retry_exhaustion_hands_off_full_compiler_protocol():
         current["slots_content"] = "valid slots"
         return True, ""
 
-    def prepare_handoff(current, errors):
+    def prepare_handoff(current, errors, handoff_reason):
         handoffs.append(list(errors))
+        current["handoff_reason"] = handoff_reason
         current["_awaiting_agent_wiki_slots"] = True
         current["agent_prompt"] = "return <<<PREPROCESS>>> + <<<WIKI>>> + <<<SLOTS>>>"
         current["agent_write_to"] = "temp/inbox-extract/meeting-unified-wiki-handoff/agent-meeting-compiler.txt"
@@ -365,11 +477,16 @@ def test_wiki_retry_exhaustion_hands_off_full_compiler_protocol():
     assert result.get("_awaiting_agent_wiki") is None
     assert result["agent_write_to"].endswith("agent-meeting-compiler.txt")
     assert "<<<PREPROCESS>>>" in result["agent_prompt"]
+    assert result["handoff_reason"] == "wiki_revision_budget_exhausted"
 
 
 def main():
     test_preprocess_only_builds_candidates()
     test_api_path_uses_one_compiler_for_all_semantic_outputs()
+    test_date_context_preserves_explicit_year_and_marks_mmdd_inference()
+    test_dedup_uses_full_date_and_subproject_scope()
+    test_mmdd_compiler_output_marks_inferred_date_and_rebases_id()
+    test_rejected_compiler_records_attempt_and_protocol_error()
     test_agent_handoff_roundtrip_consumes_same_protocol()
     test_exhausted_revision_handoff_uses_full_protocol_without_inline_source()
     test_prompt_requires_one_coherent_protocol()

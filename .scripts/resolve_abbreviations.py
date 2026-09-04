@@ -13,6 +13,7 @@
   python3 .scripts/resolve_abbreviations.py --list
 """
 import argparse
+from datetime import datetime
 import json
 import re
 import sys
@@ -99,6 +100,83 @@ def _write_todo(path: Path, entries: list[dict]) -> None:
         encoding="utf-8",
     )
     temp_path.replace(path)
+
+
+def _write_json_atomic(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(path.name + ".tmp")
+    temp_path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+def _load_maintenance_scope(receipt_arg: str) -> tuple[Path, dict, set[str]]:
+    receipt_path = Path(receipt_arg)
+    if not receipt_path.is_absolute():
+        receipt_path = REPO / receipt_path
+    receipt_path = receipt_path.resolve()
+    allowed_root = (REPO / "temp" / "inbox-maintenance").resolve()
+    if receipt_path.parent != allowed_root or receipt_path.suffix != ".json":
+        raise ValueError("maintenance receipt must be a JSON file under temp/inbox-maintenance")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    component = receipt.get("components", {}).get("abbreviations", {})
+    review_file = str(component.get("review_file") or "")
+    if not review_file:
+        raise ValueError("maintenance receipt has no abbreviation review_file")
+    review_path = (REPO / review_file).resolve()
+    review_root = (REPO / "temp" / "abbreviation-review").resolve()
+    if review_path.parent != review_root or review_path.suffix != ".json":
+        raise ValueError("abbreviation review_file is outside temp/abbreviation-review")
+    review = json.loads(review_path.read_text(encoding="utf-8"))
+    tokens = {
+        str(item.get("token") or "").strip()
+        for item in review.get("candidates", []) if str(item.get("token") or "").strip()
+    }
+    if not tokens:
+        raise ValueError("abbreviation review has no candidate tokens")
+    return receipt_path, receipt, tokens
+
+
+def _close_maintenance_receipt(receipt_path: Path, receipt: dict,
+                               review_tokens: set[str], report: dict,
+                               remaining_entries: list[dict]) -> dict:
+    remaining_review = [
+        entry for entry in remaining_entries if entry.get("token") in review_tokens
+    ]
+    remaining_tokens = sorted({entry["token"] for entry in remaining_review})
+    component = receipt.setdefault("components", {}).setdefault("abbreviations", {})
+    component.update({
+        "status": "agent_required" if remaining_tokens else "completed",
+        "remaining": len(remaining_review),
+        "remaining_tokens": len(remaining_tokens),
+        "remaining_occurrences": len(remaining_review),
+        "applied_decisions": report.get("applied", []),
+    })
+    if not remaining_tokens:
+        component.pop("next_action", None)
+    actions = [
+        action for action in receipt.get("actions", [])
+        if not (action.get("component") == "abbreviations" and not remaining_tokens)
+    ]
+    receipt["actions"] = actions
+    errors = receipt.get("errors", [])
+    deferred = any(
+        isinstance(value, dict) and value.get("status") == "deferred"
+        for value in receipt.get("components", {}).values()
+    )
+    receipt["status"] = (
+        "error" if errors else "agent_required" if actions else
+        "deferred" if deferred else "completed"
+    )
+    receipt["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    _write_json_atomic(receipt_path, receipt)
+    return {
+        "status": receipt["status"],
+        "receipt_path": str(receipt_path.relative_to(REPO.resolve())),
+        "remaining_tokens": len(remaining_tokens),
+        "remaining_occurrences": len(remaining_review),
+    }
 
 
 def _raw_definitions(page: str, cache: dict) -> dict:
@@ -388,6 +466,8 @@ def main():
     mode.add_argument("--apply", action="store_true", help="批量消解 raw 有定义的缩写")
     mode.add_argument("--apply-decisions", metavar="FILE", help="应用主 Agent 的类型化决策 JSON")
     ap.add_argument("--todo", default=str(DEFAULT_TODO), help="限定待办 JSONL（收尾阶段使用）")
+    ap.add_argument("--maintenance-receipt",
+                    help="apply-decisions 对应的 temp/inbox-maintenance 回执；成功后闭环更新")
     ap.add_argument("--json", action="store_true", help="只输出结构化 JSON")
     args = ap.parse_args()
     todo_path = Path(args.todo)
@@ -433,12 +513,37 @@ def main():
                 if not isinstance(decisions, list):
                     report = {"status": "validation_error", "errors": ["decisions must be a list"]}
                 else:
-                    report = apply_decisions(conn, decisions, todo_entries)
-                    if report["status"] == "completed":
-                        applied_tokens = {item["token"] for item in report["applied"]}
-                        _write_todo(todo_path, [
-                            entry for entry in todo_entries if entry["token"] not in applied_tokens
-                        ])
+                    maintenance_scope = None
+                    try:
+                        if args.maintenance_receipt:
+                            maintenance_scope = _load_maintenance_scope(args.maintenance_receipt)
+                            decision_tokens = {
+                                str(item.get("token") or "").strip()
+                                for item in decisions if isinstance(item, dict)
+                            }
+                            expected_tokens = maintenance_scope[2]
+                            if decision_tokens != expected_tokens:
+                                missing = sorted(expected_tokens - decision_tokens)
+                                extra = sorted(decision_tokens - expected_tokens)
+                                raise ValueError(
+                                    f"decisions must cover review tokens exactly; missing={missing}, extra={extra}"
+                                )
+                    except (OSError, ValueError, json.JSONDecodeError) as exc:
+                        report = {"status": "validation_error", "errors": [str(exc)]}
+                    else:
+                        report = apply_decisions(conn, decisions, todo_entries)
+                        if report["status"] == "completed":
+                            applied_tokens = {item["token"] for item in report["applied"]}
+                            remaining_entries = [
+                                entry for entry in todo_entries
+                                if entry["token"] not in applied_tokens
+                            ]
+                            _write_todo(todo_path, remaining_entries)
+                            if maintenance_scope is not None:
+                                receipt_path, receipt, review_tokens = maintenance_scope
+                                report["maintenance"] = _close_maintenance_receipt(
+                                    receipt_path, receipt, review_tokens, report, remaining_entries,
+                                )
     except Exception as exc:
         report = {"status": "error", "errors": [f"{type(exc).__name__}: {exc}"]}
     finally:

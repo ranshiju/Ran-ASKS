@@ -9,6 +9,7 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -84,6 +85,7 @@ def test_document_tool_schema_accepts_academic_type():
     properties = tool.input_schema["properties"]
     assert "academic" in properties["subproject"]["description"]
     assert properties["document_type"]["enum"] == ["editorial", "academic-reference"]
+    assert properties["source_kind"]["enum"] == ["ordinary", "meeting"]
 
 
 def test_guard_validates_resume_txn():
@@ -284,6 +286,25 @@ def test_error_output_includes_category():
     output = _ingest_call(["nonexistent_script.py"])
     assert output.startswith("[ERROR category=")
     assert "script=nonexistent_script.py" in output
+
+
+def test_nonzero_control_flow_status_is_not_wrapped_as_error():
+    import dsh.ingest_tools as module
+    original_run = module.subprocess.run
+    try:
+        for payload in (
+            {"status": "agent_required", "transaction_id": "txn-agent"},
+            {"status": "partial", "phase": "prepare", "items": []},
+            {"status": "graph_ready", "transaction_id": "txn-ready"},
+        ):
+            module.subprocess.run = lambda *_args, _payload=payload, **_kwargs: SimpleNamespace(
+                returncode=1, stdout=json.dumps(_payload), stderr="",
+            )
+            output = module._ingest_call(["ingest_paper.py", "--inbox"])
+            assert not output.startswith("[ERROR"), output
+            assert json.loads(output)["status"] == payload["status"]
+    finally:
+        module.subprocess.run = original_run
 
 
 def main():

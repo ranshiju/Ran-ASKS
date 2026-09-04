@@ -7,6 +7,23 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-04
+
+### Highlights
+
+- Added guarded, project-scoped comic image generation through registered
+  remote models, including dry-run validation, explicit remote-call consent,
+  output-path protection, atomic image writes, and audit receipts.
+- Hardened agent-backed ingestion so typed continuation states survive the DSH
+  subprocess boundary, resume reports retain graph and quality state, and
+  non-blocking semantic warnings remain visible without blocking valid commits.
+- Tightened source fidelity for meeting-like office documents, inferred dates,
+  department metadata, and responsibility relations; speaking at a meeting is
+  no longer treated as evidence of departmental ownership or responsibility.
+- Added child-specific evidence gating for paper-to-Hub routing and durable,
+  transaction-linked origins for Agent-confirmed route corrections.
+### Documentation and compatibility
+
 - Published the Chinese introduction as a native Markdown reading view with
   inline figures and made it the default README link. The PDF remains available
   for download and printing.

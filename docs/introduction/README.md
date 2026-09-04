@@ -14,11 +14,11 @@ The paper remains the academic source for the project's ideas, methodology, and
 supporting evidence. The content edition was first published with the
 documentation-only Ran-ASKS `v0.2.2` release. Ran-ASKS `v0.2.3` replaced the PDF
 with the corrected user-produced rendering without changing the experimental
-scope below. The 2026-09-03 revision synchronizes the engineering description
-with the existing `v0.3.0` boundary, including unified document graph
-compilation, the single Meeting Compiler, bounded semantic recovery, and
-separate ingestion model roles. This documentation update does not increment
-`VERSION` or alter a frozen paper artifact.
+scope below. The 2026-09-03 revision synchronized the engineering description
+with the `v0.3.0` boundary. The 2026-09-04 update covers the `v0.4.0` boundary:
+guarded comic image generation, more faithful agent-ingestion recovery, explicit
+meeting-source evidence rules, and child-specific Hub routing. This update does
+not alter a frozen paper artifact.
 
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
@@ -42,9 +42,9 @@ Word 版式，用于下载和打印；仓库不依赖 GitHub 的 PDF 预览器�
 论文仍是阐述项目学术思想、方法论与实验依据的正式来源。该内容版首次随仅更新
 文档的 Ran-ASKS `v0.2.2` 发布。Ran-ASKS `v0.2.3` 将 PDF 替换为用户重新生成的
 正确版本，下面列出的实验内容和版本范围保持不变。2026年9月3日修订版把工程说明
-同步到现有 `v0.3.0` 边界，包括统一文档落图、单一 Meeting Compiler、受限语义
-恢复和分离的摄入模型角色。本次文档更新不改变 `VERSION`，也不改变冻结论文数据
-产物。
+同步到 `v0.3.0` 边界；2026年9月4日更新覆盖 `v0.4.0`：受控漫画生成、更加忠实的
+Agent 摄入恢复、显式会议来源证据规则和子 Hub 特异性路由。本次更新不改变冻结
+论文数据产物。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

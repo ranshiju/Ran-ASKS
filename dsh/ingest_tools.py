@@ -13,6 +13,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / ".scripts"
+
+_CONTROL_FLOW_STATUSES = frozenset({
+    "agent_required", "bibliographic_review_required", "classification_required",
+    "duplicate_found", "graph_ready", "partial", "deferred", "completed",
+})
 sys.path.insert(0, str(SCRIPTS))
 
 from dsh.harness import ToolDefinition
@@ -89,6 +94,16 @@ def _structured_failure(stderr: str, stdout: str) -> dict | None:
     return None
 
 
+def _structured_workflow_status(stderr: str, stdout: str) -> str:
+    """Return the last top-level ingest workflow status, if present."""
+    combined = f"{stderr}\n{stdout}"
+    for payload in reversed(_json_objects(combined)):
+        status = str(payload.get("status") or "").strip().lower()
+        if status:
+            return status
+    return ""
+
+
 def _classify_error(returncode: int, stderr: str, stdout: str) -> str:
     """Prefer structured terminal state; use narrow text patterns as fallback."""
     combined = f"{stderr}\n{stdout}"
@@ -129,6 +144,8 @@ def _ingest_call(args: list[str], timeout: int = 1800) -> str:
     out = p.stdout or ""
     err = p.stderr or ""
     if p.returncode != 0:
+        if _structured_workflow_status(err, out) in _CONTROL_FLOW_STATUSES:
+            return f"{out}\n{err}".strip()
         category = _classify_error(p.returncode, err, out)
         failure = _structured_failure(err, out)
         disposition = (
@@ -210,11 +227,14 @@ def build_ingest_tools() -> list[ToolDefinition]:
                 "file": {"type": "string", "description": "inbox/ 下文档路径"},
                 "subproject": {"type": "string", "description": "academic/admin/teaching/business"},
                 "document_type": {"type": "string", "enum": ["editorial", "academic-reference"],
-                                  "description": "academic 非论文类型"}},
+                                  "description": "academic 非论文类型"},
+                "source_kind": {"type": "string", "enum": ["ordinary", "meeting"],
+                                "description": "inbox 程序判定的来源种类"}},
                 "required": ["file"]},
             execute_fn=lambda args: _ingest_call(["ingest_document.py", "--file", args.get("file", "")]
                 + (["--subproject", args["subproject"]] if args.get("subproject") else [])
-                + (["--document-type", args["document_type"]] if args.get("document_type") else [])),
+                + (["--document-type", args["document_type"]] if args.get("document_type") else [])
+                + (["--source-kind", args["source_kind"]] if args.get("source_kind") else [])),
         ),
         ToolDefinition(
             name="re_ingest_raw",

@@ -85,6 +85,8 @@ python3 .scripts/ingest_meeting.py --resume <txn-id> --verbose
 - **流程**：3.1 dedup → 3.2 `speech_entity_resolver` 只准备确定性人物候选 → 3.3 一个 Meeting Compiler specialist 一次完成转写纠错决策/Wiki/slots → 3.4/3.6 程序分别校验 Wiki 与语义 → [同一 compiler 最多一次定向修订 / 3.6b 局部修复] → 落位 → 3.7 统一 IR/plan/update_graph → 3.8 validate_graph → 3.9 finalize_tail（+清理 inbox 源至回收站）
 - **驱动器**：9 步调度循环、状态机、修复循环、resume 安全网委托 `ingest_pipeline.py`（`run_pipeline(state, MEETING_SPEC, progress)`）；本脚本只声明 spec + provider step 函数。
 - **后端模式**：`api` 与 `agent` 都使用 `meeting-compiler-v1`。API 由 `dsh.meeting_compiler_agent.MeetingCompilerAgent` 接收完整文本并执行一次逻辑编译，模型继续优先使用 `INGEST_GENERATION_*`；provider transport/fallback 仍由 `llm_structured` 受控处理，不形成第二个语义 Worker。agent handoff 只给只读源路径、`prompt + write_to + transaction_id`，宿主只派一个 sub-agent 完整读取一次并写回 `agent-meeting-compiler.txt`，再通过 `ingest_meeting_resume`/`--resume` 恢复原事务。组件只产 typed proposal，不写 Raw/Wiki/Graph；程序对 replacement 做原文精确、非级联应用后再分别校验 Wiki 与 semantic。
+- **协议恢复**：Meeting Compiler 返回 rejected 或缺少协议 section 时归类为 `worker_output_invalid`，同一 Worker 只做一次有界修订；再次失败则保留失败 trace，在原事务写出完整协议的 `prompt/write_to` 并进入 `agent_required`。宿主接管后仍恢复原事务，不创建第二条摄入链。
+- **日期与 ID**：文件名显式 `YYYYMMDD` 时保留该年份并按其分区；只有 `MMDD` 或无日期时才用摄入年推断，并在 state/Wiki frontmatter 写 `date_inferred: true`。Meeting Compiler META 的非空 title 是最终标题依据，提交前据此重算 meeting-id、Raw/Wiki 路径和 `sources`，避免初始 fallback 标题成为 canonical ID。
 - **子图健康性**（委托 `ingest_common.py`）：Wiki 或语义槽硬错误先带精确错误回同一个 Meeting Compiler 做至多一次统一修订并重跑两套校验；仍有可唯一定位的 semantic 硬错误才进入 bounded semantic recovery，否则显式 handoff。`bare_abbreviation`/`descriptive_phrase` 为非阻断 warning；`duplicate_line` 由程序去重；其他阻断 warning 整批最多调用一次带缓存的 `semantic-patch-v1` Worker。落位前 `validate_before_commit` 全量复验。
 - **META 交叉校验**（委托 `ingest_common.py`）：会议纪要与通用文档暂时仍由 LLM 输出 `<<<META>>>`（`doc_date`/`title`/`doc_type`），程序与确定性推导值交叉校验并在不一致时停止或修正对应 meeting/document ID。新论文 prompt 不再生成 META；论文 title/authors/date/venue/type、paper-id 与路径只消费程序证据和 locked bibliography，旧事务 META 仅记 `legacy_meta_audit`。
 - **语义槽**：四个 section——参会者（人→参会→会议）、汇报者（人|议题→人→汇报→议题，修复人-议题断链）、决策（决策内容→本会议→决策→内容，内容作 proposition 节点，与论文核心创新点同构）、待办（任务|负责人→人→待办→任务，任务作 keyword 不建独立节点）+ 三元组（讨论/涉及/规划 + 关联 + 参会 + 指导/师从）。关键词由代码从三元组提取。学术性引导：议题用规范学术概念名（能与论文 keyword 对齐）、决策含学术判断、提取密度宜低。sources 路径由程序注入真实 raw 路径（杜绝 `memory://` 占位），`validate_wiki` 拒绝占位路径。
@@ -118,6 +120,7 @@ python3 .scripts/ingest_document.py --file inbox/<file> --subproject admin
 - **PDF 行定位**：文档 prompt 的证据句柄来自提取文本 `RAW#Lx`，因此 PDF 即使有文本层也会把原件与同 stem Markdown locator companion 一起原子落位；Wiki `sources` 指向 companion，原 PDF 保留在同一 Raw 包。TXT/Markdown 原件仍直接使用行 locator。
 - **回滚与续做**：落位后先在事务提取目录保存 graph SQLite snapshot。graph write/validate 失败时恢复 snapshot、manifest 列出的原件 + companion、`--related-to` 目标页和 receipt `rolled_back` 状态，并记录 `resume_from: finalize`；修正临时草稿后可直接 `--resume <txn>`。
 - **来源日期**：`date` 只取文件名或原文明确日期，不再回退到摄入当天。确实无法确定时程序强制写 `date: null` + `date_status: unknown`，`created/updated` 继续记录摄入日，页面 ID 使用 `undated-<slug>`；`ingest_check` 接受且校验这一显式未知组合。
+- **来源与事实约束**：`source_kind=meeting` 的速记文档由程序写 `source_type: speech-recognition`、`confidence: medium`，普通文档写 `official-doc/high`。`department` 仅在 Raw 逐字出现完整部门名称时保留；`负责人` 关系还须在同一原文行出现“负责人/负责”等职责措辞，讲话、主讲或发言不能代替职责证据。
 - **academic 分类闸门**：`academic` 非论文只接受 `editorial|academic-reference`。统一入口仅对专题导言/特邀编辑/本期专题等强信号自动给出 `editorial`；其余返回 `classification_required`，不建立事务、不预处理、不写 Raw/Wiki/Graph，也不回退到 admin。Raw/Wiki 分别映射：`editorial` → `raw/works/editorials` + `wiki/editorials`；`academic-reference` → `raw/reference-documents` + `wiki/references`。
 - **域配置**（`DOMAIN_CONFIG`）：普通域使用 `type_to_subdir`；academic 使用独立 `raw_type_to_subdir`/`wiki_type_to_subdir`，其余均有 `page_types`/`kw_predicates`/`nav_predicates`/`extra_frontmatter`/`subject_pronoun`/`domain_name`。
   - admin: 代词「本文件」，kw 谓词 涉及/讨论/形成决策/推动/申请事项/适用对象
@@ -132,7 +135,7 @@ python3 .scripts/ingest_document.py --file inbox/<file> --subproject admin
 - **分类规则**：
   - PDF：pymupdf 读前2页，学术特征评分≥3 → `ingest_paper.py`；否则 → `ingest_document.py`。得分 1/2/3 为不确定区间。
   - `.txt`：会议特征评分≥2 → `ingest_meeting.py`；否则 → `ingest_document.py`。得分 1/2 为边界。
-  - `.docx`/`.doc`/`.pptx`/`.md` → `ingest_document.py`
+  - `.docx`/`.doc`/`.pptx`/`.md` → `ingest_document.py`；扩展名只决定提取器。文件名或正文命中强会议速记标记时仍走通用文档事务，但显式透传 `source_kind=meeting`
   - `--subproject academic` 的非论文：专题导言/特邀编辑/本期专题等强信号 → `editorial`；否则 → `classification_required`，不再映射到 admin
 - **最小调用**：
 
@@ -153,7 +156,7 @@ python3 .scripts/ingest_inbox.py --run --subproject admin     # 指定 meeting/d
 - **紧凑输出**（2026-08-25）：`--run` 不回显底层完整 stdout、逐节点 Hub candidates 或完整 `graph_report`；stdout 只返回单个紧凑工作流 JSON（计数、逐文件终态、`report_path`）。完整底层输出、图/Hub 诊断和逐文件详情持久化到该报告，DSH log 继续保留结构化终态。
 - **快速终止与终态隔离**（2026-09-02）：全部文件为 `classification_required`/失败/精确重复时不跑全库缩写、人物、Hub 收尾，直接返回紧凑 JSON；分类跳过仍写 DSH `ingest/skip` 事件。至少一个文件真正 completed 后由 `run_post_ingest_maintenance()` 写 `temp/inbox-maintenance/<session>.json`；紧凑 JSON 保留兼容 `status`、显式 `file_status` 与独立 `maintenance.status`。直接 `--resume` 成功走同一入口，DSH 不得丢弃 actionable maintenance handoff。
 - **全 PDF 批量捷径**（2026-08-24）：`--run` 扫描到多个文件且全部为 paper 时，自动改走 `ingest_paper_inbox` 工具调 `ingest_paper.py --inbox` 两阶段批量入口；quiet prepare 有界并发（上限2），graph commit 与 verbose 模式保持串行。单篇或混合类型仍走逐文件 DSH seam。
-- **自动消解与类型化复核**（2026-09-02）：warning 以 `abbreviation-todo-v2` 记录精确 token、context、field 与 locator，按 occurrence key 去重后原子替换 JSONL。收尾先查图 alias，再以 `resolve_abbreviations.py --apply --todo ... --json` 对待办范围内 raw 定义做结构化消解并复查 alias；未消解候选写 `temp/abbreviation-review/<session>.json`。主 Agent 按 `alias_to_full_name/canonical_name/unit_or_standard/dataset_or_model/ambiguous` 一次批量裁决，`--apply-decisions` 只接受 backlog 内精确 token；错误、超时、非零退出和无效 JSON 均进入 maintenance error，不解析自然语言 stdout。
+- **自动消解与类型化复核**（2026-09-02）：warning 以 `abbreviation-todo-v2` 记录精确 token、context、field 与 locator，按 occurrence key 去重后原子替换 JSONL。收尾先查图 alias，再以 `resolve_abbreviations.py --apply --todo ... --json` 对待办范围内 raw 定义做结构化消解并复查 alias；未消解候选写 `temp/abbreviation-review/<session>.json`，摘要分别报告唯一 token 数与 occurrence 数。主 Agent 按 review 中全部 token 一次批量裁决，`--apply-decisions ... --maintenance-receipt <receipt>` 只接受精确覆盖该 review 的 token；成功后只闭环回执的 abbreviations component/action，保留 Hub 等其他维护动作。错误、超时、非零退出和无效 JSON 均进入 maintenance error，不解析自然语言 stdout。
 - **People page 候选检测**（2026-08-23）：ingest/query 后自动运行 `detect_people_page_candidates()`（`ingest_common.py`），检测达标人物写入 `cross-domain/people-pending.jsonl`。入选标准（满足任一）：≥6 篇论文作者、≥4 篇通讯作者、≥3 次参会、≥2 种关系类别（paper/meeting/advisory，排除所属/任职）。已有 people page 或 `wiki/authors/` 路径的实体跳过；占位符名（括号开头）排除。纯代码零 LLM；达标即由 `build_people_pages.py` 自动建极简 people page（仿 an-chun-ji 模板）并迁移 graph node path（裸名→`wiki/authors/<slug>`），不再积压 pending 队列；slug 冲突（同名不同人）跳过留待人工。
 - **多文档摄入计划**（2026-08-22）：多文件时 `_plan_ingest_order()` 将含版本关键词（盖章/扫描/补充/v2/版本/修订/签字/正式版）的文件排到主文档之后，确保先摄入原文再摄入版本/补充件。重排事件写入 DSH session log（`ingest/plan`），dry-run 时仍输出关联提示。
 - **摄入报告**（2026-09-02）：`--run` 结束后写 `cross-domain/ingest-reports/YYYYMMDD-HHMMSS.json`，记录 timestamp、session_id、DSH log 路径、摄入计划、完整底层 tool output、逐文件状态（含 engine/graph_report/transaction_id/proposition_status/quality_status）、成功/降级/失败/跳过汇总及统一 maintenance envelope。缩写 remaining 属全局 backlog，完整维护诊断另有 `temp/inbox-maintenance/` 回执。均供复盘，不作为事实源。
@@ -311,7 +314,7 @@ python3 .scripts/ingest_paper.py --resume <txn-id>                   # 恢复中
 - **锁定书目回填**：通过书目门后，程序强制覆盖 Wiki frontmatter/H1 的 title 以及 authors/date/venue，避免 Markdown 转义（如标题尾 `\\*`）进入 YAML；E1 的 semantics wrapper 内容不可解析时在同一 checkpoint 内最多重试 3 次，每次调用均留档。
 - **语义 wrapper/section 容错**：Worker prompt 显式给出 `<<<SLOTS>>>` → `三元组:` → 内容 → `<<</SLOTS>>>` 的完整闭合模板并禁止自造 `<<<END>>>`。`<<<SLOTS>>>` 被换行拆开、包装畸形，或正文只含完整裸三元组而缺少 `三元组:` 时，程序确定性去除协议尾标记并补齐 canonical section，不调用 Worker；混合文本、缺 section 或不可解析行保留结构化 diagnostics 并按结构错误处理。恢复内容仍运行 normalize、semantic parser 和 validator，不能因容错绕过谓词或结构校验。
 - **paper-id**：代码生成（`surname-year-slug`），`ensure_unique_paper_id` 冲突自动消歧（-2/-3）。拉丁文本保持既有 ASCII slug；作者或标题含中文等非 ASCII 主体时保留稳定 Unicode 组件，避免退化为 `paper-YYYY-paper`。书目预审通过后，`generate_paper_id` 直接消费 locked 的 title/authors/year，不再从 `paper.md` 机械重解析；`--raw`/re-ingest 复用 locked `source.yaml.bibliographic`，旧 raw 则只读相邻 `paper.pdf`，不回写 raw。
-- **修复策略**：初次生成不计恢复；`wiki_revision`、`semantic_revision`、`deterministic_repair`、`subagent` 各有独立上限。`bare_abbreviation`/`descriptive_phrase` 非阻断且不消费预算；`duplicate_line` 由程序机械去重；剩余阻断 warning 合并成一个 issue catalog，仅调用一次 `semantic-patch-v1`。API 基础设施/输出传输恢复只由 `llm_structured` 消费对应 typed budget；耗尽后 pipeline 与 DSH 不原样重跑。提交前与 resume 复验保持独立。
+- **修复策略**：初次生成不计恢复；`wiki_revision`、`semantic_revision`、`deterministic_repair`、`subagent` 各有独立上限。`bare_abbreviation`/`descriptive_phrase` 非阻断且不消费预算；`duplicate_line` 由程序机械去重；剩余阻断 warning 合并成一个 issue catalog，仅调用一次 `semantic-patch-v1`。API 基础设施/输出传输恢复只由 `llm_structured` 消费对应 typed budget；耗尽后 pipeline 与 DSH 不原样重跑。提交前与 resume 复验保持独立，并把同轮非阻断 warning 持久化到 `semantic_warnings`/`quality_warnings`，不能因允许继续提交而丢失质量审计。
 - **书目候选边界与观测**：Worker 未知 ID、重复 ID、accepted/rejected 交叉、跨字段 ID 均由程序硬拒绝；候选外 affiliation 不可能编译进 `authors.value/rejected`。最终结果的 `bibliographic_worker` 回执只记录 `protocol_version/input_hash/api_called/cache_hit/skipped/skip_reason` 控制决策；真实请求次数和 token 从 canonical ExecutionEvent 聚合。校验失败保留事务内 `bibliographic-review.json` 并返回 `retryable=false`。
 - **质量状态**：书目锁定后程序复查标题是否混入期刊卷期页眉、作者是否明显少于首页重复标题下的完整作者行；命中分别记录 `bibliographic_title_contaminated`、`bibliographic_authors_incomplete`。写图成功后，GraphDelta 的两跳边界未全可达或仍有歧义 mention 分别记录 `graph_navigation_incomplete`、`graph_navigation_ambiguous`。这些问题不回滚已提交摄入，但最终 `quality_status=degraded`，必须在报告中显式保留。
 - **驱动器**：`run_commit`（Phase 2 写图→校验→收尾）委托 `ingest_pipeline.py`（`run_pipeline(state, PAPER_COMMIT_SPEC, progress)`）；`run_prepare`（Phase 1 含 propositions/reingest/from_raw 三分支落位）因 paper 专属逻辑保留在本脚本。`is_blocking_warning`/`validate_before_commit`/`handoff_to_agent`/`stop_for_semantic_errors` 不再有本地版，统一调 `ingest_common.py`（脚本名经 `_resume_cmd`/`_validate_cmd`/`NON_BLOCKING_ISSUES` 参数传入）。
@@ -482,10 +485,10 @@ python3 .scripts/graph_ingest.py ingest --page <wiki-path> --knowledge-ir <seman
 
 ### 2.6 Hub membership 与 Scope 路由：`.scripts/hub_semantics.py`
 
-- **路由契约**：论文只用可 locate 的 `## 研究方向定位` 一句与 active Hub `## Scope` 比较。legacy Hub 可保留在候选总榜供诊断，但只有具备合法 `## Scope` 的 canonical Hub 参与最终决策；canonical top-1 必须同时通过 floor（`ROUTE_FLOOR=0.5`）和 margin（`ROUTE_MARGIN=0.04`）才写 `论文 Wiki → 主要研究 → Hub`。近邻 tie 返回 `scope_margin_too_small` 候选且不落 Hub 边，避免非确定性重提在相近 Scope 间漂移；不存在 canonical Scope 时返回 `no_canonical_scope`。
-- **动态 membership**：keyword 用 `title+description`，proposition 用 canonical statement，People page 只用可 locate `## 人物画像`。程序结合 Scope、同类成员原型和图邻接 affinity，允许一个节点归入多个 Hub，并以进入/保留双阈值防抖。规划时先跨目标 profile 汇总并去重 profile、Scope、prototype 文本，单次进入 embedding cache（底层按 provider batch 上限分块），再在内存中还原各 profile 的评分序列，禁止逐 profile 发起 embedding API 请求。摄入后只刷新本页一跳内节点，写可重建 `聚类于` 边。
+- **路由契约**：论文只用可 locate 的 `## 研究方向定位` 一句与 active Hub `## Scope` 比较。legacy Hub 可保留在候选总榜供诊断，但只有具备合法 `## Scope` 的 canonical Hub 参与最终决策；canonical top-1 必须同时通过 floor（`ROUTE_FLOOR=0.5`）和 margin（`ROUTE_MARGIN=0.04`）。若 top-1 是子 Hub，还须在 profile 中命中扣除父 Scope 后的子方向特异性词项；否则返回 `child_specificity_unsupported` 候选且不落边。近邻 tie 同样返回 `scope_margin_too_small`；不存在 canonical Scope 时返回 `no_canonical_scope`。
+- **动态 membership**：keyword 用 `title+description`，proposition 用 canonical statement，People page 只用可 locate `## 人物画像`。程序结合 Scope、同类成员原型和图邻接 affinity，允许一个节点归入多个 Hub，并以进入/保留双阈值防抖。规划时先跨目标 profile 汇总并去重 profile、Scope、prototype 文本，单次进入 embedding cache（底层按 provider batch 上限分块），再在内存中还原各 profile 的评分序列，禁止逐 profile 发起 embedding API 请求。摄入后只刷新 academic 页一跳内节点，写可重建 `聚类于` 边；admin/teaching/business 页在候选生成和 embedding 前直接跳过。
 - **统一容量**：根 Hub 与子 Hub 均在成员数 >30 时才进入 overload lifecycle。达到 30 本身不触发，必须严格超过上限。
-- **Agent 复核闭环**：route/redistribution handoff 携带受控命令模板。主 Agent 用 `route-apply` 应用当前 active canonical 候选，用 `define-scope` 定义既有子 Hub，再用 `redistribute` 在单次确认下做有界单调迭代，只重算父/直接子 family；三者均要求 `--agent-confirmed`。重分配保留 family 外的重叠 membership，且任一轮 embedding 不可用时整次回滚。
+- **Agent 复核闭环**：route/redistribution handoff 携带受控命令模板。主 Agent 用 `route-apply` 应用当前 active canonical 候选，用 `define-scope` 定义既有子 Hub，再用 `redistribute` 在单次确认下做有界单调迭代，只重算父/直接子 family；三者均要求 `--agent-confirmed`。Agent 路由边额外保存 `agent-confirmed:<locator>` origin，重摄入清理时保留；有原摄入事务时同时传 `--transaction-id`，把修正、当前路由快照和派生质量状态写回事务。重分配保留 family 外的重叠 membership，且任一轮 embedding 不可用时整次回滚。
 - **People 边界**：研究人员画像写对象/问题/方法，行政人员写职责/服务范围，学生写阶段/关注方向；其他角色按实际导航语义写。无 page 的 person entity、无人物画像页面均静默不参与。
 - **身份与职责**：Hub 由稳定 path、简短 title 和必填 Scope 定义。代码生成 membership、new/split/merge candidates、probes 和超限检查；主 Agent 确认 title、Scope、parent 及 create/split/merge。三代 `子方向` 血亲 Hub 对禁止合并（`has_blood_relation`，见 §3.2 血缘迁移说明），防合并-分裂死循环；`姻亲` 边不恢复。API LLM 不得决定聚类或激活 canonical Scope。
 - **Scope 来源与生命周期**：Scope 由主 Agent 基于代表性成员 profile（keyword `title+description`、proposition canonical statement、People 人物画像）、必要的结构信号及父/待合并 Hub Scope 综合生成，不拼接全体成员文本。create/define/split/merge 在 `hub_scope_history` 保存 previous/new Scope、相关 Hub 和成员 profile 快照；legacy Hub 尚无 membership 时，`define-scope --evidence-node` 必须显式传入 `legacy-scope-plan` 的代表论文节点。split 把 plan 成员的直接 membership 从父 Hub 迁至子 Hub；merge 把 retired Hub 的直接 membership 迁至 survivor，并保留 retired 文件、节点和原 Scope。create/define/split/merge/batch-create 均用 SQLite SAVEPOINT + Hub 文件快照补偿，apply 后校验页面、图节点与 Scope 同步；失败同时回滚 DB 与文件。`hub-lifecycle-v1` 回执绑定 operation/参数/目标/前后文件 hash，`identity_attested=false`，且仍要求调用方外层 commit。
@@ -505,7 +508,7 @@ python3 .scripts/hub_semantics.py route academic/wiki/papers/<paper-id>
 python3 .scripts/hub_semantics.py profile <node-id>
 python3 .scripts/hub_semantics.py dynamics-plan [--node <node-id>] [--apply-membership]
 python3 .scripts/hub_semantics.py inspect academic/wiki/hubs/<hub>
-python3 .scripts/hub_semantics.py route-apply --page <paper> --hub <hub> --agent-confirmed
+python3 .scripts/hub_semantics.py route-apply --page <paper> --hub <hub> --agent-confirmed [--transaction-id <txn-id>]
 python3 .scripts/hub_semantics.py define-scope --hub <hub> --scope '<scope>' --evidence-node <representative-node> --agent-confirmed
 python3 .scripts/hub_semantics.py redistribute --parent <hub> --agent-confirmed
 python3 .scripts/test_hub_semantics.py
@@ -802,6 +805,23 @@ python3 dsh/test_visual_tools.py
 python3 .scripts/engineering_graph.py validate
 ```
 
+### 5.6a `.scripts/comic_generation.py` — API 漫画图片生成
+
+- **何时调用**：用户明确要求生成漫画、插画或文章配图时调用；不因普通写作、查询、摄入或视觉检查自动触发。
+- **模型目录**：只接受 `operations/config/llm-models.yaml` 的 `image_generation.candidates`。候选未经 API 探测时不得自动设为默认模型；Agent 必须显式传模型，或由受控 `COMIC_IMAGE_MODEL` 配置提供。
+- **API 与授权**：使用独立的 OpenAI-compatible `/v1/images/generations` 适配器，支持 base64 与临时 URL 返回。真实生成必须传 `--allow-remote`；`models`/`--dry-run` 不联网。API base/key 只从 `.env` 或进程环境读取，不能通过 DSH 参数传入。
+- **输出边界**：`--project <name>` 写入项目 `outputs/`；通用任务可用 `--output-root <path>`，但目标必须是仓库内已存在且目录名为 `outputs` 的目录。图片与 `manifest.json`、`prompts.jsonl`、receipts 均在 `<output-root>/<article-id>/images/`；默认拒绝覆盖。
+- **Agent 接口**：`dsh/comic_tools.py:build_comic_tools()` 提供 `comic_models`、`comic_generate`、`comic_batch`。该写工具接缝不进入 `query_actions` 或只读 `VisualAgentLoop`，由需要绘图的 Agent 显式加载。
+- **内容边界**：生成成功仅说明取得合法图片响应；科学结构、文字、箭头、数字和单位仍需人工审核，可另行调用 `visual_qa.py` 检查布局和可读性。
+- **规范**：完整参数、storyboard schema、隐私和 receipt 语义见 `operations/COMIC_GENERATION.md`。
+- **最小验证**：
+
+```bash
+python3 .scripts/test_comic_generation.py
+python3 dsh/test_comic_tools.py
+python3 .scripts/engineering_graph.py validate
+```
+
 ### 5.7 `.scripts/visual_to_editable_ppt.py` — 图片/PDF 原生对象化
 
 - **何时调用**：用户明确要求把图片、扫描页或 PDF 转成/复刻为可编辑 PPT；普通视觉检查、PDF 摄入、论文阅读和事实查询不得触发。
@@ -958,7 +978,7 @@ python3 .scripts/visual_to_editable_ppt.py <figure.png|document.pdf> \
 - **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。中英文 README 与根 `CHANGELOG.md` 均由公开资产生成；发布时同步写入版本标记、验证双向语言入口，并要求 changelog 当前版本标题与 `VERSION` 一致。每次 GitHub 更新还必须让中英文 README、带日期的中文说明 Markdown 及其版本范围说明同时进入本次 diff，且内容反映受影响的机制、能力、配置或使用方式；PDF 是下载/打印版，在中文说明读者内容变化时同步更新；同一发布边界内的文档同步可保持 `VERSION` 不变。
 - **先读**：`operations/engineering/open-source-release.md` 与 `operations/engineering/open-source-manifest.yaml`。
 - **调用**：`python3 .scripts/open_source_release.py build <目标目录> --clean --force`；随后 `python3 .scripts/open_source_release.py verify <目标目录>`。
-- **边界**：只复制 manifest 批准文件和公开资产；不读取或复制业务知识内容。DSH 作为公开执行层随 `dsh/**` 发布；active `projects/` 与 `.project/` 节点从公开工程图移除。目标非空时必须同时显式给出 `--clean --force`；脚本保留目标的 `.git` 元数据。
+- **边界**：只复制 manifest 批准文件和公开资产；不读取或复制业务知识内容。DSH 作为公开执行层随 `dsh/**` 发布；active `projects/` 与 `.project/` 节点从公开工程图移除，manifest 声明的个人 Codex 技能保持私有。目标非空时必须同时显式给出 `--clean --force`；脚本保留目标的 `.git` 元数据。
 - **验证**：`python3 .scripts/test_open_source_release.py`；发布前再运行 `verify`，并在生成树内运行 `python3 .scripts/engineering_graph.py validate` 与相关工程回归。目标是 Git 工作树时，`verify` 还会拒绝任何被目标 `.gitignore` 隐藏的白名单文件，确保生成树与实际可提交树一致。中文介绍 Markdown 必须使用公开相对路径并能解析图片；PDF 还须包含 Ghostscript 标准化标记并通过逐页渲染对比，保证下载版可移植。
 
 ## 7. 论文数据产物：`.scripts/paper_artifact.py`

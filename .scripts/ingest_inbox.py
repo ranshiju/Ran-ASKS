@@ -5,7 +5,7 @@
   - PDF + 学术特征（Abstract/References/arXiv/DOI）→ ingest_paper.py
   - PDF 非学术 → ingest_document.py
   - .txt + 会议特征（会议/参会/元宝会议助手/时间戳）→ ingest_meeting.py
-  - .txt 非会议 / .docx / .doc / .pptx / .md → ingest_document.py
+  - .txt 非会议 / .docx / .doc / .pptx / .md → ingest_document.py；会议速记保留 meeting source_kind
 
 分类先由 Python 完成（pymupdf 前2页 + 关键词评分）；程序不确定时在 --run
 调用一次受限 API 分类器裁决。高置信度文件和 dry-run 不增加 LLM 调用。
@@ -51,6 +51,14 @@ MEETING_TXT_PATTERNS = (
     ("assistant", r"元宝会议助手|腾讯会议|飞书"),
     ("timestamp", r"\(\d{2}:\d{2}\)"), ("report", r"汇报"),
     ("discussion", r"讨论"),
+)
+
+MEETING_TRANSCRIPT_NAME_RE = re.compile(r"会议|部署会|工作会|座谈会|研讨会|交流会")
+TRANSCRIPT_NAME_RE = re.compile(r"速记|逐字稿|转写")
+MEETING_TRANSCRIPT_BODY_PATTERNS = (
+    ("body_transcript", r"速记|逐字稿|会议转写"),
+    ("body_meeting", r"会议|参会|主持"),
+    ("body_speaker", r"校长讲话|书记讲话|院长讲话|主任讲话|\b发言\b|汇报"),
 )
 
 REPO = Path(__file__).resolve().parent.parent
@@ -110,6 +118,47 @@ def _matched_markers(text: str, patterns: tuple[tuple[str, str], ...]) -> list[s
     return [name for name, pattern in patterns if re.search(pattern, text, re.IGNORECASE)]
 
 
+def read_document_preview(path: Path, max_chars: int = 8000) -> str:
+    """Read enough local document text to classify its source kind without an API call."""
+    suffix = path.suffix.lower()
+    try:
+        if suffix in {".txt", ".md"}:
+            return path.read_text(encoding="utf-8")[:max_chars]
+        if suffix in {".docx", ".doc"}:
+            result = subprocess.run(
+                ["textutil", "-convert", "txt", "-stdout", str(path)],
+                capture_output=True, text=True, timeout=30,
+            )
+            return result.stdout[:max_chars] if result.returncode == 0 else ""
+        if suffix == ".pptx":
+            result = subprocess.run(
+                ["pandoc", "-t", "plain", str(path)],
+                capture_output=True, text=True, timeout=30,
+            )
+            return result.stdout[:max_chars] if result.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        pass
+    return ""
+
+
+def meeting_transcript_markers(path: Path, text: str) -> list[str]:
+    """Return only strong, auditable transcript markers."""
+    name = path.stem
+    markers = _matched_markers(text, MEETING_TRANSCRIPT_BODY_PATTERNS)
+    name_meeting = bool(MEETING_TRANSCRIPT_NAME_RE.search(name))
+    name_transcript = bool(TRANSCRIPT_NAME_RE.search(name))
+    if name_meeting:
+        markers.append("filename_meeting")
+    if name_transcript:
+        markers.append("filename_transcript")
+    strong = (
+        name_meeting and name_transcript
+        or name_transcript and "body_meeting" in markers
+        or {"body_transcript", "body_meeting", "body_speaker"} <= set(markers)
+    )
+    return list(dict.fromkeys(markers)) if strong else []
+
+
 def classify_file_details(path: Path) -> dict:
     """返回程序类型、得分、命中标记及是否需要 API 裁决。"""
     suffix = path.suffix.lower()
@@ -126,6 +175,7 @@ def classify_file_details(path: Path) -> dict:
                 "confidence": "high" if metadata_hit else "unreviewable",
                 "needs_api_review": False,
                 "review_text": "",
+                "source_kind": "ordinary",
             }
         markers = _matched_markers(text, ACADEMIC_PDF_PATTERNS)
         score = len(markers)
@@ -137,6 +187,7 @@ def classify_file_details(path: Path) -> dict:
             "confidence": "low" if score in {1, 2, 3} else "high",
             "needs_api_review": score in {1, 2, 3},
             "review_text": text[:8000],
+            "source_kind": "ordinary",
         }
     if suffix == ".txt":
         try:
@@ -153,11 +204,26 @@ def classify_file_details(path: Path) -> dict:
             "confidence": "low" if score in {1, 2} else "high",
             "needs_api_review": bool(text) and score in {1, 2},
             "review_text": text,
+            "source_kind": "meeting" if score >= 2 else "ordinary",
         }
+    if suffix in {".docx", ".doc", ".pptx", ".md"}:
+        text = read_document_preview(path)
+        transcript_markers = meeting_transcript_markers(path, text)
+        if transcript_markers:
+            return {
+                "file_type": "document",
+                "score": len(transcript_markers),
+                "threshold": 2,
+                "markers": transcript_markers,
+                "confidence": "high",
+                "needs_api_review": False,
+                "review_text": text,
+                "source_kind": "meeting",
+            }
     return {
         "file_type": "document", "score": None, "threshold": None,
         "markers": [f"extension:{suffix or 'none'}"], "confidence": "high",
-        "needs_api_review": False, "review_text": "",
+        "needs_api_review": False, "review_text": "", "source_kind": "ordinary",
     }
 
 
@@ -268,7 +334,8 @@ def classify_academic_document(path: Path) -> str | None:
 
 
 def dispatch_command(file_type: str, rel_path: str, subproject: str,
-                     document_type: str | None = None) -> list[str]:
+                     document_type: str | None = None,
+                     source_kind: str = "ordinary") -> list[str]:
     """返回对应类型的分发命令；academic 文档必须已有显式分类。"""
     if file_type == "paper":
         return [sys.executable, str(REPO / ".scripts/ingest_paper.py"), "--pdf", rel_path]
@@ -281,11 +348,14 @@ def dispatch_command(file_type: str, rel_path: str, subproject: str,
                "--file", rel_path, "--subproject", subproject]
     if document_type:
         command.extend(["--document-type", document_type])
+    if source_kind != "ordinary":
+        command.extend(["--source-kind", source_kind])
     return command
 
 
 def dsi_tool(file_type: str, rel_path: str, subproject: str,
-             document_type: str | None = None) -> tuple[str, dict]:
+             document_type: str | None = None,
+             source_kind: str = "ordinary") -> tuple[str, dict]:
     """返回 DSH ingest tool 名与参数，替代直接 subprocess dispatch。"""
     if file_type == "paper":
         return "ingest_paper_pdf", {"pdf": rel_path}
@@ -296,6 +366,8 @@ def dsi_tool(file_type: str, rel_path: str, subproject: str,
     args = {"file": rel_path, "subproject": subproject}
     if document_type:
         args["document_type"] = document_type
+    if source_kind != "ordinary":
+        args["source_kind"] = source_kind
     return "ingest_document_file", args
 
 
@@ -603,6 +675,10 @@ def _auto_resolve_abbreviations(session_id: str) -> dict:
                     "alias_to_full_name", "canonical_name", "unit_or_standard",
                     "dataset_or_model", "ambiguous",
                 ],
+                "candidate_token_count": len(candidates),
+                "candidate_occurrence_count": sum(
+                    len(item.get("occurrences", [])) for item in candidates
+                ),
                 "candidates": candidates,
             })
             review_file = str(review_path.relative_to(REPO))
@@ -616,6 +692,8 @@ def _auto_resolve_abbreviations(session_id: str) -> dict:
         ),
         "prop_resolved": int(resolver_report.get("resolved_count", 0)),
         "remaining": int(base_after.get("remaining", 0)),
+        "remaining_tokens": len(candidates),
+        "remaining_occurrences": int(base_after.get("remaining", 0)),
         "warning_count": int(resolver_report.get("warning_count", len(candidates))),
     }
     if review_file:
@@ -642,7 +720,9 @@ def _hub_route_reviews(results: list[dict]) -> list[dict]:
     for item in results:
         route = ((item.get("graph_report") or {}).get("hub_scope_route") or {})
         if (route.get("decision") != "candidates"
-                or route.get("reason") != "scope_margin_too_small"):
+                or route.get("reason") not in {
+                    "scope_margin_too_small", "child_specificity_unsupported",
+                }):
             continue
         canonical = [
             {
@@ -666,7 +746,8 @@ def _hub_route_reviews(results: list[dict]) -> list[dict]:
             "apply_command_template": (
                 "python3 .scripts/hub_semantics.py route-apply "
                 f"--page '{item.get('wiki_path', '')}' "
-                "--hub '<agent-selected-canonical-hub>' --agent-confirmed"
+                "--hub '<agent-selected-canonical-hub>' --agent-confirmed "
+                f"--transaction-id '{item.get('transaction_id', '')}'"
             ),
         })
     return reviews
@@ -779,7 +860,8 @@ def compact_maintenance(envelope: dict) -> dict:
     }
     components = {}
     allowed = {
-        "status", "alias_resolved", "prop_resolved", "remaining", "warning_count",
+        "status", "alias_resolved", "prop_resolved", "remaining", "remaining_tokens",
+        "remaining_occurrences", "warning_count",
         "review_file", "candidate_count", "built_count", "eligible_count", "split_count",
         "redistribution_count", "route_review_count", "candidates_file", "split_candidates_file",
         "redistribution_candidates_file", "next_action", "reason", "retryable",
@@ -1116,7 +1198,8 @@ def main():
                 })
                 continue
             tool_name, tool_args = dsi_tool(
-                ftype, rel, args.subproject, document_type=document_type)
+                ftype, rel, args.subproject, document_type=document_type,
+                source_kind=classification_details.get(rel, {}).get("source_kind", "ordinary"))
             content = loop.execute(tool_name, tool_args)
             tool_outputs.append({"file": f.name, "tool": tool_name, "output": content})
             # 优先使用 DSH 解析出的结构化结果；失败/拒绝时回退字符串判定

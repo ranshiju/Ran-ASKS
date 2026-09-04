@@ -10,7 +10,7 @@ The public release is an engineering template, never a copy of the personal know
 
 - **Public**: generic specifications, scripts, tests, schemas, agents, DSH loops and guards, templates, architecture documentation, and explicitly approved frozen paper artifacts.
 - **Template only**: content directories represented by `.gitkeep` files.
-- **Private**: all raw sources, personal or production compiled Wiki pages, graph databases, caches, outputs, inbox items, local memory, active project materials, and personal state. A sanitized paper-specific Wiki/Graph export is public only when it is versioned under `paper-artifacts/`, explicitly allowlisted, independently licensed, and verified.
+- **Private**: all raw sources, personal or production compiled Wiki pages, graph databases, caches, outputs, inbox items, local memory, active project materials, personal state, and personal Codex skills declared private by the manifest. A sanitized paper-specific Wiki/Graph export is public only when it is versioned under `paper-artifacts/`, explicitly allowlisted, independently licensed, and verified.
 - **Review required**: a document that mixes public engineering rules with personal data must be split before publication. Put stable rules in public engineering documents and private context in `*.private.md` or a private project/status file.
 
 ## Release version

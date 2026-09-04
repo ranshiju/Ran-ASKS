@@ -636,6 +636,23 @@ def test_first_author_reuse_upgrades_person_subtype():
         conn.close()
 
 
+def test_responsibility_object_is_created_as_person():
+    with tempfile.TemporaryDirectory() as directory:
+        db_path = Path(directory) / "graph.db"
+        conn = graph_ingest.gl.connect(db_path)
+        graph_ingest.gl.init_schema(conn)
+        page = "admin/wiki/meetings/meeting"
+        graph_ingest.gl.ensure_node(conn, page, "Meeting", "page")
+        graph_ingest.add_knowledge_edges(conn, page, [{
+            "subject": page, "predicate": "负责人", "object": "张明远",
+        }])
+        row = conn.execute(
+            "SELECT entity_subtype FROM nodes WHERE path='张明远'"
+        ).fetchone()
+        assert row is not None and row["entity_subtype"] == "person"
+        conn.close()
+
+
 def test_fallback_single_hit_direction_not_promoted():
     """Fix: 方向仅单点 keyword 命中(< _MIN_KW_FOR_EDGE)时,兜底不得提升为「主要研究」。
 
@@ -905,11 +922,19 @@ def test_inbox_state_records_telemetry_events():
     assert events[1]["failure"]["retryable"] is False
     assert len(events[1]["failure"]["fingerprints"]) == 1
     assert inbox_state.classify_failure({
+        "status": "write_wiki", "errors": [],
+    }) is None
+    assert inbox_state.classify_failure({
         "status": "failed", "errors": ["HTTP Error 429: Too Many Requests"],
     })["category"] == "api_rate_limit"
     assert inbox_state.classify_failure({
         "status": "agent_required", "errors": ["谓词格式不合法"],
     })["owner"] == "specialist_agent"
+    protocol_failure = inbox_state.classify_failure({
+        "status": "failed", "errors": ["Meeting Compiler 失败: invalid preprocess JSON"],
+    })
+    assert protocol_failure["category"] == "worker_output_invalid"
+    assert protocol_failure["next_action"] == "bounded_output_revision"
 
 
 def test_inbox_state_atomic_save_and_guarded_resume():
@@ -1386,6 +1411,79 @@ def test_llm_transport_failure_is_not_retried_by_pipeline():
     assert "llm_calls" not in result.get("telemetry", {})
 
 
+def test_unified_protocol_failure_revises_once_then_hands_off():
+    state = {
+        "transaction_id": "compiler-protocol-recovery", "status": "write_wiki",
+        "extract_dir": "temp/inbox-extract/compiler-protocol-recovery", "errors": [],
+    }
+    calls = []
+    handoffs = []
+
+    def write_wiki(current):
+        calls.append(list(current.get("compiler_errors", [])))
+        return False, "Meeting Compiler 失败: invalid preprocess JSON"
+
+    def prepare_handoff(current, errors, handoff_reason):
+        handoffs.append((list(errors), handoff_reason))
+        current["_awaiting_agent_wiki_slots"] = True
+        current["agent_write_to"] = "temp/inbox-extract/compiler-protocol-recovery/agent.txt"
+        current["agent_prompt"] = "repair protocol"
+        current["agent_required"] = True
+        return True, ""
+
+    spec = {
+        "script_name": "test_driver.py", "unified_semantic_worker": True,
+        "steps": {"write_wiki": write_wiki, "prepare_unified_handoff": prepare_handoff},
+        "recovery_limits": {"wiki_revision": 1},
+    }
+    original_save = ingest_pipeline._save
+    try:
+        ingest_pipeline._save = lambda _state: None
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+    assert calls == [[], ["Meeting Compiler 失败: invalid preprocess JSON"]]
+    assert handoffs == [(
+        ["Meeting Compiler 失败: invalid preprocess JSON"],
+        "worker_protocol_revision_exhausted",
+    )]
+    assert result["status"] == "agent_required"
+    assert result["pre_handoff_status"] == "write_wiki"
+    assert result["recovery"]["attempts"]["wiki_revision"] == 1
+
+
+def test_legacy_protocol_failure_resume_migrates_to_handoff():
+    state = {
+        "transaction_id": "legacy-compiler-protocol", "status": "failed",
+        "extract_dir": "temp/inbox-extract/legacy-compiler-protocol",
+        "errors": ["Meeting Compiler 失败: invalid preprocess JSON"],
+    }
+
+    def prepare_handoff(current, errors, handoff_reason):
+        current["handoff_reason"] = handoff_reason
+        current["_awaiting_agent_wiki_slots"] = True
+        current["agent_write_to"] = "temp/inbox-extract/legacy-compiler-protocol/agent.txt"
+        current["agent_prompt"] = "repair protocol"
+        current["agent_required"] = True
+        return bool(errors), ""
+
+    spec = {
+        "script_name": "test_driver.py", "unified_semantic_worker": True,
+        "steps": {"prepare_unified_handoff": prepare_handoff},
+        "recovery_limits": {"wiki_revision": 1},
+    }
+    original_save = ingest_pipeline._save
+    try:
+        ingest_pipeline._save = lambda _state: None
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+    assert result["status"] == "agent_required"
+    assert result["pre_handoff_status"] == "write_wiki"
+    assert result["_pending_transition"]["reason"] == "migrate_legacy_protocol_failure"
+    assert result["handoff_reason"] == "legacy_worker_protocol_failure"
+
+
 def test_resume_post_maintenance_uses_unified_inbox_tail():
     import sys
     from types import ModuleType
@@ -1393,6 +1491,10 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
 
     calls = []
     fake = ModuleType("ingest_inbox")
+    fake._write_json_atomic = lambda path, value: (
+        path.parent.mkdir(parents=True, exist_ok=True),
+        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8"),
+    )
     fake.run_post_ingest_maintenance = lambda results, session_id: calls.append(
         (results, session_id)
     ) or {"status": "agent_required", "receipt_path": "temp/receipt.json"}
@@ -1411,6 +1513,10 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
             state = {
                 "status": "completed", "transaction_id": "txn-1",
                 "source_filename": "paper.pdf", "repo": str(repo),
+                "paper_id": "paper-1", "wiki_path": "academic/wiki/papers/paper-1",
+                "graph_report": {"hub_dynamics": {"affected_nodes": ["node-a"]}},
+                "quality_status": "degraded",
+                "quality_warnings": [{"issue": "demo"}],
             }
             deferred = ic.run_resume_post_maintenance(state)
             assert deferred["status"] == "deferred"
@@ -1421,10 +1527,21 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
             pending.unlink()
             maintenance = ic.run_resume_post_maintenance(state)
             assert maintenance == {
-                "status": "agent_required", "receipt_path": "temp/receipt.json"
+                "status": "agent_required", "receipt_path": "temp/receipt.json",
+                "report_path": "cross-domain/ingest-reports/resume-txn-1.json",
             }
-            assert calls == [([{"file": "paper.pdf", "ok": True, "status": "completed"}],
-                              "resume-txn-1")]
+            expected_item = {
+                "file": "paper.pdf", "ok": True, "status": "completed",
+                "transaction_id": "txn-1", "paper_id": "paper-1",
+                "wiki_path": "academic/wiki/papers/paper-1",
+                "graph_report": {"hub_dynamics": {"affected_nodes": ["node-a"]}},
+                "quality_status": "degraded",
+                "quality_warnings": [{"issue": "demo"}],
+            }
+            assert calls == [([expected_item], "resume-txn-1")]
+            persisted = json.loads((repo / maintenance["report_path"]).read_text(encoding="utf-8"))
+            assert persisted["files"][0]["graph_report"]["hub_dynamics"]["affected_nodes"] == ["node-a"]
+            assert persisted["degraded"] == 1
             assert ic.run_resume_post_maintenance({"status": "failed"}) is None
             fake.run_post_ingest_maintenance = lambda *_args: (_ for _ in ()).throw(
                 RuntimeError("maintenance unavailable")
@@ -1466,6 +1583,7 @@ def main():
     test_metadata_venue_abbreviation_does_not_warn()
     test_deterministic_venue_metadata_sets_subtype_on_create_and_reuse()
     test_first_author_reuse_upgrades_person_subtype()
+    test_responsibility_object_is_created_as_person()
     test_fallback_single_hit_direction_not_promoted()
     test_free_edge_bare_abbreviation_report_accurate()
     test_cleanup_ghost_hubs_removes_orphan()
@@ -1489,6 +1607,8 @@ def main():
     test_graph_validation_failure_exposes_clean_graph_retry_point()
     test_wiki_validation_retry_budget_hands_off_without_third_full_rewrite()
     test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff()
+    test_unified_protocol_failure_revises_once_then_hands_off()
+    test_legacy_protocol_failure_resume_migrates_to_handoff()
     test_resume_post_maintenance_uses_unified_inbox_tail()
     print("ingest pipeline regression: PASS")
 

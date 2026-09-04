@@ -983,13 +983,19 @@ def handoff_to_agent(state: dict, context_msg: str, validate_fn,
     state["agent_prompt"] = f"{context_msg}（当前共 {len(lines)} 项待修）。\n" + "\n".join(lines) + tail
 
 
-def validate_before_commit(state: dict, validate_fn, non_blocking_issues: tuple[str, ...] = ()
-                          ) -> list[str]:
+def validate_before_commit(
+    state: dict,
+    validate_fn,
+    non_blocking_issues: tuple[str, ...] = (),
+    warning_recorder=None,
+) -> list[str]:
     """落位前全量复验：resume 安全网，防止跳过校验直接写图。"""
     try:
         sem_hard, slot_warnings = validate_fn(state)
     except Exception as exc:
         return [f"恢复前语义槽校验失败: {exc}"]
+    if warning_recorder is not None:
+        warning_recorder(state, slot_warnings)
     errors = list(sem_hard)
     blocking = [w for w in slot_warnings if is_blocking_warning(w, non_blocking_issues)]
     if blocking:
@@ -1540,15 +1546,46 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
             "components": {},
         }
     try:
-        from ingest_inbox import compact_maintenance, run_post_ingest_maintenance
+        from ingest_inbox import (
+            _write_json_atomic, compact_maintenance, run_post_ingest_maintenance,
+        )
         transaction_id = str(state.get("transaction_id", "resume"))
         result = [{
             "file": state.get("source_filename") or state.get("source") or transaction_id,
             "ok": True,
             "status": "completed",
+            "transaction_id": transaction_id,
+            "paper_id": state.get("paper_id"),
+            "wiki_path": state.get("wiki_path"),
+            "graph_report": state.get("graph_report"),
+            "quality_status": state.get("quality_status"),
+            "quality_warnings": state.get("quality_warnings", []),
         }]
-        envelope = run_post_ingest_maintenance(result, f"resume-{transaction_id}")
-        return compact_maintenance(envelope)
+        session_id = f"resume-{transaction_id}"
+        envelope = run_post_ingest_maintenance(result, session_id)
+        report_path = repo / "cross-domain" / "ingest-reports" / f"{session_id}.json"
+        report = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "session_id": session_id,
+            "dsh_log": "",
+            "total": 1,
+            "completed": 1,
+            "degraded": int(result[0].get("quality_status") == "degraded"),
+            "failed": 0,
+            "skipped": 0,
+            "files": result,
+            "classification_decisions": [],
+            "classification_reviews": [],
+            "fingerprint_matches": [],
+            "fingerprint_index_error": "",
+            "plan_notes": ["direct resume completed through unified maintenance tail"],
+            "tool_outputs": [],
+            "maintenance": envelope,
+        }
+        _write_json_atomic(report_path, report)
+        compact = compact_maintenance(envelope)
+        compact["report_path"] = str(report_path.relative_to(repo))
+        return compact
     except Exception as exc:
         return {
             "status": "error", "receipt_path": "", "actions": [],
