@@ -4,6 +4,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
+
+import open_source_release as release
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -17,7 +20,126 @@ def run(*args: str, expected: int = 0) -> subprocess.CompletedProcess:
     return result
 
 
+def check_version_preparation() -> None:
+    assert release.next_version("0.4.9", "patch") == "0.4.10"
+    assert release.next_version("0.4.9", "minor") == "0.5.0"
+    assert release.next_version("0.4.9", "major") == "1.0.0"
+    for version, level in [("01.2.3", "patch"), ("1.2", "minor"), ("1.2.3", "auto")]:
+        try:
+            release.next_version(version, level)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError((version, level))
+    with tempfile.TemporaryDirectory() as temporary:
+        repository = Path(temporary)
+        version_path = repository / "VERSION"
+        changelog = repository / "public-CHANGELOG.md"
+        mirror = repository / "CHANGELOG.md"
+        original = "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- Image OCR.\n\n## [0.4.0] - 2026-09-04\n\n- Earlier work.\n"
+        version_path.write_text("0.4.0\n", encoding="utf-8")
+        changelog.write_text(original, encoding="utf-8")
+        mirror.write_text("old mirror\n", encoding="utf-8")
+        manifest = {"public_assets": {"CHANGELOG.md": changelog.name}}
+        with patch.object(release, "REPO", repository), patch.object(release, "VERSION_PATH", version_path), patch.object(release, "load_manifest", return_value=manifest):
+            arguments = {"level": "minor", "reason": "Compatible image ingestion capability", "from_version": "0.4.0", "release_date": "2026-09-08"}
+            snapshot = {item: item.read_bytes() for item in (version_path, changelog, mirror)}
+            planned = release.prepare_version(**arguments)
+            assert planned["status"] == "planned" and planned["to"] == "0.5.0"
+            assert all(item.read_bytes() == content for item, content in snapshot.items())
+            for changes in [{"reason": " "}, {"reason": "two\nlines"}, {"release_date": "invalid"}]:
+                try:
+                    release.prepare_version(**(arguments | changes), apply=True)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(changes)
+                assert all(item.read_bytes() == content for item, content in snapshot.items())
+            for invalid in ["# Changelog\n", "## [Unreleased]\n\n### Added\n", original + "\n## [0.5.0]\n"]:
+                changelog.write_text(invalid, encoding="utf-8")
+                try:
+                    release.prepare_version(**arguments, apply=True)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(invalid)
+                assert version_path.read_bytes() == snapshot[version_path]
+                assert mirror.read_bytes() == snapshot[mirror]
+            changelog.write_text(original, encoding="utf-8")
+            original_write = Path.write_text
+
+            def fail_mirror(target, *args, **kwargs):
+                if target == mirror:
+                    raise OSError("injected write failure")
+                return original_write(target, *args, **kwargs)
+
+            with patch.object(Path, "write_text", fail_mirror):
+                try:
+                    release.prepare_version(**arguments, apply=True)
+                except OSError:
+                    pass
+                else:
+                    raise AssertionError("expected rollback")
+            assert all(item.read_bytes() == content for item, content in snapshot.items())
+            applied = release.prepare_version(**arguments, apply=True)
+            assert applied["status"] == "applied"
+            assert version_path.read_text() == "0.5.0\n"
+            assert mirror.read_bytes() == changelog.read_bytes()
+            updated = changelog.read_text()
+            assert "## [Unreleased]\n\n## [0.5.0] - 2026-09-08" in updated
+            assert "- MINOR: Compatible image ingestion capability" in updated
+            assert "- Image OCR." in updated and "- Earlier work." in updated
+            try:
+                release.prepare_version(**arguments, apply=True)
+            except ValueError as error:
+                assert "do not bump twice" in str(error)
+            else:
+                raise AssertionError("duplicate bump accepted")
+
+
+def check_version_progression() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        repository = Path(temporary)
+
+        def git(*arguments):
+            return subprocess.run(["git", *arguments], cwd=repository, check=True, capture_output=True, text=True)
+
+        assert release.git_publication_diff(repository) == (set(), None)
+        git("init", "-q")
+        git("config", "user.name", "release-test")
+        git("config", "user.email", "release-test@example.invalid")
+        assert release.git_publication_diff(repository) == (set(), None)
+        version_path = repository / "VERSION"
+        version_path.write_text("0.4.0\n")
+        git("add", "-A")
+        git("commit", "-qm", "baseline")
+        assert release.git_publication_diff(repository) == (set(), None)
+        (repository / "README.md").write_text("New capability\n")
+        changes, base = release.git_publication_diff(repository)
+        assert changes == {"README.md"} and base == "HEAD"
+        for candidate in ["0.4.0", "0.3.9"]:
+            assert release.version_progression_errors(repository, candidate, changes, base)
+        assert not release.version_progression_errors(repository, "0.5.0", changes, base)
+        version_path.write_text("0.5.0\n")
+        git("add", "-A")
+        changes, base = release.git_publication_diff(repository)
+        assert changes == {"VERSION", "README.md"} and base == "HEAD"
+        git("commit", "-qm", "new capability")
+        changes, base = release.git_publication_diff(repository)
+        assert changes == {"VERSION", "README.md"} and base == "HEAD^"
+        assert not release.version_progression_errors(repository, "0.5.0", changes, base)
+        for candidate in ["0.4.0", "0.3.9"]:
+            assert release.version_progression_errors(repository, candidate, changes, base)
+        (repository / "README.md").write_text("Same-version edit\n")
+        git("add", "-A")
+        git("commit", "-qm", "unversioned update")
+        changes, base = release.git_publication_diff(repository)
+        assert release.version_progression_errors(repository, "0.5.0", changes, base)
+
+
 def main() -> None:
+    check_version_preparation()
+    check_version_progression()
     expected_version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
     with tempfile.TemporaryDirectory() as temporary:
         destination = Path(temporary) / "release"
@@ -168,8 +290,10 @@ def main() -> None:
             cwd=destination,
             check=True,
         )
+        (destination / "VERSION").write_text("0.0.0\n", encoding="utf-8")
         subprocess.run(["git", "add", "-A"], cwd=destination, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=destination, check=True)
+        (destination / "VERSION").write_text(expected_version + "\n", encoding="utf-8")
 
         changed_path = destination / "AGENTS.md"
         original_changed = changed_path.read_bytes()
@@ -207,6 +331,14 @@ def main() -> None:
         )
         stale_changelog = run("verify", str(destination), expected=1)
         assert "CHANGELOG.md missing current release heading" in stale_changelog.stderr
+        changelog_path.write_text(original_changelog, encoding="utf-8")
+
+        changelog_path.write_text(
+            original_changelog.replace("## [Unreleased]", "## [Unreleased]\n\n## [9.9.9]", 1),
+            encoding="utf-8",
+        )
+        misordered = run("verify", str(destination), expected=1)
+        assert "newest release heading must match VERSION" in misordered.stderr
         changelog_path.write_text(original_changelog, encoding="utf-8")
 
         (destination / "academic/raw/leak.txt").write_text("private", encoding="utf-8")

@@ -7,6 +7,12 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-08
+
+### Version decision
+
+- MINOR: Add compatible reusable image OCR, reviewed image ingestion and managed source archiving; preserve existing ingestion contracts and frozen paper artifacts.
+
 ### Highlights
 
 - Added reusable, consent-gated image OCR with source-bound receipts, paired
@@ -20,7 +26,15 @@ manifests and checksums.
 - Synchronized source identity, source-addressed reading, shared ingestion
   recovery, and engineering guidance with the current Agent/API boundaries.
 - Updated both READMEs and the Chinese introduction with a dated PDF addendum;
-  the existing release version and frozen paper artifacts remain unchanged.
+  frozen paper artifacts retain their existing reproducibility boundaries.
+- Added semantic version preparation with a recorded compatibility rationale,
+  synchronized root and public changelogs, and a publication gate that rejects
+  unchanged or decreasing versions, independently of tag/Release creation.
+- Consolidated Hub routing and scope maintenance, unified 30-member capacity
+  triggers, batched membership embeddings, and child-scope readiness checks.
+- Preserved entity-origin lineage during re-ingestion, hardened proposition
+  identity and sparse semantic recovery, and removed private-cache dependencies
+  from public regression tests.
 
 ## [0.4.0] - 2026-09-04
 

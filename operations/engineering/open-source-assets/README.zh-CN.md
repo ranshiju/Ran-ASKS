@@ -85,7 +85,11 @@ Agent 模式由当前宿主控制流程，API 模式由程序控制，两者共�
 操作入口及状态含义见[图片 OCR 与复核契约](operations/IMAGE_OCR.md)和
 [收件箱流程](operations/INBOX.md)。
 
-本次是 `main` 开发更新，不创建新标签或改变冻结论文产物。公开仓库只包含通用实现
+2026年9月8日更新将 `main` 的能力边界提升至 `v0.5.0`，不创建新标签或 Release，
+也不改变冻结论文产物。以后每批实际公开更新由 Agent 按功能与兼容性自动判断
+PATCH／MINOR／MAJOR，不按文件数或行数排号；脚本记录依据、同步 Changelog，
+发布校验拒绝同版本或倒退更新。同批次重建不重复升版，详见
+[发布规范](operations/engineering/open-source-release.md)。公开仓库只包含通用实现
 和空内容模板，不包含个人图片、Wiki 页面、数据库或密钥。
 
 ## 论文与代码版本

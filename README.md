@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.4.0
+> Current release: v0.5.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -104,8 +104,14 @@ failed cleanup can be retried without replaying ingestion. See the
 [image OCR and review contract](operations/IMAGE_OCR.md) and
 [inbox workflow](operations/INBOX.md) for commands and state meanings.
 
-This is a development update on `main`, not a new tag or a change to frozen
-paper artifacts. The public repository contains the reusable implementation
+The September 8, 2026 update establishes the `v0.5.0` capability boundary on
+`main`, without creating a tag/Release or changing frozen paper artifacts.
+Future public updates receive an Agent-assessed PATCH, MINOR, or MAJOR increment
+based on behavior and compatibility, not diff size. Version preparation records
+the rationale and synchronizes the changelog; publication validation rejects
+unchanged or decreasing versions. Rebuilding the same batch does not bump again.
+See the [release policy](operations/engineering/open-source-release.md).
+The public repository contains the reusable implementation
 and empty content templates, not personal images, Wiki pages, databases, or keys.
 
 ## Paper and code versions

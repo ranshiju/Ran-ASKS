@@ -20,10 +20,14 @@ guarded comic image generation, more faithful agent-ingestion recovery, explicit
 meeting-source evidence rules, and child-specific Hub routing. This update does
 not alter a frozen paper artifact.
 
-The 2026-09-08 development update adds reviewed image-document ingestion and
+The 2026-09-08 `v0.5.0` update adds reviewed image-document ingestion and
 clarifies provenance, risk gates, independent Agent/human review, and cleanup
-ordering. It keeps the existing release number and creates no new tag or paper
-artifact boundary. The Markdown includes a dated engineering addendum; the PDF
+ordering. This compatible new capability warrants a MINOR increment; it creates
+no new tag/Release or paper artifact boundary. Future actual public updates are
+automatically classified by the host Agent and numbered deterministically, with
+the rationale recorded in the changelog and version progression checked before
+publication. Rebuilding the same batch does not bump again. The Markdown includes
+a dated engineering addendum; the PDF
 retains the earlier reviewed layout and appends the same addendum for printing.
 
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
@@ -52,8 +56,10 @@ Word 版式，用于下载和打印；仓库不依赖 GitHub 的 PDF 预览器�
 Agent 摄入恢复、显式会议来源证据规则和子 Hub 特异性路由。本次更新不改变冻结
 论文数据产物。
 
-2026年9月8日的开发更新补充图片文档摄入、来源溯源、风险闸门、Agent／人工复核
-区别与完成后的清理顺序。现有发布版本号保持不变，不创建新标签或论文产物边界。
+2026年9月8日的 `v0.5.0` 更新补充图片文档摄入、来源溯源、风险闸门、Agent／人工复核
+区别与完成后的清理顺序。兼容新增能力对应 MINOR 升版，不创建新标签、Release 或论文产物边界。
+以后实际公开更新由 Agent 自动判断语义级别、脚本确定性排号并记录依据，发布前校验
+版本递增；同批次重建不重复升版。
 Markdown 增加带日期的工程补充；PDF 保留之前已审阅的版式，并在末尾附上同一补充，
 用于下载和打印。
 

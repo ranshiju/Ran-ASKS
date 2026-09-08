@@ -2347,7 +2347,8 @@ script_contracts:
     - python3 .scripts/graph_validate.py
   open_source_release:
     preconditions:
-    - 根目录 VERSION 是当前 MAJOR.MINOR.PATCH 发布边界；仅发布新 tag/Release 时递增，同一版本内的文档同步提交保持版本号不变；白名单 manifest 已覆盖本期公开文件
+    - 每次有实际公开变更的 GitHub 同步先由当前 Agent 评估 PATCH/MINOR/MAJOR 并说明功能与兼容性依据，不按文件数/行数推断；脚本 prepare-version 按显式级别与预期旧版本计算新版本，同次构建重试不重复排号
+    - 根目录 VERSION 是当前 MAJOR.MINOR.PATCH 发布边界；verify 对比公开仓库的待提交或最新提交基线，拒绝同版本或版本倒退的公开更新；Git tag/Release 的创建与版本排号分别授权
     - 根目录 CHANGELOG.md 由公开资产生成，且最新版本标题与 VERSION 一致
     - 每次 GitHub 公开树更新均须内容级审阅并同步英文 README、中文 README、带日期的中文说明 Markdown 及其版本范围说明；相关机制、能力、配置或使用方式不得只写 changelog
     - 中文说明 Markdown 是 GitHub 默认在线阅读入口，图片使用公开相对路径；PDF 保留用于下载和打印，在读者内容变化时从同一已审阅来源同步更新
@@ -2357,7 +2358,8 @@ script_contracts:
     - 个人 Codex 技能入口按 manifest 显式排除；active projects 工作区继续由公开 allowlist 的既有边界隔离
     - 已发布的冻结 paper-artifacts 版本全部保留，并分别通过其声明的版本化验证器
     writes:
-    - 指定目标公开树（绝不能写入 REPO 自身）
+    - build 写入指定目标公开树（目标绝不能是 REPO 自身）
+    - prepare-version --apply 仅同步源 VERSION、公开资产 CHANGELOG 和根目录 CHANGELOG 镜像，将 Unreleased 条目归入新版本并记录判断依据；缺省只输出计划，不调用 LLM 或 Git 网络
     - 目标树中的 operations/engineering/graph.yaml 确定性投影，仅保留公开路径闭包
     forbidden:
     - 手工向生成公开树补入业务文件

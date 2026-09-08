@@ -18,18 +18,21 @@ The public release is an engineering template, never a copy of the personal know
 - The canonical public release version is the root `VERSION` file, formatted as `MAJOR.MINOR.PATCH`; documentation must not duplicate a current-version constant.
 - `open_source_release.py build` reads `VERSION`, writes it to the destination tree, and stamps `> Current release: v<version>` into the public `README.md`.
 - `open_source_release.py verify` rejects a version mismatch between source `VERSION`, destination `VERSION`, and the README release badge.
-- The root `CHANGELOG.md` records public project updates; its newest release heading must match `VERSION` before publication.
+- Edit release notes only in `operations/engineering/open-source-assets/CHANGELOG.md`. `prepare-version --apply` synchronizes this asset and the source root `CHANGELOG.md` mirror; `build` copies the asset to the public root. The newest release heading must match `VERSION` before publication.
 - Keep the changelog human-readable: prioritize important user-facing capabilities, behavior or contract changes, compatibility, quality, and security; summarize minor fixes and internal adjustments instead of listing them individually.
 - Every GitHub update requires a content-level documentation review. Synchronize the English README, Chinese README, dated Chinese introduction Markdown, and its version-scope note with any affected capabilities, configuration, workflow, or user guidance. The release verifier rejects a pending or latest committed public diff that does not include all four reader-facing documents.
 - The Markdown introduction is the default GitHub reading view. Retain the dated PDF for download and printing, and update it whenever the introduction's reader-facing content changes. Normalize the PDF after Word export for portable rendering; the release asset must contain a Ghostscript producer marker, and `verify` rejects the original Word/Quartz export even when local PDF tools accept it.
-- A documentation synchronization commit on `main` may retain the current `VERSION`; increment it only when establishing a new tag/Release boundary. Keeping the version does not waive the documentation review.
+- Before every actual public update, the host Agent automatically assesses the highest semantic change level and records the capability/compatibility rationale. Do not infer it from file counts, line counts, or the last Git tag: compare with the published tree and its `VERSION`. The deterministic `prepare-version` command calculates the next number; it does not call an LLM or classify changes itself.
+- Every public update advances `VERSION`, including documentation-only updates. `verify` rejects unchanged or decreasing versions against `HEAD` for pending changes, or `HEAD^` for the latest committed change when clean. Initial trees without a commit baseline are exempt. Rebuilding or retrying the same prepared batch does not allocate another version; `--from-version` rejects accidental repeated preparation. With no actual change to publish, do not prepare another version or publication commit.
+- Number allocation does not authorize a Git tag or GitHub Release. Create those only when separately requested; frozen paper artifacts keep their own immutable boundaries.
 - This number is separate from pipeline versioning: `CURRENT_PIPELINE_VERSION` in `.scripts/graph_lib.py` tracks content-pipeline upgrades and is never the public release number.
 - Increment PATCH for compatible fixes or documentation-only releases, MINOR for backward-compatible public capabilities, and MAJOR for breaking public contracts.
+- Apply this decision policy explicitly during `0.x` development too: record compatibility changes rather than silently treating all pre-1.0 updates as interchangeable. A large internal refactor can remain PATCH; a small new public capability can warrant MINOR.
 
 ## Release workflow
 
-1. Review the diff against the current GitHub state. Update the manifest when a public engineering file is added or moved, synchronize both READMEs and the Chinese introduction Markdown plus its scope note, and update the changelog. If reader-facing introduction content changed, update its PDF edition from the same reviewed source. Update `VERSION` only when creating a new release boundary.
-2. Build a clean tree; the command only copies manifest-approved files.
+1. Review the diff against the current GitHub state and its `VERSION`, classify PATCH/MINOR/MAJOR, and add reviewed notes under the public asset's `Unreleased` heading. Preview `prepare-version --level <level> --reason '<semantic rationale>' --from-version <current>`; then run the same command with `--apply` once. It updates `VERSION`, archives the notes with the date and decision rationale, and synchronizes the source root changelog. It refuses empty notes, stale expected versions, and duplicate release headings.
+2. Update the manifest when a public engineering file is added or moved. Synchronize both READMEs and the Chinese introduction Markdown plus its scope note; if reader-facing introduction content changed, update its PDF edition from the same reviewed source. Build a clean tree; the command only copies manifest-approved files and never allocates another version.
 3. Verify the tree before staging or publishing.
 4. Verify every included paper artifact with its declared verifier. The base
    `v0.2.0` artifact uses `.scripts/paper_artifact.py verify`; additive audit
@@ -37,6 +40,7 @@ The public release is an engineering template, never a copy of the personal know
 5. In a Git worktree, verify that no manifest-approved release file is excluded
    by the destination `.gitignore`.
 6. Review the staged diff and confirm that documentation describes the affected behavior rather than merely changing dates or version badges; then run the normal engineering regressions.
+7. Commit the reviewed source changes locally and the generated public changes in the public repository. Verify the committed public tree again, then push only the public repository and confirm its remote commit. Never push the personal source repository as a substitute for the allowlisted public tree.
 
 Normalize the Word-exported PDF before placing it in the public-assets directory:
 

@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import copy
 import fnmatch
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -27,7 +29,7 @@ RELEASE_DOCUMENTATION_PATHS = {
 }
 INTRODUCTION_PREFIX = "docs/introduction/ASKS-Chinese-Introduction-"
 NORMALIZED_PDF_PRODUCER = b"GPL Ghostscript"
-VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+VERSION_PATTERN = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 PRIVATE_PREFIXES = (
     "academic/raw/", "academic/wiki/", "academic/outputs/",
     "admin/raw/", "admin/wiki/", "admin/outputs/",
@@ -60,6 +62,57 @@ def read_version() -> str | None:
 
 def release_badge(version: str) -> str:
     return f"> Current release: v{version}"
+
+
+def next_version(current: str, level: str) -> str:
+    if not VERSION_PATTERN.fullmatch(current) or level not in {"patch", "minor", "major"}:
+        raise ValueError("valid MAJOR.MINOR.PATCH and patch/minor/major level required")
+    major, minor, patch = (int(part) for part in current.split("."))
+    if level == "major":
+        return f"{major + 1}.0.0"
+    if level == "minor":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def prepare_version(level: str, reason: str, from_version: str, *, apply: bool = False,
+                    release_date: str | None = None) -> dict:
+    current = read_version()
+    if current != from_version:
+        raise ValueError(f"VERSION changed: expected {from_version}, found {current}; do not bump twice on retry")
+    if not reason.strip() or "\n" in reason or "\r" in reason:
+        raise ValueError("a non-empty single-line semantic change/compatibility rationale is required")
+    new_version = next_version(current, level)
+    dated = date.fromisoformat(release_date).isoformat() if release_date else date.today().isoformat()
+    manifest = load_manifest()
+    changelog = REPO / manifest["public_assets"]["CHANGELOG.md"]
+    text = changelog.read_text(encoding="utf-8")
+    match = re.search(r"^## \[Unreleased\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.M | re.S)
+    if not match or not re.search(r"^- \S", match[1], re.M):
+        raise ValueError("public CHANGELOG Unreleased must contain reviewed user-facing changes")
+    if re.search(rf"^## \[{re.escape(new_version)}\]", text, re.M):
+        raise ValueError(f"CHANGELOG already contains {new_version}")
+    section = (f"## [Unreleased]\n\n## [{new_version}] - {dated}\n\n"
+               f"### Version decision\n\n- {level.upper()}: {reason.strip()}\n\n"
+               + match[1].strip() + "\n\n")
+    updated = text[:match.start()] + section + text[match.end():]
+    writes = {VERSION_PATH: new_version + "\n", changelog: updated, REPO / "CHANGELOG.md": updated}
+    plan = {"status": "applied" if apply else "planned", "from": current, "to": new_version,
+            "level": level, "reason": reason.strip(), "date": dated,
+            "writes": [str(path.relative_to(REPO)) for path in writes]}
+    if apply:
+        originals = {path: path.read_bytes() if path.exists() else None for path in writes}
+        try:
+            for path, content in writes.items():
+                path.write_text(content, encoding="utf-8")
+        except OSError:
+            for path, content in originals.items():
+                if content is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_bytes(content)
+            raise
+    return plan
 
 
 def localized_release_badge(version: str) -> str:
@@ -117,7 +170,7 @@ def documentation_sync_paths(manifest: dict) -> set[str]:
     return RELEASE_DOCUMENTATION_PATHS | introduction_markdown
 
 
-def git_publication_changes(destination: Path) -> set[str]:
+def git_publication_diff(destination: Path) -> tuple[set[str], str | None]:
     """Return the pending release diff, or the latest committed diff when clean."""
     inside = subprocess.run(
         ["git", "rev-parse", "--is-inside-work-tree"],
@@ -126,7 +179,7 @@ def git_publication_changes(destination: Path) -> set[str]:
         capture_output=True,
     )
     if inside.returncode != 0 or inside.stdout.strip() != "true":
-        return set()
+        return set(), None
     has_head = subprocess.run(
         ["git", "rev-parse", "--verify", "HEAD"],
         cwd=destination,
@@ -134,7 +187,7 @@ def git_publication_changes(destination: Path) -> set[str]:
         capture_output=True,
     )
     if has_head.returncode != 0:
-        return set()
+        return set(), None
     tracked = subprocess.run(
         ["git", "diff", "HEAD", "--name-only", "--"],
         cwd=destination,
@@ -155,7 +208,7 @@ def git_publication_changes(destination: Path) -> set[str]:
         if path and path != MARKER
     }
     if pending:
-        return pending
+        return pending, "HEAD"
     has_parent = subprocess.run(
         ["git", "rev-parse", "--verify", "HEAD^"],
         cwd=destination,
@@ -163,7 +216,7 @@ def git_publication_changes(destination: Path) -> set[str]:
         capture_output=True,
     )
     if has_parent.returncode != 0:
-        return set()
+        return set(), None
     latest = subprocess.run(
         ["git", "diff", "HEAD^", "HEAD", "--name-only", "--"],
         cwd=destination,
@@ -171,7 +224,26 @@ def git_publication_changes(destination: Path) -> set[str]:
         capture_output=True,
         check=True,
     )
-    return {path for path in latest.stdout.splitlines() if path and path != MARKER}
+    return {path for path in latest.stdout.splitlines() if path and path != MARKER}, "HEAD^"
+
+
+def git_publication_changes(destination: Path) -> set[str]:
+    return git_publication_diff(destination)[0]
+
+
+def version_progression_errors(destination: Path, version: str, changes: set[str], base: str | None) -> list[str]:
+    if not changes or base is None:
+        return []
+    previous = subprocess.run(["git", "show", f"{base}:VERSION"], cwd=destination,
+                              text=True, capture_output=True)
+    if previous.returncode != 0:
+        return ["public update baseline has no VERSION; review the baseline before publishing"]
+    old_version = previous.stdout.strip()
+    if not VERSION_PATTERN.fullmatch(old_version):
+        return ["public update baseline has an invalid VERSION"]
+    if tuple(map(int, version.split("."))) <= tuple(map(int, old_version.split("."))):
+        return [f"public update must advance VERSION beyond {old_version}; classify changes and run prepare-version"]
+    return []
 
 
 def projected_engineering_graph(destination: Path) -> dict:
@@ -355,12 +427,17 @@ def verify(destination: Path) -> int:
             changelog_text = changelog_path.read_text(encoding="utf-8", errors="ignore")
             if not re.search(rf"^## \[{re.escape(version)}\](?:\s|$)", changelog_text, re.M):
                 failures.append(f"CHANGELOG.md missing current release heading: [{version}]")
+            latest = re.search(r"^## \[(\d+\.\d+\.\d+)\]", changelog_text, re.M)
+            if not latest or latest[1] != version:
+                failures.append("CHANGELOG.md newest release heading must match VERSION")
     for path in sorted(expected - actual):
         failures.append(f"missing expected file: {path}")
     for path in sorted(actual - expected):
         failures.append(f"unexpected file: {path}")
     try:
-        publication_changes = git_publication_changes(destination)
+        publication_changes, base = git_publication_diff(destination)
+        if version:
+            failures.extend(version_progression_errors(destination, version, publication_changes, base))
         required_documentation = documentation_sync_paths(manifest)
         missing_documentation = required_documentation - publication_changes
         if publication_changes and missing_documentation:
@@ -425,8 +502,18 @@ def main() -> None:
     build_parser.add_argument("--force", action="store_true")
     verify_parser = subparsers.add_parser("verify")
     verify_parser.add_argument("destination", type=Path)
+    prepare_parser = subparsers.add_parser("prepare-version")
+    prepare_parser.add_argument("--level", choices=["patch", "minor", "major"], required=True)
+    prepare_parser.add_argument("--reason", required=True)
+    prepare_parser.add_argument("--from-version", required=True)
+    prepare_parser.add_argument("--date")
+    prepare_parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     try:
+        if args.command == "prepare-version":
+            print(json.dumps(prepare_version(args.level, args.reason, args.from_version,
+                                            apply=args.apply, release_date=args.date), ensure_ascii=False, indent=2))
+            return
         if args.command == "build":
             build(args.destination, args.clean, args.force)
         else:
