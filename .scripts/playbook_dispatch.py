@@ -42,7 +42,7 @@ def _parse_entries(text):
 
 
 def dispatch(query):
-    """根据查询词检索 playbook，返回命中条目文本（可能多条）。无命中返回 None。"""
+    """按最具体触发词派发 playbook；无完整匹配时允许高覆盖短写。"""
     if not PLAYBOOK.exists():
         return None
     text = PLAYBOOK.read_text(encoding="utf-8")
@@ -50,16 +50,33 @@ def dispatch(query):
     q = _normalize(query)
     if len(q) < 2:
         return None
-    matches = []
+    strong = []
+    weak = []
     for e in entries:
+        best_strong = 0
+        best_weak = 0.0
         for t in e["triggers"]:
             tn = _normalize(t)
             if len(tn) < 2:
                 continue
-            # 双向子串匹配：查询含触发词，或触发词含查询
-            if tn in q or q in tn:
-                matches.append(e["body"])
-                break
+            if tn in q:
+                best_strong = max(best_strong, len(tn))
+            elif q in tn:
+                coverage = len(q) / len(tn)
+                if coverage >= 0.6:
+                    best_weak = max(best_weak, coverage)
+        if best_strong:
+            strong.append((best_strong, e["body"]))
+        elif best_weak:
+            weak.append((best_weak, e["body"]))
+    if strong:
+        specificity = max(score for score, _ in strong)
+        matches = [body for score, body in strong if score == specificity]
+    elif weak:
+        specificity = max(score for score, _ in weak)
+        matches = [body for score, body in weak if score == specificity]
+    else:
+        matches = []
     if not matches:
         return None
     return "\n\n---\n\n".join(matches)

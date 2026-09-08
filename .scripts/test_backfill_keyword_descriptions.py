@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import sys
 import tempfile
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -66,6 +67,43 @@ def test_collect_candidates_requires_precise_raw_evidence():
         assert candidate["raw_source"].endswith("paper.md#L1")
         assert "量子多体波函数" in candidate["evidence_quote"]
     finally:
+        restore_fixture(temporary, conn, originals)
+
+
+def test_agent_batch_is_prepared_without_writing_failure_review():
+    temporary, conn, originals = make_fixture()
+    try:
+        candidate = bk.collect_candidates(conn)["candidates"]
+        task = bk.prepare_agent_batch(candidate, batch_size=1)
+        assert task["status"] == "prepared"
+        assert task["schema"] == "agent-task-v1"
+        assert task["inputs"][0]["path"].startswith("temp/keyword-description-backfill/")
+        assert not conn.execute("SELECT 1 FROM node_description_reviews").fetchone()
+    finally:
+        restore_fixture(temporary, conn, originals)
+
+
+def test_agent_apply_rejects_cross_namespace_paths():
+    temporary, conn, originals = make_fixture()
+    original_mode = bk.ingest_mode
+    try:
+        bad_dir = gl.REPO / "temp" / "other"
+        bad_dir.mkdir(parents=True)
+        input_path = bad_dir / "input.json"
+        result_path = bad_dir / "result.json"
+        input_path.write_text(json.dumps({"records": []}), encoding="utf-8")
+        result_path.write_text(json.dumps({"descriptions": [], "uncertain": []}), encoding="utf-8")
+        bk.ingest_mode = lambda: "agent"
+        try:
+            bk.main([
+                "--db", str(gl.REPO / "graph.db"), "--apply",
+                "--agent-input", str(input_path), "--agent-result", str(result_path),
+            ])
+            raise AssertionError("cross-namespace Agent artifacts must fail")
+        except SystemExit as exc:
+            assert exc.code == 2
+    finally:
+        bk.ingest_mode = original_mode
         restore_fixture(temporary, conn, originals)
 
 

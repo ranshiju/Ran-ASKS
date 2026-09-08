@@ -93,16 +93,14 @@ def test_loop_is_isolated_and_runs(tmp: Path) -> None:
     assert output.is_file()
 
 
-def test_agent_mode_handoff(tmp: Path) -> None:
+def test_agent_mode_is_rejected(tmp: Path) -> None:
     source = tmp / "handoff.pdf"
     _vector_pdf(source)
-    loop = VisualReconstructionAgentLoop(mode="agent")
-    result = loop.run(f'严格复刻 "{source}" 为可编辑ppt')
-    assert result.status == "agent_required"
-    assert result.handoff
-    assert result.handoff["tool"] == "visual_to_editable_ppt"
-    assert result.handoff["path_candidate"] == str(source)
-    assert "覆盖权限" in result.handoff["instruction"]
+    try:
+        VisualReconstructionAgentLoop(mode="agent")
+        raise AssertionError("reconstruction DSH loop must reject the host-Agent backend")
+    except ValueError as exc:
+        assert "API backend" in str(exc)
 
 
 def test_dispatch_is_specific() -> None:
@@ -124,7 +122,7 @@ def main() -> None:
         tmp = Path(tmp_dir)
         test_tool_executes_without_modifying_source(tmp)
         test_loop_is_isolated_and_runs(tmp)
-        test_agent_mode_handoff(tmp)
+        test_agent_mode_is_rejected(tmp)
     test_dispatch_is_specific()
     print("dsh visual reconstruction tools regression: PASS")
 

@@ -163,10 +163,19 @@ def extract_authors_from_text(text):
         "Laboratory", "College", "Faculty", "Centre", "Center", "Hospital",
     )
     name_token = r"[A-Z][A-Za-zÀ-ÿ\'’]+(?:-[A-Za-z][A-Za-zÀ-ÿ\'’]+)*"
+    surname_particle = (
+        r"(?:[Dd]e(?:\s+l(?:a|as|os))?|[Dd]el|[Dd]a|[Dd]i|"
+        r"[Vv]an(?:\s+der)?|[Vv]on)"
+    )
+    surname = rf"(?:(?:{surname_particle}\s+){{0,2}}{name_token})"
     name_pattern = re.compile(
-        rf"(?:{name_token}(?:\s+(?:[A-Z]\.?\s*){{1,4}})?\s+{name_token}|"
-        rf"(?:[A-Z]\.?\s*){{1,4}}{name_token}(?:\s+{name_token})*|"
+        rf"(?:{name_token}(?:\s+(?:[A-Z]\.?\s*){{1,4}})?\s+{surname}|"
+        rf"(?:[A-Z]\.?\s*){{1,4}}{surname}(?:\s+{name_token})*|"
         r"(?:[A-ZÀ-ÿ]{2,}(?:-[A-ZÀ-ÿ]{2,})*(?:\s+[A-ZÀ-ÿ]{2,}(?:-[A-ZÀ-ÿ]{2,})*){1,4}))"
+    )
+    front_matter_label = re.compile(
+        r"(?:PAPER|ARTICLE|RESEARCH ARTICLE|REVIEW ARTICLE|EDITORIAL|"
+        r"OPEN|OPEN ACCESS)", re.I,
     )
     for i in range(title_idx + 1, min(title_idx + 40, len(lines))):
         line = lines[i].replace("\u00a0", " ").strip()
@@ -176,6 +185,11 @@ def extract_authors_from_text(text):
                 lookahead = re.sub(r'<sup\b[^>]*>.*?</sup>', '', lookahead, flags=re.I)
                 if not name_pattern.match(lookahead):
                     break
+            continue
+        if not collected and (
+                line.startswith("# ")
+                or re.fullmatch(r"https?://\S+", line, re.I)
+                or front_matter_label.fullmatch(line)):
             continue
         if re.search(r'\b(Abstract|摘要)\b', line, re.I):
             break
@@ -201,7 +215,17 @@ def extract_authors_from_text(text):
             segments = re.split(r'\s+AND\s+', line)
             candidates = []
             for segment in segments:
-                candidates.extend(match.group(0).strip().rstrip("-–—") for match in name_pattern.finditer(segment))
+                for match in name_pattern.finditer(segment):
+                    candidate = match.group(0).strip().rstrip("-–—")
+                    first_token = candidate.split(maxsplit=1)[0].strip(".,")
+                    # MinerU sometimes appends an affiliation without punctuation,
+                    # e.g. "Alexios A. Michailidis IST Austria, Am Campus ...".
+                    # Once real names were found, an all-caps organization token
+                    # marks the end of this compressed author line.
+                    if collected or candidates:
+                        if re.fullmatch(r"[A-Z][A-Z0-9&.-]{1,7}", first_token):
+                            break
+                    candidates.append(candidate)
         if candidates:
             collected.extend(candidates)
         elif collected:

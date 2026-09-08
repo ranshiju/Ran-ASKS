@@ -1,6 +1,6 @@
 # cross-domain/ — 跨域关联规范
 
-> Topic Hub、知识三元组索引和跨域引用的规则文件。
+> Topic Hub、`graph.db` 导航关系和跨域引用的规则文件。
 > Hub 创建/维护的详细规范见 `operations/HUB.md`。
 
 ---
@@ -45,9 +45,9 @@ page_count: N                      # 关联页面数
 - business: [[../business/wiki/research/xxx]]
 ```
 
-## 知识图谱（graph.db，v4 主数据化，2026-07-25）
+## 知识图谱（graph.db）
 
-graph.db 是边唯一源（不再有 `triples*.md`/`keyword-index*.md` 派生文件，已删）。md 存节点属性，graph.db 存边。
+graph.db 是边唯一源；Markdown 保存可读节点属性，graph.db 保存关系、别名和导航状态。
 
 无 page 人物使用 `nodes.entity_subtype=person` 标记，便于与 citation-only、venue、institution 等 entity 区分。活跃 person-entity 软上限为 2000，1600 预警；治理队列为 `cross-domain/outputs/people-pending.yaml`。
 
@@ -55,7 +55,7 @@ graph.db 是边唯一源（不再有 `triples*.md`/`keyword-index*.md` 派生文
 |------|------|
 | `cross-domain/graph.db` | 边的唯一源（nodes + edges + aliases 表，进 git） |
 | `.scripts/graph_ingest.py` | ingest 增量加边（resolve 裸名 + 去双向冗余 + alias 自动识别 + INSERT） |
-| `.scripts/graph_dump.py` | 图文本快照（人读，替代原 md Core Triples 段） |
+| `.scripts/graph_dump.py` | 供人审阅的图文本快照 |
 | `.scripts/graph_lib.py` | 共享库（resolve/去重/schema） |
 | `.scripts/query_graph.py` | 查询（search/neighbors/relations/hub_of/path_exists） |
 
@@ -84,17 +84,11 @@ venue / institution 的「内容」是它的边本身（不另写正文）；具
 - **历史兼容**：无法解析或无脚注的旧 semantic address 由 `graph_validate.py` 聚合为 WARN，修复任务不得改写 `raw/`。
 - 详见 `operations/INGEST.md`「Raw 文档包节点与 Wiki 直连」及 `operations/QUERY.md`「section 读取」。
 
-### 动态 hub 生长机制（2026-07-26）
+### Hub 成员与生长
 
-对于无预定义结构的文件类型（如会议纪要，区别于论文有 arXiv 方向可对齐），采用**涌现式 hub 生长**：
+canonical Hub 以稳定 path、title、`## Scope`、可选 parent 和生命周期状态定义。普通节点通过可重建的 `聚类于` 边获得最多三个重叠归属；程序根据节点 profile、Hub Scope、同类成员原型和图邻接计算 membership。
 
-- **catch-all hub**：普通 topic-hub（无 hub_subtype），命名"<文件类型>关键词"（如"会议纪要关键词"），存 `*/wiki/hubs/<名称>.md`。未归类 keyword 的临时池
-- **keyword 归属**：提取的 keyword 先查现有 hub 正文 `## 关键词` 段——命中则已在 hub 内；未命中 → 进 catch-all hub
-- **聚类触发**：catch-all hub `## 关键词` 段达 100 个 keyword → 触发聚类（`.scripts/cluster_keywords.py`）：GLM-Embedding-3 批量 embedding → 层次聚类 → 最大簇（≤30）拆出建新 hub → LLM 语义命名
-- **查重合并**：新 hub 与已有 hub 的 keyword 集合 embedding 质心距离 < 阈值 → 提议合并；合并后 ≤100 才合并，超限不合并仅区别命名
-- **持续接收**：聚类拆分后 catch-all hub 继续接收新 keyword
-- **推广性**：各文件类型可各建一个 catch-all hub（如"行政文档关键词""教学文档关键词"）
-- 详见 `operations/INGEST.md`「会议纪要 keyword + 动态 hub 生长」段
+未归类节点是正常状态。程序只生成具有稳定内部结构的 `new_hubs`、`splits` 和 `merges` 候选；主 Agent 根据代表成员确认 title、Scope、parent 及生命周期动作，再调用受控写入口。完整契约与阈值见 `operations/HUB.md`。
 
 
 ---
@@ -164,9 +158,9 @@ LLM 读全文后统一指代（"张教授"和"冉仕举"是否同人），再 re
 
 > cross-domain 的索引文件非知识内容页,**不适用**内容页三段规范。Topic Hub 页面是导航聚合页,不强制三段。跨域引用的各子项目内容页适用各自 SCHEMA 的标准 section 规范。
 
-## 图查询局部读（v4，2026-07-25 主数据化）
+## 图查询局部读
 
-> 原 `triples*.md`/`keyword-index*.md` 已删，融进 graph.db。局部读改为图查询：
+关系定位直接查询 graph.db：
 
 | 查询类型 | 命令 | 说明 |
 |---------|------|------|

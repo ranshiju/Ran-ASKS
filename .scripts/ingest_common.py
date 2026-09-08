@@ -19,8 +19,14 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from llm_structured import call_json
+import agent_task
 import recovery_policy as rp
+
+
+def call_json(*args, **kwargs):
+    """API-only adapter kept patchable for focused tests."""
+    from llm_structured import call_json as api_call_json
+    return api_call_json(*args, **kwargs)
 
 
 # ===== META 块解析与校验（LLM 读全文时的元信息交叉校验）=====
@@ -147,14 +153,42 @@ def context_profile(kind: str) -> dict:
     return CONTEXT_PROFILES.get(kind, CONTEXT_PROFILES["document"])
 
 
+def _head_fragment(text: str, cap: int) -> str:
+    fragment = text[:cap]
+    if cap < len(text) and "\n" in fragment:
+        fragment = fragment.rsplit("\n", 1)[0]
+    return fragment.strip()
+
+
+def _tail_fragment(text: str, cap: int) -> str:
+    if cap <= 0:
+        return ""
+    start = max(0, len(text) - cap)
+    fragment = text[start:]
+    if start > 0:
+        if "\n" not in fragment:
+            return ""
+        fragment = fragment.split("\n", 1)[1]
+    return fragment.strip()
+
+
+def _has_raw_line_handles(text: str) -> bool:
+    return re.search(r"(?m)^<[^>\n]+#L\d+>[ \t]", text) is not None
+
+
 def _clip_context_section(content: str, cap: int) -> str:
     """超长 section 保留头部为主、尾部兜底，避免单段吞掉预算。"""
     content = content.strip()
     if len(content) <= cap:
         return content
-    head = content[: int(cap * 0.8)]
-    tail = content[-int(cap * 0.2):]
-    return f"{head}\n\n[...中段省略...]\n\n{tail}"
+    if not _has_raw_line_handles(content):
+        head = content[: int(cap * 0.8)]
+        tail = content[-int(cap * 0.2):]
+        return f"{head}\n\n[...中段省略...]\n\n{tail}"
+    head = _head_fragment(content, int(cap * 0.8))
+    tail = _tail_fragment(content, int(cap * 0.2))
+    parts = [head, "[...中段省略...]", tail]
+    return "\n\n".join(part for part in parts if part)
 
 
 def _assemble_reduced_context(profile: dict, sections: list[tuple[str, str]]) -> str:
@@ -175,8 +209,12 @@ def _fallback_head_tail_context(profile: dict, text: str) -> str:
     """无可用结构提取时，程序确定性地截取头部与尾部。"""
     head_cap = min(profile["fallback_head_cap"], len(text) // 2)
     tail_cap = min(profile["fallback_tail_cap"], len(text) - head_cap)
-    head = text[:head_cap].strip()
-    tail = text[-tail_cap:].strip() if tail_cap > 0 else ""
+    if _has_raw_line_handles(text):
+        head = _head_fragment(text, head_cap)
+        tail = _tail_fragment(text, tail_cap)
+    else:
+        head = text[:head_cap].strip()
+        tail = text[-tail_cap:].strip() if tail_cap > 0 else ""
     return f"--- [fallback: 头部截取] ---\n{head}\n\n--- [fallback: 尾部截取] ---\n{tail}"
 
 
@@ -192,7 +230,7 @@ def _split_markdown_sections(text: str) -> list[tuple[str, str]]:
             sections.append((current_title, content))
 
     for line in text.splitlines():
-        m = re.match(r"^(#{1,6})[ \t]+(.+?)\s*$", line)
+        m = re.match(r"^(?:<[^>\n]+#L\d+>[ \t]+)?(#{1,6})[ \t]+(.+?)\s*$", line)
         if m:
             flush()
             current_title = m.group(2).strip()
@@ -234,7 +272,8 @@ def build_source_context(kind: str, text: str, *, source_path: Path | str | None
       会议纪要用头部尾部截取。
     """
     profile = context_profile(kind)
-    if not force_reduced and len(text) <= profile["full_text_max_chars"]:
+    if len(text) <= profile["full_text_max_chars"] and (
+            not force_reduced or kind == "paper"):
         return text
 
     if kind == "paper" and source_path is not None:
@@ -479,6 +518,87 @@ def apply_semantic_recovery_proposal(semantic_text: str, proposal: dict,
     return "\n".join(lines) + ("\n" if semantic_text.endswith("\n") else "")
 
 
+def _prepare_semantic_agent_task(state: dict, repo: Path, issues: list, *,
+                                 resume_cmd: str = "", check_cmd: str = "") -> None:
+    if (state.get("agent_task") or {}).get("schema") == agent_task.SCHEMA_VERSION:
+        agent_task.reopen(state, issues)
+        return
+    transaction_id = re.sub(
+        r"[^A-Za-z0-9_.-]+", "-",
+        str(state.get("transaction_id") or "semantic-repair"),
+    ).strip("-.") or "semantic-repair"
+    semantic_value = str(state.get("semantic_path") or "")
+    source_semantic = None
+    if semantic_value:
+        candidate = Path(semantic_value)
+        source_semantic = candidate.resolve() if candidate.is_absolute() else (repo / candidate).resolve()
+        try:
+            relative = source_semantic.relative_to(repo.resolve())
+        except ValueError as exc:
+            raise ValueError("semantic staged artifact 必须位于仓库内") from exc
+        if relative.parts and relative.parts[0] == "temp":
+            semantic_value = relative.as_posix()
+        else:
+            semantic_value = ""
+    if not semantic_value:
+        semantic_file = repo / "temp" / "semantic-repair" / f"{transaction_id}.txt"
+        semantic_file.parent.mkdir(parents=True, exist_ok=True)
+        semantic_text = (
+            source_semantic.read_text(encoding="utf-8")
+            if source_semantic and source_semantic.is_file()
+            else str(state.get("slots_content") or "")
+        )
+        semantic_file.write_text(semantic_text, encoding="utf-8")
+        semantic_value = str(semantic_file.relative_to(repo))
+        state["semantic_path"] = semantic_value
+    inputs = [{
+        "name": "semantic_slots", "path": semantic_value,
+        "role": "staged_artifact_to_revise",
+    }]
+    for name, key in (("wiki", "wiki_path"), ("source", "source")):
+        value = str(state.get(key) or "")
+        if not value:
+            continue
+        candidate = Path(value)
+        resolved = candidate.resolve() if candidate.is_absolute() else (repo / candidate).resolve()
+        try:
+            relative = resolved.relative_to(repo.resolve())
+        except ValueError:
+            continue
+        if resolved.is_file():
+            inputs.append({
+                "name": name, "path": relative.as_posix(), "role": "read_only_evidence",
+            })
+    transaction_id = str(state.get("transaction_id") or "semantic-repair")
+    script_name = str(state.get("pipeline_script") or "")
+    resume = resume_cmd or (
+        f"python3 .scripts/{script_name} --resume {transaction_id}"
+        if script_name else ""
+    )
+    commands = {}
+    if check_cmd:
+        commands["check"] = check_cmd
+    if resume:
+        commands["resume"] = resume
+    agent_task.prepare(
+        state,
+        kind="repair_ingest_semantics",
+        transaction_id=transaction_id,
+        inputs=inputs,
+        outputs=[{
+            "name": "semantic_slots", "path": semantic_value,
+            "format": "semantic-slots-v1",
+        }],
+        protocol={
+            "name": "semantic-patch-v1",
+            "scope": "listed issues in the staged semantic artifact",
+            "validator": "calling ingest pipeline semantic validator",
+        },
+        issues=issues,
+        commands=commands,
+    )
+
+
 def try_semantic_recovery(state: dict, repo: Path, hard_errors: list,
                           warnings: list[dict], validate_fn,
                           non_blocking_issues: tuple[str, ...] = ()) -> tuple[bool, str]:
@@ -506,6 +626,10 @@ def try_semantic_recovery(state: dict, repo: Path, hard_errors: list,
     state["semantic_issues"] = issues
     if not issues or any(not issue.get("retryable") for issue in issues):
         return False, "semantic issues 缺少唯一可修 locator"
+
+    if agent_task.ingest_backend() == "agent":
+        _prepare_semantic_agent_task(state, repo, issues)
+        return False, "Agent task prepared"
 
     wiki_text, source_text = _read_staged_agent_context(state, repo)
     try:
@@ -861,6 +985,9 @@ def repair_slots(
         worker["skip_reason"] = "transaction_cache"
     prompt = _build_semantic_patch_prompt(catalog)
     if not decision:
+        if agent_task.ingest_backend() == "agent":
+            _prepare_semantic_agent_task(state, REPO, catalog.get("issues", blocking))
+            return False, "Agent task prepared"
         result = call_json(
             prompt,
             semantic_patch_decision_schema,
@@ -945,6 +1072,15 @@ def stop_for_semantic_errors(state: dict, errors: list[str], resume_cmd: str,
 
     warnings 为同时发现的阻断型 warning，一并写入 agent_prompt，避免修完硬错误后
     才在 resume 复验中暴露 warning，造成二次人工介入。"""
+    if agent_task.ingest_backend() == "agent":
+        issues = list(errors)
+        issues.extend(warnings or [])
+        _prepare_semantic_agent_task(
+            state, Path(__file__).resolve().parent.parent, issues,
+            resume_cmd=resume_cmd,
+        )
+        state["errors"] = errors
+        return
     state["status"] = "agent_required"
     state["errors"] = errors
     state["agent_required"] = True
@@ -965,8 +1101,6 @@ def handoff_to_agent(state: dict, context_msg: str, validate_fn,
     # 记录 handoff 前阶段，供 resume 恢复（落位后 handoff 不应重跑落位）
     if state.get("status") != "agent_required":
         state["pre_handoff_status"] = state.get("status")
-    state["status"] = "agent_required"
-    state["agent_required"] = True
     state["errors"] = []
     lines: list[str] = []
     try:
@@ -980,6 +1114,15 @@ def handoff_to_agent(state: dict, context_msg: str, validate_fn,
     tail = f"\n\n请手动修正 `{state.get('semantic_path', '')}` 后运行 `{resume_cmd}`。"
     if validate_cmd:
         tail += f" 修正后可先用 `{validate_cmd}` 自检。"
+    if agent_task.ingest_backend() == "agent":
+        _prepare_semantic_agent_task(
+            state, Path(__file__).resolve().parent.parent,
+            [context_msg, *sem_hard, *slot_warnings],
+            resume_cmd=resume_cmd, check_cmd=validate_cmd,
+        )
+        return
+    state["status"] = "agent_required"
+    state["agent_required"] = True
     state["agent_prompt"] = f"{context_msg}（当前共 {len(lines)} 项待修）。\n" + "\n".join(lines) + tail
 
 
@@ -1252,12 +1395,29 @@ def step_update_graph(state: dict, REPO: Path, clean: bool = False) -> tuple[boo
     return True, ""
 
 
+def _abbreviation_occurrence_target(entry: dict) -> str:
+    field = str(entry.get("field") or "object")
+    if field in {"subject", "object"}:
+        return str(entry.get(field) or "")
+    return str(entry.get("value") or entry.get("object") or entry.get("subject") or "")
+
+
+def _is_page_identity_abbreviation(entry: dict) -> bool:
+    page = str(entry.get("page") or "")
+    return (
+        str(entry.get("field") or "object") == "subject"
+        and bool(page)
+        and str(entry.get("subject") or "") == page
+    )
+
+
 def _abbreviation_todo_key(entry: dict) -> tuple:
     return (
-        str(entry.get("page", "")), str(entry.get("subject", "")),
-        str(entry.get("predicate", "")), str(entry.get("object", "")),
+        str(entry.get("page", "")),
         str(entry.get("field", "object")),
+        _abbreviation_occurrence_target(entry),
         str(entry.get("token") or entry.get("value") or ""),
+        str(entry.get("locator") or entry.get("source") or ""),
     )
 
 
@@ -1285,6 +1445,8 @@ def _write_abbreviation_todo(path: Path, entries: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     unique = {}
     for entry in entries:
+        if _is_page_identity_abbreviation(entry):
+            continue
         unique[_abbreviation_todo_key(entry)] = entry
     temp_path = path.with_name(path.name + ".tmp")
     temp_path.write_text(
@@ -1318,6 +1480,14 @@ def _record_abbreviation_warnings(state: dict, REPO: Path) -> None:
     doc_id = state.get("paper_id") or state.get("meeting_id") or ""
     additions = []
     for w in bare:
+        warning_entry = {
+            "page": page,
+            "subject": w.get("subject", ""),
+            "object": w.get("object", ""),
+            "field": w.get("field", "object"),
+        }
+        if _is_page_identity_abbreviation(warning_entry):
+            continue
         context = str(w.get("value") or w.get("object") or w.get("subject") or "")
         tokens = re.findall(r"[A-Z]{2,}[A-Za-z0-9]*", context)
         for token in tokens:
@@ -1524,17 +1694,77 @@ def lightweight_abbr_resolve(REPO: Path) -> dict:
     }
 
 
+def _resume_result_item(state: dict, *, file_name: str = "") -> dict:
+    return {
+        "file": file_name or state.get("source_filename") or state.get("source")
+        or state.get("transaction_id", "resume"),
+        "ok": state.get("status") == "completed",
+        "status": state.get("status", "failed"),
+        "transaction_id": state.get("transaction_id", ""),
+        "paper_id": state.get("paper_id"),
+        "wiki_path": state.get("wiki_path"),
+        "graph_report": state.get("graph_report"),
+        "quality_status": state.get("quality_status"),
+        "quality_warnings": state.get("quality_warnings", []),
+    }
+
+
+def _reconcile_parent_batch_report(repo: Path, state: dict):
+    """Refresh the newest multi-item inbox report containing this transaction."""
+    report_dir = repo / "cross-domain" / "ingest-reports"
+    transaction_id = str(state.get("transaction_id") or "")
+    if not transaction_id or not report_dir.is_dir():
+        return None
+    for report_path in sorted(report_dir.glob("*.json"), reverse=True):
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        files = report.get("files") if isinstance(report, dict) else None
+        if not isinstance(files, list) or len(files) < 2:
+            continue
+        if not any(item.get("transaction_id") == transaction_id for item in files):
+            continue
+        refreshed = []
+        for item in files:
+            item_transaction = str(item.get("transaction_id") or "")
+            item_state = state if item_transaction == transaction_id else None
+            state_path = repo / "temp" / "inbox-state" / f"{item_transaction}.json"
+            if item_state is None and item_transaction and state_path.is_file():
+                try:
+                    item_state = json.loads(state_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    item_state = None
+            if item_state and item_state.get("status") in {"completed", "duplicate_found"}:
+                refreshed.append(_resume_result_item(
+                    item_state, file_name=str(item.get("file") or ""),
+                ))
+            else:
+                refreshed.append(item)
+        from ingest_inbox import _report_counts, _write_json_atomic
+        report["files"] = refreshed
+        report.update(_report_counts(refreshed))
+        _write_json_atomic(report_path, report)
+        return report_path, report
+    return None
+
+
 def run_resume_post_maintenance(state: dict) -> dict | None:
     """Run the unified inbox tail after a successful direct resume."""
     if state.get("status") != "completed":
         return None
     repo = Path(state.get("repo") or state.get("repo_path") or Path(__file__).resolve().parents[1])
     inbox = repo / "inbox"
-    skip_files = {".gitkeep", ".DS_Store", "facts-pending.md"}
+    from inbox_plan import fact_entries
+    skip_files = {".gitkeep", ".DS_Store"}
     pending = [
         path for path in inbox.iterdir()
-        if path.is_file() and path.name not in skip_files and not path.name.startswith(".")
+        if (path.is_file()
+            and path.name not in skip_files
+            and not path.name.startswith(".")
+            and (path.name != "facts-pending.md" or fact_entries(path) > 0))
     ] if inbox.is_dir() else []
+    parent_batch = _reconcile_parent_batch_report(repo, state)
     if pending:
         return {
             "status": "deferred",
@@ -1547,20 +1777,44 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
         }
     try:
         from ingest_inbox import (
-            _write_json_atomic, compact_maintenance, run_post_ingest_maintenance,
+            compact_maintenance, publish_maintenance_report, run_post_ingest_maintenance,
         )
+        if parent_batch:
+            report_path, report = parent_batch
+            terminal = {"completed", "duplicate_found"}
+            if not all(item.get("status") in terminal for item in report["files"]):
+                return {
+                    "status": "deferred",
+                    "reason": "pending_batch_items",
+                    "pending_count": sum(
+                        item.get("status") not in terminal for item in report["files"]
+                    ),
+                    "receipt_path": "",
+                    "actions": [],
+                    "errors": [],
+                    "components": {},
+                    "report_path": str(report_path.relative_to(repo)),
+                }
+            existing = report.get("maintenance") or {}
+            if (existing.get("publication", {}).get("status") in {"pending", "error"}
+                    or existing.get("status") not in {"skipped", "deferred", "error", ""}):
+                publish_maintenance_report(report_path, report)
+                compact = compact_maintenance(report["maintenance"])
+                compact["report_path"] = str(report_path.relative_to(repo))
+                return compact
+            envelope = run_post_ingest_maintenance(
+                report["files"], str(report.get("session_id") or "resume-batch")
+            )
+            report["maintenance"] = envelope
+            report.setdefault("plan_notes", []).append(
+                "batch report reconciled after direct Agent resumes"
+            )
+            publish_maintenance_report(report_path, report)
+            compact = compact_maintenance(report["maintenance"])
+            compact["report_path"] = str(report_path.relative_to(repo))
+            return compact
         transaction_id = str(state.get("transaction_id", "resume"))
-        result = [{
-            "file": state.get("source_filename") or state.get("source") or transaction_id,
-            "ok": True,
-            "status": "completed",
-            "transaction_id": transaction_id,
-            "paper_id": state.get("paper_id"),
-            "wiki_path": state.get("wiki_path"),
-            "graph_report": state.get("graph_report"),
-            "quality_status": state.get("quality_status"),
-            "quality_warnings": state.get("quality_warnings", []),
-        }]
+        result = [_resume_result_item(state)]
         session_id = f"resume-{transaction_id}"
         envelope = run_post_ingest_maintenance(result, session_id)
         report_path = repo / "cross-domain" / "ingest-reports" / f"{session_id}.json"
@@ -1582,8 +1836,8 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
             "tool_outputs": [],
             "maintenance": envelope,
         }
-        _write_json_atomic(report_path, report)
-        compact = compact_maintenance(envelope)
+        publish_maintenance_report(report_path, report)
+        compact = compact_maintenance(report["maintenance"])
         compact["report_path"] = str(report_path.relative_to(repo))
         return compact
     except Exception as exc:

@@ -17,7 +17,7 @@ if str(REPO / ".scripts") not in sys.path:
 
 import ingest_meeting as meeting
 import llm_structured
-from dsh.meeting_compiler_agent import PROTOCOL_VERSION
+from meeting_compiler_contract import PROTOCOL_VERSION
 
 
 def _workspace() -> Path:
@@ -144,23 +144,20 @@ def test_preprocess_only_builds_candidates():
 
 def test_api_path_uses_one_compiler_for_all_semantic_outputs():
     work = _workspace()
-    original_agent = meeting.MeetingCompilerAgent
+    original_runner = meeting.run_api_meeting_compiler
     original_mode = meeting.ingest_mode
     calls = []
     try:
         state = _state(work)
 
-        class FakeAgent:
-            def __init__(self, task):
-                calls.append(task)
+        def fake_runner(task_fields):
+            calls.append(task_fields)
+            return SimpleNamespace(
+                status="compiled", reason="proposal_ready", proposal=_proposal(),
+                trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "compiled"},
+            )
 
-            def run(self):
-                return SimpleNamespace(
-                    status="compiled", reason="proposal_ready", proposal=_proposal(),
-                    trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "compiled"},
-                )
-
-        meeting.MeetingCompilerAgent = FakeAgent
+        meeting.run_api_meeting_compiler = fake_runner
         meeting.ingest_mode = lambda: "api"
         ok, error = meeting.step_write_wiki(state)
         assert ok, error
@@ -179,7 +176,29 @@ def test_api_path_uses_one_compiler_for_all_semantic_outputs():
         assert ok, error
         assert len(calls) == 1
     finally:
-        meeting.MeetingCompilerAgent = original_agent
+        meeting.run_api_meeting_compiler = original_runner
+        meeting.ingest_mode = original_mode
+        shutil.rmtree(work)
+
+
+def test_agent_path_prepares_task_without_entering_api_adapter():
+    work = _workspace()
+    original_runner = meeting.run_api_meeting_compiler
+    original_mode = meeting.ingest_mode
+    try:
+        state = _state(work)
+        meeting.ingest_mode = lambda: "agent"
+        meeting.run_api_meeting_compiler = lambda _task: (_ for _ in ()).throw(
+            AssertionError("Agent backend must not enter the API adapter")
+        )
+        ok, error = meeting.step_write_wiki(state)
+        assert not ok and error == "Agent task prepared"
+        assert state["status"] == "prepared"
+        assert state["agent_task"]["schema"] == "agent-task-v1"
+        assert state["agent_task"]["kind"] == "ingest_meeting"
+        assert "agent_prompt" not in state
+    finally:
+        meeting.run_api_meeting_compiler = original_runner
         meeting.ingest_mode = original_mode
         shutil.rmtree(work)
 
@@ -237,7 +256,8 @@ def test_dedup_uses_full_date_and_subproject_scope():
 
 def test_mmdd_compiler_output_marks_inferred_date_and_rebases_id():
     work = _workspace()
-    original_agent = meeting.MeetingCompilerAgent
+    original_runner = meeting.run_api_meeting_compiler
+    original_mode = meeting.ingest_mode
     try:
         state = _state(work)
         state["source_filename"] = "0901-test-inferred.txt"
@@ -245,88 +265,63 @@ def test_mmdd_compiler_output_marks_inferred_date_and_rebases_id():
         proposal = _proposal()
         proposal["meta"]["title"] = "测试会议推断日期"
 
-        class FakeAgent:
-            def __init__(self, _task):
-                pass
-
-            def run(self):
-                return SimpleNamespace(
-                    status="compiled", reason="proposal_ready", proposal=proposal,
-                    trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "compiled"},
-                )
-
-        meeting.MeetingCompilerAgent = FakeAgent
+        meeting.ingest_mode = lambda: "api"
+        meeting.run_api_meeting_compiler = lambda _task: SimpleNamespace(
+            status="compiled", reason="proposal_ready", proposal=proposal,
+            trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "compiled"},
+        )
         ok, error = meeting.step_write_wiki(state)
         assert ok, error
         assert state["meeting_id"] == "0901-测试会议推断日期"
         assert state["date_inferred"] is True
         assert "date_inferred: true" in state["wiki_content"]
     finally:
-        meeting.MeetingCompilerAgent = original_agent
+        meeting.run_api_meeting_compiler = original_runner
+        meeting.ingest_mode = original_mode
         shutil.rmtree(work)
 
 
 def test_rejected_compiler_records_attempt_and_protocol_error():
     work = _workspace()
-    original_agent = meeting.MeetingCompilerAgent
+    original_runner = meeting.run_api_meeting_compiler
+    original_mode = meeting.ingest_mode
     try:
         state = _state(work)
-
-        class RejectingAgent:
-            def __init__(self, _task):
-                pass
-
-            def run(self):
-                return SimpleNamespace(
-                    status="rejected", reason="invalid preprocess JSON", proposal=None,
-                    trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "rejected"},
-                )
-
-        meeting.MeetingCompilerAgent = RejectingAgent
+        meeting.ingest_mode = lambda: "api"
+        meeting.run_api_meeting_compiler = lambda _task: SimpleNamespace(
+            status="rejected", reason="invalid preprocess JSON", proposal=None,
+            trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "rejected"},
+        )
         ok, error = meeting.step_write_wiki(state)
         assert not ok and "invalid preprocess JSON" in error
         assert state["compiler_errors"] == ["invalid preprocess JSON"]
         assert state["meeting_compiler_attempts"][-1]["status"] == "rejected"
     finally:
-        meeting.MeetingCompilerAgent = original_agent
+        meeting.run_api_meeting_compiler = original_runner
+        meeting.ingest_mode = original_mode
         shutil.rmtree(work)
 
 
-def test_agent_handoff_roundtrip_consumes_same_protocol():
+def test_agent_task_roundtrip_consumes_same_protocol():
     work = _workspace()
-    original_agent = meeting.MeetingCompilerAgent
     original_mode = meeting.ingest_mode
     try:
         state = _state(work)
-
-        class HandoffAgent:
-            def __init__(self, task):
-                self.task = task
-
-            def run(self):
-                return SimpleNamespace(
-                    status="agent_required", reason="host_agent_required", proposal=None,
-                    prompt=self.task.prompt,
-                    trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "agent_required"},
-                )
-
-        meeting.MeetingCompilerAgent = HandoffAgent
         meeting.ingest_mode = lambda: "agent"
         ok, error = meeting.step_write_wiki(state)
-        assert not ok and "sub-agent" in error
+        assert not ok and error == "Agent task prepared"
         assert state["_awaiting_agent_wiki_slots"] is True
-        assert state["agent_write_to"].endswith("agent-meeting-compiler.txt")
-        assert "任老师讨论知事库。" not in state["agent_prompt"]
-        assert state["source"] in state["agent_prompt"]
-        output = REPO / state["agent_write_to"]
+        assert state["status"] == "prepared"
+        assert "agent_prompt" not in state
+        output = REPO / state["agent_task"]["outputs"][0]["path"]
         output.write_text(_output(), encoding="utf-8")
         ok, error = meeting.step_write_wiki(state)
         assert ok, error
         assert state["semantic_worker"] == "meeting-compiler-agent"
         assert state["meeting_compiler"]["reason"] == "host_agent_output_validated"
+        assert state["agent_task"]["status"] == "consumed"
         assert "agent_write_to" not in state
     finally:
-        meeting.MeetingCompilerAgent = original_agent
         meeting.ingest_mode = original_mode
         shutil.rmtree(work)
 
@@ -412,15 +407,18 @@ def test_semantic_retry_returns_to_same_compiler():
     original_save = pipeline._save
     original_fill = pipeline.ic.step_fill_semantics
     original_recovery = pipeline.ic.try_semantic_recovery
+    original_backend = pipeline.ic.agent_task.ingest_backend
     try:
         pipeline._save = lambda _state: None
         pipeline.ic.step_fill_semantics = lambda *_args, **_kwargs: (True, "")
         pipeline.ic.try_semantic_recovery = lambda *_args, **_kwargs: (False, "not resolved")
+        pipeline.ic.agent_task.ingest_backend = lambda: "api"
         result = pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
     finally:
         pipeline._save = original_save
         pipeline.ic.step_fill_semantics = original_fill
         pipeline.ic.try_semantic_recovery = original_recovery
+        pipeline.ic.agent_task.ingest_backend = original_backend
 
     assert compiler_calls == [[], ["三元组格式错误"]]
     assert result["status"] == "agent_required"
@@ -483,11 +481,12 @@ def test_wiki_retry_exhaustion_hands_off_full_compiler_protocol():
 def main():
     test_preprocess_only_builds_candidates()
     test_api_path_uses_one_compiler_for_all_semantic_outputs()
+    test_agent_path_prepares_task_without_entering_api_adapter()
     test_date_context_preserves_explicit_year_and_marks_mmdd_inference()
     test_dedup_uses_full_date_and_subproject_scope()
     test_mmdd_compiler_output_marks_inferred_date_and_rebases_id()
     test_rejected_compiler_records_attempt_and_protocol_error()
-    test_agent_handoff_roundtrip_consumes_same_protocol()
+    test_agent_task_roundtrip_consumes_same_protocol()
     test_exhausted_revision_handoff_uses_full_protocol_without_inline_source()
     test_prompt_requires_one_coherent_protocol()
     test_meeting_compiler_uses_ingest_generation_profile()

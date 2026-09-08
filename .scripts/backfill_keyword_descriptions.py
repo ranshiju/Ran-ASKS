@@ -9,17 +9,34 @@ locators.  Default mode is a read-only plan; ``--apply`` writes graph.db only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import shlex
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import agent_task
 import graph_lib as gl
 import graph_repair as gr
 import source_locator as sl
 import wiki_locator as wl
-from llm_structured import call_json, configured_model, ingest_mode
+
+
+ingest_mode = agent_task.ingest_backend
+
+
+def call_json(*args, **kwargs):
+    from llm_structured import call_json as api_call_json
+    return api_call_json(*args, **kwargs)
+
+
+def configured_model() -> str:
+    if ingest_mode() != "api":
+        return ""
+    from llm_structured import configured_model as api_configured_model
+    return api_configured_model()
 
 
 MAX_EVIDENCE_CHARS = 2400
@@ -246,6 +263,130 @@ def validate_description(title: str, description: str, evidence: str = "") -> st
     return issue or ""
 
 
+def prepare_agent_batch(candidates: list[dict], batch_size: int = DEFAULT_BATCH_SIZE) -> dict:
+    records = candidates[:batch_size]
+    identity = [
+        {key: record.get(key) for key in ("node", "title", "origin_page", "raw_source")}
+        for record in records
+    ]
+    digest = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+    directory = gl.REPO / "temp" / "keyword-description-backfill"
+    directory.mkdir(parents=True, exist_ok=True)
+    input_path = directory / f"{digest}-batch.json"
+    output_path = directory / f"{digest}-result.json"
+    payload = {
+        "schema": "keyword-description-agent-batch-v1",
+        "records": [
+            {
+                "id": f"K{index}",
+                "node": record["node"],
+                "title": record["title"],
+                "origin_page": record["origin_page"],
+                "raw_source": record["raw_source"],
+                "output_language": evidence_language(record["evidence_quote"]),
+                "evidence_quote": record["evidence_quote"],
+            }
+            for index, record in enumerate(records, start=1)
+        ],
+    }
+    input_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+    )
+    commit = (
+        "INGEST_BACKEND=agent python3 .scripts/backfill_keyword_descriptions.py --apply "
+        f"--agent-input {shlex.quote(str(input_path.relative_to(gl.REPO)))} "
+        f"--agent-result {shlex.quote(str(output_path.relative_to(gl.REPO)))}"
+    )
+    return agent_task.make_task(
+        kind="keyword_description_backfill",
+        transaction_id=f"keyword-description-backfill-{digest}",
+        inputs=[{
+            "name": "evidence_batch", "path": str(input_path.relative_to(gl.REPO)),
+            "role": "source_bound_candidates", "read": "full",
+        }],
+        outputs=[{
+            "name": "descriptions", "path": str(output_path.relative_to(gl.REPO)),
+            "format": "keyword-description-result-v1",
+        }],
+        protocol={
+            "name": "keyword-description-result-v1",
+            "fields": ["descriptions", "uncertain"],
+            "description_fields": ["id", "description", "evidence_id"],
+            "constraints": {
+                "one_decision_per_id": True,
+                "description": "source-bounded, self-contained, source language",
+                "uncertain": "use when evidence is insufficient",
+            },
+            "validator": "backfill_keyword_descriptions.response_schema",
+        },
+        commands={"commit": commit},
+        context={"candidate_count": len(records)},
+    )
+
+
+def apply_agent_result(conn, input_path: Path, result_path: Path) -> dict:
+    payload = json.loads(input_path.read_text(encoding="utf-8"))
+    records = payload.get("records") or []
+    ids = [str(record.get("id") or "") for record in records]
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    if not ids or not response_schema(ids)(result):
+        return {"status": "validation_error", "errors": ["Agent 结果不符合 batch schema"]}
+    by_id = {record["id"]: record for record in records}
+    descriptions = {item["id"]: item["description"].strip() for item in result["descriptions"]}
+    errors = []
+    for item_id, description in descriptions.items():
+        record = by_id[item_id]
+        current = conn.execute(
+            "SELECT title,description FROM nodes WHERE path=? AND type='entity' "
+            "AND entity_subtype='keyword'",
+            (record["node"],),
+        ).fetchone()
+        if not current or not gr.keyword_description_issue(current["title"], current["description"]):
+            errors.append(f"{item_id}: node 不再符合回填资格")
+            continue
+        evidence = _evidence_excerpt(record["raw_source"], record["title"])
+        if not evidence:
+            errors.append(f"{item_id}: Raw locator 已失效")
+            continue
+        issue = validate_description(record["title"], description, evidence)
+        if issue:
+            errors.append(f"{item_id}: {issue}")
+    if errors:
+        return {"status": "validation_error", "errors": errors}
+
+    accepted = []
+    rejected = []
+    for item_id, description in descriptions.items():
+        record = by_id[item_id]
+        gl.add_node_gloss(
+            conn, record["node"], record["origin_page"], record["raw_source"],
+            description, promote=True,
+        )
+        gl.add_node_description_review(
+            conn, record["node"], record["origin_page"], record["raw_source"],
+            "accepted", "", description,
+        )
+        accepted.append({
+            "node": record["node"], "origin_page": record["origin_page"],
+            "source": record["raw_source"], "description": description,
+        })
+    for item_id in result["uncertain"]:
+        record = by_id[item_id]
+        gl.add_node_description_review(
+            conn, record["node"], record["origin_page"], record["raw_source"],
+            "worker_uncertain", "evidence_insufficient",
+        )
+        rejected.append({"node": record["node"], "reason": "worker_uncertain"})
+    conn.commit()
+    return {
+        "status": "completed", "applied": True, "api_calls": 0,
+        "accepted_count": len(accepted), "rejected_count": len(rejected),
+        "accepted": accepted, "rejected": rejected,
+    }
+
+
 def apply_batches(conn, candidates, batch_size=DEFAULT_BATCH_SIZE, max_batches=0):
     accepted = []
     rejected = []
@@ -399,6 +540,8 @@ def main(argv=None):
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--max-batches", type=int, default=0)
     parser.add_argument("--node", action="append", default=[])
+    parser.add_argument("--agent-input", type=Path, default=None)
+    parser.add_argument("--agent-result", type=Path, default=None)
     parser.add_argument(
         "--retry-rejected", action="store_true",
         help="重新评估相同 Raw locator 上已 abstain/拒绝的节点",
@@ -421,12 +564,34 @@ def main(argv=None):
             **{key: value for key, value in plan.items() if key != "candidates"},
         }
         if args.apply and not args.dry_run:
-            summary["result"] = apply_batches(
-                conn,
-                plan["candidates"],
-                args.batch_size,
-                max(0, args.max_batches),
-            )
+            if ingest_mode() == "agent":
+                if bool(args.agent_input) != bool(args.agent_result):
+                    parser.error("--agent-input 与 --agent-result 必须同时提供")
+                if args.agent_input:
+                    try:
+                        input_path = agent_task.resolve_temp_artifact(
+                            gl.REPO, args.agent_input, "keyword-description-backfill",
+                        )
+                        result_path = agent_task.resolve_temp_artifact(
+                            gl.REPO, args.agent_result, "keyword-description-backfill",
+                        )
+                    except ValueError as exc:
+                        parser.error(str(exc))
+                    summary["result"] = apply_agent_result(conn, input_path, result_path)
+                elif plan["candidates"]:
+                    summary["result"] = {
+                        "status": "prepared",
+                        "agent_task": prepare_agent_batch(plan["candidates"], args.batch_size),
+                    }
+                else:
+                    summary["result"] = {"status": "completed", "accepted_count": 0}
+            else:
+                summary["result"] = apply_batches(
+                    conn,
+                    plan["candidates"],
+                    args.batch_size,
+                    max(0, args.max_batches),
+                )
         else:
             summary["sample"] = [
                 {key: item[key] for key in ("node", "title", "origin_page", "raw_source")}

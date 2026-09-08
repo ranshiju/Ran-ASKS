@@ -20,6 +20,7 @@ import json
 import re
 import datetime
 import sys
+from functools import wraps
 from pathlib import Path
 from typing import NamedTuple
 
@@ -107,17 +108,32 @@ def _get_domain_from_path(page_path):
             return domain
     return None
 
+def _graph_db_path_for(args):
+    db = getattr(args, "db", None)
+    if db:
+        return Path(db)
+    page = getattr(args, "page", None)
+    if page:
+        return gl.graph_db_for(page)
+    return gl.GRAPH_DB
+
+
 def _connect_for(args):
     """按 args 选择 graph.db: --db 显式优先;否则按 page 所属域(private→private 库)。
     保持物理隔离:private 页只写 private/graph.db,主库页只写 cross-domain/graph.db。
     """
-    db = getattr(args, "db", None)
-    if db:
-        return gl.connect(db)
-    page = getattr(args, "page", None)
-    if page:
-        return gl.connect(gl.graph_db_for(page))
-    return gl.connect()
+    return gl.connect(_graph_db_path_for(args))
+
+
+def _graph_write_command(command):
+    """Serialize a complete live-graph command before it opens SQLite."""
+    @wraps(command)
+    def locked(args):
+        with gl.graph_writer_lock(_graph_db_path_for(args)):
+            return command(args)
+
+    locked._graph_writer_locked = True
+    return locked
 
 # ===== 谓词 tier 映射 (论文→研究方向 hub 边) =====
 _PREDICATE_TIERS = None  # lazy cache
@@ -650,21 +666,32 @@ def resolve_related_path(page_path, target):
 
 # ===== 机械边提取 =====
 
-def extract_mechanical_edges(page_path):
+def extract_mechanical_edges(page_path, fm=None):
     """从 frontmatter 机械提取边(0 token)。
-    authors[] → 人 --作者--> 论文
+    authors[] → 第一位作者 --第一作者--> 论文，其余 --作者--> 论文
+    venue      → 论文 --发表于--> venue
     related[]  → 论文 --引用--> 目标
     返回 [{subject, predicate, object}, ...]
     """
-    fm = gl.read_frontmatter(page_path)
+    fm = fm if fm is not None else gl.read_frontmatter(page_path)
     edges = []
-    for author in gl.parse_list_field(fm, "authors"):
+    for index, author in enumerate(gl.parse_list_field(fm, "authors")):
         name = extract_name(author)
         if name:
             edges.append({
-                "subject": name, "predicate": "作者", "object": page_path,
+                "subject": name,
+                "predicate": "第一作者" if index == 0 else "作者",
+                "object": page_path,
+                "subject_metadata_kind": "person",
                 "object_is_canonical": True,
             })
+    venue = canonical_venue_name(fm.get("venue", ""))
+    if venue:
+        edges.append({
+            "subject": page_path, "predicate": "发表于", "object": venue,
+            "subject_is_canonical": True,
+            "object_metadata_kind": "venue",
+        })
     for rel in gl.parse_list_field(fm, "related"):
         resolved = resolve_related_path(page_path, rel)
         if resolved:
@@ -677,6 +704,7 @@ def extract_mechanical_edges(page_path):
 
 # ===== 预填模板 =====
 
+@_graph_write_command
 def cmd_prefill(args):
     """生成预填模板:机械边已提取 + 论文摘要 + 待填语义槽。"""
     conn = _connect_for(args)
@@ -899,7 +927,7 @@ def parse_semantic_sections(text):
             if current_section == "三元组" and not triple_like:
                 malformed_triple_lines.append(stripped)
             elif current_section == "概念说明":
-                gloss_parts = [part.strip() for part in stripped.split("|")]
+                gloss_parts = [part.strip() for part in stripped.split("|", 1)]
                 if len(gloss_parts) != 2 or not all(gloss_parts):
                     malformed_gloss_lines.append(stripped)
         elif triple_like:
@@ -921,7 +949,7 @@ def parse_semantic_sections(text):
     )
     concept_gloss_count = sum(
         1 for item in sections.get("概念说明", [])
-        if len(parts := [part.strip() for part in item.split("|")]) == 2
+        if len(parts := [part.strip() for part in item.split("|", 1)]) == 2
         and all(parts)
     )
     diagnostics = {
@@ -937,7 +965,7 @@ def parse_semantic_sections(text):
     return sections, diagnostics
 
 
-def parse_semantic_text(text, page_path):
+def parse_semantic_text(text, page_path, fm=None):
     """解析 LLM 填的语义槽文本。
     返回 (triples, keywords, main_direction, corresponding, cross_directions, direction_predicates)
     triples: [{subject, predicate, object}, ...]
@@ -968,7 +996,7 @@ def parse_semantic_text(text, page_path):
         keywords = list(dict.fromkeys(keywords))[:ADMIN_KEYWORD_LIMIT]
         return triples, keywords, None, set(), [], []
 
-    fm = gl.read_frontmatter(page_path)
+    fm = fm if fm is not None else gl.read_frontmatter(page_path)
     if fm.get("type") == "conference-summary" or "/wiki/conferences/" in f"/{page_path}":
         keywords = []
         # 参会者 → 参会 三元组 (人 → 参会 → 会议)
@@ -1020,38 +1048,10 @@ def parse_semantic_text(text, page_path):
     keywords = []
 
     # 书目与作者由确定性 frontmatter 驱动；仅测试/旧页面缺字段时兼容语义槽。
-    venue = canonical_venue_name(fm.get("venue", ""))
-    if not venue:
-        venue = next((canonical_venue_name(item) for item in sections.get("期刊", [])
-                      if canonical_venue_name(item)), "")
-    if venue:
-        triples.append({
-            "subject": page_path, "predicate": "发表于", "object": venue,
-            "object_metadata_kind": "venue",
-        })
-
     authors = _frontmatter_authors(fm)
     if authors:
-        triples.append({
-            "subject": authors[0], "predicate": "第一作者", "object": page_path,
-            "subject_metadata_kind": "person",
-        })
+        # 作者事实由 extract_mechanical_edges 单点生成；这里只保留导航所需角色。
         corresponding.add(authors[0])
-        for name in authors[1:]:
-            triples.append({
-                "subject": name, "predicate": "作者", "object": page_path,
-                "subject_metadata_kind": "person",
-            })
-        author_keys = {re.sub(r"\s+", "", name).casefold(): name for name in authors}
-        for item in sections.get("通讯作者", []):
-            key = re.sub(r"\s+", "", item).casefold()
-            name = author_keys.get(key)
-            if name and name != authors[0]:
-                triples.append({
-                    "subject": name, "predicate": "通讯作者", "object": page_path,
-                    "subject_metadata_kind": "person",
-                })
-                corresponding.add(name)
     else:
         for item in sections.get("第一作者", []):
             name = item.strip()
@@ -1113,14 +1113,37 @@ def parse_concept_glosses(text):
     return glosses
 
 
-def attach_concept_gloss_sources(glosses, page_path):
+def _best_raw_citation(citations, raw_overrides, *terms):
+    """Select a Raw locator while allowing staged locator companions."""
+    if not raw_overrides:
+        return wl.best_raw_citation(citations, *terms)
+    needles = [str(term).casefold().strip() for term in terms if str(term).strip()]
+    tokens = set().union(*(wl.semantic_overlap_tokens(needle) for needle in needles))
+
+    def score(locator):
+        raw_path, fragment = wl.raw_locator.split_locator(str(locator))
+        target = raw_overrides.get(raw_path) or wl.raw_locator.resolve_path(raw_path)
+        if target is None or wl.raw_locator.locator_status(fragment, target) != "present":
+            return -1, 0
+        excerpt = wl.raw_locator.read_locator_text(target, fragment).casefold()
+        exact = sum(4 for needle in needles if needle and needle in excerpt)
+        overlap = sum(1 for token in tokens if token in excerpt)
+        return exact + overlap, -len(excerpt)
+
+    valid = [str(locator).strip() for locator in citations if str(locator).strip()]
+    return max(valid, key=score) if valid else ""
+
+
+def attach_concept_gloss_sources(
+    glosses, page_path, *, page_file=None, raw_overrides=None,
+):
     """从 Wiki 被引 section 机械选择 Raw locator；无定位说明不进入图。"""
-    page_file = gl.REPO / str(page_path)
+    page_file = Path(page_file) if page_file else gl.REPO / str(page_path)
     if not page_file.suffix:
         page_file = page_file.with_suffix(".md")
     if not page_file.is_file():
         return [], {"located_glosses": 0, "unlocated_glosses": len(glosses)}
-    errors = wl.validate_wiki_page(page_file)
+    errors = wl.validate_wiki_page(page_file, raw_overrides=raw_overrides)
     if errors:
         raise ValueError("Wiki locator 校验失败: " + "; ".join(errors[:5]))
     located = []
@@ -1128,8 +1151,9 @@ def attach_concept_gloss_sources(glosses, page_path):
         _wiki_source, raw_citations = wl.graph_wiki_source(
             page_file, gloss.get("mention", ""), gloss.get("description", "")
         )
-        raw_source = wl.best_raw_citation(
-            raw_citations, gloss.get("mention", ""), gloss.get("description", "")
+        raw_source = _best_raw_citation(
+            raw_citations, raw_overrides,
+            gloss.get("mention", ""), gloss.get("description", "")
         )
         if not raw_source:
             continue
@@ -1144,13 +1168,15 @@ def attach_concept_gloss_sources(glosses, page_path):
     }
 
 
-def attach_wiki_section_sources(triples, page_path):
+def attach_wiki_section_sources(
+    triples, page_path, *, page_file=None, raw_overrides=None,
+):
     """Optionally annotate Wiki-centered edges with a section locator.
 
     Raw citations remain in the Wiki page.  Graph edges do not duplicate them
     into edge_evidence; ``edges.source`` is now only an optional locator.
     """
-    page_file = gl.REPO / str(page_path)
+    page_file = Path(page_file) if page_file else gl.REPO / str(page_path)
     if not page_file.suffix:
         page_file = page_file.with_suffix(".md")
     if not page_file.is_file():
@@ -1158,7 +1184,7 @@ def attach_wiki_section_sources(triples, page_path):
     sections, _definitions = wl.parse_wiki_page(page_file)
     if not any(section.footnote_ids for section in sections):
         return {"located_edges": 0, "unlocated_edges": len(triples)}
-    errors = wl.validate_wiki_page(page_file)
+    errors = wl.validate_wiki_page(page_file, raw_overrides=raw_overrides)
     if errors:
         raise ValueError("Wiki locator 校验失败: " + "; ".join(errors[:5]))
 
@@ -1168,6 +1194,8 @@ def attach_wiki_section_sources(triples, page_path):
             page_file, triple.get("subject", ""), triple.get("object", ""))
         if not wiki_source:
             continue
+        if "#" in wiki_source:
+            wiki_source = f"{page_path}#{wiki_source.split('#', 1)[1]}"
         triple["source"] = wiki_source
         triple.pop("evidence_sources", None)
         triple.pop("evidence_quote", None)
@@ -1578,9 +1606,9 @@ def fill_defaults(triples, fm):
 
 # ===== 页面节点 + alias =====
 
-def upsert_page_node(conn, page_path):
+def upsert_page_node(conn, page_path, fm=None, page_file=None):
     """UPSERT 一个 page/hub/timeline-summary 节点 + alias 自动识别(层1)。"""
-    fm = gl.read_frontmatter(page_path)
+    fm = fm if fm is not None else gl.read_frontmatter(page_path)
     ptype = fm.get("type", "")
     if ptype == "topic-hub":
         node_type = "hub"
@@ -1592,21 +1620,21 @@ def upsert_page_node(conn, page_path):
         node_type = "page"
     title = fm.get("title", Path(page_path).name)
     source_type = fm.get("source_type", "")
-    date = str(fm.get("date", ""))
+    date = str(fm.get("date") or "")
     status = fm.get("status", "current")
     has_raw = 1 if gl.has_raw_source(fm) else 0
     description = hs.read_hub_scope(page_path) if node_type == "hub" else None
     # 写入当前管道版本戳（re_ingest --outdated 据此判断是否需重新摄入）
     gl.ensure_node(conn, page_path, title, node_type, source_type, date, status, has_raw,
                    ingest_version=gl.CURRENT_PIPELINE_VERSION, description=description)
-    aliases = gl.extract_aliases_from_md(page_path)
+    aliases = gl.extract_aliases_from_md(page_file or page_path)
     conflicts = gl.insert_aliases(conn, page_path, aliases)
     return node_type, conflicts
 
 
 # ===== Raw 文档包节点 + Wiki 来源边 =====
 
-def ensure_raw_support_edge(conn, page_path):
+def ensure_raw_support_edge(conn, page_path, fm=None):
     """从 Wiki sources 机械建 Raw 文档包节点和 ``Wiki → 来源 → Raw`` 边。
 
     sources 如 ["academic/raw/works/papers/2010-ltrg/paper.md"]
@@ -1614,7 +1642,7 @@ def ensure_raw_support_edge(conn, page_path):
     → 原件 paper.pdf 与 locator companion paper.md 通过同词干归为一个节点
     → 建 ``page --来源--> raw``；locator 只在 source 自带 ``#...`` 时可选记录。
     """
-    fm = gl.read_frontmatter(page_path)
+    fm = fm if fm is not None else gl.read_frontmatter(page_path)
     sources = gl.parse_list_field(fm, "sources")
     if not sources:
         return []
@@ -1808,16 +1836,19 @@ def _build_subgraph(triples, page_path):
             warns.append({"subject": t.get("subject", ""), "predicate": pred,
                           "object": obj_raw, "issue": "descriptive_phrase"})
         # keyword 裸缩写校验（缩写须在括号内，格式「中文英文(缩写)」）
-        if pred in KW_PREDICATES and is_bare_abbreviation(obj_raw):
+        if pred in CONCEPT_KW_PREDICATES and is_bare_abbreviation(obj_raw):
             warns.append({"subject": t.get("subject", ""), "predicate": pred,
                           "object": obj_raw, "issue": "bare_abbreviation",
                           "field": "object", "value": obj_raw})
-        # 自由边（非 keyword 谓词）裸缩写校验：subject/object 含英文缩写但无括号释义。
+        # 自由边（非 concept keyword 谓词）裸缩写校验：subject/object 含英文缩写但无括号释义。
         # 跳过结构性谓词(包含/相似)：其端点来自命题/概念节点，已在命题谓词或 keyword
         # 谓词审计过，重复检查只会对同一 proposition 的多条包含边重复告警(噪声)。
-        if pred not in KW_PREDICATES and pred not in STRUCTURAL_PREDICATES \
-                and pred not in METADATA_PREDICATES:
+        if pred not in CONCEPT_KW_PREDICATES and pred not in STRUCTURAL_PREDICATES \
+                and pred not in METADATA_PREDICATES \
+                and pred not in PROPOSITION_PREDICATES:
             for _field, _val in (("subject", subj_raw), ("object", obj_raw)):
+                if _field == "subject" and _val == page_path:
+                    continue
                 if _val and is_bare_abbreviation(_val):
                     warns.append({"subject": subj_raw, "predicate": pred,
                                   "object": obj_raw, "issue": "bare_abbreviation",
@@ -2257,20 +2288,66 @@ def is_person_reference(triple, role):
 def merge_nodes(conn, src_node, tgt_node):
     """把 src_node 合并到 tgt_node:迁移边 + 加 alias + 去重 + 删 src 节点。
     用于中英文同名/重复节点合并。返回去重条数。"""
+    if src_node == tgt_node:
+        raise ValueError("merge source and target must differ")
+    if not gl.node_exists(conn, src_node):
+        raise ValueError(f"merge source node does not exist: {src_node}")
+    if not gl.node_exists(conn, tgt_node):
+        raise ValueError(f"merge target node does not exist: {tgt_node}")
+
+    collapsed_edge_ids = [
+        row["id"] for row in conn.execute(
+            "SELECT id FROM edges WHERE "
+            "(subject=? AND object=?) OR (subject=? AND object=?) OR "
+            "(subject=? AND object=?)",
+            (src_node, tgt_node, tgt_node, src_node, src_node, src_node),
+        )
+    ]
     conn.execute("UPDATE edges SET subject=? WHERE subject=?", (tgt_node, src_node))
     conn.execute("UPDATE edges SET object=? WHERE object=?", (tgt_node, src_node))
-    dups = conn.execute(
-        "SELECT subject, predicate, object, MIN(id) as keep_id FROM edges "
-        "WHERE subject=? GROUP BY subject, predicate, object HAVING COUNT(*) > 1",
-        (tgt_node,)
+    for edge_id in collapsed_edge_ids:
+        conn.execute("DELETE FROM edges WHERE id=?", (edge_id,))
+
+    duplicate_groups = conn.execute(
+        "SELECT subject,predicate,object,COALESCE(confidence,'') AS confidence,"
+        "MIN(id) AS keep_id FROM edges WHERE subject=? OR object=? "
+        "GROUP BY subject,predicate,object,COALESCE(confidence,'') HAVING COUNT(*) > 1",
+        (tgt_node, tgt_node),
     ).fetchall()
     dup_count = 0
-    for s, p, o, keep_id in dups:
-        deleted = conn.execute(
-            "DELETE FROM edges WHERE subject=? AND predicate=? AND object=? AND id != ?",
-            (s, p, o, keep_id)
-        )
-        dup_count += deleted.rowcount
+    for group in duplicate_groups:
+        edge_rows = conn.execute(
+            "SELECT id,source,is_sr FROM edges WHERE subject=? AND predicate=? AND object=? "
+            "AND COALESCE(confidence,'')=? ORDER BY id",
+            (group["subject"], group["predicate"], group["object"], group["confidence"]),
+        ).fetchall()
+        keep_id = group["keep_id"]
+        keep_source = str(edge_rows[0]["source"] or "")
+        for edge in edge_rows:
+            if edge["source"]:
+                gl.add_edge_evidence(
+                    conn, keep_id, edge["source"], "", bool(edge["is_sr"]),
+                )
+            if edge["id"] == keep_id:
+                continue
+            if not keep_source and edge["source"]:
+                keep_source = str(edge["source"])
+                conn.execute("UPDATE edges SET source=? WHERE id=?", (keep_source, keep_id))
+            for evidence in conn.execute(
+                "SELECT source,evidence_quote,is_sr FROM edge_evidence WHERE edge_id=?",
+                (edge["id"],),
+            ).fetchall():
+                gl.add_edge_evidence(
+                    conn, keep_id, evidence["source"], evidence["evidence_quote"],
+                    bool(evidence["is_sr"]),
+                )
+            for origin in conn.execute(
+                "SELECT origin_page,source FROM edge_origins WHERE edge_id=?",
+                (edge["id"],),
+            ).fetchall():
+                gl.add_edge_origin(conn, keep_id, origin["origin_page"], origin["source"])
+            conn.execute("DELETE FROM edges WHERE id=?", (edge["id"],))
+            dup_count += 1
     conn.execute(
         "INSERT OR IGNORE INTO aliases (alias, node_path) VALUES (?, ?)",
         (src_node, tgt_node),
@@ -2318,6 +2395,20 @@ def merge_nodes(conn, src_node, tgt_node):
                 "WHEN origin_page=? AND source=? THEN 1 ELSE 0 END WHERE node_path=?",
                 (primary["origin_page"], primary["source"], tgt_node),
             )
+    conn.execute(
+        "UPDATE node_description_reviews SET node_path=? WHERE node_path=?",
+        (tgt_node, src_node),
+    )
+    conn.execute(
+        "UPDATE hub_scope_history SET hub_path=? WHERE hub_path=?",
+        (tgt_node, src_node),
+    )
+    conn.execute(
+        "UPDATE temporal_facts SET subject=? WHERE subject=?", (tgt_node, src_node)
+    )
+    conn.execute(
+        "UPDATE temporal_facts SET object=? WHERE object=?", (tgt_node, src_node)
+    )
     conn.execute("DELETE FROM aliases WHERE node_path=?", (src_node,))
     conn.execute("DELETE FROM node_origins WHERE node_path=?", (src_node,))
     conn.execute("DELETE FROM managed_nodes WHERE node_path=?", (src_node,))
@@ -2441,6 +2532,25 @@ def _compile_knowledge_ir(
     return ir, kir.relations_from_ir(ir)
 
 
+def _page_origin_snapshot(conn, page):
+    relations = {
+        (str(row[0]), str(row[1]), str(row[2]))
+        for row in conn.execute(
+            "SELECT e.subject,e.predicate,e.object FROM edges e "
+            "JOIN edge_origins o ON o.edge_id=e.id WHERE o.origin_page=?",
+            (page,),
+        )
+    }
+    glosses = {
+        (str(row[0]), str(row[1]), str(row[2]))
+        for row in conn.execute(
+            "SELECT node_path,source,description FROM node_glosses WHERE origin_page=?",
+            (page,),
+        )
+    }
+    return relations, glosses
+
+
 def _record_graph_plan(args, ir, inspection, report):
     plan = kir.build_graph_plan(ir, inspection)
     output_path = getattr(args, "graph_plan_out", None)
@@ -2453,9 +2563,57 @@ def _record_graph_plan(args, ir, inspection, report):
     return plan
 
 
-def cmd_ingest(args):
+def _page_file_for(args, page):
+    value = str(getattr(args, "page_file", "") or "").strip()
+    target = Path(value) if value else gl.REPO / f"{page}.md"
+    if not target.is_absolute():
+        target = gl.REPO / target
+    if not target.is_file():
+        raise FileNotFoundError(f"Wiki page file not found: {target}")
+    return target
+
+
+def _staged_raw_overrides(args, fm):
+    value = str(getattr(args, "raw_source_override", "") or "").strip()
+    if not value:
+        return {}
+    target = Path(value)
+    if not target.is_absolute():
+        target = gl.REPO / target
+    if not target.is_file():
+        raise FileNotFoundError(f"Raw source override not found: {target}")
+    sources = gl.parse_list_field(fm, "sources")
+    if not sources:
+        raise ValueError("--raw-source-override requires Wiki frontmatter sources")
+    return {str(sources[0]).split("#", 1)[0]: target}
+
+
+def _route_paper_from_file(conn, page, page_file):
+    """Route a staged paper profile while retaining its final logical page ID."""
+    final_file = gl.REPO / f"{page}.md"
+    if page_file.resolve() == final_file.resolve():
+        return hs.route_paper(conn, page)
+    profile = hs.read_paper_profile(page_file)
+    if profile is None:
+        return {"decision": "invalid", "reason": "missing_direction_profile", "candidates": []}
+    locator_suffix = profile.locator.split("#", 1)[1] if "#" in profile.locator else ""
+    result = hs.route_profile(
+        profile.text, hs.list_hubs(conn, subtype="research-direction"),
+    )
+    result["profile"] = {
+        "page": page,
+        "locator": f"{page}#{locator_suffix}" if locator_suffix else page,
+        "text": profile.text,
+        "raw_citations": list(profile.raw_citations),
+    }
+    return result
+
+
+def _cmd_ingest_locked(args):
     page = args.page.removesuffix(".md")
-    fm = gl.read_frontmatter(page)
+    page_file = _page_file_for(args, page)
+    fm = gl.read_frontmatter(page_file)
+    raw_overrides = _staged_raw_overrides(args, fm)
     direct_ir_path = getattr(args, "knowledge_ir", None)
     semantic_path = getattr(args, "semantic", None)
     legacy_inputs = [
@@ -2479,6 +2637,7 @@ def cmd_ingest(args):
         direct_semantic, direct_glosses = None, None
     structural_relations = _plan_raw_relationship(args, page, fm)
     conn = _connect_for(args)
+    origin_snapshot_before = _page_origin_snapshot(conn, page)
     # --clean: re-ingest 模式，清本页旧边后重建（单事务原子，无风险窗口）
     if getattr(args, "clean", False):
         clean_report = clean_page_edges(conn, page, commit=False)
@@ -2504,17 +2663,17 @@ def cmd_ingest(args):
     integrity = cleanup_orphan_references(conn, commit=False)
     if integrity:
         report["graph_integrity_cleaned"] = integrity
-    node_type, conflicts = upsert_page_node(conn, page)
+    node_type, conflicts = upsert_page_node(conn, page, fm, page_file)
     report.update({"page": page, "node_type": node_type, "alias_conflicts": conflicts})
 
     # Raw 文档包节点 + Wiki→来源→Raw（机械、零 token）
-    raw_nodes = ensure_raw_support_edge(conn, page)
+    raw_nodes = ensure_raw_support_edge(conn, page, fm)
     if raw_nodes:
         report["raw_nodes"] = raw_nodes
 
     # 轻量时态事实：仅对明确会过期的页面类型，按 frontmatter 有效期写入。
     # 普通语义边和 temporal_facts 分表保存，不改变 neighbors/search 的导航语义。
-    temporal_report = sync_page_temporal_fact(conn, page, gl.read_frontmatter(page))
+    temporal_report = sync_page_temporal_fact(conn, page, fm)
     if temporal_report.get("removed") or temporal_report.get("added"):
         report["temporal_facts_removed"] = temporal_report["removed"]
         report["temporal_facts_added"] = temporal_report["added"]
@@ -2523,7 +2682,6 @@ def cmd_ingest(args):
 
     # auto-merge: 检测是否存在与本页 title/alias 同名的 citation-only entity 节点
     # (摄入论文时,若该论文此前作为引文节点存在,自动吸收:迁移引用边+加alias+删引文节点)
-    fm = gl.read_frontmatter(page)
     page_title = fm.get("title", "")
     page_aliases = gl.parse_list_field(fm, "authors")  # 作者不作为论文节点匹配键
     # 从 aliases 表查本页已注册的 alias
@@ -2554,10 +2712,9 @@ def cmd_ingest(args):
 
     if semantic_path or direct_ir is not None:
         # 预填+语义模式
-        fm = gl.read_frontmatter(page)
-        text = (gl.REPO / (page + ".md")).read_text(encoding="utf-8")
+        text = page_file.read_text(encoding="utf-8")
         nav = extract_section_text(text, "Navigation")
-        mechanical = extract_mechanical_edges(page)
+        mechanical = extract_mechanical_edges(page, fm)
         if direct_ir is not None:
             sem_text = ""
             sem_triples = direct_semantic
@@ -2587,10 +2744,21 @@ def cmd_ingest(args):
             }
         else:
             sem_text = Path(semantic_path).read_text(encoding="utf-8")
-            sem_triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = parse_semantic_text(sem_text, page)
+            sem_triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = parse_semantic_text(
+                sem_text, page, fm
+            )
             concept_glosses = parse_concept_glosses(sem_text)
         _is_paper = fm.get("type") == "paper-summary" or page.startswith("academic/wiki/papers/")
         if _is_paper:
+            semantic_bibliography = [
+                triple for triple in sem_triples
+                if triple.get("predicate") in {"发表于", "作者", "第一作者", "通讯作者"}
+            ]
+            sem_triples = [
+                triple for triple in sem_triples if triple not in semantic_bibliography
+            ]
+            if semantic_bibliography:
+                report["semantic_bibliography_ignored"] = len(semantic_bibliography)
             # 新论文不接受语义槽自报方向或通用“研究关键词”标签。方向只由可定位的
             # 研究方向定位句与 Hub Scope 路由；其余有明确谓词的概念边仍可保留。
             retired_triples = [
@@ -2622,7 +2790,7 @@ def cmd_ingest(args):
             if not (t["predicate"] == "作者" and t["subject"] in corresponding)
         ]
         if _is_paper:
-            scope_route = hs.route_paper(conn, page)
+            scope_route = _route_paper_from_file(conn, page, page_file)
             report["hub_scope_route"] = scope_route
             if scope_route.get("decision") == "resolved":
                 hub_path = scope_route["node_id"]
@@ -2653,9 +2821,11 @@ def cmd_ingest(args):
                 _dd["truly_orphan_keywords"] = []
         # 合并 + 可选 Wiki section locator + 补默认值。
         all_triples = mechanical + sem_triples
-        report["edge_locators"] = attach_wiki_section_sources(all_triples, page)
+        report["edge_locators"] = attach_wiki_section_sources(
+            all_triples, page, page_file=page_file, raw_overrides=raw_overrides,
+        )
         concept_glosses, gloss_locator_report = attach_concept_gloss_sources(
-            concept_glosses, page
+            concept_glosses, page, page_file=page_file, raw_overrides=raw_overrides,
         )
         report["node_gloss_locators"] = gloss_locator_report
         fill_defaults(all_triples, fm)
@@ -2727,8 +2897,9 @@ def cmd_ingest(args):
         elif args.triples_json:
             triples = json.loads(args.triples_json)
         # 兼容模式也补默认值(修复 source 填空 bug:语义模式调了 fill_defaults,兼容模式漏调)
-        fm = gl.read_frontmatter(page)
-        report["edge_locators"] = attach_wiki_section_sources(triples, page)
+        report["edge_locators"] = attach_wiki_section_sources(
+            triples, page, page_file=page_file, raw_overrides=raw_overrides,
+        )
         fill_defaults(triples, fm)
         deterministic_count = len(triples) if args.citations else 0
         knowledge_ir_doc, triples = _compile_knowledge_ir(
@@ -2772,20 +2943,50 @@ def cmd_ingest(args):
                 "planned": len(knowledge_ir_doc["structural_relations"]),
                 "added": structural_added,
             }
-        conn.commit()
+        if getattr(args, "plan_only", False):
+            conn.rollback()
+            report["plan_only"] = True
+            report["committed"] = False
+        else:
+            conn.commit()
     except Exception:
         conn.rollback()
         conn.close()
         raise
+    if getattr(args, "plan_only", False):
+        conn.close()
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
     # Hub 动力学只局部刷新可重建的“普通节点→聚类于→Hub”边。生命周期
     # 始终只产候选；embedding 不可用或节点无画像时静默保留原归属。
     try:
-        hub_dynamics = hs.refresh_after_ingest(conn, page)
+        relations_after, glosses_after = _page_origin_snapshot(conn, page)
+        changed_relations = origin_snapshot_before[0] ^ relations_after
+        changed_glosses = origin_snapshot_before[1] ^ glosses_after
+        affected_nodes = {
+            endpoint
+            for subject, _predicate, object_name in changed_relations
+            for endpoint in (subject, object_name)
+            if endpoint != page
+        }
+        affected_nodes.update(node for node, _source, _description in changed_glosses)
+        report["hub_refresh_scope"] = {
+            "mode": "page_origin_delta",
+            "changed_relation_count": len(changed_relations),
+            "changed_gloss_count": len(changed_glosses),
+            "affected_node_count": len(affected_nodes),
+        }
+        hub_dynamics = hs.refresh_after_ingest(
+            conn, page, affected_nodes=sorted(affected_nodes),
+        )
         conn.commit()
-        if hub_dynamics.get("affected_nodes"):
-            report["hub_dynamics"] = hub_dynamics
-    except Exception:
+        report["hub_dynamics"] = hub_dynamics
+    except Exception as exc:
         conn.rollback()
+        report["hub_dynamics"] = {
+            "status": "error", "affected_nodes": [],
+            "errors": [f"{type(exc).__name__}: {exc}"],
+        }
     # 消解 abbreviation-todo：若本次新建节点含全称，自动补 alias 并移除已消解项
     try:
         import sync_keyword_aliases
@@ -2798,14 +2999,27 @@ def cmd_ingest(args):
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
+@_graph_write_command
+def cmd_ingest(args):
+    """Run all live graph access through one database-scoped writer."""
+    return _cmd_ingest_locked(args)
+
+
+@_graph_write_command
 def cmd_merge(args):
     conn = _connect_for(args)
-    dup = merge_nodes(conn, args.src, args.tgt)
-    conn.commit()
-    conn.close()
+    try:
+        dup = merge_nodes(conn, args.src, args.tgt)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     print(json.dumps({"merged": args.src, "into": args.tgt, "dups_removed": dup}, ensure_ascii=False, indent=2))
 
 
+@_graph_write_command
 def cmd_init(args):
     db = getattr(args, "db", None)
     conn = gl.connect(db) if db else gl.connect()
@@ -2826,6 +3040,7 @@ def cmd_init(args):
         print(f"[OK] 数据库已经初始化，已含 {node_count} 个节点；init 不会清空数据: {target}")
 
 
+@_graph_write_command
 def cmd_cleanup_ghosts(args):
     """手动清理 ghost hub（摄入时已自动清扫，此为独立入口）。"""
     conn = getattr(args, 'db', None) and gl.connect(args.db) or gl.connect()
@@ -2839,6 +3054,7 @@ def cmd_cleanup_ghosts(args):
         print("无 ghost hub（所有 type='hub' 节点均有对应 .md）")
 
 
+@_graph_write_command
 def cmd_cleanup_orphans(args):
     """清理无效/孤儿 alias、孤儿边与 FK 违规。"""
     conn = getattr(args, 'db', None) and gl.connect(args.db) or gl.connect()
@@ -2872,6 +3088,9 @@ def main():
     p_pf.set_defaults(func=cmd_prefill)
     p_g = sub.add_parser("ingest", help="ingest 一页建边")
     p_g.add_argument("--page", required=True)
+    p_g.add_argument("--page-file", help="暂存 Wiki 文件；只改变读取位置，不改变 --page 逻辑 ID")
+    p_g.add_argument("--raw-source-override", help="暂存 Raw locator companion，映射 frontmatter 首个 source")
+    p_g.add_argument("--plan-only", action="store_true", help="在 live graph 上生成并校验计划后回滚全部图变更")
     input_group = p_g.add_mutually_exclusive_group()
     input_group.add_argument("--triples", help="LLM 临时片段文件路径(JSON,兼容模式)")
     input_group.add_argument("--triples-json", help="LLM 临时 JSON 字符串(兼容模式)")

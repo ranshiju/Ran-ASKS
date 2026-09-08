@@ -21,11 +21,25 @@ FOOTNOTE_REF_RE = re.compile(r"\[\^(?P<id>[A-Za-z0-9_-]+)\]")
 FOOTNOTE_DEF_RE = re.compile(
     r"^\[\^(?P<id>[A-Za-z0-9_-]+)\]:[ \t]+(?P<locator>.+?)[ \t]*$"
 )
+RAW_HANDLE_RE = re.compile(r"(?<![A-Za-z0-9_])<?RAW#L\d+>?")
+MALFORMED_RAW_FOOTNOTE_RE = re.compile(r"\[\^r\d+\]\d+>")
 RAW_PLACEHOLDER_RE = re.compile(
     r"^(?P<prefix>\[\^[A-Za-z0-9_-]+\]:[ \t]+)RAW(?P<fragment>#\S+)[ \t]*$",
     re.M,
 )
 MAX_RAW_CITATION_CHARS = 8000
+
+
+def semantic_overlap_tokens(value: str) -> set[str]:
+    """Return stable Latin words and CJK bigrams for locator ranking."""
+    text = str(value or "").casefold()
+    tokens = set(re.findall(r"[a-z0-9]{3,}", text))
+    for chunk in re.findall(r"[\u3400-\u9fff]+", text):
+        if len(chunk) <= 2:
+            tokens.add(chunk)
+        else:
+            tokens.update(chunk[index:index + 2] for index in range(len(chunk) - 1))
+    return tokens
 
 
 @dataclass(frozen=True)
@@ -174,7 +188,7 @@ def read_wiki_locator(value: str, section: str = "") -> dict:
 
 def validate_wiki_page(path: Path | str, *, require_citations: bool = False,
                        raw_overrides: dict[str, Path | str] | None = None) -> list[str]:
-    """Run only the three checks required by the Wiki→Raw locator contract."""
+    """Run the closed-loop checks required by the Wiki→Raw locator contract."""
     target = Path(path)
     text = target.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
@@ -192,6 +206,11 @@ def validate_wiki_page(path: Path | str, *, require_citations: bool = False,
             seen_slugs[item.slug] = item.title
     for footnote_id in duplicate_defs:
         errors.append(f"脚注定义重复: [^{footnote_id}]")
+
+    for handle in sorted(set(RAW_HANDLE_RE.findall(text))):
+        errors.append(f"Wiki 残留未编译 RAW handle: {handle}")
+    for fragment in sorted(set(MALFORMED_RAW_FOOTNOTE_RE.findall(text))):
+        errors.append(f"Wiki 含残缺 RAW 脚注引用: {fragment}")
 
     used_ids = tuple(dict.fromkeys(
         match.group("id")
@@ -243,10 +262,8 @@ def best_cited_section(path: Path | str, *terms: str) -> WikiSection | None:
     def score(item: WikiSection) -> tuple[int, int, int]:
         haystack = item.text.casefold()
         exact = sum(3 for needle in needles if needle and needle in haystack)
-        tokens = []
-        for needle in needles:
-            tokens.extend(re.findall(r"[a-z0-9]{3,}|[\u3400-\u9fff]{2,}", needle))
-        overlap = sum(1 for token in set(tokens) if token in haystack)
+        tokens = set().union(*(semantic_overlap_tokens(needle) for needle in needles))
+        overlap = sum(1 for token in tokens if token in haystack)
         return exact + overlap, item.level, -item.start_line
 
     return max(candidates, key=score)
@@ -269,9 +286,7 @@ def graph_wiki_source(path: Path | str, *terms: str) -> tuple[str, list[str]] | 
 def best_raw_citation(citations, *terms: str) -> str:
     """在已选 Wiki section 的脚注中，以文本重合选最贴近概念说明的一条。"""
     needles = [str(term).casefold().strip() for term in terms if str(term).strip()]
-    tokens = set()
-    for needle in needles:
-        tokens.update(re.findall(r"[a-z0-9]{3,}|[\u3400-\u9fff]{2,}", needle))
+    tokens = set().union(*(semantic_overlap_tokens(needle) for needle in needles))
 
     def score(locator: str) -> tuple[int, int]:
         path, fragment = raw_locator.split_locator(locator)

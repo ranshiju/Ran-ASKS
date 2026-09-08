@@ -20,6 +20,12 @@ guarded comic image generation, more faithful agent-ingestion recovery, explicit
 meeting-source evidence rules, and child-specific Hub routing. This update does
 not alter a frozen paper artifact.
 
+The 2026-09-08 development update adds reviewed image-document ingestion and
+clarifies provenance, risk gates, independent Agent/human review, and cleanup
+ordering. It keeps the existing release number and creates no new tag or paper
+artifact boundary. The Markdown includes a dated engineering addendum; the PDF
+retains the earlier reviewed layout and appends the same addendum for printing.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -45,6 +51,11 @@ Word 版式，用于下载和打印；仓库不依赖 GitHub 的 PDF 预览器�
 同步到 `v0.3.0` 边界；2026年9月4日更新覆盖 `v0.4.0`：受控漫画生成、更加忠实的
 Agent 摄入恢复、显式会议来源证据规则和子 Hub 特异性路由。本次更新不改变冻结
 论文数据产物。
+
+2026年9月8日的开发更新补充图片文档摄入、来源溯源、风险闸门、Agent／人工复核
+区别与完成后的清理顺序。现有发布版本号保持不变，不创建新标签或论文产物边界。
+Markdown 增加带日期的工程补充；PDF 保留之前已审阅的版式，并在末尾附上同一补充，
+用于下载和打印。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

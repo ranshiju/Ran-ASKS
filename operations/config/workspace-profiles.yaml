@@ -1,0 +1,66 @@
+version: 1
+
+states:
+  - planned
+  - active
+  - waiting
+  - blocked
+  - done
+  - cancelled
+
+profiles:
+  generic:
+    label: 通用工作
+    item_types: [task, project, milestone, follow_up]
+    memory_kinds: [decision, lesson, context, preference]
+    profile_schema:
+      required: [summary, keywords, stage, active_questions]
+      fields:
+        summary: {type: string}
+        keywords: {type: string_list}
+        stage:
+          type: enum
+          values: [planning, execution, review, maintenance, paused, unknown]
+        active_questions: {type: string_list}
+
+  research:
+    label: 科研工作
+    item_types: [question, experiment, analysis, manuscript, milestone]
+    memory_kinds: [decision, insight, literature_judgment, research_direction, context]
+    profile_schema:
+      required: [topic, keywords, stage, active_questions]
+      fields:
+        topic: {type: string}
+        keywords: {type: string_list}
+        stage:
+          type: enum
+          values: [ideation, writing, experiment, revision, submission, unknown]
+        active_questions: {type: string_list}
+
+  role_work:
+    label: 行政与管理工作
+    item_types: [task, project, meeting, coordination, decision, proposal, milestone]
+    memory_kinds: [decision, policy, stakeholder, coordination, lesson, context]
+    profile_schema:
+      required: [remit, stakeholders, stage, active_priorities]
+      fields:
+        remit: {type: string}
+        stakeholders: {type: string_list}
+        stage:
+          type: enum
+          values: [planning, execution, coordination, review, maintenance, paused, unknown]
+        active_priorities: {type: string_list}
+
+  writing:
+    label: 写作工作
+    item_types: [outline, draft, revision, review, delivery, milestone]
+    memory_kinds: [decision, feedback, style, audience, lesson, context]
+    profile_schema:
+      required: [deliverable, audience, stage, open_questions]
+      fields:
+        deliverable: {type: string}
+        audience: {type: string_list}
+        stage:
+          type: enum
+          values: [outline, drafting, revising, reviewing, delivered, paused, unknown]
+        open_questions: {type: string_list}

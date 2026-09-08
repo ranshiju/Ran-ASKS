@@ -1,10 +1,10 @@
-updated: '2026-09-03'
+updated: '2026-09-07'
 source: user-provided-provider-catalog
 enforced: false
 notes:
   - 该清单用于模型选择与配置审计，不作为运行时白名单；provider 模型上下线不应阻断摄入。
   - 命题抽取推荐 MiniMax-M3：短 JSON、fast reasoning、450 token 上限；失败后回退主模型。
-  - 视觉产物 QA 推荐 GLM-4.6V：覆盖图像与页面布局理解并输出结构化 JSON；调用失败时回退同系列 GLM-4.5V。
+  - 图片 OCR 与视觉 QA 经当前 endpoint 对照及用户确认后使用 GLM-5.3-Flash + low；兼容回退 GLM-4.6V。两类任务独立推理/输出预算，不联动可编辑 PPT 重建。
   - GLM-5.3-Flash 当前 endpoint 于 2026-09-01 实测 reasoning_effort 接受 low/high、拒绝 medium；摄入映射 fast/standard=low、deep/xdeep=high。
   - Sub-Agent 模型由离线策略按任务能力、稳定性、延迟和成本选择，运行中的 Agent 不得自行换模型；pending_evaluation 推荐不自动生效。
 sub_agent_policy:
@@ -16,12 +16,14 @@ sub_agent_policy:
   visual_model_policy: preserve_existing_visual_qa
   embedding_model_policy: preserve_existing_embed_configuration
 preferred:
+  image_ocr: GLM-5.3-Flash
   meeting_compiler: GLM-5.3-Flash
   ingest_proposition: MiniMax-M3
-  visual_qa: GLM-4.6V
+  visual_qa: GLM-5.3-Flash
   semantic_recovery_agent: GLM-5.3-Flash
 fallback:
-  visual_qa: GLM-4.5V
+  image_ocr: GLM-4.6V
+  visual_qa: GLM-4.6V
 image_generation:
   status: pending_probe
   api_profile: COMIC_IMAGE
@@ -66,15 +68,49 @@ agent_profiles:
     required_capabilities: [structured_json, multi_turn_tool_use, evidence_bounded_repair]
     activation: inherit_primary_model_until_evaluated
 visual_capabilities:
+  visual_qa_probe:
+    date: '2026-09-07'
+    endpoint: inherited_LLM_API_BASE
+    selected: GLM-5.3-Flash
+    reasoning_effort: low
+    activation: explicit_user_confirmation
+    scope: three_fixed_synthetic_pages_with_existing_qa_json_contract
+    observations:
+      - GLM-5.3-Flash 的 low/high 六次调用完成，均检出预设实质缺陷；正常页面有额外软告警，prompt-v2 将纯审美建议留在 summary。
+      - GLM-4.6V 一次超时，一次对明显缺陷页返回 pass；仅作兼容备用，不是真值裁判。
+      - 小样本不构成整体准确率排名；可编辑 PPT 几何重建未在本次切换范围。
+  image_ocr_probe:
+    date: '2026-09-07'
+    endpoint: inherited_LLM_API_BASE
+    selected: GLM-5.3-Flash
+    reasoning_effort: low
+    scope: synthetic_text_image_and_inbox_form
+    results:
+      - model: GLM-5.3-Flash
+        status: usable_low_reasoning_transcription_with_source_bound_receipt
+      - model: GLM-4.6V
+        status: usable_transcription_requires_visual_review
+      - model: PaddleOCR-VL-1.5
+        status: http_500_on_synthetic_image
+      - model: DeepSeek-OCR
+        status: timeout_at_65_seconds_on_synthetic_image
+    notes:
+      - 当前 provider 探测结果，不是模型能力排名；OCR/QA 分别经用户确认切换，不自动改写主语义或重建模型策略。
   contracted:
+    - model: GLM-5.3-Flash
+      role: primary_visual_qa_and_image_ocr
+      modalities: [text, image]
+      capabilities: [ocr, page_layout_analysis, structured_json]
+      evidence: local_ocr_and_visual_qa_endpoint_comparison
+      probe_status: tested_and_user_approved
     - model: GLM-4.6V
-      role: primary_visual_qa
+      role: fallback_visual_qa_and_image_ocr
       modalities: [text, image]
       capabilities: [page_layout_analysis, structured_json]
       evidence: local_visual_qa_contract
       probe_status: previously_used
     - model: GLM-4.5V
-      role: fallback_visual_qa
+      role: fallback_visual_reconstruction
       modalities: [text, image]
       capabilities: [page_layout_analysis, structured_json]
       evidence: local_visual_qa_contract

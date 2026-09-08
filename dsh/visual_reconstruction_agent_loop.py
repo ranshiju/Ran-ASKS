@@ -45,7 +45,9 @@ def _path_from_intent(intent: str) -> str | None:
 class VisualReconstructionAgentLoop:
     """Write-capable visual reconstruction loop with an explicit tool seam."""
 
-    def __init__(self, mode: str = "agent"):
+    def __init__(self, mode: str = "api"):
+        if mode != "api":
+            raise ValueError("DSH VisualReconstructionAgentLoop 仅支持 API backend")
         self.mode = mode
         self.registry = ToolRegistry()
         self.session_log = SessionLog()
@@ -112,23 +114,6 @@ class VisualReconstructionAgentLoop:
     ) -> VisualReconstructionTurnResult:
         self.session_log.append("user/message", {"role": "user", "content": intent})
         artifact_path = path or _path_from_intent(intent)
-        if self.mode == "agent":
-            return VisualReconstructionTurnResult(
-                session_id=self.session_log.session_id,
-                status="agent_required",
-                handoff={
-                    "status": "agent_required",
-                    "tool": "visual_to_editable_ppt",
-                    "path_candidate": artifact_path or "",
-                    "output_path_candidate": output_path or "",
-                    "tool_schema": self.registry.schemas()[0],
-                    "instruction": (
-                        "确认源路径、输出路径、覆盖权限和远程上传权限后调用 "
-                        "visual_to_editable_ppt"
-                    ),
-                },
-                snapshot=self._snapshot(),
-            )
         if not artifact_path:
             return VisualReconstructionTurnResult(
                 session_id=self.session_log.session_id,

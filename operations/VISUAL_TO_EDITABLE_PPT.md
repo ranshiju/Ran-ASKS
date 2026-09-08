@@ -113,8 +113,7 @@ VISUAL_RECONSTRUCTION_* → VISUAL_QA_* → LLM_API_*
 
 普通“视觉检查”“PDF 页面排版”“论文摄入”“查询 PDF 作者”不会触发转换。
 
-Agent 模式先返回 tool schema handoff，要求确认源路径、输出路径、覆盖权限和远程上传权限；
-API/direct 模式在路径齐备时才执行。
+当前宿主 Agent 确认源路径、输出路径、覆盖权限和远程上传权限后直接调用底层能力，不进入 DSH；API backend 仅在路径齐备时通过 `VisualReconstructionAgentLoop` 执行。
 
 ## 验证
 

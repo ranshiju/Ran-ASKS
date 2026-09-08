@@ -19,6 +19,10 @@ def playbook_fixture():
         path.write_text(
             "# fixture\n\n"
             "---\n"
+            "## DSH 摄入\n\n"
+            "**触发词**：「用 DSH 摄入 inbox」\n\n"
+            "使用 API DSH。\n\n"
+            "---\n"
             "## 摄入\n\n"
             "**触发词**：「摄入 inbox」\n\n"
             "使用 ingest_paper.py。\n\n"
@@ -42,6 +46,21 @@ def test_dispatch_hit_ingest():
     assert result is not None
     assert "ingest_paper.py" in result
     assert "触发词" in result
+    assert "API DSH" not in result
+
+
+def test_dispatch_prefers_explicit_specialized_trigger():
+    with playbook_fixture():
+        result = module.dispatch("请用 DSH 摄入 inbox")
+    assert result is not None
+    assert "API DSH" in result
+    assert "使用 ingest_paper.py" not in result
+
+
+def test_dispatch_rejects_overly_short_reverse_substring():
+    with playbook_fixture():
+        result = module.dispatch("摄入")
+    assert result is None
 
 
 def test_dispatch_hit_update_docs():
@@ -55,6 +74,14 @@ def test_dispatch_no_match():
     with playbook_fixture():
         result = module.dispatch("查询论文")
     assert result is None
+
+
+def test_real_playbook_dispatches_class_meeting_proposal_to_workspace_items():
+    result = module.dispatch("班子会提案：新增实验室空间安排")
+    assert result is not None
+    assert "projects/科研副主任工作区" in result
+    assert "workspace proposal" in result
+    assert "不触发会议纪要摄入" in result
 
 
 def test_dispatch_short_query():
@@ -76,8 +103,11 @@ def test_list_entries():
 
 def main():
     test_dispatch_hit_ingest()
+    test_dispatch_prefers_explicit_specialized_trigger()
+    test_dispatch_rejects_overly_short_reverse_substring()
     test_dispatch_hit_update_docs()
     test_dispatch_no_match()
+    test_real_playbook_dispatches_class_meeting_proposal_to_workspace_items()
     test_dispatch_short_query()
     test_list_entries()
     print("playbook dispatch regression: PASS")

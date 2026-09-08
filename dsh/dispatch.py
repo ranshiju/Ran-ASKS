@@ -1,4 +1,4 @@
-"""dispatch.py — DSH 工作流选择器。
+"""dispatch.py — API backend 的 DSH 工作流选择器。
 
 根据用户意图选择 visual/query/ingest/research loop：
 - 显式图片/PDF 转可编辑 PPT → VisualReconstructionAgentLoop
@@ -80,8 +80,10 @@ def _needs_visual_context(text: str) -> bool:
     )
 
 
-def dispatch_loop(intent: str, mode: str = "agent"):
+def dispatch_loop(intent: str, mode: str = "api"):
     """返回适合当前意图的 DSH loop 实例。"""
+    if mode != "api":
+        raise ValueError("DSH dispatcher 仅支持 API backend")
     text = (intent or "").strip().lower()
     if any(k in text for k in VISUAL_RECONSTRUCTION_INTENTS):
         return VisualReconstructionAgentLoop(mode=mode)

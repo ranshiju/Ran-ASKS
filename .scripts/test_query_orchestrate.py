@@ -3,8 +3,8 @@
 
 验证点：
 - stage/mode/read_sources 字段存在且默认值正确
-- API 模式下 STAGE_ACTIONS allowlist 生效（start 不许 read_section, answer 不许读）
-- agent 模式下 stage 守卫不生效（行为不变）
+- STAGE_ACTIONS allowlist 生效（start 不许 read_section, answer 不许读）
+- 旧 agent mode 被拒绝，宿主 Agent 不进入此内部循环
 - read_sources 字段可读写且序列化正确
 - 既有守卫（非法动作/重复/预算/循环）不受影响
 """
@@ -35,7 +35,7 @@ def test_new_fields_exist():
     """stage/mode/read_sources 字段存在，默认值正确。"""
     s = QuerySession(query="q", query_type="simple")
     assert s.stage == "start"
-    assert s.mode == "agent"
+    assert s.mode == "api"
     assert s.read_sources == []
 
 
@@ -125,24 +125,17 @@ def test_api_mode_answer_blocks_all_reads():
     assert deny2 and deny2.startswith("STAGE_GUARD"), f"answer 阶段应拦截 read_section，实际: {deny2}"
 
 
-def test_agent_mode_ignores_stage_guard():
-    """agent 模式下 stage 守卫不生效（行为不变）。"""
-    s = QuerySession(query="q", query_type="t", stage="start", mode="agent")
-    # start 阶段的 read_section 在 agent 模式下不应被 STAGE_GUARD 拦截
-    deny = s.deny_reason({"action": "read_section", "input": {"page": "demo.md", "section": "Content"}})
-    assert deny is None or not deny.startswith("STAGE_GUARD"), f"agent 模式不应触发 STAGE_GUARD，实际: {deny}"
-
-
-def test_agent_mode_answer_allows_reads():
-    """agent 模式 answer 阶段仍允许读（不强制 stage）。"""
-    s = QuerySession(query="q", query_type="t", stage="answer", mode="agent")
-    deny = s.deny_reason({"action": "graph_search", "input": {}})
-    assert deny is None, f"agent 模式 answer 不应拦截，实际: {deny}"
+def test_agent_mode_is_rejected():
+    try:
+        QuerySession(query="q", query_type="t", mode="agent")
+        raise AssertionError("query_orchestrate must reject the Agent backend")
+    except ValueError as exc:
+        assert "API backend" in str(exc)
 
 
 def test_existing_guards_unaffected():
-    """既有守卫（非法动作/重复/预算/循环）在 agent 模式仍正常工作。"""
-    s = QuerySession(query="q", query_type="t")
+    """既有守卫（非法动作/重复/预算/循环）仍正常工作。"""
+    s = QuerySession(query="q", query_type="t", stage="evidence")
     assert s.deny_reason({"action": "invalid_action", "input": {}}).startswith("非法动作")
     s.record_visit("read_section", {"page": "demo.md", "section": "Navigation"})
     assert s.deny_reason({"action": "read_section", "input": {"page": "demo.md", "section": "Navigation"}}).startswith("ACTION_ALREADY_VISITED")
@@ -195,7 +188,7 @@ def test_api_mode_evidence_allows_read_raw():
 
 def test_read_raw_repeat_denied():
     """同一 locator 的 read_raw 不重复执行。"""
-    s = QuerySession(query="q", query_type="t")
+    s = QuerySession(query="q", query_type="t", stage="evidence")
     s.record_visit("read_raw", {"locator": "raw/demo.md"})
     deny = s.deny_reason({"action": "read_raw", "input": {"locator": "raw/demo.md"}})
     assert deny and deny.startswith("ACTION_ALREADY_VISITED"), f"重复 read_raw 应拦截，实际: {deny}"

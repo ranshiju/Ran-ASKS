@@ -11,6 +11,7 @@ import difflib
 import hashlib
 import json
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -26,6 +27,7 @@ SCRIPTS = REPO / ".scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import graph_lib as gl
+import agent_task
 import query_actions as qa
 import source_locator as sl
 
@@ -56,7 +58,9 @@ FACT_RELATIONS = {"grounded_in", "raised_by", "about", "motivated_by", "answered
 QUESTION_CUES = re.compile(
     r"open question|open problem|future work|future research|remains? (?:an? )?open|"
     r"remains? unclear|not yet (?:known|understood|resolved)|further (?:work|research)|"
-    r"leave .*? for future|it would be interesting|开放问题|未来工作|未来研究|"
+    r"leave .*? for future|it would be interesting|"
+    r"it (?:is|may be|could be|would be) an? (?:interesting|important) future "
+    r"(?:study|direction|research)|开放问题|未来工作|未来研究|"
     r"仍(?:然)?不清楚|尚未(?:解决|理解|明确)|有待(?:研究|解决|验证)|值得进一步",
     re.I,
 )
@@ -557,7 +561,62 @@ recommended_disposition(new_thread/merge/resolved/parked/reject), duplicate_targ
 {compact}"""
 
 
-def run_assessment(packet: dict) -> dict:
+def _agent_semantic_task(kind: str, packet: dict, *, transaction_id: str = "",
+                         commit_command: str = "") -> dict:
+    packet_hash = hashlib.sha256(
+        json.dumps(packet, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    transaction_id = transaction_id or f"frontier-{kind}-{packet_hash[:16]}"
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", transaction_id).strip("-.")
+    directory = REPO / "temp" / "frontier-agent"
+    directory.mkdir(parents=True, exist_ok=True)
+    packet_path = directory / f"{safe_id}-packet.json"
+    output_path = directory / f"{safe_id}-{kind}.json"
+    packet_path.write_text(
+        json.dumps(packet, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+    )
+    fields = (
+        sorted({
+            "canonical_question", "kb_state", "kb_summary", "residual_gaps",
+            "value_reason", "academic", "specific", "recommended_disposition",
+            "duplicate_target",
+        })
+        if kind == "assessment" else
+        sorted({
+            "kb_state", "answer", "supported_claims", "derived_claims",
+            "residual_gaps", "coverage_note",
+        })
+    )
+    task = agent_task.make_task(
+        kind=f"frontier_{kind}",
+        transaction_id=transaction_id,
+        inputs=[{
+            "name": "kb_packet", "path": str(packet_path.relative_to(REPO)),
+            "role": "bounded_wikigraph_evidence", "read": "full",
+        }],
+        outputs=[{
+            "name": kind, "path": str(output_path.relative_to(REPO)),
+            "format": f"frontier-{kind}-v1",
+        }],
+        protocol={
+            "name": f"frontier-{kind}-v1",
+            "fields": fields,
+            "evidence_boundary": "supported claims may cite only packet anchors.raw",
+            "validator": f"frontier.{kind}_schema",
+        },
+        commands={"commit": commit_command} if commit_command else {},
+        context={"packet_sha256": packet_hash},
+    )
+    return {"ok": False, "status": "prepared", "agent_task": task}
+
+
+def run_assessment(packet: dict, *, transaction_id: str = "",
+                   commit_command: str = "") -> dict:
+    if agent_task.query_backend() == "agent":
+        return _agent_semantic_task(
+            "assessment", packet, transaction_id=transaction_id,
+            commit_command=commit_command,
+        )
     import llm_structured as llm
     return llm.call_json(
         assessment_prompt(packet), assessment_schema,
@@ -618,7 +677,13 @@ residual_gaps(字符串数组), coverage_note。
 {compact}"""
 
 
-def run_answer(packet: dict) -> dict:
+def run_answer(packet: dict, *, transaction_id: str = "",
+               commit_command: str = "") -> dict:
+    if agent_task.query_backend() == "agent":
+        return _agent_semantic_task(
+            "answer", packet, transaction_id=transaction_id,
+            commit_command=commit_command,
+        )
     import llm_structured as llm
     return llm.call_json(
         answer_prompt(packet), answer_schema,
@@ -736,7 +801,26 @@ def answer_question(root: Path, record_id: str, topk: int = 6, *, no_ai: bool = 
         write_record(root, record)
         rebuild_index(root)
         return {"id": record_id, "status": "pending", "kb_state": record["kb_state"]}
-    result = (answer_fn or run_answer)(packet)
+    if answer_fn:
+        result = answer_fn(packet)
+    else:
+        root_option = (
+            "" if root.resolve() == DEFAULT_ROOT.resolve()
+            else f" --root {shlex.quote(str(root))}"
+        )
+        packet_path = (
+            REPO / "temp" / "frontier-agent"
+            / f"frontier-answer-{record_id}-packet.json"
+        )
+        result = run_answer(
+            packet,
+            transaction_id=f"frontier-answer-{record_id}",
+            commit_command=(
+                f"python3 .scripts/frontier.py{root_option} answer {record_id} "
+                f"--answer-file temp/frontier-agent/frontier-answer-{record_id}-answer.json "
+                f"--packet-file {packet_path.relative_to(REPO)}"
+            ),
+        )
     if result.get("ok"):
         return apply_answer(root, record, packet, result["parsed"])
     record["answer_status"] = "pending"
@@ -744,8 +828,12 @@ def answer_question(root: Path, record_id: str, topk: int = 6, *, no_ai: bool = 
     record["updated_at"] = now_iso()
     write_record(root, record)
     rebuild_index(root)
-    return {"id": record_id, "status": "pending", "kb_state": record["kb_state"],
-            "reason": result.get("status", "model_unavailable")}
+    pending = {"id": record_id, "status": result.get("status", "pending"),
+               "kb_state": record["kb_state"],
+               "reason": result.get("status", "model_unavailable")}
+    if result.get("agent_task"):
+        pending["agent_task"] = result["agent_task"]
+    return pending
 
 
 def new_question(question: str, origin_kind: str, packet: dict,
@@ -986,10 +1074,25 @@ def cmd_ask(args) -> int:
     assessment_result = None
     applied = None
     if args.assessment_file:
-        assessment = json.loads(Path(args.assessment_file).read_text(encoding="utf-8"))
+        assessment_path = agent_task.resolve_temp_artifact(
+            REPO, args.assessment_file, "frontier-agent",
+        )
+        assessment = json.loads(assessment_path.read_text(encoding="utf-8"))
         applied = apply_assessment(root, question_page, assessment, promote=not args.no_promote)
     elif not args.no_ai:
-        assessment_result = run_assessment(packet)
+        root_option = (
+            "" if root.resolve() == DEFAULT_ROOT.resolve()
+            else f" --root {shlex.quote(str(root))}"
+        )
+        assessment_result = run_assessment(
+            packet,
+            transaction_id=f"frontier-assessment-{question_page['id']}",
+            commit_command=(
+                f"python3 .scripts/frontier.py{root_option} assess {question_page['id']} "
+                f"--assessment-file temp/frontier-agent/"
+                f"frontier-assessment-{question_page['id']}-assessment.json"
+            ),
+        )
         if assessment_result.get("ok"):
             applied = apply_assessment(root, question_page, assessment_result["parsed"], promote=not args.no_promote)
         else:
@@ -1010,9 +1113,9 @@ def cmd_ask(args) -> int:
     }
     if assessment_result and not assessment_result.get("ok"):
         result["assessment"] = {
-            "status": assessment_result.get("status"),
-            "error": assessment_result.get("error", ""),
-            "prompt": assessment_result.get("prompt", "") if assessment_result.get("status") == "agent_required" else "",
+            key: assessment_result[key]
+            for key in ("status", "error", "agent_task")
+            if assessment_result.get(key) is not None
         }
     return print_json(result)
 
@@ -1022,7 +1125,10 @@ def cmd_assess(args) -> int:
     intake, _ = find_record(root, args.record_id)
     if intake["kind"] not in {"question", "intake", "thread"}:
         raise ValueError("assess 只接受 Question Page")
-    assessment = json.loads(Path(args.assessment_file).read_text(encoding="utf-8"))
+    assessment_path = agent_task.resolve_temp_artifact(
+        REPO, args.assessment_file, "frontier-agent",
+    )
+    assessment = json.loads(assessment_path.read_text(encoding="utf-8"))
     return print_json(apply_assessment(root, intake, assessment, promote=not args.no_promote))
 
 
@@ -1264,8 +1370,22 @@ def split_question_pages(root: Path) -> dict:
 
 
 def cmd_answer(args) -> int:
-    return print_json(answer_question(resolve_root(args.root), args.record_id, args.topk,
-                                      no_ai=args.no_ai))
+    root = resolve_root(args.root)
+    if args.answer_file:
+        record, _ = find_record(root, args.record_id)
+        answer_path = agent_task.resolve_temp_artifact(
+            REPO, args.answer_file, "frontier-agent",
+        )
+        packet = (
+            json.loads(agent_task.resolve_temp_artifact(
+                REPO, args.packet_file, "frontier-agent",
+            ).read_text(encoding="utf-8"))
+            if args.packet_file else
+            build_kb_packet(record.get("question") or record["title"], root, args.topk)
+        )
+        answer = json.loads(answer_path.read_text(encoding="utf-8"))
+        return print_json(apply_answer(root, record, packet, answer))
+    return print_json(answer_question(root, args.record_id, args.topk, no_ai=args.no_ai))
 
 
 def cmd_migrate_questions(args) -> int:
@@ -1299,7 +1419,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_ask)
 
     p = sub.add_parser("assess"); p.add_argument("record_id"); p.add_argument("--assessment-file", required=True); p.add_argument("--no-promote", action="store_true"); p.set_defaults(func=cmd_assess)
-    p = sub.add_parser("answer"); p.add_argument("record_id"); p.add_argument("--topk", type=int, default=6); p.add_argument("--no-ai", action="store_true"); p.set_defaults(func=cmd_answer)
+    p = sub.add_parser("answer"); p.add_argument("record_id"); p.add_argument("--topk", type=int, default=6); p.add_argument("--no-ai", action="store_true"); p.add_argument("--answer-file", default=""); p.add_argument("--packet-file", default=""); p.set_defaults(func=cmd_answer)
     p = sub.add_parser("migrate-questions"); p.set_defaults(func=cmd_migrate_questions)
     p = sub.add_parser("split-questions"); p.set_defaults(func=cmd_split_questions)
     p = sub.add_parser("review"); p.add_argument("record_id"); p.add_argument("--status", choices=sorted(STATUSES - {"captured"}), required=True); p.add_argument("--reviewer", default="user"); p.set_defaults(func=cmd_review)

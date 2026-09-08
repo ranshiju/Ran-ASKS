@@ -34,6 +34,39 @@ Abstract
     ]
 
 
+def test_publisher_wrapper_and_review_label_are_not_authors():
+    raw = """# COMMUNICATIONS PHYSICS
+
+REVIEW ARTICLE
+
+https://doi.org/10.1038/s42005-019-0152-6
+
+OPEN
+
+# Complex networks from classical to quantum
+
+Jacob Biamonte <sup>1</sup>, Mauro Faccin<sup>2</sup> & Manlio De Domenico<sup>3</sup>
+
+Recent progress in applying complex network theory begins here.
+"""
+    assert extract_authors_from_text(raw) == [
+        "Jacob Biamonte", "Mauro Faccin", "Manlio De Domenico",
+    ]
+
+
+def test_initials_and_multiword_surname_particle_remain_one_author():
+    raw = """# Energy as a Detector of Nonlocality of Many-Body Spin Systems
+
+J. Tura,<sup>1,2</sup> G. De las Cuevas,<sup>2,3</sup> R. Augusiak,<sup>4</sup> M. Lewenstein,<sup>1,5</sup> A. Acín,<sup>1,5</sup> and J. I. Cirac<sup>2</sup>
+
+<sup>1</sup>ICFO-Institut de Ciencies Fotoniques, The Barcelona Institute of Science and Technology
+"""
+    assert extract_authors_from_text(raw) == [
+        "J. Tura", "G. De las Cuevas", "R. Augusiak", "M. Lewenstein",
+        "A. Acín", "J. I. Cirac",
+    ]
+
+
 def test_blank_after_author_block_stops_abstract_words():
     raw = """# Deep-neural-network solution
 
@@ -196,9 +229,17 @@ def test_paper_metadata_edges_come_from_frontmatter_not_weak_llm_slots():
                 "第一作者:\n错误作者\n通讯作者:\n（wiki 未提供）\n"
                 "三元组:\n本论文 | 核心方法 | hybrid算法\n"
             )
-            triples, *_ = graph_ingest.parse_semantic_text(semantic, page_rel)
+            semantic_triples, *_ = graph_ingest.parse_semantic_text(semantic, page_rel)
+            mechanical = graph_ingest.extract_mechanical_edges(
+                page_rel, graph_ingest.gl.read_frontmatter(page_rel),
+            )
         finally:
             graph_ingest.gl.REPO = old_repo
+        assert not [
+            triple for triple in semantic_triples
+            if triple["predicate"] in {"第一作者", "作者", "通讯作者", "发表于"}
+        ]
+        triples = mechanical + semantic_triples
         metadata = {(t["subject"], t["predicate"], t["object"]) for t in triples
                     if t["predicate"] in {"第一作者", "作者", "通讯作者", "发表于"}}
         assert ("Alice Smith", "第一作者", page_rel) in metadata
@@ -566,6 +607,25 @@ def test_add_knowledge_edges_warns_free_edge_bare_abbreviation():
         conn.close()
 
 
+def test_page_identity_abbreviation_is_not_a_free_edge_warning():
+    """Canonical page IDs may contain abbreviations; only semantic endpoints are audited."""
+    with tempfile.TemporaryDirectory() as directory:
+        db_path = Path(directory) / "graph.db"
+        conn = graph_ingest.gl.connect(db_path)
+        graph_ingest.gl.init_schema(conn)
+        page = "academic/wiki/conferences/20210924-QCAI-2021-summary"
+        graph_ingest.gl.ensure_node(conn, page, "QCAI 2021 summary", "page")
+        triples = [
+            {"subject": page, "predicate": "涉及", "object": "量子算法"},
+            {"subject": "研究团队", "predicate": "涉及", "object": "QCAI"},
+        ]
+        result = graph_ingest.add_knowledge_edges(conn, page, triples)
+        *_, warnings = result
+        bare = [w for w in warnings if w.get("issue") == "bare_abbreviation"]
+        assert [(w["field"], w["value"]) for w in bare] == [("object", "QCAI")]
+        conn.close()
+
+
 def test_metadata_venue_abbreviation_does_not_warn():
     """确定性 venue 简称是书目元数据，不进入自由语义边裸缩写审计。"""
     with tempfile.TemporaryDirectory() as directory:
@@ -578,6 +638,65 @@ def test_metadata_venue_abbreviation_does_not_warn():
         *_, dwarns = result
         assert not [w for w in dwarns if w.get("issue") == "bare_abbreviation"]
         conn.close()
+
+
+def test_upsert_page_node_preserves_unknown_date_as_empty():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        db_path = root / "graph.db"
+        page_file = root / "undated.md"
+        page_file.write_text(
+            "---\ntitle: Undated conference\ntype: conference-summary\ndate: null\n---\n",
+            encoding="utf-8",
+        )
+        conn = graph_ingest.gl.connect(db_path)
+        graph_ingest.gl.init_schema(conn)
+        page = "academic/wiki/conferences/undated-conference"
+        graph_ingest.upsert_page_node(
+            conn, page,
+            {"title": "Undated conference", "type": "conference-summary", "date": None},
+            page_file,
+        )
+        row = conn.execute("SELECT date FROM nodes WHERE path=?", (page,)).fetchone()
+        assert row["date"] == ""
+        conn.close()
+
+
+def test_proposition_abbreviation_does_not_warn():
+    """Proposition prose is not a canonical keyword name."""
+    with tempfile.TemporaryDirectory() as directory:
+        db_path = Path(directory) / "graph.db"
+        conn = graph_ingest.gl.connect(db_path)
+        graph_ingest.gl.init_schema(conn)
+        graph_ingest.gl.ensure_node(conn, "page", "Page", "page")
+        triples = [{
+            "subject": "page", "predicate": "核心创新点",
+            "object": "ALCE提供端到端可复现实验设置",
+        }]
+        result = graph_ingest.add_knowledge_edges(conn, "page", triples)
+        *_, warnings = result
+        assert not [w for w in warnings if w.get("issue") == "bare_abbreviation"]
+        conn.close()
+
+
+def test_locked_bibliography_edges_are_mechanical_and_single_source():
+    page = "academic/wiki/papers/example"
+    edges = graph_ingest.extract_mechanical_edges(page, {
+        "authors": ["Alice", "Bob"], "venue": "ICLR 2026",
+    })
+    assert [(edge["subject"], edge["predicate"], edge["object"]) for edge in edges] == [
+        ("Alice", "第一作者", page),
+        ("Bob", "作者", page),
+        (page, "发表于", "ICLR 2026"),
+    ]
+    semantic, *_ = graph_ingest.parse_semantic_text(
+        "三元组:\n本论文 | 核心方法 | 检索增强生成\n", page,
+        {"type": "paper-summary", "authors": ["Alice", "Bob"], "venue": "ICLR 2026"},
+    )
+    assert not [
+        edge for edge in semantic
+        if edge["predicate"] in {"第一作者", "作者", "通讯作者", "发表于"}
+    ]
 
 
 def test_deterministic_venue_metadata_sets_subtype_on_create_and_reuse():
@@ -929,7 +1048,7 @@ def test_inbox_state_records_telemetry_events():
     })["category"] == "api_rate_limit"
     assert inbox_state.classify_failure({
         "status": "agent_required", "errors": ["谓词格式不合法"],
-    })["owner"] == "specialist_agent"
+    })["owner"] == "host_agent"
     protocol_failure = inbox_state.classify_failure({
         "status": "failed", "errors": ["Meeting Compiler 失败: invalid preprocess JSON"],
     })
@@ -1062,6 +1181,58 @@ def test_validate_completion_blocks_stale_errors_and_empty_graph():
         clean = {"errors": [], "semantic_path": "temp/test.sem",
                  "graph_report": {"edges_added": 1, "dup_skipped": 0, "nodes_created": 1}}
         assert ic.validate_completion(clean, repo) == []
+
+
+def test_cleanup_waits_for_completion_and_retries_without_replaying_ingest():
+    from unittest.mock import patch
+    for cleanup_after in ("validate_graph", "finalize_tail"):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            original = repo / "inbox/image.jpg"
+            original.parent.mkdir()
+            original.write_bytes(b"image")
+            extract = repo / "temp/extract"
+            extract.mkdir(parents=True)
+            semantic = extract / "semantic.txt"
+            semantic.write_text("valid semantic", encoding="utf-8")
+            state = {"transaction_id": "cleanup-test", "status": "finalize_tail", "errors": [],
+                     "source": "inbox/image.jpg", "extract_dir": "temp/extract",
+                     "semantic_path": "temp/extract/semantic.txt", "graph_report": {"edges_added": 1}}
+            spec = {"script_name": "test.py", "cleanup_after": cleanup_after,
+                    "steps": {"validate_semantics": lambda current: ([], []),
+                              "finalize_tail": lambda current: (True, "")}}
+            snapshots = []
+            with patch.object(ingest_pipeline, "REPO", repo), \
+                    patch.object(ingest_pipeline, "_save", side_effect=lambda current: snapshots.append(dict(current))), \
+                    patch.object(ingest_pipeline.ic, "validate_before_commit", return_value=[]), \
+                    patch.object(ingest_pipeline.ic, "validate_completion", return_value=["completion failed"]), \
+                    patch.object(ingest_pipeline, "_cleanup_sources") as cleanup:
+                ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+                cleanup.assert_not_called()
+                assert state["status"] == "failed"
+                assert original.is_file() and semantic.is_file()
+            state.update({"status": "finalize_tail", "errors": []})
+
+            def cleanup_failure(*args):
+                assert snapshots[-1]["status"] == "completed"
+                assert snapshots[-1]["cleanup_pending"] is True
+                raise OSError("trash unavailable")
+
+            with patch.object(ingest_pipeline, "REPO", repo), \
+                    patch.object(ingest_pipeline, "_save", side_effect=lambda current: snapshots.append(dict(current))), \
+                    patch.object(ingest_pipeline.ic, "validate_before_commit", return_value=[]), \
+                    patch.object(ingest_pipeline, "_cleanup_sources", side_effect=cleanup_failure):
+                ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+                assert state["status"] == "completed" and state["cleanup_pending"]
+                assert original.is_file() and semantic.is_file()
+            with patch.object(ingest_pipeline, "_save"), \
+                    patch.object(ingest_pipeline, "_cleanup_sources") as cleanup, \
+                    patch.object(ingest_pipeline.ic, "validate_completion") as validate:
+                ingest_pipeline.run_pipeline(state, {**spec, "steps": {}}, lambda *args, **kwargs: None)
+                cleanup.assert_called_once()
+                validate.assert_not_called()
+                assert state["status"] == "completed" and not state["cleanup_pending"]
+                assert "cleanup_error" not in state
 
 
 def test_resolve_bare_name_normalized_match():
@@ -1362,19 +1533,68 @@ def test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff():
     }
     original_save = ingest_pipeline._save
     original_fill = ingest_pipeline.ic.step_fill_semantics
+    original_backend = ingest_pipeline.agent_task.ingest_backend
     try:
         ingest_pipeline._save = lambda _state: None
         ingest_pipeline.ic.step_fill_semantics = lambda *_args, **_kwargs: (True, "")
+        ingest_pipeline.agent_task.ingest_backend = lambda: "agent"
         result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
     finally:
         ingest_pipeline._save = original_save
         ingest_pipeline.ic.step_fill_semantics = original_fill
+        ingest_pipeline.agent_task.ingest_backend = original_backend
 
     assert len(calls) == 2, "初次生成后只允许一次定向重写"
     assert calls[1] == ["三元组格式错误"]
     assert result["semantic_hard_retry"] == 1
     assert result["recovery"]["attempts"]["semantic_revision"] == 1
-    assert result["status"] == "agent_required"
+    assert result["status"] == "prepared"
+    assert result["agent_task"]["schema"] == "agent-task-v1"
+
+
+def test_agent_exhausted_deterministic_repair_prepares_task_not_legacy_handoff():
+    warning = {
+        "issue": "descriptive_phrase",
+        "line": "本文件 | 涉及 | 需要语义判断的长描述",
+        "reason": "需要语义裁决",
+    }
+    state = {
+        "transaction_id": "agent-repair-budget",
+        "status": "write_slots",
+        "slots_content": warning["line"] + "\n",
+        "semantic_path": "temp/inbox-state/agent-repair-budget-semantic.txt",
+        "errors": [],
+    }
+    spec = {
+        "script_name": "test_driver.py",
+        "steps": {
+            "write_slots": lambda _state: (True, ""),
+            "validate_semantics": lambda _state: ([], [warning]),
+            "repair_slots": lambda *_args: (_ for _ in ()).throw(
+                AssertionError("exhausted repair budget must prepare Agent work first")
+            ),
+        },
+        "normalize_slots": lambda text: text,
+        "recovery_limits": {"deterministic_repair": 0},
+    }
+    original_save = ingest_pipeline._save
+    original_fill = ingest_pipeline.ic.step_fill_semantics
+    original_backend = ingest_pipeline.agent_task.ingest_backend
+    try:
+        ingest_pipeline._save = lambda _state: None
+        ingest_pipeline.ic.step_fill_semantics = lambda *_args, **_kwargs: (True, "")
+        ingest_pipeline.agent_task.ingest_backend = lambda: "agent"
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+        ingest_pipeline.ic.step_fill_semantics = original_fill
+        ingest_pipeline.agent_task.ingest_backend = original_backend
+
+    assert result["status"] == "prepared"
+    assert "agent_required" not in result
+    assert result["agent_task"]["schema"] == "agent-task-v1"
+    assert result["agent_task"]["transaction_id"] == "agent-repair-budget"
+    assert "deterministic repair budget exhausted" in result["agent_task"]["issues"]
 
 
 def test_llm_transport_failure_is_not_retried_by_pipeline():
@@ -1495,6 +1715,7 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
         path.parent.mkdir(parents=True, exist_ok=True),
         path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8"),
     )
+    fake.publish_maintenance_report = fake._write_json_atomic
     fake.run_post_ingest_maintenance = lambda results, session_id: calls.append(
         (results, session_id)
     ) or {"status": "agent_required", "receipt_path": "temp/receipt.json"}
@@ -1525,6 +1746,18 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
             assert calls == []
 
             pending.unlink()
+            facts = inbox / "facts-pending.md"
+            facts.write_text(
+                "# Pending facts\n\n- [2026-09-05] Alice advises Bob.\n",
+                encoding="utf-8",
+            )
+            deferred = ic.run_resume_post_maintenance(state)
+            assert deferred["status"] == "deferred"
+            assert deferred["reason"] == "pending_inbox_files"
+            assert deferred["pending_count"] == 1
+            assert calls == []
+
+            facts.write_text("# Pending facts\n", encoding="utf-8")
             maintenance = ic.run_resume_post_maintenance(state)
             assert maintenance == {
                 "status": "agent_required", "receipt_path": "temp/receipt.json",
@@ -1543,6 +1776,12 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
             assert persisted["files"][0]["graph_report"]["hub_dynamics"]["affected_nodes"] == ["node-a"]
             assert persisted["degraded"] == 1
             assert ic.run_resume_post_maintenance({"status": "failed"}) is None
+            def failed_publication(path, report):
+                report["maintenance"] = {"status": "error", "receipt_path": "temp/receipt.json",
+                                         "publication": {"status": "error"}}
+                return False
+            fake.publish_maintenance_report = failed_publication
+            assert ic.run_resume_post_maintenance(state)["status"] == "error"
             fake.run_post_ingest_maintenance = lambda *_args: (_ for _ in ()).throw(
                 RuntimeError("maintenance unavailable")
             )
@@ -1556,8 +1795,137 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
             sys.modules["ingest_inbox"] = previous
 
 
+def test_resume_reconciles_parent_batch_before_maintenance():
+    import sys
+    from types import ModuleType
+    import ingest_common as ic
+
+    calls = []
+    fake = ModuleType("ingest_inbox")
+    fake._write_json_atomic = lambda path, value: (
+        path.parent.mkdir(parents=True, exist_ok=True),
+        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8"),
+    )
+    fake.publish_maintenance_report = fake._write_json_atomic
+    fake._report_counts = lambda items: {
+        "completed": sum(item.get("status") == "completed" for item in items),
+        "duplicates": sum(item.get("status") == "duplicate_found" for item in items),
+        "awaiting_agent": 0,
+        "pending": 0,
+        "degraded": sum(item.get("quality_status") == "degraded" for item in items),
+        "failed": 0,
+        "skipped": 0,
+    }
+    fake.run_post_ingest_maintenance = lambda results, session_id: calls.append(
+        (results, session_id)
+    ) or {"status": "completed", "receipt_path": "temp/batch-receipt.json"}
+    fake.compact_maintenance = lambda envelope: {
+        "status": envelope["status"], "receipt_path": envelope["receipt_path"]
+    }
+    previous = sys.modules.get("ingest_inbox")
+    sys.modules["ingest_inbox"] = fake
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            (repo / "inbox").mkdir()
+            state_dir = repo / "temp/inbox-state"
+            report_dir = repo / "cross-domain/ingest-reports"
+            state_dir.mkdir(parents=True)
+            report_dir.mkdir(parents=True)
+            first = {
+                "status": "completed", "transaction_id": "txn-1",
+                "paper_id": "paper-1", "graph_report": {"edges_added": 1},
+                "quality_status": "complete", "quality_warnings": [],
+            }
+            second = {
+                "status": "completed", "transaction_id": "txn-2",
+                "paper_id": "paper-2", "graph_report": {"edges_added": 2},
+                "quality_status": "degraded", "quality_warnings": [{"issue": "demo"}],
+                "repo": str(repo),
+            }
+            (state_dir / "txn-1.json").write_text(json.dumps(first), encoding="utf-8")
+            report_path = report_dir / "20260906-120000.json"
+            report_path.write_text(json.dumps({
+                "session_id": "agent-batch",
+                "files": [
+                    {"file": "one.pdf", "status": "prepared", "transaction_id": "txn-1"},
+                    {"file": "two.pdf", "status": "prepared", "transaction_id": "txn-2"},
+                ],
+                "maintenance": {"status": "skipped"},
+            }), encoding="utf-8")
+
+            maintenance = ic.run_resume_post_maintenance(second)
+            updated = json.loads(report_path.read_text(encoding="utf-8"))
+            failed_report = {**updated, "maintenance": {
+                "status": "error", "receipt_path": "temp/batch-receipt.json",
+                "publication": {"status": "error"},
+            }}
+            fake._write_json_atomic(report_path, failed_report)
+            publications = []
+            def recovered_publication(path, report):
+                publications.append(path)
+                report["maintenance"] = {"status": "completed", "receipt_path": "temp/batch-receipt.json"}
+                fake._write_json_atomic(path, report)
+                return True
+            fake.publish_maintenance_report = recovered_publication
+            retry = ic.run_resume_post_maintenance(second)
+            assert retry["status"] == "completed"
+            assert publications == [report_path]
+
+        assert maintenance["report_path"].endswith("20260906-120000.json")
+        assert updated["completed"] == 2
+        assert updated["awaiting_agent"] == 0
+        assert updated["maintenance"]["status"] == "completed"
+        assert len(calls) == 1 and len(calls[0][0]) == 2
+        assert calls[0][1] == "agent-batch"
+        assert {item["paper_id"] for item in calls[0][0]} == {"paper-1", "paper-2"}
+    finally:
+        if previous is None:
+            sys.modules.pop("ingest_inbox", None)
+        else:
+            sys.modules["ingest_inbox"] = previous
+
+
+def test_inbox_state_supersede_requires_completed_same_source():
+    import inbox_state
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        original_repo = inbox_state.REPO
+        inbox_state.REPO = root
+        try:
+            shared = {
+                "source": "inbox/paper.pdf",
+                "retry_count": 0,
+                "errors": [],
+                "telemetry": {"source_hash": "same-hash"},
+            }
+            inbox_state.save("old-txn", {**shared, "status": "prepared"})
+            inbox_state.save("new-txn", {**shared, "status": "completed"})
+            receipt = inbox_state.supersede_transaction("old-txn", "new-txn")
+            stale = inbox_state.load("old-txn")
+            assert receipt["status"] == "superseded"
+            assert stale["status"] == "superseded"
+            assert stale["superseded_by"] == "new-txn"
+
+            inbox_state.save("other-txn", {
+                **shared, "source": "inbox/other.pdf", "status": "completed",
+            })
+            inbox_state.save("old-other-source", {**shared, "status": "prepared"})
+            try:
+                inbox_state.supersede_transaction("old-other-source", "other-txn")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("cross-source supersede must be rejected")
+        finally:
+            inbox_state.REPO = original_repo
+
+
 def main():
     test_nature_author_block()
+    test_publisher_wrapper_and_review_label_are_not_authors()
+    test_initials_and_multiword_surname_particle_remain_one_author()
     test_blank_after_author_block_stops_abstract_words()
     test_affiliation_does_not_become_author()
     test_multiword_affiliation_does_not_leave_prefix_as_author()
@@ -1580,7 +1948,11 @@ def main():
     test_is_citation_fragment_detection()
     test_add_knowledge_edges_skips_citation_fragment()
     test_add_knowledge_edges_warns_free_edge_bare_abbreviation()
+    test_page_identity_abbreviation_is_not_a_free_edge_warning()
+    test_proposition_abbreviation_does_not_warn()
+    test_locked_bibliography_edges_are_mechanical_and_single_source()
     test_metadata_venue_abbreviation_does_not_warn()
+    test_upsert_page_node_preserves_unknown_date_as_empty()
     test_deterministic_venue_metadata_sets_subtype_on_create_and_reuse()
     test_first_author_reuse_upgrades_person_subtype()
     test_responsibility_object_is_created_as_person()
@@ -1592,6 +1964,7 @@ def main():
     test_inbox_state_runtime_summary_uses_canonical_events()
     test_step_update_graph_fails_on_non_json_output()
     test_validate_completion_blocks_stale_errors_and_empty_graph()
+    test_cleanup_waits_for_completion_and_retries_without_replaying_ingest()
     test_resolve_bare_name_normalized_match()
     test_ensure_keyword_connectivity()
     test_locator_aware_page_adds_optional_wiki_section_locator_only()
@@ -1607,9 +1980,12 @@ def main():
     test_graph_validation_failure_exposes_clean_graph_retry_point()
     test_wiki_validation_retry_budget_hands_off_without_third_full_rewrite()
     test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff()
+    test_agent_exhausted_deterministic_repair_prepares_task_not_legacy_handoff()
     test_unified_protocol_failure_revises_once_then_hands_off()
     test_legacy_protocol_failure_resume_migrates_to_handoff()
     test_resume_post_maintenance_uses_unified_inbox_tail()
+    test_resume_reconciles_parent_batch_before_maintenance()
+    test_inbox_state_supersede_requires_completed_same_source()
     print("ingest pipeline regression: PASS")
 
 
@@ -1729,7 +2105,7 @@ def test_paper_prefill_does_not_raise_name_error():
 
 
 def test_bare_abbreviation_resolved_to_keyword_no_warning():
-    """能 resolve 到已有 keyword 的裸缩写 → 融合期复查移除 warning。"""
+    """命题正文不按 keyword 命名格式检查缩写。"""
     with tempfile.TemporaryDirectory() as directory:
         db_path = Path(directory) / "graph.db"
         conn = graph_ingest.gl.connect(db_path)

@@ -1,6 +1,6 @@
 # 研究工作流规范
 
-> 研究项目级工作流：在 `projects/<name>/` 下开展研究，过程中产生结构化记忆。研究内容**不入库**（独立于 ingest），记忆绑定到研究项目。
+> 研究项目级工作流：在 `projects/<name>/` 下开展研究，过程中产生结构化状态与记忆。新项目使用通用 `workspace_state` 的 `research` profile；已有 `.research-memory` 项目由兼容入口继续支持。研究内容**不入库**（独立于 ingest）。
 
 ## 触发与任务判定
 
@@ -20,17 +20,33 @@
 
 ## 进入研究项目
 
-agent 进入研究项目时的第一步是**恢复上下文**：
+agent 进入研究项目时的第一步是**恢复上下文**。存在 `workspace.yaml` 时使用通用入口：
+
+```bash
+python3 .scripts/workspace_state.py recall <project>
+```
+
+旧项目尚未初始化通用工作区时继续使用兼容入口：
 
 ```bash
 python3 .scripts/research_memory.py recall <project>
 ```
 
-`recall` 输出研究画像（topic/keywords/stage/active_questions）+ 近期记忆条目索引 + status.md（如有）。这是无上下文接续锚点。
+通用 `recall` 输出本工作区画像、当前事项、有效记忆索引和直接子工作区摘要，不读取子工作区记忆。兼容 `recall` 保留研究画像、近期记忆索引和 status.md 输出。
 
 若无记忆条目（首次进入），recall 返回空，正常开始工作。
 
-## 记忆工具
+## 状态与记忆工具
+
+新工作区使用共享内核：
+
+```bash
+python3 .scripts/workspace_state.py item add <project> --title "事项" --state active --next-action "下一步"
+python3 .scripts/workspace_state.py memory add <project> --title "标题" --kind decision --content "理由与边界"
+python3 .scripts/workspace_state.py doctor <project>
+```
+
+既有 `.research-memory` 项目继续使用：
 
 ```bash
 # 恢复上下文
@@ -62,9 +78,10 @@ python3 .scripts/route.py --capability write --capability-profile academic
 
 研究中需要查知识库文献、定位已有结果、回溯 raw 原文核验，或操作研究记忆，调用 `.scripts/wg.py`（统一 JSON 输出，跨功能、回合中可调）：
 
-**记忆**（等价于上述 `research_memory.py`，统一入口）：
-- `wg.py recall <project>` — 恢复研究上下文（进入项目首调）
-- `wg.py remember <project> --title "..." --intent <intent> [--content "..." | --stdin] [--tags a,b]` — 沉淀记忆条目
+**状态与记忆**：
+- `wg.py workspace recall <project>` — 恢复通用研究工作区上下文（新项目进入时首调）
+- `wg.py workspace item ...` / `workspace memory ...` — 管理新工作区事项与记忆
+- `wg.py recall <project>` / `remember ...` — 仅用于已有 `.research-memory` 项目的兼容入口
 
 **知识库查证**（研究内容不入库，但可查已有 raw/wiki/graph）：
 - `wg.py lookup <term>` — 关键词查节点（导航层，省 token）
@@ -103,7 +120,9 @@ python3 .scripts/research_project.py validate <project> --strict
 - `--strict`：生成物未放入 `outputs/` 也视为 ERROR。
 - 新项目模板位于 `projects/_templates/research/`。
 
-### 记忆目录结构
+### 状态与记忆目录结构
+
+新工作区结构见 `operations/WORKSPACE.md`，权威记录位于 `.workspace/items/` 与 `.workspace/memories/`，投影可重建。旧项目保持：
 
 ```
 projects/<name>/.research-memory/
@@ -124,12 +143,12 @@ projects/<name>/.research-memory/
 
 ## 自动保存纪律（核心）
 
-agent 在研究过程中遇到以下情况时，**无需用户要求**，主动调用 `research_memory.py add` 记录：
+agent 在研究过程中遇到以下情况时，**无需用户要求**，新工作区调用 `workspace_state.py memory add`，旧项目调用 `research_memory.py add`：
 
-1. **研究决策**：方向选择、方法取舍、实验设计定案 → `intent=decision`
-2. **关键发现**：重要洞察、对比结论、新认知 → `intent=insight`
-3. **文献判断**：论文质量评估、威胁度判定、相关性结论 → `intent=literature_judgment`
-4. **方向调整**：研究脉络变化、阶段推进、下步计划明确 → `intent=research_direction`
+1. **研究决策**：方向选择、方法取舍、实验设计定案 → `kind/intent=decision`
+2. **关键发现**：重要洞察、对比结论、新认知 → `kind/intent=insight`
+3. **文献判断**：论文质量评估、威胁度判定、相关性结论 → `kind/intent=literature_judgment`
+4. **方向调整**：研究脉络变化、阶段推进、下步计划明确 → `kind/intent=research_direction`
 
 **不记录**的内容：
 - 一次性调试命令、临时指令
@@ -162,10 +181,10 @@ agent 在研究过程中遇到以下情况时，**无需用户要求**，主动�
 
 | | status.md | .research-memory/ |
 |--|-----------|-------------------|
-| 定位 | 人写的接续锚点 | 机器自动写入的结构化记忆 |
+| 定位 | 新工作区的可重建当前状态投影；旧项目仍可人工维护 | 结构化历史记忆 |
 | 内容 | 当前状态 + 下步计划 | 决策/发现/判断的历史条目 |
-| 维护 | 手动 | agent 自动 |
-| 读取 | recall 末尾附带 | recall 主体 |
+| 维护 | 新工作区由 `workspace_state` 生成；旧项目手动 | agent 经受管命令写入 |
+| 读取 | 通用 recall 从权威事项生成；兼容 recall 附带旧 status | recall 返回有效记忆索引 |
 
 两者互补不冲突：status.md 是「现在在哪」，记忆是「走过什么路」。
 

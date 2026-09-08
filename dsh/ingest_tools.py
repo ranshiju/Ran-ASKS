@@ -180,6 +180,15 @@ def build_ingest_tools() -> list[ToolDefinition]:
             execute_fn=lambda args: _ingest_call(["ingest_inbox.py", "--run", "--file", args.get("file", "")]),
         ),
         ToolDefinition(
+            name="ingest_user_assertions_apply",
+            description="提交已填写并通过受管事务校验的用户申明事实 proposal",
+            input_schema={"type": "object", "properties": {
+                "txn": {"type": "string", "description": "user-assertions-<hash> 事务 ID"}},
+                "required": ["txn"]},
+            execute_fn=lambda args: _ingest_call([
+                "ingest_user_assertions.py", "--apply", args.get("txn", "")]),
+        ),
+        ToolDefinition(
             name="ingest_paper_inbox",
             description="inbox 下全部学术 PDF 批量摄入（ingest_paper.py --inbox，两阶段 prepare/commit）",
             input_schema={"type": "object", "properties": {}, "required": []},
@@ -202,6 +211,42 @@ def build_ingest_tools() -> list[ToolDefinition]:
             execute_fn=lambda args: _ingest_call(["ingest_paper.py", "--resume", args.get("txn", "")]),
         ),
         ToolDefinition(
+            name="paper_workspace_read",
+            description="读取论文 Agent workspace 任务包；返回四态 workflow、版本、候选目录和产物路径",
+            input_schema={"type": "object", "properties": {
+                "txn": {"type": "string", "description": "事务 ID"}},
+                "required": ["txn"]},
+            execute_fn=lambda args: _ingest_call([
+                "ingest_paper.py", "--agent-workspace", args.get("txn", "")]),
+        ),
+        ToolDefinition(
+            name="paper_workspace_refresh",
+            description="显式归档旧输出并刷新候选提供器已升级的未提交论文 workspace",
+            input_schema={"type": "object", "properties": {
+                "txn": {"type": "string", "description": "事务 ID"}},
+                "required": ["txn"]},
+            execute_fn=lambda args: _ingest_call([
+                "ingest_paper.py", "--agent-refresh", args.get("txn", "")]),
+        ),
+        ToolDefinition(
+            name="paper_workspace_check",
+            description="一次校验书目/Wiki/semantics/Graph plan；不落位、不提交 live graph",
+            input_schema={"type": "object", "properties": {
+                "txn": {"type": "string", "description": "事务 ID"}},
+                "required": ["txn"]},
+            execute_fn=lambda args: _ingest_call([
+                "ingest_paper.py", "--agent-check", args.get("txn", "")]),
+        ),
+        ToolDefinition(
+            name="paper_workspace_commit",
+            description="复验并提交已通过校验的论文 workspace；返回四态 workflow 回执",
+            input_schema={"type": "object", "properties": {
+                "txn": {"type": "string", "description": "事务 ID"}},
+                "required": ["txn"]},
+            execute_fn=lambda args: _ingest_call([
+                "ingest_paper.py", "--agent-commit", args.get("txn", "")]),
+        ),
+        ToolDefinition(
             name="ingest_meeting_txt",
             description="摄入 inbox 下会议纪要 .txt（ingest_meeting.py --txt）",
             input_schema={"type": "object", "properties": {
@@ -222,19 +267,28 @@ def build_ingest_tools() -> list[ToolDefinition]:
         ),
         ToolDefinition(
             name="ingest_document_file",
-            description="摄入 inbox 下通用文档；academic 必须显式指定 editorial 或 academic-reference",
+            description=(
+                "摄入 inbox 下通用文档；academic 必须显式指定 editorial、"
+                "academic-reference 或 conference-summary"
+            ),
             input_schema={"type": "object", "properties": {
                 "file": {"type": "string", "description": "inbox/ 下文档路径"},
                 "subproject": {"type": "string", "description": "academic/admin/teaching/business"},
-                "document_type": {"type": "string", "enum": ["editorial", "academic-reference"],
+                "document_type": {"type": "string", "enum": [
+                    "editorial", "academic-reference", "conference-summary",
+                ],
                                   "description": "academic 非论文类型"},
                 "source_kind": {"type": "string", "enum": ["ordinary", "meeting"],
-                                "description": "inbox 程序判定的来源种类"}},
+                                "description": "inbox 程序判定的来源种类"},
+                "ocr_result": {"type": "string", "description": "显式指定的源绑定 OCR JSON 回执"},
+                "allow_remote_ocr": {"type": "boolean", "description": "调用方显式授权图片上传；默认 false"}},
                 "required": ["file"]},
             execute_fn=lambda args: _ingest_call(["ingest_document.py", "--file", args.get("file", "")]
                 + (["--subproject", args["subproject"]] if args.get("subproject") else [])
                 + (["--document-type", args["document_type"]] if args.get("document_type") else [])
-                + (["--source-kind", args["source_kind"]] if args.get("source_kind") else [])),
+                + (["--source-kind", args["source_kind"]] if args.get("source_kind") else [])
+                + (["--ocr-result", args["ocr_result"]] if args.get("ocr_result") else [])
+                + (["--allow-remote-ocr"] if args.get("allow_remote_ocr") is True else [])),
         ),
         ToolDefinition(
             name="re_ingest_raw",

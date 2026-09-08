@@ -51,7 +51,7 @@ STATUS_ORDER = {"current": 0, "active": 0, "deprecated": 1, "dormant": 2, "archi
 
 def connect(db_path):
     if not Path(db_path).exists():
-        print(f"错误: 图数据库不存在 {db_path}。先运行 graph_build.py --build --apply", file=sys.stderr)
+        print(f"错误: 图数据库不存在 {db_path}。请通过受管摄入、同步或备份恢复该数据库", file=sys.stderr)
         sys.exit(1)
     return gl.connect(str(db_path))
 

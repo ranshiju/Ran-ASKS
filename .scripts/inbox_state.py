@@ -20,11 +20,16 @@ KNOWN_STATUSES = frozenset({
     "classification_required", "finalize", "propositions", "propositions_done",
     "prepared", "finalized", "graph_ready", "update_graph", "validate_graph",
     "finalize_tail", "completed", "duplicate_found", "failed", "validation_error",
+    "superseded",
 })
 RESUME_TRANSITIONS = {
     "failed": frozenset({"finalize", "graph_ready"}),
     "agent_required": frozenset({
         "write_wiki", "write_slots", "finalize", "propositions", "graph_ready",
+        "update_graph", "validate_graph", "finalize_tail", "bibliographic_review_required",
+    }),
+    "prepared": frozenset({
+        "preprocess", "write_wiki", "write_slots", "finalize", "propositions", "graph_ready",
         "update_graph", "validate_graph", "finalize_tail", "bibliographic_review_required",
     }),
     "bibliographic_review_required": frozenset({"write_wiki", "agent_required"}),
@@ -131,9 +136,9 @@ def classify_failure(state: dict) -> dict | None:
             "extraction_failure", "extraction", "inspect_extraction", "program",
             "inspect_extracted_artifact",
         )
-    elif status in {"agent_required", "type_mismatch", "classification_required"}:
+    elif status in {"agent_required", "prepared", "type_mismatch", "classification_required"}:
         category, domain, disposition, owner, next_action = (
-            "semantic_decision", "semantic", "specialist_review", "specialist_agent",
+            "semantic_decision", "semantic", "host_agent_review", "host_agent",
             str(state.get("next_action") or "review_handoff_then_resume"),
         )
     elif status in {"failed", "validation_error"} or errors:
@@ -275,6 +280,44 @@ def save(transaction_id: str, state: dict) -> Path:
     return path
 
 
+def supersede_transaction(transaction_id: str, completed_by: str) -> dict:
+    """Close one stale, uncommitted transaction using a completed same-source txn."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", transaction_id or ""):
+        raise ValueError("invalid superseded transaction id")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", completed_by or ""):
+        raise ValueError("invalid replacement transaction id")
+    if transaction_id == completed_by:
+        raise ValueError("transaction cannot supersede itself")
+    stale = load(transaction_id)
+    replacement = load(completed_by)
+    if stale is None or replacement is None:
+        raise ValueError("supersede requires two existing transactions")
+    if stale.get("status") not in {"prepared", "agent_required", "validation_error"}:
+        raise ValueError("only an uncommitted review transaction may be superseded")
+    if replacement.get("status") not in {"completed", "duplicate_found"}:
+        raise ValueError("replacement transaction is not complete")
+    if stale.get("source") != replacement.get("source"):
+        raise ValueError("supersede transactions do not reference the same source")
+    stale_hash = str((stale.get("telemetry") or {}).get("source_hash") or "")
+    replacement_hash = str((replacement.get("telemetry") or {}).get("source_hash") or "")
+    if stale_hash and replacement_hash and stale_hash != replacement_hash:
+        raise ValueError("supersede transactions have different source hashes")
+    transition(
+        stale, "superseded", reason=f"completed_by:{completed_by}",
+        allowed_targets={"superseded"},
+    )
+    stale["superseded_by"] = completed_by
+    stale["superseded_reason"] = "same_source_completed_transaction"
+    stale["errors"] = []
+    path = save(transaction_id, stale)
+    return {
+        "status": "superseded",
+        "transaction_id": transaction_id,
+        "superseded_by": completed_by,
+        "state_path": str(path.relative_to(REPO)),
+    }
+
+
 def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = None) -> dict:
     """Read-only aggregate of resumable transactions and canonical API events."""
     states_root = Path(state_dir or (REPO / "temp" / "inbox-state"))
@@ -357,12 +400,21 @@ def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = N
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--summary", action="store_true", help="只读汇总摄入事务与 API 事件")
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--summary", action="store_true", help="只读汇总摄入事务与 API 事件")
+    action.add_argument("--supersede", help="关闭同源、未提交的旧事务 ID")
+    parser.add_argument("--by", help="已完成的替代事务 ID")
     parser.add_argument("--state-dir")
     parser.add_argument("--events-dir")
     args = parser.parse_args()
-    if not args.summary:
-        parser.error("需要 --summary")
+    if args.supersede:
+        if not args.by:
+            parser.error("--supersede 需要 --by")
+        print(json.dumps(
+            supersede_transaction(args.supersede, args.by),
+            ensure_ascii=False, indent=2,
+        ))
+        return
     report = summarize_runtime(
         Path(args.state_dir) if args.state_dir else None,
         Path(args.events_dir) if args.events_dir else None,

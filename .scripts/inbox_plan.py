@@ -12,12 +12,13 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from source_locator import IMAGE_SUFFIXES
 
 REPO = Path(__file__).resolve().parent.parent
 SUBPROJECTS = ("academic", "admin", "teaching", "business")
 PAPER_SUFFIXES = {".pdf"}
 MEETING_SUFFIXES = {".txt"}
-DOCUMENT_SUFFIXES = {".md", ".docx", ".xlsx", ".pptx"}
+DOCUMENT_SUFFIXES = {".md", ".docx", ".xlsx", ".pptx"} | IMAGE_SUFFIXES
 
 
 def slugify(value: str) -> str:

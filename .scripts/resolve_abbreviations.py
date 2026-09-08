@@ -39,6 +39,34 @@ def _extract_abbr_tokens(text):
     return re.findall(r"[A-Z]{2,}[A-Za-z0-9]*", no_paren)
 
 
+def _occurrence_target(entry: dict) -> str:
+    field = str(entry.get("field") or "object")
+    if field in {"subject", "object"}:
+        return str(entry.get(field) or "")
+    return str(entry.get("path") or entry.get("value") or
+               entry.get("object") or entry.get("subject") or "")
+
+
+def _is_page_identity_entry(entry: dict) -> bool:
+    page = str(entry.get("page") or "")
+    return (
+        str(entry.get("field") or "object") == "subject"
+        and bool(page)
+        and str(entry.get("subject") or "") == page
+    )
+
+
+def _todo_occurrence(entry: dict) -> dict:
+    target = _occurrence_target(entry)
+    return {
+        "path": target,
+        "title": str(entry.get("context") or target or entry.get("token") or ""),
+        "page": str(entry.get("page") or ""),
+        "field": str(entry.get("field") or "object"),
+        "locator": str(entry.get("locator") or entry.get("source") or ""),
+    }
+
+
 def _source_page(conn, prop_path):
     """反查命题节点的源页（subject=page, predicate=命题谓词, object=prop）。"""
     r = conn.execute(
@@ -64,7 +92,10 @@ def _read_todo(path: Path) -> tuple[list[dict], list[str]]:
         if not isinstance(value, dict):
             errors.append(f"line {line_number}: expected object")
             continue
-        token_source = str(value.get("token") or value.get("value") or value.get("object") or "")
+        if _is_page_identity_entry(value):
+            continue
+        target = _occurrence_target(value)
+        token_source = str(value.get("token") or value.get("value") or target)
         tokens = _extract_abbr_tokens(token_source)
         if not tokens:
             errors.append(f"line {line_number}: no abbreviation token")
@@ -76,7 +107,7 @@ def _read_todo(path: Path) -> tuple[list[dict], list[str]]:
                 "token": token,
                 "context": str(
                     value.get("context") or value.get("value") or
-                    value.get("object") or value.get("subject") or token
+                    target or token
                 ),
                 "locator": value.get("locator") or value.get("source") or "",
                 "resolution_state": value.get("resolution_state", "unresolved"),
@@ -87,10 +118,12 @@ def _read_todo(path: Path) -> tuple[list[dict], list[str]]:
 def _write_todo(path: Path, entries: list[dict]) -> None:
     unique = {}
     for entry in entries:
+        if _is_page_identity_entry(entry):
+            continue
+        occurrence = _todo_occurrence(entry)
         key = (
-            entry.get("page", ""), entry.get("subject", ""),
-            entry.get("predicate", ""), entry.get("object", ""),
-            entry.get("field", "object"), entry.get("token", ""),
+            occurrence["page"], occurrence["field"], occurrence["path"],
+            entry.get("token", ""), occurrence["locator"],
         )
         unique[key] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -254,13 +287,7 @@ def _collect_pending(conn, todo_entries: list[dict] | None = None) -> list[dict]
         })
         if item.get("raw") is None and tok in raw_defs:
             item["raw"] = raw_defs[tok]
-        occurrence = {
-            "path": str(entry.get("object") or entry.get("subject") or ""),
-            "title": str(entry.get("context") or entry.get("object") or tok),
-            "page": page,
-            "field": entry.get("field", "object"),
-            "locator": entry.get("locator", ""),
-        }
+        occurrence = _todo_occurrence(entry)
         if occurrence not in item["occurrences"]:
             item["occurrences"].append(occurrence)
 
@@ -430,11 +457,10 @@ def apply_decisions(conn, decisions: list[dict], todo_entries: list[dict]) -> di
 
     occurrences_by_token = {}
     for entry in todo_entries:
-        occurrences_by_token.setdefault(entry["token"], []).append({
-            "path": str(entry.get("object") or entry.get("subject") or ""),
-            "title": str(entry.get("context") or entry.get("object") or entry["token"]),
-            "page": str(entry.get("page", "")),
-        })
+        occurrence = _todo_occurrence(entry)
+        bucket = occurrences_by_token.setdefault(entry["token"], [])
+        if occurrence not in bucket:
+            bucket.append(occurrence)
     applied = []
     for decision in normalized:
         token = decision["token"]

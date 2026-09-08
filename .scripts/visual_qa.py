@@ -42,14 +42,15 @@ except ImportError:  # pragma: no cover - reported at use site
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_RECEIPT_ROOT = REPO / "temp" / "visual-qa"
 MODEL_CATALOG = REPO / "operations" / "config" / "llm-models.yaml"
-DEFAULT_MODEL = "GLM-4.6V"
-DEFAULT_FALLBACK_MODEL = "GLM-4.5V"
+DEFAULT_MODEL = "GLM-5.3-Flash"
+DEFAULT_FALLBACK_MODEL = "GLM-4.6V"
+REASONING_EFFORTS = {"default", "low", "high"}
 SUPPORTED_IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
 SUPPORTED_DOCUMENTS = {".pdf", ".ppt", ".pptx"}
 SUPPORTED_EXTENSIONS = SUPPORTED_IMAGES | SUPPORTED_DOCUMENTS
 PROFILES = {"auto", "figure", "paper", "slides", "document"}
 RENDER_VERSION = "visual-qa-render-v1"
-PROMPT_VERSION = "visual-qa-prompt-v1"
+PROMPT_VERSION = "visual-qa-prompt-v2"
 SCHEMA_VERSION = "visual-qa-schema-v1"
 
 
@@ -76,6 +77,8 @@ def load_visual_env(env_file: Path | None = None) -> dict[str, str]:
         "LLM_API_BASE", "LLM_API_KEY",
         "VISUAL_QA_API_BASE", "VISUAL_QA_API_KEY",
         "VISUAL_QA_MODEL", "VISUAL_QA_FALLBACK_MODEL",
+        "VISUAL_QA_REASONING_EFFORT", "VISUAL_QA_FALLBACK_REASONING_EFFORT",
+        "VISUAL_QA_MAX_TOKENS",
     }
     values.update({name: value for name, value in os.environ.items() if name in known})
     pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
@@ -95,6 +98,15 @@ class RemoteConfig:
     api_base: str
     api_key: str
     timeout: int = 90
+    reasoning_effort: str = "default"
+    max_tokens: int = 1800
+
+    def __post_init__(self) -> None:
+        if self.reasoning_effort not in REASONING_EFFORTS:
+            raise VisualQAError("reasoning_effort must be default, low, or high")
+        if isinstance(self.max_tokens, bool) or not isinstance(self.max_tokens, int) \
+                or not 1 <= self.max_tokens <= 32768:
+            raise VisualQAError("max_tokens must be an integer between 1 and 32768")
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -483,6 +495,14 @@ Inspect only what is visibly supported by this rendered page. Check for:
 - apparent duplicated panels, placeholder text, rendering corruption, or export defects;
 - for plots, visibly missing units/legend mappings or ambiguous panel references.
 
+List only actionable, visibly supported defects in issues. Use fail for defects
+that prevent reading or cut off required content; use warn for concrete problems
+that impair interpretation or accessibility. Pure aesthetic preferences, optional
+enhancements, and functional whitespace are not defects: put any such suggestions
+in summary only, keep issues empty and verdict=pass when no actual defect exists.
+Check that each issue's evidence supports rather than contradicts the issue.
+Describe the visible defect once without inventing its hidden cause or styling intent.
+
 Do not judge whether scientific claims or underlying data are true. Do not invent
 hidden content. A visual model finding is advisory, not a factual source. If the
 page cannot support a confident decision, set needs_human_review=true.
@@ -597,9 +617,11 @@ def _call_vision_api(model: str, image_path: Path, prompt: str,
             ],
         }],
         "temperature": 0,
-        "max_tokens": 1800,
+        "max_tokens": config.max_tokens,
         "response_format": {"type": "json_object"},
     }
+    if config.reasoning_effort != "default":
+        payload["reasoning_effort"] = config.reasoning_effort
     request = urllib.request.Request(
         _chat_completions_url(config.api_base),
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -613,14 +635,16 @@ def _call_vision_api(model: str, image_path: Path, prompt: str,
         with urllib.request.urlopen(request, timeout=config.timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:500]
-        raise VisualQAError(f"vision API HTTP {exc.code}: {detail}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise VisualQAError(f"vision API request failed: {exc}") from exc
+        raise VisualQAError(f"vision API HTTP {exc.code}") from None
+    except (urllib.error.URLError, TimeoutError):
+        raise VisualQAError("vision API request failed or timed out") from None
     try:
         envelope = json.loads(body)
-        content = envelope["choices"][0]["message"]["content"]
-    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        choice = envelope["choices"][0]
+        if choice.get("finish_reason") != "stop" or choice["message"].get("refusal"):
+            raise VisualQAError("vision API response truncated, refused, or not normally completed")
+        content = choice["message"]["content"]
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError) as exc:
         raise VisualQAError("vision API returned an invalid response envelope") from exc
     if isinstance(content, list):
         content = "".join(
@@ -722,6 +746,9 @@ def run_visual_qa(
     receipt_root: str | Path | None = None,
     model: str | None = None,
     fallback_model: str | None = None,
+    reasoning_effort: str | None = None,
+    fallback_reasoning_effort: str | None = None,
+    max_tokens: int | None = None,
     api_base: str | None = None,
     api_key: str | None = None,
     timeout: int = 90,
@@ -751,6 +778,15 @@ def run_visual_qa(
     )
     base = api_base if api_base is not None else env.get("VISUAL_QA_API_BASE", "")
     key = api_key if api_key is not None else env.get("VISUAL_QA_API_KEY", "")
+    chosen_effort = reasoning_effort if reasoning_effort is not None else env.get("VISUAL_QA_REASONING_EFFORT", "low")
+    fallback_effort = (fallback_reasoning_effort if fallback_reasoning_effort is not None
+                       else env.get("VISUAL_QA_FALLBACK_REASONING_EFFORT", "default"))
+    try:
+        chosen_budget = max_tokens if max_tokens is not None else int(env.get("VISUAL_QA_MAX_TOKENS", "1800"))
+    except ValueError:
+        raise VisualQAError("VISUAL_QA_MAX_TOKENS must be an integer") from None
+    primary_config = RemoteConfig(base, key, int(timeout), chosen_effort, chosen_budget)
+    fallback_config = RemoteConfig(base, key, int(timeout), fallback_effort, chosen_budget)
     render_config = {"version": RENDER_VERSION, "dpi": int(dpi), "format": "png"}
     check_key_data = {
         "prompt_version": PROMPT_VERSION,
@@ -758,6 +794,9 @@ def run_visual_qa(
         "profile": chosen_profile,
         "model": chosen_model,
         "fallback_model": chosen_fallback,
+        "reasoning_effort": chosen_effort,
+        "fallback_reasoning_effort": fallback_effort,
+        "max_tokens": chosen_budget,
         "render": render_config,
         "context_sha256": context_sha,
         "deterministic_only": bool(deterministic_only),
@@ -847,12 +886,12 @@ def run_visual_qa(
                 "reason": "VISUAL_QA_API_BASE and VISUAL_QA_API_KEY are required",
             }
         else:
-            config = RemoteConfig(api_base=base, api_key=key, timeout=int(timeout))
             attempts = []
             models = [chosen_model]
             if chosen_fallback and chosen_fallback != chosen_model:
                 models.append(chosen_fallback)
             for candidate in models:
+                config = primary_config if candidate == chosen_model else fallback_config
                 started = time.monotonic()
                 try:
                     raw_result = call_vision(candidate, render_path, prompt, config)
@@ -860,6 +899,8 @@ def run_visual_qa(
                     attempts.append({
                         "model": candidate,
                         "status": "checked",
+                        "reasoning_effort": config.reasoning_effort,
+                        "max_tokens": config.max_tokens,
                         "duration_ms": int((time.monotonic() - started) * 1000),
                     })
                     remote = {
@@ -872,6 +913,8 @@ def run_visual_qa(
                     attempts.append({
                         "model": candidate,
                         "status": "error",
+                        "reasoning_effort": config.reasoning_effort,
+                        "max_tokens": config.max_tokens,
                         "error": f"{type(exc).__name__}: {str(exc)[:500]}",
                         "duration_ms": int((time.monotonic() - started) * 1000),
                     })
@@ -927,6 +970,9 @@ def run_visual_qa(
         "check_key": check_key,
         "model": chosen_model,
         "fallback_model": chosen_fallback,
+        "reasoning_effort": chosen_effort,
+        "fallback_reasoning_effort": fallback_effort,
+        "max_tokens": chosen_budget,
         "deterministic_only": bool(deterministic_only),
         "remote_allowed": remote_allowed,
         "sensitive_path": sensitive,
@@ -952,6 +998,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="run local checks only; a clean page may receive pass")
     parser.add_argument("--model", default=None)
     parser.add_argument("--fallback-model", default=None)
+    parser.add_argument("--reasoning-effort", choices=sorted(REASONING_EFFORTS))
+    parser.add_argument("--fallback-reasoning-effort", choices=sorted(REASONING_EFFORTS))
+    parser.add_argument("--max-tokens", type=int)
     parser.add_argument("--api-base", default=None)
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--timeout", type=int, default=90)
@@ -974,6 +1023,9 @@ def main(argv: list[str] | None = None) -> int:
             receipt_root=args.receipt_root,
             model=args.model,
             fallback_model=args.fallback_model,
+            reasoning_effort=args.reasoning_effort,
+            fallback_reasoning_effort=args.fallback_reasoning_effort,
+            max_tokens=args.max_tokens,
             api_base=args.api_base,
             api_key=args.api_key,
             timeout=args.timeout,

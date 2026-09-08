@@ -9,9 +9,11 @@
 被 graph_ingest.py(增量建边)、graph_dump.py(快照)、query_graph.py(查询)复用。
 """
 import json
+import hashlib
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 try:
@@ -26,6 +28,7 @@ HUB_DIR = REPO / "cross-domain" / "topics"
 GRAPH_DB = REPO / "cross-domain" / "graph.db"
 PRIVATE_GRAPH_DB = PRIVATE_DIR / "graph.db"
 GRAPH_SCHEMA_CONFIG = REPO / "operations" / "config" / "graph-schema.yaml"
+GRAPH_BUSY_TIMEOUT_MS = 30000
 
 # 域 → 所属 graph.db。主库四域统一用 cross-domain/graph.db(聚合);
 # private 物理隔离,独立 graph.db,不进主聚合。
@@ -99,7 +102,7 @@ def traversal_families(profile="", families=None, contract=None):
 # 管道版本号：影响 wiki/图边输出的建设变更才 bump。
 # 纯改名/重构不 bump；skeleton 模板/建边逻辑/prompt 调整等影响已入库内容的 bump。
 # re_ingest --outdated 据此判断哪些论文需重新摄入。
-CURRENT_PIPELINE_VERSION = 12  # v12: shared paper semantic contract across API and Agent backends
+CURRENT_PIPELINE_VERSION = 14  # v14: rank Chinese Wiki/Raw locators with deterministic CJK bigrams
 
 RAW_DOCUMENT_SUFFIXES = {
     ".md", ".txt", ".pdf", ".doc", ".docx", ".ppt", ".pptx",
@@ -182,9 +185,28 @@ def _ensure_aliases_many_to_many(conn):
         raise
 
 
+@contextmanager
+def graph_writer_lock(db_path=None):
+    """Serialize live graph simulations and commits across Agent processes."""
+    import fcntl
+
+    target = Path(db_path or GRAPH_DB).resolve()
+    digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:16]
+    lock_dir = REPO / "temp" / "graph-writer"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"{target.name}-{digest}.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield target
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def connect(db_path=None):
-    conn = sqlite3.connect(db_path or GRAPH_DB)
+    conn = sqlite3.connect(db_path or GRAPH_DB, timeout=GRAPH_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {GRAPH_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(nodes)")}
     # 加性迁移：ingest_version（管道版本戳，re_ingest 判断是否需重新摄入）

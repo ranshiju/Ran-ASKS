@@ -72,6 +72,23 @@ def _meaningful_components(value: str) -> set[str]:
     }
 
 
+def _without_trailing_acronym(value: str) -> str:
+    return re.sub(
+        r"\s*[(（][A-Z][A-Za-z0-9+.-]{1,11}[)）]\s*$", "", str(value or "")
+    ).strip()
+
+
+def optional_acronym_equivalent(left: str, right: str) -> bool:
+    """Treat a trailing acronym as optional only when the full names match."""
+    left_without = _without_trailing_acronym(left)
+    right_without = _without_trailing_acronym(right)
+    if left_without == str(left or "").strip() and right_without == str(right or "").strip():
+        return False
+    left_base = _normalize(left_without)
+    right_base = _normalize(right_without)
+    return bool(left_base and left_base == right_base)
+
+
 def lexical_identity_signal(left: str, right: str) -> bool:
     """代码化身份信号：等价组成部分重合或一个规范全名包含另一个。"""
     left_n, right_n = _normalize(left), _normalize(right)
@@ -299,6 +316,16 @@ def _decomposed_exact_candidates(
             ).fetchall()
             for row in rows:
                 item = _row_dict(row)
+                component_key = _normalize(component)
+                title_key = _normalize(item["title"])
+                if (
+                    component_key != title_key
+                    and component_key in title_key
+                    and len(title_key) > len(component_key)
+                ):
+                    # An alias mechanically exposed from inside a compound
+                    # title is a related concept, not the compound's identity.
+                    continue
                 by_path[item["node_id"]] = item
         return list(by_path.values())
 
@@ -455,6 +482,28 @@ def resolve_node(
         }
 
     all_rows = _identity_rows(conn, node_types)
+    acronym_equivalent = [
+        row for row in all_rows if optional_acronym_equivalent(name, row["title"])
+    ]
+    if len(acronym_equivalent) == 1:
+        candidate = acronym_equivalent[0]
+        return {
+            "decision": "resolved",
+            "node_id": candidate["node_id"],
+            "title": candidate["title"],
+            "description": candidate["description"],
+            "match_mode": "optional_trailing_acronym",
+            "reason": "full_name_equal_ignoring_trailing_acronym",
+            "candidates": [],
+        }
+    if len(acronym_equivalent) > 1:
+        return {
+            "decision": "ambiguous",
+            "reason": "multiple_optional_acronym_targets",
+            "match_mode": "deterministic",
+            "candidates": acronym_equivalent[:top_k],
+            "allowed_actions": ["keep_local", "use_context", "review_later"],
+        }
     # 自动身份复用必须先有代码化名称信号；没有名称证据时不调用 embedding，
     # semantic relatedness 留给 semantic_search，不冒充 identity。
     rows = [row for row in all_rows if lexical_identity_signal(name, row["title"])]

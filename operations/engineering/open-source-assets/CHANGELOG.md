@@ -7,6 +7,21 @@ manifests and checksums.
 
 ## [Unreleased]
 
+### Highlights
+
+- Added reusable, consent-gated image OCR with source-bound receipts, paired
+  original/Markdown Raw packages, and persistent extraction and review provenance.
+- Added field-level risk review with separate Agent and human identities;
+  unresolved critical fields block ingestion, while non-critical limitations
+  remain visible without turning completed ingestion into a user task.
+- Made image-source confidence conservative, preserved blank form fields, and
+  deferred source cleanup until final validation and persisted completion;
+  cleanup retries do not replay ingestion.
+- Synchronized source identity, source-addressed reading, shared ingestion
+  recovery, and engineering guidance with the current Agent/API boundaries.
+- Updated both READMEs and the Chinese introduction with a dated PDF addendum;
+  the existing release version and frozen paper artifacts remain unchanged.
+
 ## [0.4.0] - 2026-09-04
 
 ### Highlights

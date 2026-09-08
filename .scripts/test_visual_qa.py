@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import io
 import sys
 import tempfile
+import urllib.error
 from pathlib import Path
+from unittest.mock import patch
 
 import fitz
 from PIL import Image, ImageDraw
@@ -21,6 +24,7 @@ from visual_qa import (
     parse_page_selector,
     run_visual_qa,
 )
+import visual_qa
 
 
 def _normal_image(path: Path, color: tuple[int, int, int] = (40, 100, 180)) -> None:
@@ -185,8 +189,10 @@ def test_remote_primary_fallback(tmp: Path) -> None:
 
     def fallback_call(model, image_path, prompt, config):
         calls.append(model)
-        if model == "GLM-4.6V":
+        if model == "GLM-5.3-Flash":
+            assert config.reasoning_effort == "low"
             raise TimeoutError("simulated timeout")
+        assert config.reasoning_effort == "default"
         return _vision_pass(model, image_path, prompt, config)
 
     result = run_visual_qa(
@@ -195,13 +201,15 @@ def test_remote_primary_fallback(tmp: Path) -> None:
         api_base="https://example.invalid/v1",
         api_key="test-key",
         vision_call=fallback_call,
+        model="GLM-5.3-Flash", fallback_model="GLM-4.6V",
+        reasoning_effort="low", fallback_reasoning_effort="default",
     )
     assert result["status"] == "completed"
-    assert calls == ["GLM-4.6V", "GLM-4.5V"]
+    assert calls == ["GLM-5.3-Flash", "GLM-4.6V"]
     page = json.loads(Path(
         result["receipt_dir"], "pages", "page-0001.json"
     ).read_text(encoding="utf-8"))
-    assert page["remote"]["model_used"] == "GLM-4.5V"
+    assert page["remote"]["model_used"] == "GLM-4.6V"
     assert page["state"] == "complete"
 
 
@@ -337,6 +345,93 @@ def test_pptx_static_render_when_available(tmp: Path) -> None:
     assert Path(result["receipt_dir"], "renders", "page-0001.png").is_file()
 
 
+def test_reasoning_budget_and_prompt_invalidate_cache(tmp: Path) -> None:
+    image = tmp / "cache-policy.png"
+    _normal_image(image)
+    options = dict(deterministic_only=True, receipt_root=tmp / "policy-receipts",
+                   reasoning_effort="low", fallback_reasoning_effort="default", max_tokens=1800)
+    first = run_visual_qa(image, **options)
+    assert run_visual_qa(image, **options)["resumed_pages"] == 1
+    for change in ({"reasoning_effort": "high"}, {"fallback_reasoning_effort": "low"}, {"max_tokens": 3000}):
+        changed = run_visual_qa(image, **{**options, **change})
+        assert changed["check_key"] != first["check_key"]
+        assert changed["resumed_pages"] == 0
+    with patch.object(visual_qa, "PROMPT_VERSION", "old-prompt"):
+        assert run_visual_qa(image, **options)["check_key"] != first["check_key"]
+    manifest = json.loads(Path(first["receipt_dir"], "manifest.json").read_text())
+    assert manifest["check_key_inputs"]["reasoning_effort"] == "low"
+    assert manifest["check_key_inputs"]["max_tokens"] == 1800
+
+
+def test_vision_transport_settings_and_completion_guard(tmp: Path) -> None:
+    image = tmp / "transport.png"
+    _normal_image(image)
+    response = _vision_pass("model", image, "prompt", None)
+    for effort in ("low", "high", "default"):
+        for finish in ("stop", "length", None):
+            envelope = {"choices": [{"finish_reason": finish, "message": {"content": json.dumps(response)}}]}
+            config = visual_qa.RemoteConfig("https://example.invalid/v1", "secret-key",
+                                            reasoning_effort=effort, max_tokens=3000)
+            with patch.object(visual_qa.urllib.request, "urlopen",
+                              return_value=io.BytesIO(json.dumps(envelope).encode())) as call:
+                if finish == "stop":
+                    assert visual_qa._call_vision_api("model", image, "prompt", config)["verdict"] == "pass"
+                else:
+                    try:
+                        visual_qa._call_vision_api("model", image, "prompt", config)
+                        raise AssertionError("non-stop response must fail even with complete JSON")
+                    except VisualQAError:
+                        pass
+                payload = json.loads(call.call_args.args[0].data)
+                assert payload["max_tokens"] == 3000
+                assert payload.get("reasoning_effort") == (None if effort == "default" else effort)
+    error = urllib.error.HTTPError("https://example.invalid", 500, "provider error", {}, io.BytesIO(b"secret-key"))
+    with patch.object(visual_qa.urllib.request, "urlopen", side_effect=error):
+        try:
+            visual_qa._call_vision_api("model", image, "prompt", config)
+            raise AssertionError("HTTP failure must raise")
+        except VisualQAError as caught:
+            assert "secret-key" not in str(caught)
+
+
+def test_qa_env_overrides_and_parameter_validation(tmp: Path) -> None:
+    env_file = tmp / "qa.env"
+    env_file.write_text("VISUAL_QA_REASONING_EFFORT=low\nVISUAL_QA_MAX_TOKENS=1800\n")
+    with patch.dict("os.environ", {"VISUAL_QA_REASONING_EFFORT": "high", "VISUAL_QA_MAX_TOKENS": "2400"}):
+        env = load_visual_env(env_file)
+    assert env["VISUAL_QA_REASONING_EFFORT"] == "high"
+    assert env["VISUAL_QA_MAX_TOKENS"] == "2400"
+    image = tmp / "invalid-settings.png"
+    _normal_image(image)
+    for setting in ({"reasoning_effort": "medium"}, {"max_tokens": 0}, {"max_tokens": True}):
+        try:
+            run_visual_qa(image, deterministic_only=True, receipt_root=tmp / "invalid", **setting)
+            raise AssertionError("invalid settings must be rejected")
+        except VisualQAError:
+            pass
+
+
+def test_advisory_policy_preserves_real_findings_without_fallback(tmp: Path) -> None:
+    image = tmp / "reported-issue.png"
+    _normal_image(image)
+    calls = []
+
+    def reported_issue(model, image_path, prompt, config):
+        calls.append(model)
+        assert "summary only" in prompt and "actionable, visibly supported defects" in prompt
+        result = _vision_pass(model, image_path, prompt, config)
+        result["issues"] = [{"code": "clipped_text", "severity": "fail", "evidence": "Visible clipping"}]
+        return result
+
+    result = run_visual_qa(image, receipt_root=tmp / "no-rejudge", api_base="https://example.invalid",
+                           api_key="key", model="primary", fallback_model="fallback", vision_call=reported_issue)
+    assert result["verdict"] == "fail"
+    assert calls == ["primary"]
+    report = _vision_pass("model", image, "prompt", None)
+    report["issues"] = [{"code": "minor_whitespace_bottom", "severity": "warn", "evidence": "Reported issue"}]
+    assert visual_qa._normalize_vision_result(report)["verdict"] == "warn"
+
+
 def main() -> None:
     test_page_selector()
     with tempfile.TemporaryDirectory(prefix="visual-qa-test-") as tmp_dir:
@@ -351,6 +446,10 @@ def main() -> None:
         test_missing_remote_config_is_not_pass(tmp)
         test_paper_pdf_requires_remote_opt_in(tmp)
         test_sensitive_remote_guard(tmp)
+        test_reasoning_budget_and_prompt_invalidate_cache(tmp)
+        test_vision_transport_settings_and_completion_guard(tmp)
+        test_qa_env_overrides_and_parameter_validation(tmp)
+        test_advisory_policy_preserves_real_findings_without_fallback(tmp)
         test_pptx_static_render_when_available(tmp)
     print("visual QA regression: PASS")
 

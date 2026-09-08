@@ -56,6 +56,30 @@ def test_relation_roundtrip_preserves_writer_fields():
     assert ir["relations"][0]["origin"] == "deterministic"
 
 
+def test_duplicate_author_relation_keeps_single_deterministic_source():
+    page = "academic/wiki/papers/example"
+    relation = {"subject": "Alice", "predicate": "第一作者", "object": page}
+    ir = _build(page, "paper-summary", [relation, relation], deterministic=1)
+    assert len(ir["relations"]) == 1
+    assert ir["relations"][0]["origin"] == "deterministic"
+    assert ir["extensions"]["paper"]["authors"] == [
+        {"person": "Alice", "role": "第一作者"},
+    ]
+
+
+def test_one_punctuated_proposition_remains_one_ir_relation():
+    page = "academic/wiki/papers/alce"
+    proposition = "ALCE从流畅性、正确性和引文质量三个维度评估生成，并提供端到端实验设置"
+    ir = _build(page, "paper-summary", [{
+        "subject": page, "predicate": "核心创新点", "object": proposition,
+    }])
+    assert len(ir["relations"]) == 1
+    assert ir["relations"][0]["object"] == proposition
+    assert ir["extensions"]["paper"]["propositions"] == [
+        {"kind": "核心创新点", "text": proposition},
+    ]
+
+
 def test_meeting_extension_keeps_people_tasks_and_reports():
     page = "academic/wiki/conferences/0903-example"
     ir = _build(page, "conference-summary", [
@@ -321,6 +345,72 @@ def test_invalid_direct_ir_fails_before_database_open():
         finally:
             graph_ingest.gl.REPO = old_repo
             graph_ingest._connect_for = old_connect
+
+
+def test_staged_plan_only_uses_logical_page_and_rolls_back_live_graph():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        (repo / "cross-domain").mkdir()
+        staged_wiki = repo / "temp" / "staged.md"
+        staged_raw = repo / "temp" / "source.md"
+        semantic = repo / "temp" / "semantic.txt"
+        staged_wiki.parent.mkdir(parents=True, exist_ok=True)
+        staged_raw.write_text("source text\n", encoding="utf-8")
+        staged_wiki.write_text(
+            "---\ntitle: Staged policy\ntype: policy\nsources:\n"
+            "  - admin/raw/policies/staged.md\nsource_type: official-doc\n"
+            "status: current\n---\n\n## Navigation\n\nStaged navigation.\n",
+            encoding="utf-8",
+        )
+        semantic.write_text(
+            "三元组:\n本文件 | 涉及 | staged graph planning\n",
+            encoding="utf-8",
+        )
+        logical_page = "admin/wiki/policies/staged"
+        ir_path = repo / "temp" / "ir.json"
+        plan_path = repo / "temp" / "plan.json"
+        db_path = repo / "cross-domain" / "graph.db"
+        old_repo, old_db = graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB
+        graph_ingest.gl.REPO = repo
+        graph_ingest.gl.GRAPH_DB = db_path
+        try:
+            conn = graph_ingest.gl.connect()
+            graph_ingest.gl.init_schema(conn)
+            conn.close()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                graph_ingest.cmd_ingest(Namespace(
+                    page=logical_page,
+                    page_file=str(staged_wiki),
+                    raw_source_override=str(staged_raw),
+                    plan_only=True,
+                    semantic=str(semantic),
+                    knowledge_ir=None,
+                    triples=None,
+                    triples_json=None,
+                    citations=None,
+                    transaction_id="txn-preflight",
+                    knowledge_ir_out=str(ir_path),
+                    graph_plan_out=str(plan_path),
+                    raw_relationship_json=None,
+                    clean=False,
+                    db=None,
+                ))
+            report = json.loads(output.getvalue())
+            assert report["plan_only"] is True
+            assert report["committed"] is False
+            ir = kir.load_knowledge_ir(ir_path)
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            assert ir["document"]["page"] == logical_page
+            assert plan["document"]["page"] == logical_page
+            assert not kir.validate_graph_plan(plan, ir)
+            assert not (repo / f"{logical_page}.md").exists()
+            conn = sqlite3.connect(db_path)
+            assert conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 0
+            conn.close()
+        finally:
+            graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB = old_repo, old_db
 
 
 def test_shared_graph_command_records_ir_and_plan_paths():

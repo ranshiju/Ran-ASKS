@@ -146,6 +146,18 @@ def build_knowledge_ir(
         _relation_record(row, index, deterministic_relation_count)
         for index, row in enumerate(relations)
     ]
+    deduplicated = []
+    positions = {}
+    for row in relation_rows:
+        key = (row["subject"], row["predicate"], row["object"])
+        previous = positions.get(key)
+        if previous is None:
+            positions[key] = len(deduplicated)
+            deduplicated.append(row)
+        elif (deduplicated[previous].get("origin") != "deterministic"
+              and row.get("origin") == "deterministic"):
+            deduplicated[previous] = row
+    relation_rows = deduplicated
     structural_rows = []
     for index, relation in enumerate(structural_relations or []):
         row = _relation_record(

@@ -580,7 +580,139 @@ def record_paper_route_correction(transaction_id: str, result: dict) -> str:
     state["quality_status"] = (
         "degraded" if state.get("quality_warnings") else "complete"
     )
+    state_path = inbox_state.save(transaction_id, state)
+    closed_report = _close_route_review_handoff(state, correction)
+    if closed_report and any(
+        item.get("transaction_id") == transaction_id and item.get("status") == "completed"
+        for item in closed_report.get("files", [])
+    ):
+        result["maintenance"] = state["maintenance"]
+        return str(state_path.relative_to(REPO))
     return str(inbox_state.save(transaction_id, state).relative_to(REPO))
+
+
+def _read_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_json(path: Path, value) -> None:
+    _atomic_write_bytes(
+        path, (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    )
+
+
+def _managed_artifact(relative: str, prefix: str) -> Path | None:
+    if not relative:
+        return None
+    target = (REPO / relative).resolve()
+    try:
+        target.relative_to((REPO / prefix).resolve())
+    except ValueError:
+        return None
+    return target
+
+
+def _finish_hub_route_action(envelope: dict, remaining: int) -> None:
+    components = envelope.setdefault("components", {})
+    hubs = components.setdefault("hubs", {})
+    hubs["route_review_count"] = remaining
+    other_reviews = sum(
+        int(hubs.get(key) or 0)
+        for key in ("eligible_count", "split_count", "redistribution_count")
+    )
+    if remaining == 0 and other_reviews == 0:
+        hubs["status"] = "completed"
+        hubs.pop("next_action", None)
+        envelope["actions"] = [
+            action for action in envelope.get("actions", [])
+            if action.get("component") != "hubs"
+        ]
+    if envelope.get("errors"):
+        envelope["status"] = "error"
+    elif envelope.get("actions"):
+        envelope["status"] = "agent_required"
+    elif any(
+        isinstance(item, dict) and item.get("status") == "deferred"
+        for item in components.values()
+    ):
+        envelope["status"] = "deferred"
+    else:
+        envelope["status"] = "completed"
+
+
+def _close_route_review_handoff(state: dict, correction: dict) -> dict | None:
+    """Consume the matching route-review task in state, receipt, and report."""
+    maintenance = state.get("maintenance")
+    if not isinstance(maintenance, dict):
+        return
+    hubs = (maintenance.get("components") or {}).get("hubs") or {}
+    route_rel = str(hubs.get("route_review_file") or "")
+    route_path = _managed_artifact(route_rel, "temp/hub-route-review")
+    if route_path is None or not route_path.is_file():
+        return
+    reviews = _read_json(route_path)
+    if not isinstance(reviews, list):
+        return
+    matched = False
+    for review in reviews:
+        if not isinstance(review, dict):
+            continue
+        same_transaction = review.get("transaction_id") == state.get("transaction_id")
+        same_page = str(review.get("wiki_path") or "").removesuffix(".md") == correction["page"]
+        if not (same_transaction and same_page):
+            continue
+        review["resolution"] = {
+            "status": "applied",
+            "hub": correction.get("hub"),
+            "recorded_at": correction["recorded_at"],
+        }
+        matched = True
+    if not matched:
+        return
+    _write_json(route_path, reviews)
+    remaining = sum(
+        not isinstance(item.get("resolution"), dict)
+        or item["resolution"].get("status") != "applied"
+        for item in reviews if isinstance(item, dict)
+    )
+
+    receipt_rel = str(maintenance.get("receipt_path") or "")
+    receipt_path = _managed_artifact(receipt_rel, "temp/inbox-maintenance")
+    receipt = None
+    if receipt_path is not None and receipt_path.is_file():
+        receipt = _read_json(receipt_path)
+        if isinstance(receipt, dict):
+            _finish_hub_route_action(receipt, remaining)
+            _write_json(receipt_path, receipt)
+
+    _finish_hub_route_action(maintenance, remaining)
+    report_rel = str(maintenance.get("report_path") or "")
+    report_path = _managed_artifact(report_rel, "cross-domain/ingest-reports")
+    if receipt is not None and report_path is not None and report_path.is_file():
+        report = _read_json(report_path)
+        if isinstance(report, dict):
+            report["maintenance"] = receipt
+            for item in report.get("files", []):
+                if item.get("transaction_id") != state.get("transaction_id"):
+                    continue
+                item.setdefault("graph_report", {})["hub_scope_route_current"] = (
+                    state["graph_report"]["hub_scope_route_current"]
+                )
+                item["route_corrections"] = state.get("route_corrections", [])
+                item["quality_warnings"] = state.get("quality_warnings", [])
+                item["quality_status"] = "degraded" if item["quality_warnings"] else "complete"
+            if "files" in report:
+                report["degraded"] = sum(
+                    item.get("quality_status") == "degraded" for item in report["files"]
+                )
+            from ingest_inbox import compact_maintenance, publish_maintenance_report
+            publish_maintenance_report(
+                report_path, report, repo=REPO,
+                state_overrides={state["transaction_id"]: state},
+            )
+            state["maintenance"] = compact_maintenance(report["maintenance"])
+            state["maintenance"]["report_path"] = report_rel
+            return report
 
 
 def read_people_profile(path: str | Path) -> NodeProfile | None:
@@ -1383,7 +1515,9 @@ def dynamics_plan(conn, node_ids: Iterable[str] | None = None,
     }
 
 
-def refresh_after_ingest(conn, page: str, *, max_nodes: int = 48) -> dict:
+def refresh_after_ingest(
+    conn, page: str, *, affected_nodes: list[str] | None = None, max_nodes: int = 48,
+) -> dict:
     """Locally refresh derived membership around one ingested page.
 
     This hook is deliberately bounded and soft-failing at its caller.  It never
@@ -1405,11 +1539,14 @@ def refresh_after_ingest(conn, page: str, *, max_nodes: int = 48) -> dict:
             "lifecycle_auto_applied": False,
         }
     affected = {page}
-    for row in conn.execute(
-        "SELECT subject,object FROM edges WHERE subject=? OR object=? LIMIT ?",
-        (page, page, max_nodes),
-    ):
-        affected.update((str(row[0]), str(row[1])))
+    if affected_nodes is None:
+        for row in conn.execute(
+            "SELECT subject,object FROM edges WHERE subject=? OR object=? LIMIT ?",
+            (page, page, max_nodes),
+        ):
+            affected.update((str(row[0]), str(row[1])))
+    else:
+        affected.update(str(node) for node in affected_nodes if node)
     eligible = [item.node_id for item in ordinary_profiles(conn, affected)][:max_nodes]
     membership = plan_memberships(conn, eligible)
     applied = apply_membership_plan(conn, membership)

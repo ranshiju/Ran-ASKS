@@ -10,7 +10,7 @@ raw 不可变（红线），只重生 wiki + 清旧图边 + 重建。
   python3 .scripts/re_ingest.py --manifest          # 全量 re-ingest（works + references）
   python3 .scripts/re_ingest.py --manifest --dry-run # 预览清单
   python3 .scripts/re_ingest.py --outdated          # 仅 re-ingest 管道版本落后的论文
-  python3 .scripts/re_ingest.py --resume <txn-id>   # 恢复 agent_required 中断的事务
+  python3 .scripts/re_ingest.py --resume <txn-id>   # 继续同一 Agent task/API 兼容事务
 """
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / ".scripts"))
 
 import inbox_state
+import agent_task
 import ingest_common as ic
 from ingest_common import (
     progress, set_progress_file, set_progress_log_path, close_progress_file,
@@ -124,6 +125,9 @@ def new_state_for_reingest(paper_id: str, raw_md_rel: str) -> dict:
     # 复制 raw paper.md 到 extract_dir（step_write_wiki 从此读取）
     raw_md_path = REPO / raw_md_rel
     shutil.copy2(raw_md_path, extract_dir / "paper.md")
+    raw_pdf_path = raw_md_path.with_name("paper.pdf")
+    if raw_pdf_path.is_file():
+        shutil.copy2(raw_pdf_path, extract_dir / "paper.pdf")
     # raw_dir 取 raw paper.md 的真实父目录（works/references 均可，不再硬编码 references）
     raw_dir = str((REPO / raw_md_rel).parent.relative_to(REPO))
     md_text = raw_md_path.read_text(encoding="utf-8")
@@ -150,10 +154,46 @@ def new_state_for_reingest(paper_id: str, raw_md_rel: str) -> dict:
 def review_reingest_bibliography(state: dict) -> bool:
     """Run the same evidence-bound bibliography gate used by fresh ingestion."""
     extract_dir = REPO / state["extract_dir"]
-    md_text = (extract_dir / "paper.md").read_text(encoding="utf-8")
+    paper_md = extract_dir / "paper.md"
+    md_text = paper_md.read_text(encoding="utf-8")
+    is_agent = agent_task.ingest_backend() == "agent"
     result = ip.review_bibliographic_metadata(
-        state.get("bibliographic_meta"), md_text, state.get("transaction_id", ""))
+        state.get("bibliographic_meta"), md_text, state.get("transaction_id", ""),
+        agent_workspace=True,
+    )
     draft_rel = str(extract_dir.relative_to(REPO) / "bibliographic-review.json")
+
+    if result.get("status") == "prepared":
+        if is_agent:
+            ip.prepare_agent_workspace_handoff(state, result, paper_md)
+            task = state["agent_task"]
+            task["kind"] = "re_ingest_paper"
+            task["commands"] = {
+                "resume": (
+                    "INGEST_BACKEND=agent python3 .scripts/re_ingest.py --resume "
+                    + state["transaction_id"]
+                ),
+            }
+            task["context"].update({
+                "reingest": True,
+                "raw_source": state.get("source", ""),
+                "paper_id": state.get("paper_id", ""),
+            })
+            task["context"].pop("source_pdf", None)
+            state["agent_task"] = task
+            state["pre_handoff_status"] = "write_wiki"
+            return False
+        state["bibliographic_review"] = {
+            "status": "prepared",
+            "review": result.get("review", {}),
+            "decision": result.get("decision"),
+            "candidates": result.get("candidates", {}),
+            "catalog": result.get("catalog", {}),
+            "input_hash": result.get("input_hash", ""),
+            "worker": result.get("worker", {}),
+            "draft_path": draft_rel,
+        }
+        return True
 
     if result.get("status") == "agent_required":
         state["status"] = "agent_required"
@@ -338,7 +378,7 @@ def run_one(paper_id: str, raw_md_rel: str, verbose: bool) -> dict:
 
 
 def resume_reingest(txn_id: str, verbose: bool) -> int:
-    """恢复 agent_required 中断的 re-ingest 事务。
+    """继续当前 Agent task 或兼容旧的 agent_required re-ingest 事务。
 
     走 re-ingest 自有的 commit_wiki_and_graph（带 --clean 清旧边），
     而非 ingest_paper 的无 clean commit，避免旧边残留。
@@ -347,17 +387,78 @@ def resume_reingest(txn_id: str, verbose: bool) -> int:
     if not state:
         print(json.dumps({"status": "error", "error": f"事务不存在: {txn_id}"}))
         return 1
-    if state.get("status") != "agent_required":
+    workspace = state.get("agent_workspace") or {}
+    workspace_pending = (
+        state.get("status") in {"prepared", "agent_required"}
+        and workspace.get("protocol_version") == ip.AGENT_WORKSPACE_PROTOCOL
+        and workspace.get("status") == "awaiting_output"
+    )
+    if agent_task.is_prepared(state) or workspace_pending:
+        if not ip.resume_agent_workspace(
+            state,
+            check_duplicate=False,
+            check_relationship=str(workspace.get("execution_backend") or "agent") == "agent",
+        ):
+            errors = list(state.get("errors") or ["Agent workspace 校验失败"])
+            ip.reopen_agent_workspace(state, "workspace", errors)
+            inbox_state.save(txn_id, state)
+            payload = {
+                "status": "prepared" if agent_task.is_prepared(state) else "agent_required",
+                "transaction_id": txn_id,
+                "execution_backend": workspace.get("execution_backend", "agent"),
+                "write_to": (state.get("agent_write_to")
+                             or workspace.get("output_path", "")),
+                "errors": errors,
+            }
+            if agent_task.is_prepared(state):
+                payload["agent_task"] = agent_task.payload(state)
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+        if state.get("status") == "bibliographic_review_required":
+            inbox_state.save(txn_id, state)
+            print(json.dumps({
+                "status": state["status"],
+                "transaction_id": txn_id,
+                "errors": state.get("errors", []),
+            }, ensure_ascii=False, indent=2))
+            return 1
+        inbox_state.save(txn_id, state)
+    elif state.get("status") != "agent_required":
         print(json.dumps({"status": "error",
-                          "error": f"事务状态非 agent_required: {state.get('status')}",
+                          "error": f"事务状态不可恢复: {state.get('status')}",
                           "transaction_id": txn_id}))
         return 1
-    # agent 已修正 semantic 文件，清标记，从命题抽取继续（跳过 wiki/slots 重写）
-    state["agent_required"] = False
-    state["agent_prompt"] = ""
-    state["errors"] = []
-    inbox_state.transition(state, "propositions", reason="resume_reingest_after_agent_fix")
-    inbox_state.save(txn_id, state)
+    else:
+        review = state.get("bibliographic_review") or {}
+        if review.get("status") == "agent_required":
+            if not ip._resume_bibliographic_review(state):
+                inbox_state.save(txn_id, state)
+                print(json.dumps({
+                    "status": "agent_required",
+                    "transaction_id": txn_id,
+                    "errors": state.get("errors", ["书目裁决输出尚未就绪"]),
+                }, ensure_ascii=False, indent=2))
+                return 1
+            if state.get("status") == "bibliographic_review_required":
+                inbox_state.save(txn_id, state)
+                print(json.dumps({
+                    "status": state["status"],
+                    "transaction_id": txn_id,
+                    "errors": state.get("errors", []),
+                }, ensure_ascii=False, indent=2))
+                return 1
+            inbox_state.save(txn_id, state)
+        else:
+            # 兼容升级前由 API/旧 Agent 留下的语义修复事务。
+            if not ip.resume_after_semantic_fix(state):
+                inbox_state.save(txn_id, state)
+                print(json.dumps({
+                    "status": "agent_required",
+                    "transaction_id": txn_id,
+                    "errors": state.get("errors", ["语义修复暂存产物尚未就绪"]),
+                }, ensure_ascii=False, indent=2))
+                return 1
+            inbox_state.save(txn_id, state)
 
     set_progress_file(None)
     set_progress_log_path(None)
@@ -387,8 +488,10 @@ def resume_reingest(txn_id: str, verbose: bool) -> int:
         "quality_status": "degraded" if state.get("quality_warnings") else "complete",
         "quality_warnings": state.get("quality_warnings", []),
         "bibliographic_corrections": state.get("bibliographic_corrections", []),
+        **({"agent_task": agent_task.payload(state)}
+           if agent_task.is_prepared(state) else {}),
     }, ensure_ascii=False, indent=2))
-    return 0 if state["status"] == "completed" else 1
+    return 0 if state["status"] in {"completed", "prepared"} else 1
 
 
 def main() -> int:
@@ -397,13 +500,13 @@ def main() -> int:
     src.add_argument("--raw", help="raw paper.md 路径或 raw 目录路径（单篇）")
     src.add_argument("--manifest", action="store_true", help="扫描全量已入库论文")
     src.add_argument("--outdated", action="store_true", help="仅 re-ingest 管道版本落后的论文")
-    src.add_argument("--resume", help="恢复 agent_required 中断的事务 ID（走 clean commit）")
+    src.add_argument("--resume", help="继续同一 Agent task/API 兼容事务（走 clean commit）")
     parser.add_argument("--dry-run", action="store_true", help="仅列出清单，不执行")
     parser.add_argument("--verbose", action="store_true", help="进度打印到 stdout")
     parser.add_argument("--force", action="store_true", help="即使页面已是当前管线版本仍重新生成")
     args = parser.parse_args()
 
-    # resume：恢复 agent_required 中断的事务（走 re-ingest 自有 clean commit）
+    # resume：消费同一暂存任务并走 re-ingest 自有 clean commit。
     if args.resume:
         return resume_reingest(args.resume, args.verbose)
 
@@ -464,7 +567,16 @@ def main() -> int:
             "quality_status": "degraded" if state.get("quality_warnings") else "complete",
             "quality_warnings": state.get("quality_warnings", []),
             "bibliographic_corrections": state.get("bibliographic_corrections", []),
+            **({"agent_task": agent_task.payload(state)}
+               if agent_task.is_prepared(state) else {}),
         })
+        if agent_task.is_prepared(state):
+            print(json.dumps({
+                "status": "prepared",
+                "item": results[-1],
+                "agent_task": agent_task.payload(state),
+            }, ensure_ascii=False, indent=2))
+            return 0
         if state["status"] == "agent_required":
             print(json.dumps({
                 "status": "agent_required", "item": results[-1],

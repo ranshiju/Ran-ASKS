@@ -312,6 +312,84 @@ def test_coverage_anchors_prefer_locked_bibliographic_authors():
             ingest_check.REPO = old_repo
 
 
+def test_coverage_anchors_prefer_locked_title_over_publisher_wrapper_h1():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory).resolve()
+        raw_dir = repo / "academic/raw/references/demo"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "paper.md").write_text(
+            "# COMMUNICATIONS PHYSICS\n\n# Complex networks from classical to quantum\n",
+            encoding="utf-8",
+        )
+        (raw_dir / "source.yaml").write_text(
+            "bibliographic:\n"
+            "  title: Complex networks from classical to quantum\n"
+            "  authors: []\n"
+            "  review:\n"
+            "    locked: true\n",
+            encoding="utf-8",
+        )
+        page = repo / "academic/wiki/papers/demo.md"
+        page.parent.mkdir(parents=True)
+        fm = {
+            "type": "paper-summary",
+            "sources": ["academic/raw/references/demo/paper.md"],
+            "title": "Complex networks from classical to quantum",
+            "authors": [],
+        }
+        old_repo = ingest_check.REPO
+        ingest_check.REPO = repo
+        try:
+            warns = ingest_check.check_coverage_anchors(page, fm, "")
+            assert not any("raw标题" in warning for warning in warns), warns
+            (raw_dir / "source.yaml").write_text(
+                "bibliographic:\n"
+                "  title: Complex networks from classical to quantum\n"
+                "  authors: []\n"
+                "  review:\n"
+                "    locked: false\n",
+                encoding="utf-8",
+            )
+            warns = ingest_check.check_coverage_anchors(page, fm, "")
+            assert any("raw标题" in warning for warning in warns), warns
+        finally:
+            ingest_check.REPO = old_repo
+
+
+def test_coverage_anchors_expand_only_truncated_locked_surname_particle():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory).resolve()
+        raw_dir = repo / "academic/raw/references/tura"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "paper.md").write_text(
+            "# Energy as a Detector of Nonlocality\n\n"
+            "J. Tura, G. De las Cuevas, R. Augusiak\n",
+            encoding="utf-8",
+        )
+        (raw_dir / "source.yaml").write_text(
+            "bibliographic:\n"
+            "  authors: [J. Tura, G. De, R. Augusiak]\n"
+            "  review:\n"
+            "    locked: true\n",
+            encoding="utf-8",
+        )
+        page = repo / "academic/wiki/papers/tura.md"
+        page.parent.mkdir(parents=True)
+        fm = {
+            "type": "paper-summary",
+            "sources": ["academic/raw/references/tura/paper.md"],
+            "title": "Energy as a Detector of Nonlocality",
+            "authors": ["J. Tura", "G. De las Cuevas", "R. Augusiak"],
+        }
+        old_repo = ingest_check.REPO
+        ingest_check.REPO = repo
+        try:
+            warns = ingest_check.check_coverage_anchors(page, fm, "")
+        finally:
+            ingest_check.REPO = old_repo
+    assert not any("authors" in warning for warning in warns), warns
+
+
 def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
     with tempfile.TemporaryDirectory() as directory:
         repo = Path(directory).resolve()
@@ -338,8 +416,12 @@ def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
         try:
             errors, _warnings = ingest_check.check_file(page, set(), set())
             assert not errors
-            page.write_text(page.read_text(encoding="utf-8").replace("#L3", "#L30"),
+            valid_text = page.read_text(encoding="utf-8")
+            page.write_text(valid_text.replace("Supported fact.[^r1]", "Supported fact.[^r1]6>"),
                             encoding="utf-8")
+            errors, _warnings = ingest_check.check_file(page, set(), set())
+            assert any("残缺 RAW 脚注引用" in error for error in errors)
+            page.write_text(valid_text.replace("#L3", "#L30"), encoding="utf-8")
             errors, _warnings = ingest_check.check_file(page, set(), set())
         finally:
             (ingest_check.REPO, ingest_check.wl.REPO,
@@ -430,6 +512,7 @@ y
     test_extract_engine_warns_on_non_mineru()
     test_bibliographic_consistency_uses_published_year_and_aps_doi()
     test_coverage_anchors_prefer_locked_bibliographic_authors()
+    test_coverage_anchors_expand_only_truncated_locked_surname_particle()
     test_locator_aware_page_runs_only_minimal_closed_loop_checks()
     print("ingest check regression: PASS")
 

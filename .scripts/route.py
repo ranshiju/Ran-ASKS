@@ -15,7 +15,7 @@ LLM 判断指令类型后,调本脚本截取对应规范 section,拼成 prompt�
   route.py --task scan
   route.py --task inbox  # 先运行 inbox_plan.py；按 manifest 分流，禁止直接猜 batch
   route.py --task hub
-  route.py --task build    # 建设:输出 shared-conventions
+  route.py --task build    # 建设:输出 WikiGraph 方法哲学与工程信息入口
   route.py --task research # 研究:输出 RESEARCH 规范
   route.py --task frontier # 研究前沿:输出 FRONTIER 规范
   route.py --capability write --capability-profile academic # research 状态内按需加载论文落笔能力
@@ -40,7 +40,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / ".scripts"))
-from llm_structured import configured_model, execution_mode, ingest_backend_notice
+import agent_task
 import engineering_locator as engineering_loc
 from engineering_graph import capability as engineering_capability
 from engineering_graph import load as load_engineering_graph
@@ -91,15 +91,6 @@ EXPERIENCE_TRIGGER_NOTICE = """--- 轻量经验层（事件触发） ---
 - 经验只提示策略，不是事实源；不得绕过 raw、schema、graph、stage guard 或回归。
 """
 
-BUILD_ENGINEERING_LOCATOR_DISCIPLINE = """--- 建设任务工程精确读取门 ---
-- 先运行 `python3 .scripts/engineering_graph.py impact <target> --verify`，把 node/contract/capability、code-guidance section、推荐精确 locator 与最小验证命令作为影响卡；不要先枚举整个 YAML。
-- 建设域有 DSH capability seam：`dsh.build_tools.BuildLocatorCockpit` 只暴露 build_engineering_impact / build_locator_read / build_locator_list；guard 强制 impact 完成后才可精读，list 必须带 prefix。
-- 推荐精确 locator（先直接 read）直接 `read`；只有推荐不足时才调用 filtered `list --prefix`，再用返回的 `md:`/`yaml:`/`py:`/`Lx-Ly` locator 执行 `read`，只把命中片段交给 Agent。
-- `rg` 只用于定位候选文件或符号。仅 locator 明确不支持、报错，或所需上下文本身跨多个块时才定向扩大读取，并在工作更新中说明原因。
-- Raw、Wiki 各用专用 locator；功能性任务不调用工程 locator。
-"""
-
-
 def classify_query(query: str) -> list[str]:
     """返回可组合查询意图；证据需求不再被关键词顺序单选覆盖。"""
     facets = [profile for profile, hints in QUERY_PROFILE_HINTS.items() if any(hint in query for hint in hints)]
@@ -115,6 +106,10 @@ def engineering_context(task):
         sys.exit(1)
     if task not in capabilities:
         return ""
+    if task == "build":
+        lines = ["[WikiGraph build 方法]"]
+        lines.extend(f"- {item}" for item in capabilities[task].get("guardrails", []))
+        return "\n".join(lines)
     return engineering_capability(nodes, capabilities, task, compact=True)
 
 # paper-only schema section: content != paper 时过滤掉
@@ -142,7 +137,7 @@ ROUTES = {
                     # stage 1: 编码 (Encoding) — 读 raw 写 summary
                     {
                         "name": "编码 (Encoding)",
-                        "ingest": ["会话级总计划", "两种模式", "阶段一", "长文动态颗粒度", "编码阶段最小读取", "通用 raw 路径约束",
+                        "ingest": ["会话级总计划", "摄入操作类型", "阶段一", "长文动态颗粒度", "编码阶段最小读取", "通用 raw 路径约束",
                                    "通用来源标记", "重要约束"],
                         "schema": ["页面类型", "Frontmatter 模板", "标准 section 结构"],
                     },
@@ -166,7 +161,7 @@ ROUTES = {
                 ],
             },
             "update": {
-                "sections": ["会话级总计划", "两种模式", "更新模式", "冲突处理分支", "通用 raw 路径约束",
+                "sections": ["会话级总计划", "摄入操作类型", "更新模式", "冲突处理分支", "通用 raw 路径约束",
                              "节点类型", "描述性短语校验",
                              "graph.db 边格式", "通用来源标记", "重要约束",
                              "Raw 文档包节点与 Wiki 直连"],
@@ -174,7 +169,7 @@ ROUTES = {
                            "graph.db 边写作约束"],
             },
             "batch": {
-                "sections": ["会话级总计划", "两种模式", "批量摄入子流程", "通用 raw 路径约束", "重要约束"],
+                "sections": ["会话级总计划", "摄入操作类型", "批量摄入子流程", "通用 raw 路径约束", "重要约束"],
                 "schema": ["页面类型", "Frontmatter 模板", "标准 section 结构",
                            "graph.db 边写作约束", "研究方向定位与 Hub Scope"],
             },
@@ -187,7 +182,7 @@ ROUTES = {
     "lint": {
         "file": "operations/LINT.md",
         "sections": ["触发方式", "检查清单", "SR 交叉验证", "冲突分级",
-                     "时效性判定", "图相关检查", "输出"],
+                     "时效性判定", "图相关检查", "输出", "提示词审查审计"],
     },
     "sync": {
         "file": "operations/SYNC.md",
@@ -213,8 +208,8 @@ ROUTES = {
                      "分裂", "合并", "兼容与迁移"],
     },
     "build": {
-        "file": "operations/shared-conventions.md",
-        "sections": ["下游同步清单", "建设交付的工程文档维护", "系统设计原则"],
+        "file": None,
+        "sections": [],  # 工程细节由 impact 推荐 locator 按需加载
     },
     "research": {
         "file": "operations/RESEARCH.md",
@@ -266,6 +261,8 @@ def load_sections(filepath, prefixes, optional=False, stage=None):
     stage: 当前 ingest stage 编号(1/2/3);用于应用 STAGE_TRUNCATE 截断规则,
     避免 stage 1 派发超长段全量。
     """
+    if prefixes == []:
+        return [], []
     p = REPO / filepath
     if not p.exists():
         return [], [(filepath, "文件不存在")]
@@ -320,7 +317,8 @@ def emit_query_profile(query, profiles, stage, output_format):
     else:
         text = rules
     backend_notice = ""
-    if execution_mode() == "api":
+    if agent_task.query_backend() == "api":
+        from llm_structured import configured_model
         backend_notice = f"阶段 {stage}：LLM=API（{configured_model()}）；输出须遵守当前任务卡并经既有校验。"
     result = {
         "task": "query", "profile": "+".join(profiles), "profiles": profiles, "stage": stage, "query": query,
@@ -519,7 +517,11 @@ def main():
             file=sys.stderr,
         )
         notice_stage = args.stage if args.stage else None
-        backend_notice = ingest_backend_notice(stage=notice_stage)
+        backend = agent_task.ingest_backend()
+        backend_notice = ""
+        if backend == "api":
+            from llm_structured import ingest_backend_notice
+            backend_notice = ingest_backend_notice(stage=notice_stage)
         if backend_notice:
             print(f"[ingest 后端] {backend_notice}", file=sys.stderr)
         if content == "paper" and args.subproject == "academic":
@@ -530,8 +532,7 @@ def main():
                 "下方 stage 任务卡仅在需手动介入或 agent 模式时参考。",
                 file=sys.stderr,
             )
-            from llm_structured import ingest_mode
-            if ingest_mode() == "api":
+            if backend == "api":
                 print(
                     "[ingest API 后端] 当前 INGEST_BACKEND=api，--raw 模式全自动代码驱动。",
                     file=sys.stderr,
@@ -628,9 +629,7 @@ def main():
         print()
     if args.task != "build":
         print(USE_TASK_EXECUTION_DISCIPLINE)
-    else:
-        print(BUILD_ENGINEERING_LOCATOR_DISCIPLINE)
-    if args.task in {"query", "ingest", "write", "build"}:
+    if args.task in {"query", "ingest", "write"}:
         print(EXPERIENCE_TRIGGER_NOTICE)
     for label, content_text in all_hits:
         print(f"--- {label} ---")

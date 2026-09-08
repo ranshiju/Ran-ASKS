@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""query_orchestrate.py — A+ v3 编排层(程序侧,不裁决语义)
+"""query_orchestrate.py — API-only constrained query session loop.
 
 v3 边界(GPT 修正):程序不裁决开放语义,但核验客观事实、约束执行过程、要求 LLM 对证据不足作显式说明。
 - Evidence Profile:程序读 frontmatter 返回**原始证据事实**(source_presence/source_types/version_status/conflict_markers),不返回"权威充分/时间匹配"等语义结论
@@ -8,7 +8,7 @@ v3 边界(GPT 修正):程序不裁决开放语义,但核验客观事实、约束
 - stop_reason + required_disclosures:诚实边界可追溯
 - v4(2026-07-23):槽位清单与缺口回检——LLM 声明预期槽位(init --slots),每轮报告覆盖(exec --covered),程序机械算缺口;stop_reason 细化 sufficient_complete/sufficient_partial。修 pilot 漏停(M1/M3/M4)。见 operations/RECOVERY.md 候补策略
 
-入口(init/exec/finalize),由 Codex 对话里的 LLM 显式调用。
+当前宿主 Agent 不使用本会话壳，直接按 query task card 调用只读查询工具。
 """
 from __future__ import annotations
 import argparse
@@ -26,6 +26,7 @@ from typing import Optional
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / ".scripts"))
 import query_actions as actions
+import agent_task
 import ingest_common
 import wiki_locator as wl
 
@@ -100,7 +101,7 @@ class QuerySession:
     steps: list[dict] = field(default_factory=list)
     ts: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S"))
     stage: str = "start"       # DSH cockpit: start→evidence→continue→answer
-    mode: str = "agent"        # agent=原有行为不变, api=启用 stage 守卫
+    mode: str = "api"
     read_sources: list[str] = field(default_factory=list)   # 成功读取的 raw locator(Batch 3 read_raw 填充)
 
     def slot_gaps(self) -> list[str]:
@@ -111,6 +112,8 @@ class QuerySession:
         return max(0, self.token_budget - self.token_used)
 
     def __post_init__(self):
+        if self.mode != "api":
+            raise ValueError("query_orchestrate 仅支持 API backend")
         if not self.token_budget:
             self.token_budget = int(DEFAULT_WINDOW * BUDGET_RATIO)
 
@@ -122,7 +125,7 @@ class QuerySession:
         if act not in ALLOWED:
             return f"非法动作 {act}(允许: {ALLOWED})"
         # 1b. DSH cockpit stage guard: API 模式下按阶段约束动作
-        if self.mode == "api" and self.stage in STAGE_ACTIONS:
+        if self.stage in STAGE_ACTIONS:
             allowed_in_stage = STAGE_ACTIONS[self.stage]
             if act not in allowed_in_stage:
                 return f"STAGE_GUARD: 阶段 {self.stage} 不允许 {act}(允许: {allowed_in_stage or '仅 answer'})"
@@ -351,7 +354,9 @@ def _load(sid: str) -> QuerySession:
     s.plan_count = d["plan_count"]; s.loop_count = d["loop_count"]; s.hard_stopped = d["hard_stopped"]
     s.stop_reason = d["stop_reason"]; s.steps = d["steps"]
     s.search_strategy = d.get("search_strategy", {})
-    s.stage = d.get("stage", "start"); s.mode = d.get("mode", "agent")
+    s.stage = d.get("stage", "start"); s.mode = d.get("mode", "api")
+    if s.mode != "api":
+        raise ValueError("legacy Agent query session 不再由 query_orchestrate 恢复")
     s.read_sources = d.get("read_sources", [])
     return s
 
@@ -364,7 +369,7 @@ def _result(session, out):
 def cmd_init(args):
     session = QuerySession(query=args.query, query_type=args.query_type or "简单事实",
                            stage=getattr(args, "stage", "start") or "start",
-                           mode=getattr(args, "mode", "agent") or "agent")
+                           mode=getattr(args, "mode", "api") or "api")
     if getattr(args, "slots", "") and args.slots.strip():
         session.slot_checklist = [x.strip() for x in args.slots.split(",") if x.strip()]
     strategy = json.loads(args.strategy) if getattr(args, "strategy", "") else {}
@@ -563,7 +568,12 @@ def _api_query_loop(session: QuerySession, llm_call_fn, max_rounds: int | None =
         prompt = _build_api_prompt(session, last_results, round_num)
         result = llm_call_fn(prompt)
         if result.get("status") == "agent_required":
-            return {"session_id": session.session_id, "handoff": result, "round": round_num}
+            return {
+                "session_id": session.session_id,
+                "status": "backend_error",
+                "error": "API query loop received an Agent backend response",
+                "round": round_num,
+            }
         parsed = result.get("parsed") or {}
         decision = parsed.get("decision", "answer")
         plan = parsed.get("plan", [])
@@ -600,6 +610,8 @@ def _api_query_loop(session: QuerySession, llm_call_fn, max_rounds: int | None =
 
 def cmd_run_api(args):
     """API 模式全自动查询循环：LLM 决策 + 程序通过 stage guard 执行 + citation contract。"""
+    if agent_task.query_backend() != "api":
+        raise SystemExit("ERROR: query_orchestrate run-api requires QUERY_BACKEND=api")
     import llm_structured as llm
     session = QuerySession(query=args.query, query_type=args.query_type or "简单事实",
                            stage="start", mode="api")
@@ -628,7 +640,7 @@ if __name__ == "__main__":
     p_init.add_argument("--strategy", default="", help="轻量检索策略 JSON")
     p_init.add_argument("--slots", default="", help="预期槽位,逗号分隔(多槽题声明,简单题可省略)")
     p_init.add_argument("--stage", default="start", help="查询阶段: start|evidence|continue|answer")
-    p_init.add_argument("--mode", default="agent", help="运行模式: agent(默认,不受阶段约束)|api(DSH cockpit,强制 stage 守卫)")
+    p_init.add_argument("--mode", default="api", choices=["api"], help="运行模式: API")
     p_exec = sub.add_parser("exec"); p_exec.add_argument("--session", required=True); p_exec.add_argument("--plan", required=True)
     p_exec.add_argument("--covered", default="", help="本轮已覆盖槽位,逗号分隔(累积,可选)")
     p_exec.add_argument("--stage", default="", help="推进查询阶段: start|evidence|continue|answer(留空=不变)")

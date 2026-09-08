@@ -76,16 +76,14 @@ def test_visual_loop_is_isolated_and_runs(tmp: Path) -> None:
     assert "visual_check" in result.snapshot["tool_names"]
 
 
-def test_agent_mode_handoff(tmp: Path) -> None:
+def test_agent_mode_is_rejected(tmp: Path) -> None:
     artifact = tmp / "figure.png"
     _image(artifact)
-    loop = VisualAgentLoop(mode="agent")
-    result = loop.run(f'请做视觉 QA "{artifact}"')
-    assert result.status == "agent_required"
-    assert result.handoff
-    assert result.handoff["tool"] == "visual_check"
-    assert result.handoff["path_candidate"] == str(artifact)
-    assert "修改指令依赖可见状态" in result.handoff["instruction"]
+    try:
+        VisualAgentLoop(mode="agent")
+        raise AssertionError("visual DSH loop must reject the host-Agent backend")
+    except ValueError as exc:
+        assert "API backend" in str(exc)
 
 
 def test_dispatch_is_specific() -> None:
@@ -111,7 +109,7 @@ def main() -> None:
         tmp = Path(tmp_dir)
         test_visual_tool_executes_deterministic_check(tmp)
         test_visual_loop_is_isolated_and_runs(tmp)
-        test_agent_mode_handoff(tmp)
+        test_agent_mode_is_rejected(tmp)
     test_dispatch_is_specific()
     print("dsh visual tools regression: PASS")
 

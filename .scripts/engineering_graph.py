@@ -23,6 +23,74 @@ def node_ref(nodes, node_id):
     return f"{node_id}: {node['path']} ({node['role']})"
 
 
+class TargetResolutionError(ValueError):
+    pass
+
+
+def _normalize_target_path(value):
+    raw = str(value).strip().replace('\\', '/')
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = REPO / candidate
+    try:
+        return candidate.resolve().relative_to(REPO.resolve()).as_posix()
+    except ValueError:
+        return raw
+
+
+def _unique_target(nodes, target, matches, match_kind):
+    matches = sorted(set(matches))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        candidates = ', '.join(f"{node_id} ({nodes[node_id]['path']})" for node_id in matches)
+        raise TargetResolutionError(
+            f"目标 {target!r} 的{match_kind}不唯一；请改用 canonical node ID: {candidates}"
+        )
+    return None
+
+
+def resolve_target(nodes, capabilities, target, *, allow_capability=False):
+    """Resolve a CLI target to a registered canonical node or capability ID."""
+    requested = str(target or '').strip()
+    if allow_capability and requested in capabilities:
+        return 'capability', requested
+    if requested in nodes:
+        return 'node', requested
+
+    normalized = _normalize_target_path(requested)
+    path_matches = [
+        node_id for node_id, node in nodes.items()
+        if _normalize_target_path(node.get('path', '')) == normalized
+    ]
+    resolved = _unique_target(nodes, requested, path_matches, '注册路径')
+    if resolved:
+        return 'node', resolved
+
+    requested_path = requested.replace('\\', '/')
+    if '/' not in requested_path:
+        filename_matches = [
+            node_id for node_id, node in nodes.items()
+            if Path(str(node.get('path', ''))).name == requested_path
+        ]
+        resolved = _unique_target(nodes, requested, filename_matches, '文件名')
+        if resolved:
+            return 'node', resolved
+
+    if '/' not in requested_path and not Path(requested_path).suffix:
+        stem_matches = [
+            node_id for node_id, node in nodes.items()
+            if Path(str(node.get('path', ''))).stem == requested_path
+        ]
+        resolved = _unique_target(nodes, requested, stem_matches, 'stem')
+        if resolved:
+            return 'node', resolved
+
+    accepted = 'canonical node ID、capability 或唯一已注册 path/文件名/stem' \
+        if allow_capability else 'canonical node ID 或唯一已注册 path/文件名/stem'
+    raise TargetResolutionError(f"未知工程目标 {requested!r}；可接受 {accepted}")
+
+
 _GUIDANCE_CACHE = None
 _GUIDANCE_LOCATOR_CACHE = None
 
@@ -269,8 +337,9 @@ def contract_failures(nodes, capabilities, contracts):
             failures.append('ingest capability missing required closure nodes')
     if 'raw_redline_text' in checks:
         agents = (REPO / 'AGENTS.md').read_text(encoding='utf-8')
-        if '绝不修改 raw/' not in agents:
-            failures.append('raw redline drift: AGENTS.md no longer declares raw immutability')
+        markers = ('Agent 不直接修改 `raw/`', 'Raw 写入只经受管摄入事务')
+        if not all(marker in agents for marker in markers):
+            failures.append('raw redline drift: AGENTS.md no longer declares managed Raw writes')
     return failures
 
 
@@ -398,14 +467,25 @@ def main():
         print('\n'.join('ERROR: '+f for f in failures),file=sys.stderr); sys.exit(1)
     try:
         if args.command=='capability': print(capability(nodes,capabilities,args.node,args.compact))
-        elif args.command=='impact': print(impact(
-            nodes, edges, capabilities, args.node,
-            verification if args.verify else None, script_contracts,
-        ))
-        elif args.command=='contract': print(script_contract(nodes,script_contracts,args.node))
-        elif args.command=='status': print(node_ref(nodes,args.node))
-        elif args.command=='forget': apply_forget(args.node, args.dry_run)
+        elif args.command=='impact':
+            _kind, target = resolve_target(
+                nodes, capabilities, args.node, allow_capability=True)
+            print(impact(
+                nodes, edges, capabilities, target,
+                verification if args.verify else None, script_contracts,
+            ))
+        elif args.command=='contract':
+            _kind, target = resolve_target(nodes, capabilities, args.node)
+            print(script_contract(nodes,script_contracts,target))
+        elif args.command=='status':
+            _kind, target = resolve_target(nodes, capabilities, args.node)
+            print(node_ref(nodes,target))
+        elif args.command=='forget':
+            _kind, target = resolve_target(nodes, capabilities, args.node)
+            apply_forget(target, args.dry_run)
         else: print(f'工程元图有效: {len(nodes)} 节点, {len(edges)} 边, {len(capabilities)} 能力包, {len(contracts)} 契约')
+    except TargetResolutionError as exc:
+        print(f'ERROR: {exc}',file=sys.stderr); sys.exit(2)
     except KeyError as exc:
         print(f'ERROR: 未知节点/能力 {exc.args[0]}',file=sys.stderr); sys.exit(2)
 if __name__=='__main__': main()

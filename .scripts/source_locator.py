@@ -6,9 +6,13 @@ import re
 REPO = Path(__file__).resolve().parent.parent
 LOCATOR_RE = re.compile(r"^(?P<path>[^#]+)(?:#(?P<locator>.+))?$")
 LINE_LOCATOR_RE = re.compile(r"^L(?P<start>\d+)(?:-L?(?P<end>\d+))?$", re.I)
+EXPLICIT_ANCHOR_RE = re.compile(
+    r"\{:\s*#(?P<anchor>[A-Za-z][A-Za-z0-9_.:-]*)[^}]*\}"
+)
 PAGE_LOCATOR_RE = re.compile(r"^(?:page-?)?(?P<start>\d+)(?:-(?P<end>\d+))?$", re.I)
 TEXT_LOCATOR_SUFFIXES = {".md", ".txt", ".yaml", ".yml", ".json", ".jsonl", ".csv"}
-BINARY_SUFFIXES = {".pdf", ".docx", ".doc", ".pptx", ".jpg", ".jpeg", ".png"}
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"})
+BINARY_SUFFIXES = {".pdf", ".docx", ".doc", ".pptx"} | IMAGE_SUFFIXES
 FACT_PREDICATES = {
     "作者", "通讯作者", "发表于", "引用", "参会", "就读", "所属", "主讲",
     "指导", "师从", "受指导于", "任职于", "研究关键词", "研究基础",
@@ -109,6 +113,27 @@ def locator_companion_name(source_name):
         return source.name
     return f"{source.stem}.md"
 
+
+def explicit_anchor_block(text, locator):
+    """Return the Markdown block bound to ``{: #locator}``, if present."""
+    locator = str(locator or "").strip()
+    if not locator:
+        return None
+    for match in EXPLICIT_ANCHOR_RE.finditer(text):
+        if match.group("anchor") != locator:
+            continue
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        same_line = text[line_start:match.start()].strip()
+        if same_line:
+            return same_line
+        before = text[:line_start].rstrip()
+        if not before:
+            return None
+        block_start = before.rfind("\n\n") + 2
+        block = before[block_start:].strip()
+        return block or None
+    return None
+
 def valid_locator(locator, target):
     if not locator:
         return False
@@ -150,6 +175,8 @@ def locator_status(locator, target):
     if requested:
         start, end = requested
         return "present" if end <= len(lines) else "missing"
+    if explicit_anchor_block(text, locator) is not None:
+        return "present"
     if locator in {"authors", "participants", "references"}:
         patterns = {
             "authors": (r"^# .+$", r"作者", r"\band\b"),
@@ -192,6 +219,9 @@ def read_locator_text(target, locator):
         if end > len(lines):
             return None
         return "\n".join(lines[start - 1:end])
+    anchored = explicit_anchor_block(text, locator)
+    if anchored is not None:
+        return anchored
     locator_lower = locator.lower()
     if locator_lower == "authors":
         title = re.search(r"^#\s+.+$", text, re.M)

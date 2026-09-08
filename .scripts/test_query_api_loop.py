@@ -208,14 +208,15 @@ def test_loop_exhausted():
     assert result["round"] == 2
 
 
-def test_loop_agent_handoff():
-    """API 未配置时 agent_required 交接。"""
+def test_loop_rejects_agent_backend_response():
+    """API 编排器不得把错误的 Agent backend 响应伪装成正常交接。"""
     def mock_fn(prompt):
         return {"status": "agent_required", "mode": "agent"}
     s = QuerySession(query="test", query_type="t", stage="start", mode="api")
     result = module._api_query_loop(s, mock_fn, max_rounds=3)
-    assert "handoff" in result
-    assert result["handoff"]["status"] == "agent_required"
+    assert result["status"] == "backend_error"
+    assert "handoff" not in result
+    assert "Agent backend response" in result["error"]
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from derivation_state import sha256_file
+from source_locator import IMAGE_SUFFIXES
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -19,12 +20,15 @@ PRIVATE_DB = REPO / "private" / "source-fingerprints.db"
 RAW_ROOTS = tuple(REPO / domain / "raw" for domain in ("academic", "admin", "teaching", "business"))
 PRIVATE_RAW_ROOTS = (REPO / "private" / "raw",)
 SIDECAR_NAMES = {"source.yaml", "parse_meta.yaml", "manifest.json", "entity-resolution.json"}
-SIDECAR_PATTERNS = (re.compile(r"^corrected(?:[-.].*)?$", re.I),)
+SIDECAR_PATTERNS = (
+    re.compile(r"^corrected(?:[-.].*)?$", re.I),
+    re.compile(r"^.+\.source\.json$", re.I),
+)
 TEXT_COMPANION_SUFFIXES = {".md", ".txt"}
 BINARY_SOURCE_SUFFIXES = {
     ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
-    ".jpg", ".jpeg", ".png", ".wav", ".mp3", ".m4a", ".mp4",
-}
+    ".wav", ".mp3", ".m4a", ".mp4",
+} | IMAGE_SUFFIXES
 
 
 def db_for_path(path: Path, repo: Path = REPO) -> Path:

@@ -79,6 +79,19 @@ def test_cockpit_has_audit_state():
     assert "impact" in cockpit.start_prompt("ingest_paper")
 
 
+def test_cockpit_impact_accepts_registered_script_path():
+    cockpit = BuildLocatorCockpit()
+    result = cockpit.execute(TOOL_BUILD_IMPACT, {
+        "target": ".scripts/engineering_graph.py",
+        "verify": False,
+    })
+    payload = json.loads(result.content)
+    assert payload["ok"] is True, payload
+    assert "[建设影响面] engineering_graph:" in payload["output"]
+    assert cockpit.audit()["impact_seen"] is True
+    assert cockpit.audit()["impact_target"] == ".scripts/engineering_graph.py"
+
+
 def main():
     tests = [(name, fn) for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]

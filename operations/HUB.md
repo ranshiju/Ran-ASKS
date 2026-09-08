@@ -180,6 +180,10 @@ python3 .scripts/hub_semantics.py route-apply --page <paper> --hub <canonical-hu
 
 论文 Wiki 仍保留可 locate 的 `## 研究方向定位`。程序只比较该句与 active、具有正式 `## Scope` 的 canonical Hub；legacy title 只用于候选诊断。canonical top-1 同时达到 floor 与 margin 后，若它是子 Hub，还必须在论文 profile 中命中扣除父 Scope 后的子方向特异性词项；否则以 `child_specificity_unsupported` abstain。达到 floor 但 margin 不足时同样 abstain，二者都生成 route-review handoff。
 
-主 Agent 复核后，`route-apply` 仅接受当前候选榜中的 active canonical research-direction Hub，并替换该论文既有同谓词 Hub 路由边；新边同时记录 `研究方向定位` evidence、普通 origin 与 `agent-confirmed:<locator>` origin，重摄入清理时保留。传入 `--transaction-id` 时，原事务同时写入 `route_corrections`、当前路由快照和派生 `quality_status`；后续 route 查询返回 `agent_confirmed_override`，但仍保留自动门禁结果供审计。它不降低自动 floor/margin。
+主 Agent 复核后，`route-apply` 仅接受当前候选榜中的 active canonical research-direction Hub，并替换该论文既有同谓词 Hub 路由边；新边同时记录 `研究方向定位` evidence、普通 origin 与 `agent-confirmed:<locator>` origin，重摄入清理时保留。传入 `--transaction-id` 时，原事务同时写入 `route_corrections`、当前路由快照和派生 `quality_status`，并消费匹配的 route-review handoff、同步 maintenance 回执与摄入报告；没有其他待审动作时 maintenance 转为 `completed`。后续 route 查询返回 `agent_confirmed_override`，但仍保留自动门禁结果供审计。它不降低自动 floor/margin。
+
+摄入报告发布时即关联各已完成事务的共享维护回执。方向裁决同时更新报告对应文件的当前路由与质量摘要，避免后续维护使用旧路由重复生成待审项；其他图导航歧义不会因方向已确认而消失。缺失关联的历史回执按 `INBOX.md` 的 `--reconcile-maintenance-report` 定向修复。
+
+方向裁决先写入原事务，再通过共享发布入口同步同批全部事务的维护快照；最后一项完成后，较早事务也须显示相同终态。发布中断保留检查点和已记录裁决，恢复只重放既有裁决并重新同步快照，不重新裁决或重复写方向边。发布错误作为独立 maintenance 摘要返回，不推翻已成功的方向应用。
 
 这条边表达“论文的主要研究方向”，与可重建的 `普通节点 → 聚类于 → Hub` 不混用。

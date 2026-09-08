@@ -114,7 +114,7 @@ def test_parser_has_all_subcommands():
                   if hasattr(a, "choices") and a.choices}
     # 子命令名在 choices
     for cmd in ("lookup", "neighbors", "relations", "hub-of", "read-section",
-                "read-raw", "recall", "remember", "abbr", "frontier"):
+                "read-raw", "recall", "remember", "workspace", "abbr", "frontier"):
         assert cmd in _subcommand_names(ap), f"缺子命令 {cmd}"
 
 
@@ -134,6 +134,8 @@ def test_parser_defaults():
     assert ns.predicate == ""
     ns = ap.parse_args(["read-section", "academic/wiki/demo.md#method"])
     assert ns.section == ""
+    ns = ap.parse_args(["workspace", "recall", "role/nested"])
+    assert ns.workspace_args == ["recall", "role/nested"]
 
 
 # ============ Wiki section locator + Raw footnotes ============
@@ -164,7 +166,13 @@ def test_wiki_locator_reads_one_section_and_raw_citations():
     try:
         rel = str(wiki.relative_to(REPO))
         d = capture_call(module.cmd_read_section,
-                         type("A", (), {"page": f"{rel}#retrieval-control", "section": ""})())
+                         type("A", (), {
+                             "page": f"{rel}#retrieval-control",
+                             "section": "",
+                             "with_context": False,
+                             "profile": "fact",
+                             "topk": 8,
+                         })())
         assert d["ok"] is True
         assert d["result"]["section"] == "retrieval-control"
         assert "Stop rule" in d["result"]["text"]
@@ -189,12 +197,53 @@ def test_wiki_locator_minimal_validation():
         cleanup()
 
 
+def test_wiki_locator_rejects_raw_handle_and_truncated_footnote():
+    _raw, wiki = setup_locator_wiki()
+    try:
+        text = wiki.read_text(encoding="utf-8").replace(
+            "系统按证据缺口继续检索。[^r1]",
+            "系统按证据缺口继续检索。[^r1]6> <RAW#L4>",
+        )
+        wiki.write_text(text, encoding="utf-8")
+        errors = module.wl.validate_wiki_page(wiki, require_citations=True)
+        assert any("残缺 RAW 脚注引用" in error for error in errors)
+        assert any("残留未编译 RAW handle" in error for error in errors)
+    finally:
+        cleanup()
+
+
 def test_wiki_graph_source_points_to_cited_section():
     _raw, wiki = setup_locator_wiki()
     try:
         source, evidence = module.wl.graph_wiki_source(wiki, "证据缺口")
         assert source.endswith("/wiki/page#retrieval-control")
         assert evidence and evidence[0].endswith("#L3")
+    finally:
+        cleanup()
+
+
+def test_wiki_graph_source_ranks_nonidentical_chinese_proposition_by_bigrams():
+    TEMP_TEST_DIR.mkdir(parents=True, exist_ok=True)
+    wiki = TEMP_TEST_DIR / "cjk-ranking-page.md"
+    try:
+        wiki.write_text(
+            """## 零空间与非热本征态
+零空间提供非热本征态。[^r1]
+
+## 面积律标度与强热化假设的破缺
+最不纠缠零模式在宽参数区域服从面积律，并据此提出局域哈密顿量打破强热化假设的猜想。[^r2]
+
+## Sources
+[^r1]: academic/raw/references/demo/paper.md#L1
+[^r2]: academic/raw/references/demo/paper.md#L2
+""",
+            encoding="utf-8",
+        )
+        source, evidence = module.wl.graph_wiki_source(
+            wiki, "具有零空间的局域哈密顿量拥有面积律纠缠标度的零模式并打破强热化假设",
+        )
+        assert source.endswith("#面积律标度与强热化假设的破缺")
+        assert evidence == ["academic/raw/references/demo/paper.md#L2"]
     finally:
         cleanup()
 
@@ -385,6 +434,32 @@ def test_read_raw_line_range_out_of_bounds():
         cleanup()
 
 
+def test_read_raw_explicit_fact_anchor_returns_only_bound_assertion():
+    content = (
+        "# 用户申明事实累积\n\n"
+        "- [2026-09-01] **第一条事实。** {: #fact-first-20260901}\n\n"
+        "- [2026-09-02] **第二条事实。**\n"
+        "{: #fact-second-20260902}\n\n"
+        "- [2026-09-03] **不得泄漏的相邻事实。** {: #fact-third-20260903}\n"
+    )
+    p = setup_temp_file("fact_anchor", content)
+    try:
+        rel = str(p.resolve().relative_to(REPO))
+        first = capture_call(module.cmd_read_raw, type(
+            "A", (), {"locator": f"{rel}#fact-first-20260901"},
+        )())
+        second = capture_call(module.cmd_read_raw, type(
+            "A", (), {"locator": f"{rel}#fact-second-20260902"},
+        )())
+        assert first["ok"] is True
+        assert first["result"]["text"] == "- [2026-09-01] **第一条事实。**"
+        assert second["ok"] is True
+        assert "第二条事实" in second["result"]["text"]
+        assert "相邻事实" not in second["result"]["text"]
+    finally:
+        cleanup()
+
+
 def test_read_raw_oversized_locator_requires_refinement():
     """命中片段过大时拒绝返回半截内容。"""
     content = "## Large\n\n" + ("x" * (module.RAW_PREVIEW_CHARS + 1)) + "\n"
@@ -450,6 +525,11 @@ def main():
     test_collect_sources_skips_missing_source()
     test_parser_has_all_subcommands()
     test_parser_defaults()
+    test_wiki_locator_reads_one_section_and_raw_citations()
+    test_wiki_locator_minimal_validation()
+    test_wiki_locator_rejects_raw_handle_and_truncated_footnote()
+    test_wiki_graph_source_points_to_cited_section()
+    test_wiki_graph_source_ranks_nonidentical_chinese_proposition_by_bigrams()
     test_abbr_envelope()
     test_frontier_wrapper_json_envelope()
     test_frontier_answer_wrapper()
@@ -462,6 +542,7 @@ def main():
     test_read_raw_participants_is_precise_line()
     test_read_raw_line_range_exact()
     test_read_raw_line_range_out_of_bounds()
+    test_read_raw_explicit_fact_anchor_returns_only_bound_assertion()
     test_read_raw_oversized_locator_requires_refinement()
     test_read_raw_pdf_page_native()
     test_read_raw_unresolvable_path()

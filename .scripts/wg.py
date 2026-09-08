@@ -8,7 +8,7 @@
 - 渐进披露：默认只返回导航/关联层，省 token；要深挖用 read-section / read-raw
 
 底层全部复用现有脚本（query_graph.py / wiki_locator.py /
-research_memory.py / query_actions.py / source_locator.py），本文件只做薄包统一。
+workspace_state.py / research_memory.py / query_actions.py / source_locator.py），本文件只做薄包统一。
 
 输出 envelope（stdout 一行 JSON）:
   {"ok": bool, "action": str, "result": ..., "sources": [...],
@@ -24,6 +24,8 @@ research_memory.py / query_actions.py / source_locator.py），本文件只做�
   wg.py read-raw <locator>              # 精确 locator：path#标题 / #L5-L8 / #page-2-3
   wg.py recall <project>
   wg.py remember <project> --title "..." --intent <intent> [--content "..." | --stdin] [--tags a,b]
+  wg.py workspace recall <workspace>
+  wg.py workspace item add <workspace> --title "..." --state active --next-action "..."
   wg.py abbr <term>
   wg.py frontier ask "<academic question>"
   wg.py frontier list
@@ -235,6 +237,32 @@ def cmd_remember(args):
                     sources=[], status="ok")
 
 
+def cmd_workspace(args):
+    """Generic workspace-state thin wrapper; the target script owns its schema."""
+    command = ["python3", str(SCRIPTS / "workspace_state.py"), *args.workspace_args]
+    rc, out, err = run_script(command)
+    if rc != 0:
+        try:
+            diagnostic = json.loads(out)
+        except json.JSONDecodeError:
+            diagnostic = None
+        if isinstance(diagnostic, dict) and diagnostic.get("ok") is False:
+            return envelope("workspace", {"command": args.workspace_args, "output": diagnostic},
+                            sources=[], status="error", ok=False,
+                            error="workspace doctor reported errors")
+        return envelope("workspace", None, status="error",
+                        error=(err or out).strip()[:500])
+    output = out.strip()
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        result = {"text": output}
+    ok = result.get("ok") if isinstance(result, dict) and "ok" in result else True
+    return envelope("workspace", {"command": args.workspace_args, "output": result},
+                    sources=[], status="ok" if ok else "error", ok=ok,
+                    error="" if ok else "workspace doctor reported errors")
+
+
 def cmd_frontier(args):
     """Frontier 薄包；主逻辑和准入契约只定义在 frontier.py。"""
     cmd = ["python3", str(SCRIPTS / "frontier.py"), args.frontier_cmd]
@@ -329,6 +357,11 @@ def build_parser():
     p.add_argument("--stdin", action="store_true")
     p.add_argument("--tags", default="")
     p.set_defaults(func=cmd_remember)
+
+    p = sub.add_parser("workspace", help="通用持续工作区状态、事项、记忆与投影")
+    p.add_argument("workspace_args", nargs=argparse.REMAINDER,
+                   help="传给 workspace_state.py 的子命令与参数")
+    p.set_defaults(func=cmd_workspace)
 
     p = sub.add_parser("frontier", help="研究前沿 Question/Trajectory")
     frontier_sub = p.add_subparsers(dest="frontier_cmd", required=True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ingest_inbox.py — inbox 统一摄入入口：程序分流 + 不确定样本 API 裁决。
+"""ingest_inbox.py — inbox 统一摄入入口：确定性分流 + 双后端语义裁决。
 
 扫描 inbox/ 下的文件，按扩展名+内容关键词分类，分发到对应摄入脚本：
   - PDF + 学术特征（Abstract/References/arXiv/DOI）→ ingest_paper.py
@@ -7,8 +7,9 @@
   - .txt + 会议特征（会议/参会/元宝会议助手/时间戳）→ ingest_meeting.py
   - .txt 非会议 / .docx / .doc / .pptx / .md → ingest_document.py；会议速记保留 meeting source_kind
 
-分类先由 Python 完成（pymupdf 前2页 + 关键词评分）；程序不确定时在 --run
-调用一次受限 API 分类器裁决。高置信度文件和 dry-run 不增加 LLM 调用。
+分类先由 Python 完成（pymupdf 前2页 + 关键词评分）。`--run` 遇到不确定
+样本时，Agent backend 返回单个批量任务，API backend 调用受限分类器；高置信度文件
+和 dry-run 都不触发语义裁决。
 
 用法：
   python3 .scripts/ingest_inbox.py                    # 扫描+分类，打印分流表（dry run）
@@ -23,14 +24,24 @@ import argparse
 import hashlib
 import json
 import re
+import shlex
 import subprocess
 import sys
 import urllib.parse
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
 ACADEMIC_EDITORIAL_MARKERS = (
     "专题导言", "特邀编辑", "本期专题", "编者按", "guest editorial", "guest editor",
+)
+ACADEMIC_CONFERENCE_NAME_RE = re.compile(
+    r"会议|研讨会|论坛|年会|conference|workshop|symposium", re.I,
+)
+ACADEMIC_CONFERENCE_RECORD_MARKERS = (
+    "信息整理", "会议信息", "会议记录", "会议总结", "会议议程", "会议通知",
+    "会议安排", "参会信息", "资料汇总", "日程安排", "会务", "meeting record",
+    "conference notes",
 )
 
 ACADEMIC_PDF_PATTERNS = (
@@ -64,10 +75,19 @@ MEETING_TRANSCRIPT_BODY_PATTERNS = (
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 import ingest_common as ic
+import agent_task
+import inbox_plan
+import ingest_user_assertions
 import source_fingerprints as sf
-from llm_structured import call_json
+import trash_util
 INBOX = REPO / "inbox"
-SKIP_FILES = {".gitkeep", ".DS_Store", "facts-pending.md"}
+SKIP_FILES = {".gitkeep", ".DS_Store"}
+
+
+def call_json(*args, **kwargs):
+    """API-only adapter kept patchable for classification tests."""
+    from llm_structured import call_json as api_call_json
+    return api_call_json(*args, **kwargs)
 
 
 def read_pdf_text(path: Path, max_pages: int = 2) -> str:
@@ -257,6 +277,8 @@ def classification_review_schema(value) -> bool:
 
 def review_low_confidence_classification(path: Path, decision: dict) -> dict:
     """用受限 API 分类器裁决不确定样本；不读知识库、不写任何持久层。"""
+    if agent_task.ingest_backend() != "api":
+        raise RuntimeError("Agent backend 不调用 API 分类器")
     allowed_types = ({"paper", "document"} if path.suffix.lower() == ".pdf"
                      else {"meeting", "document"})
     allowed = "|".join(sorted(allowed_types))
@@ -303,15 +325,106 @@ markers={json.dumps(decision['markers'], ensure_ascii=False)}
 
 
 def reconcile_classification(decision: dict, review: dict) -> tuple[str | None, str]:
-    """用 API 中高置信度结果裁决程序不确定样本。"""
+    """用 API 或当前 Agent 的中高置信度结果裁决程序不确定样本。"""
     if review.get("status") != "ok":
-        return None, f"API 分类复核失败: {review.get('error', 'unknown')}"
+        return None, f"分类复核失败: {review.get('error', 'unknown')}"
     api_type = review.get("doc_type")
     if api_type == "ambiguous":
-        return None, "API 分类复核认为证据不足（ambiguous）"
+        return None, "分类复核认为证据不足（ambiguous）"
     if review.get("confidence") == "low":
-        return None, "API 分类复核置信度仍为 low"
+        return None, "分类复核置信度仍为 low"
     return str(api_type), ""
+
+
+def _classification_task(pending: list[dict], args, issues: list | None = None) -> dict:
+    identity = [
+        {"file": item["file"], "sha256": hashlib.sha256(
+            item["review_text"].encode("utf-8")
+        ).hexdigest()}
+        for item in pending
+    ]
+    digest = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+    directory = REPO / "temp" / "inbox-classification"
+    directory.mkdir(parents=True, exist_ok=True)
+    input_path = directory / f"{digest}-input.json"
+    output_path = directory / f"{digest}-result.json"
+    input_path.write_text(json.dumps({
+        "schema": "inbox-classification-input-v1",
+        "items": pending,
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    rerun = ["python3", ".scripts/ingest_inbox.py", "--run", "--subproject", args.subproject]
+    if args.file:
+        rerun.extend(["--file", args.file])
+    if getattr(args, "ocr_result", None):
+        rerun.extend(["--ocr-result", args.ocr_result])
+    if getattr(args, "allow_remote_ocr", False):
+        rerun.append("--allow-remote-ocr")
+    rerun.extend(["--classification-file", str(output_path.relative_to(REPO))])
+    return agent_task.make_task(
+        kind="inbox_classification",
+        transaction_id=f"inbox-classification-{digest}",
+        inputs=[{
+            "name": "classification_candidates",
+            "path": str(input_path.relative_to(REPO)),
+            "role": "program_scored_bounded_source_text",
+            "read": "full",
+        }],
+        outputs=[{
+            "name": "classification_decisions",
+            "path": str(output_path.relative_to(REPO)),
+            "format": "inbox-classification-result-v1",
+        }],
+        protocol={
+            "name": "inbox-classification-result-v1",
+            "shape": {"decisions": [{
+                "file": "input file",
+                "doc_type": "allowed_types item or ambiguous",
+                "confidence": "high|medium|low",
+                "reasons": "1-4 strings",
+                "evidence_quotes": "0-4 exact source quotes",
+            }]},
+            "validator": "ingest_inbox.classification_review_schema",
+        },
+        issues=list(issues or []),
+        commands={"resume": "INGEST_BACKEND=agent " + " ".join(
+            shlex.quote(part) for part in rerun
+        )},
+    )
+
+
+def _load_agent_classifications(path: Path) -> dict[str, dict]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    decisions = payload.get("decisions") if isinstance(payload, dict) else None
+    if not isinstance(decisions, list):
+        raise ValueError("classification result 缺少 decisions")
+    result = {}
+    for decision in decisions:
+        file_name = str(decision.get("file") or "") if isinstance(decision, dict) else ""
+        if not file_name or file_name in result or not classification_review_schema(decision):
+            raise ValueError("classification decision 不符合 schema 或 file 重复")
+        result[file_name] = {**decision, "status": "ok"}
+    return result
+
+
+def _validate_agent_classification(path: Path, decision: dict, review: dict) -> None:
+    allowed_types = ({"paper", "document"} if path.suffix.lower() == ".pdf"
+                     else {"meeting", "document"})
+    if review.get("doc_type") not in allowed_types | {"ambiguous"}:
+        raise ValueError(f"{path}: doc_type 不适用于来源格式")
+    source = _normalized_evidence_text(decision.get("review_text", ""))
+    if any(
+            quote and _normalized_evidence_text(quote) not in source
+            for quote in review.get("evidence_quotes", [])
+    ):
+        raise ValueError(f"{path}: evidence_quotes 不在分类输入中")
+
+
+def _normalized_evidence_text(value: str) -> str:
+    """Normalize representation noise while preserving lexical evidence."""
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return " ".join(normalized.split())
 
 
 def classify_academic_document(path: Path) -> str | None:
@@ -330,12 +443,21 @@ def classify_academic_document(path: Path) -> str | None:
         return "editorial"
     if re.search(r"\beditorial\b", lowered):
         return "editorial"
+    conference_title = path.stem
+    heading = re.search(r"^#\s+(.+)$", text, re.M)
+    if heading:
+        conference_title += "\n" + heading.group(1)
+    conference_title = conference_title.lower()
+    if (ACADEMIC_CONFERENCE_NAME_RE.search(conference_title)
+            and any(marker in conference_title for marker in ACADEMIC_CONFERENCE_RECORD_MARKERS)):
+        return "conference-summary"
     return None
 
 
 def dispatch_command(file_type: str, rel_path: str, subproject: str,
                      document_type: str | None = None,
-                     source_kind: str = "ordinary") -> list[str]:
+                     source_kind: str = "ordinary", *, ocr_result: str | None = None,
+                     allow_remote_ocr: bool = False) -> list[str]:
     """返回对应类型的分发命令；academic 文档必须已有显式分类。"""
     if file_type == "paper":
         return [sys.executable, str(REPO / ".scripts/ingest_paper.py"), "--pdf", rel_path]
@@ -350,12 +472,17 @@ def dispatch_command(file_type: str, rel_path: str, subproject: str,
         command.extend(["--document-type", document_type])
     if source_kind != "ordinary":
         command.extend(["--source-kind", source_kind])
+    if ocr_result:
+        command.extend(["--ocr-result", ocr_result])
+    if allow_remote_ocr:
+        command.append("--allow-remote-ocr")
     return command
 
 
 def dsi_tool(file_type: str, rel_path: str, subproject: str,
              document_type: str | None = None,
-             source_kind: str = "ordinary") -> tuple[str, dict]:
+             source_kind: str = "ordinary", *, ocr_result: str | None = None,
+             allow_remote_ocr: bool = False) -> tuple[str, dict]:
     """返回 DSH ingest tool 名与参数，替代直接 subprocess dispatch。"""
     if file_type == "paper":
         return "ingest_paper_pdf", {"pdf": rel_path}
@@ -368,17 +495,24 @@ def dsi_tool(file_type: str, rel_path: str, subproject: str,
         args["document_type"] = document_type
     if source_kind != "ordinary":
         args["source_kind"] = source_kind
+    if ocr_result:
+        args["ocr_result"] = ocr_result
+    if allow_remote_ocr:
+        args["allow_remote_ocr"] = True
     return "ingest_document_file", args
 
 
 def scan_inbox() -> list[Path]:
-    """扫描 inbox/ 下的待摄入文件（排除 .gitkeep/.DS_Store/facts-pending.md）。"""
+    """扫描 inbox/，仅在 facts-pending.md 含事实条目时纳入处理。"""
     if not INBOX.is_dir():
         return []
     files = []
     for p in sorted(INBOX.iterdir()):
-        if p.is_file() and p.name not in SKIP_FILES and not p.name.startswith("."):
-            files.append(p)
+        if not p.is_file() or p.name in SKIP_FILES or p.name.startswith("."):
+            continue
+        if p.name == "facts-pending.md" and inbox_plan.fact_entries(p) == 0:
+            continue
+        files.append(p)
     return files
 
 
@@ -458,7 +592,7 @@ def _extract_last_json(stdout: str) -> dict:
     terminal = {}
     saw_status = False
     workflow_statuses = {
-        "completed", "duplicate_found", "agent_required", "failed",
+        "completed", "duplicate_found", "prepared", "agent_required", "failed",
         "type_mismatch", "classification_required", "bibliographic_review_required",
         "validation_error", "partial", "error",
     }
@@ -583,7 +717,8 @@ def _map_paper_batch_results(parsed: dict) -> list[dict]:
             entry["ok"] = True
             for key in ("paper_id", "raw_dir", "wiki_path", "engine", "graph_report",
                         "transaction_id", "proposition_status", "proposition_details",
-                        "bibliographic_worker", "relationship_worker", "semantic_repair_worker",
+                        "bibliographic_worker", "workspace_worker", "relationship_worker",
+                        "semantic_repair_worker", "execution_backend",
                         "quality_status", "quality_warnings"):
                 if item.get(key) is not None:
                     entry[key] = item[key]
@@ -593,17 +728,23 @@ def _map_paper_batch_results(parsed: dict) -> list[dict]:
                 if item.get(key) is not None:
                     entry[key] = item[key]
         elif status in {
-            "partial", "failed", "agent_required", "bibliographic_review_required",
+            "partial", "failed", "prepared", "agent_required", "bibliographic_review_required",
             "validation_error", "classification_required",
         }:
             errors = item.get("errors") or []
             if isinstance(errors, list):
-                entry["reason"] = errors[0] if errors else status
+                entry["reason"] = (
+                    errors[0] if errors else
+                    "API worker 自动恢复耗尽，等待宿主 Agent 修正暂存产物"
+                    if status == "agent_required" and item.get("execution_backend") == "api"
+                    else status
+                )
             else:
                 entry["reason"] = str(errors)
             for key in (
                 "transaction_id", "retryable", "next_action", "resume_from",
-                "failure_signature", "bibliographic_review", "prompt", "write_to",
+                "failure_signature", "bibliographic_review", "agent_task", "write_to",
+                "workspace_worker", "execution_backend", "failure_disposition",
             ):
                 if item.get(key) is not None:
                     entry[key] = item[key]
@@ -613,6 +754,64 @@ def _map_paper_batch_results(parsed: dict) -> list[dict]:
     return results
 
 
+def _result_entry(file_name: str, file_type: str, parsed: dict, content: str = "") -> dict:
+    status = str(parsed.get("status") or "unknown") if isinstance(parsed, dict) else "unknown"
+    if status == "type_mismatch":
+        errors = parsed.get("errors") or ["type_mismatch"]
+        return {"file": file_name, "type": file_type, "ok": False, "skipped": True,
+                "reason": errors[0], "status": status}
+    if status in {"completed", "duplicate_found"}:
+        entry = {"file": file_name, "type": file_type, "ok": True, "status": status}
+        for key in (
+            "paper_id", "admin_id", "raw_dir", "wiki_path", "engine",
+            "graph_report", "transaction_id", "proposition_status",
+            "proposition_details", "bibliographic_worker", "workspace_worker",
+            "relationship_worker", "execution_backend",
+            "semantic_repair_worker", "quality_status", "quality_warnings",
+        ):
+            if parsed.get(key) is not None:
+                entry[key] = parsed[key]
+        return entry
+    if status == "classification_required":
+        errors = parsed.get("errors") or ["需要显式分类"]
+        return {"file": file_name, "type": file_type, "ok": False, "skipped": True,
+                "status": status, "reason": errors[0]}
+    pending_statuses = {
+        "prepared", "agent_required", "partial", "bibliographic_review_required",
+        "validation_error", "graph_ready",
+    }
+    if status in pending_statuses:
+        errors = parsed.get("errors") or []
+        review_error = (parsed.get("bibliographic_review") or {}).get("error", "")
+        reason = (
+            "Agent task prepared" if status == "prepared" else
+            (
+                "API worker 自动恢复耗尽，等待宿主 Agent 修正暂存产物"
+                if parsed.get("execution_backend") == "api"
+                else "等待宿主 Agent 接管暂存任务"
+            ) if status == "agent_required" else
+            "部分完成" if status == "partial" else
+            errors[0] if errors else review_error or status
+        )
+        entry = {"file": file_name, "type": file_type, "ok": False,
+                 "status": status, "reason": reason}
+        for key in (
+            "transaction_id", "errors", "retryable", "next_action", "resume_from",
+            "failure_signature", "bibliographic_review", "agent_task", "write_to",
+            "failure_disposition", "workflow_status", "internal_status",
+            "workspace_worker", "execution_backend",
+        ):
+            if parsed.get(key) is not None:
+                entry[key] = parsed[key]
+        return entry
+    reason = (
+        content.splitlines()[0][:200]
+        if content and content.splitlines() else str(parsed.get("errors") or status)
+    )
+    return {"file": file_name, "type": file_type, "ok": False,
+            "status": status, "reason": reason}
+
+
 def _write_json_atomic(path: Path, value: dict | list) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(path.name + ".tmp")
@@ -620,6 +819,132 @@ def _write_json_atomic(path: Path, value: dict | list) -> None:
         json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     temp_path.replace(path)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _raw_duplicate_path(match: dict) -> Path:
+    raw_value = Path(str(match.get("raw_path") or ""))
+    if not raw_value.parts or raw_value.is_absolute():
+        raise ValueError("fingerprint raw_path 必须是仓库相对路径")
+    raw_path = (REPO / raw_value).resolve()
+    try:
+        relative = raw_path.relative_to(REPO.resolve())
+    except ValueError as exc:
+        raise ValueError("fingerprint raw_path 越出仓库") from exc
+    if len(relative.parts) < 3 or relative.parts[1] != "raw":
+        raise ValueError("fingerprint raw_path 不在受管 raw/ 目录")
+    if not raw_path.is_file():
+        raise ValueError("fingerprint 指向的 Raw 文件不存在")
+    return raw_path
+
+
+def cleanup_exact_duplicate(source: Path, match: dict) -> dict:
+    """Reverify an exact duplicate, write a receipt, then move it to Trash."""
+    expected_hash = str(match.get("binary_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        raise ValueError("fingerprint 缺少合法 binary_sha256")
+    repo_root = REPO.resolve()
+    source_path = source.resolve()
+    try:
+        source_relative = source_path.relative_to(repo_root)
+    except ValueError as exc:
+        raise ValueError("重复源文件越出仓库") from exc
+    if len(source_relative.parts) < 2 or source_relative.parts[0] != "inbox":
+        raise ValueError("重复源文件必须位于 inbox/")
+    if not source_path.is_file():
+        raise ValueError("重复源文件不存在")
+    raw_path = _raw_duplicate_path(match)
+    source_hash = _sha256_file(source_path)
+    raw_hash = _sha256_file(raw_path)
+    if source_hash != expected_hash or raw_hash != expected_hash:
+        raise ValueError("清理前 source/Raw SHA-256 复核不一致")
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", source.stem).strip("-") or "duplicate"
+    receipt_path = REPO / "temp" / "inbox-duplicate-receipts" / (
+        f"{timestamp}-{safe_stem}-{expected_hash[:12]}.json"
+    )
+    receipt = {
+        "schema": "exact-duplicate-cleanup-v1",
+        "status": "verified",
+        "source": str(source_relative),
+        "raw_path": str(raw_path.relative_to(repo_root)),
+        "binary_sha256": expected_hash,
+        "verified_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    _write_json_atomic(receipt_path, receipt)
+    try:
+        trash_util.trash_path(source_path)
+        if source_path.exists():
+            raise RuntimeError("trash 返回后源文件仍存在")
+    except Exception as exc:
+        receipt["status"] = "failed"
+        receipt["errors"] = [str(exc)]
+        _write_json_atomic(receipt_path, receipt)
+        raise RuntimeError(f"精确重复清理失败: {exc}") from exc
+    receipt["status"] = "trashed"
+    receipt["trashed_at"] = datetime.now().isoformat(timespec="seconds")
+    _write_json_atomic(receipt_path, receipt)
+    return {
+        "status": "trashed",
+        "receipt_path": str(receipt_path.relative_to(REPO)),
+    }
+
+
+def user_assertions_handoff(path: Path) -> dict:
+    result = ingest_user_assertions.prepare_transaction(path=path, repo=REPO)
+    count = result.get("fact_entries", inbox_plan.fact_entries(path))
+    result.update({
+        "file": path.name,
+        "type": "user-assertions",
+        "reason": (
+            f"facts-pending.md 含 {count} 条用户申明事实；"
+            "受管事务已准备，等待填写受限语义提案"
+        ),
+        "failure_disposition": {
+            "category": "semantic_decision",
+            "domain": "semantic",
+            "disposition": "specialist_review",
+            "retryable": False,
+            "owner": "primary_agent",
+            "next_action": result.get("next_action", "complete_agent_task"),
+            "fingerprints": [result.get("transaction_id", "")],
+        },
+    })
+    return result
+
+
+def _report_counts(results: list[dict]) -> dict:
+    pending_statuses = {
+        "prepared", "agent_required", "partial", "bibliographic_review_required",
+        "validation_error", "graph_ready",
+    }
+    return {
+        "completed": sum(item.get("status") == "completed" for item in results),
+        "duplicates": sum(item.get("status") == "duplicate_found" for item in results),
+        "awaiting_agent": sum(
+            item.get("status") in {"prepared", "agent_required"} for item in results
+        ),
+        "pending": sum(item.get("status") in pending_statuses for item in results),
+        "degraded": sum(item.get("quality_status") == "degraded" for item in results),
+        "failed": sum(
+            item.get("status") in {"failed", "error", "unknown"}
+            or (
+                not item.get("ok")
+                and not item.get("skipped")
+                and item.get("status") not in pending_statuses
+            )
+            for item in results
+        ),
+        "skipped": sum(bool(item.get("skipped")) for item in results),
+    }
 
 
 def _safe_session_id(session_id: str) -> str:
@@ -718,7 +1043,12 @@ def _hub_route_reviews(results: list[dict]) -> list[dict]:
     """Extract low-margin canonical routes for strong-agent review."""
     reviews = []
     for item in results:
-        route = ((item.get("graph_report") or {}).get("hub_scope_route") or {})
+        graph_report = item.get("graph_report") or {}
+        current_route = graph_report.get("hub_scope_route_current") or {}
+        if (current_route.get("decision") == "resolved"
+                and current_route.get("reason") == "agent_confirmed_override"):
+            continue
+        route = graph_report.get("hub_scope_route") or {}
         if (route.get("decision") != "candidates"
                 or route.get("reason") not in {
                     "scope_margin_too_small", "child_specificity_unsupported",
@@ -858,6 +1188,9 @@ def compact_maintenance(envelope: dict) -> dict:
         "actions": envelope.get("actions", [])[:10],
         "errors": [str(error)[:300] for error in envelope.get("errors", [])[:10]],
     }
+    for key in ("publication", "retryable", "next_action", "report_path"):
+        if key in envelope:
+            compact[key] = envelope[key]
     components = {}
     allowed = {
         "status", "alias_resolved", "prop_resolved", "remaining", "remaining_tokens",
@@ -889,6 +1222,46 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
             "receipt_path": str(receipt_path.relative_to(REPO)),
             "components": {
                 "abbreviations": skipped, "people": skipped.copy(), "hubs": skipped.copy(),
+            },
+        }
+        try:
+            _write_json_atomic(receipt_path, envelope)
+        except Exception as exc:
+            envelope["status"] = "error"
+            envelope["errors"].append(f"maintenance receipt write failed: {exc}")
+        return envelope
+
+    invalid_results = []
+    for index, item in enumerate(results):
+        if not (item.get("ok") and item.get("status") == "completed"):
+            continue
+        graph_report = item.get("graph_report")
+        hub_dynamics = graph_report.get("hub_dynamics") if isinstance(graph_report, dict) else None
+        if not isinstance(graph_report, dict) or not isinstance(hub_dynamics, dict) \
+                or not isinstance(hub_dynamics.get("affected_nodes"), list) \
+                or hub_dynamics.get("status") == "error":
+            invalid_results.append({
+                "index": index,
+                "file": item.get("file", ""),
+                "transaction_id": item.get("transaction_id", ""),
+                "missing": "graph_report.hub_dynamics.affected_nodes",
+            })
+    if invalid_results:
+        skipped = {"status": "skipped", "reason": "invalid_result_envelope"}
+        envelope = {
+            "status": "validation_error",
+            "session_id": session_id,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "actions": [],
+            "errors": [
+                "completed maintenance trigger is missing the full graph_report envelope"
+            ],
+            "invalid_results": invalid_results,
+            "receipt_path": str(receipt_path.relative_to(REPO)),
+            "components": {
+                "abbreviations": skipped,
+                "people": skipped.copy(),
+                "hubs": skipped.copy(),
             },
         }
         try:
@@ -975,6 +1348,102 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
     return envelope
 
 
+def publish_maintenance_report(report_path: Path, report: dict, *,
+                               state_overrides: dict | None = None,
+                               repo: Path | None = None) -> bool:
+    """Publish a shared maintenance report and bind its completed transactions."""
+    import inbox_state
+    repo = (repo or REPO).resolve()
+    report_path = report_path.resolve()
+    report_path.relative_to((repo / "cross-domain/ingest-reports").resolve())
+    maintenance = report.get("maintenance") or {}
+    updates = []
+    report_rel = str(report_path.relative_to(repo))
+    checkpoint_written = False
+    try:
+        if maintenance.get("receipt_path"):
+            receipt_path = (repo / maintenance["receipt_path"]).resolve()
+            receipt_path.relative_to((repo / "temp/inbox-maintenance").resolve())
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if not isinstance(receipt, dict):
+                raise ValueError("maintenance receipt must be an object")
+            maintenance = {**receipt, "receipt_path": str(receipt_path.relative_to(repo))}
+            linked = compact_maintenance({**maintenance, "publication": {"status": "completed"}})
+            linked["report_path"] = report_rel
+            for item in report.get("files", []):
+                transaction_id = item.get("transaction_id")
+                if item.get("status") != "completed" or not transaction_id:
+                    continue
+                state = (state_overrides or {}).get(transaction_id)
+                if state is None:
+                    state = inbox_state.load(transaction_id)
+                if state is None or state.get("status") != "completed":
+                    raise ValueError(f"completed maintenance transaction missing: {transaction_id}")
+                state_page = str(state.get("wiki_path") or "").removesuffix(".md")
+                item_page = str(item.get("wiki_path") or "").removesuffix(".md")
+                if not state_page or state_page != item_page:
+                    raise ValueError(f"maintenance transaction page mismatch: {transaction_id}")
+                state["maintenance"] = linked
+                updates.append((transaction_id, state))
+        report["maintenance"] = {
+            **maintenance, "status": "deferred", "retryable": True,
+            "next_action": "reconcile_maintenance_report", "report_path": report_rel,
+            "publication": {"status": "pending"},
+        }
+        _write_json_atomic(report_path, report)
+        checkpoint_written = True
+        for transaction_id, state in updates:
+            inbox_state.save(transaction_id, state)
+        report["maintenance"] = {**maintenance, "publication": {"status": "completed"}}
+        _write_json_atomic(report_path, report)
+        return True
+    except (OSError, ValueError) as exc:
+        report["maintenance"] = {
+            **maintenance, "status": "error", "retryable": isinstance(exc, OSError),
+            "errors": [*maintenance.get("errors", []), f"maintenance publication failed: {exc}"],
+            "report_path": report_rel,
+            "next_action": "reconcile_maintenance_report" if checkpoint_written else "repair_report_publication",
+            "publication": {"status": "error", "report_persisted": checkpoint_written},
+        }
+        if checkpoint_written:
+            try:
+                _write_json_atomic(report_path, report)
+            except OSError as persist_error:
+                report["maintenance"]["errors"].append(f"publication error checkpoint: {persist_error}")
+        return False
+
+
+def reconcile_maintenance_report(report_path: Path) -> dict:
+    """Repair one historical report using only recorded transaction decisions."""
+    import inbox_state
+    import hub_semantics
+    report_path = report_path.resolve()
+    report_path.relative_to((REPO / "cross-domain/ingest-reports").resolve())
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    receipt_rel = (report.get("maintenance") or {}).get("receipt_path")
+    if receipt_rel:
+        receipt_path = (REPO / receipt_rel).resolve()
+        receipt_path.relative_to((REPO / "temp/inbox-maintenance").resolve())
+        report["maintenance"] = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if not publish_maintenance_report(report_path, report):
+        return _compact_summary(report, report_path)
+    for item in report.get("files", []):
+        if item.get("status") != "completed" or not item.get("transaction_id"):
+            continue
+        state = inbox_state.load(item["transaction_id"])
+        if state is None:
+            continue
+        for correction in state.get("route_corrections", []):
+            if correction.get("kind") == "agent_confirmed_hub_route":
+                closed_report = hub_semantics._close_route_review_handoff(state, correction)
+                if closed_report and (closed_report.get("maintenance") or {}).get("publication", {}).get("status") == "error":
+                    return _compact_summary(closed_report, report_path)
+        inbox_state.save(item["transaction_id"], state)
+    repaired = json.loads(report_path.read_text(encoding="utf-8"))
+    publish_maintenance_report(report_path, repaired)
+    return _compact_summary(repaired, report_path)
+
+
 def _compact_summary(report: dict, report_path: Path) -> dict:
     """构造给 Agent 的稳定小结果；完整逐文件诊断只保留在 report。"""
     item_statuses = {item.get("status") for item in report["files"]}
@@ -986,10 +1455,14 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
         status = "bibliographic_review_required"
     elif "classification_required" in item_statuses:
         status = "classification_required"
+    elif "prepared" in item_statuses:
+        status = "prepared"
     elif "agent_required" in item_statuses:
         status = "agent_required"
     elif "partial" in item_statuses or report["skipped"]:
         status = "partial"
+    elif item_statuses == {"duplicate_found"}:
+        status = "duplicate_found"
     else:
         status = "completed"
     files = []
@@ -999,15 +1472,29 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
             "quality_status", "reason", "transaction_id", "retryable",
             "next_action", "resume_from", "failure_signature", "bibliographic_worker",
             "relationship_worker", "semantic_repair_worker", "failure_disposition",
+            "fact_entries", "write_to", "manifest_path", "apply_command", "cleanup",
+            "agent_task", "workflow_status", "internal_status",
         ):
             if item.get(key) is not None:
                 compact[key] = item[key]
+        warnings = item.get("quality_warnings") or []
+        if warnings:
+            compact["quality_warning_count"] = len(warnings)
+            compact["quality_warnings"] = [
+                {key: str(warning[key])[:240] for key in ("issue", "detail") if key in warning}
+                if isinstance(warning, dict) else {"detail": str(warning)[:240]}
+                for warning in warnings[:5]
+            ]
         files.append(compact)
     compact = {
         "status": status,
         "file_status": status,
+        "backend": report.get("backend"),
         "total": report["total"],
         "completed": report["completed"],
+        "duplicates": report.get("duplicates", 0),
+        "awaiting_agent": report.get("awaiting_agent", 0),
+        "pending": report.get("pending", 0),
         "degraded": report["degraded"],
         "failed": report["failed"],
         "skipped": report["skipped"],
@@ -1020,15 +1507,59 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="inbox 统一摄入入口：程序分流 + 边界 API 复核")
+    ap = argparse.ArgumentParser(description="inbox 统一摄入入口：确定性分流 + 双后端语义复核")
     ap.add_argument("--file", help="指定单个文件（不扫描 inbox 全部）")
     ap.add_argument("--run", action="store_true", help="实际执行分发（默认 dry run）")
     ap.add_argument("--subproject", default="academic",
                     choices=["academic", "admin", "teaching", "business"],
                     help="meeting/document 的存储域（默认 academic）")
+    ap.add_argument("--document-type",
+                    choices=["editorial", "academic-reference", "conference-summary"],
+                    help="单个 academic 非论文文档的显式子类型；须与 --file 同用")
     ap.add_argument("--download", nargs="+", metavar="URL",
                     help="下载 PDF URL 到 inbox/ 再处理")
+    ap.add_argument("--classification-file", default="",
+                    help="Agent backend 的 temp/ 分类裁决 JSON")
+    ap.add_argument("--ocr-result", help="单图片已有 OCR JSON 回执，校验后复用")
+    ap.add_argument("--allow-remote-ocr", action="store_true", help="显式授权单图片上传 OCR API")
+    ap.add_argument("--reconcile-maintenance-report", type=Path,
+                    help="修复指定历史摄入报告的维护关联并重放已有裁决（不重摄入）")
     args = ap.parse_args()
+    ocr_options = {}
+    if args.ocr_result or args.allow_remote_ocr:
+        if not args.file or Path(args.file).suffix.lower() not in inbox_plan.IMAGE_SUFFIXES:
+            ap.error("OCR 参数只用于 --file 指定的单张图片")
+        if args.ocr_result:
+            ocr_options["ocr_result"] = args.ocr_result
+        if args.allow_remote_ocr:
+            ocr_options["allow_remote_ocr"] = True
+    if args.reconcile_maintenance_report:
+        if args.run or args.file or args.download or args.classification_file or args.document_type:
+            ap.error("--reconcile-maintenance-report 不得与摄入操作组合")
+        try:
+            result = reconcile_maintenance_report(REPO / args.reconcile_maintenance_report)
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"status": "validation_error", "errors": [str(exc)]}, ensure_ascii=False))
+            raise SystemExit(1)
+        print(json.dumps(result, ensure_ascii=False))
+        return
+    if args.document_type and (args.subproject != "academic" or not args.file):
+        ap.error("--document-type 仅用于 --file 指定的 academic 文档")
+    backend = agent_task.ingest_backend()
+    if args.run:
+        print(f"ingest backend={backend}", file=sys.stderr, flush=True)
+    supplied_classifications = {}
+    if args.classification_file:
+        classification_path = (REPO / args.classification_file).resolve()
+        try:
+            classification_path.relative_to((REPO / "temp" / "inbox-classification").resolve())
+            supplied_classifications = _load_agent_classifications(classification_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(json.dumps({
+                "status": "validation_error",
+                "errors": [f"Agent 分类裁决无效: {exc}"],
+            }, ensure_ascii=False, indent=2))
+            raise SystemExit(1)
 
     # 下载模式
     if args.download:
@@ -1058,6 +1589,8 @@ def main():
     classification_details: dict[str, dict] = {}
     classification_reviews: dict[str, dict] = {}
     classification_blocks: dict[str, str] = {}
+    classification_pending: list[dict] = []
+    used_classifications: set[str] = set()
     fingerprint_matches: dict[str, dict] = {}
     fingerprint_index_error = ""
     try:
@@ -1066,6 +1599,16 @@ def main():
         fingerprint_index_error = str(exc)
     for f in files:
         rel = str(f.relative_to(REPO))
+        if f.name == "facts-pending.md":
+            decision = inbox_plan.classify(f)
+            classification_details[rel] = {
+                "file_type": "user-assertions",
+                **decision,
+            }
+            if not args.run:
+                print(f"{f.name:<40} {'user-assertions':<24} {'agent handoff':<20}")
+            classified.append((f, "user-assertions", rel))
+            continue
         if not fingerprint_index_error:
             try:
                 match = sf.lookup_exact(f)
@@ -1076,11 +1619,41 @@ def main():
                 fingerprint_matches[rel] = match
         decision = classify_file_details(f)
         ftype = decision["file_type"]
+        if args.document_type:
+            decision = {
+                **decision,
+                "program_file_type": ftype,
+                "file_type": "document",
+                "needs_api_review": False,
+                "explicit_document_type": args.document_type,
+            }
+            ftype = "document"
         classification_details[rel] = {
             key: value for key, value in decision.items() if key != "review_text"
         }
         if args.run and decision.get("needs_api_review") and rel not in fingerprint_matches:
-            review = review_low_confidence_classification(f, decision)
+            if backend == "api":
+                review = review_low_confidence_classification(f, decision)
+            elif rel in supplied_classifications:
+                review = supplied_classifications[rel]
+                try:
+                    _validate_agent_classification(f, decision, review)
+                except ValueError as exc:
+                    review = {"status": "review_error", "error": str(exc)}
+                used_classifications.add(rel)
+            else:
+                allowed = ["document", "paper"] if f.suffix.lower() == ".pdf" else ["document", "meeting"]
+                classification_pending.append({
+                    "file": rel,
+                    "extension": f.suffix.lower(),
+                    "allowed_types": allowed,
+                    "program": {key: value for key, value in decision.items() if key != "review_text"},
+                    "review_text": decision.get("review_text", ""),
+                })
+                review = None
+            if review is None:
+                classified.append((f, ftype, rel))
+                continue
             classification_reviews[rel] = review
             resolved_type, reason = reconcile_classification(decision, review)
             if resolved_type is None:
@@ -1089,8 +1662,12 @@ def main():
                 ftype = resolved_type
         document_type = None
         if ftype == "document" and args.subproject == "academic":
-            document_type = classify_academic_document(f)
+            document_type = args.document_type or classify_academic_document(f)
             academic_document_types[rel] = document_type
+            classification_details[rel]["document_type"] = document_type
+            classification_details[rel]["document_type_source"] = (
+                "explicit" if args.document_type else "strong_signal"
+            )
         script = {"paper": "ingest_paper.py", "meeting": "ingest_meeting.py",
                   "document": "ingest_document.py"}[ftype]
         if not args.run:
@@ -1103,6 +1680,21 @@ def main():
                 display_type = "duplicate:sha256"
             print(f"{f.name:<40} {display_type:<24} {script:<20}")
         classified.append((f, ftype, rel))
+
+    unused_classifications = sorted(set(supplied_classifications) - used_classifications)
+    if unused_classifications:
+        print(json.dumps({
+            "status": "validation_error",
+            "errors": ["分类裁决包含非本次待裁决文件: " + ", ".join(unused_classifications)],
+        }, ensure_ascii=False, indent=2))
+        raise SystemExit(1)
+    if args.run and classification_pending:
+        print(json.dumps({
+            "status": "prepared",
+            "agent_task": _classification_task(classification_pending, args),
+            "total": len(files),
+        }, ensure_ascii=False, indent=2))
+        return
 
     if not args.run:
         print(f"\n共 {len(classified)} 个文件。加 --run 执行分发。")
@@ -1121,31 +1713,59 @@ def main():
     # 多文档计划：主文档优先，版本/补充靠后（改进 3）
     classified, plan_notes = _plan_ingest_order(classified)
 
-    # 执行分发：经 DSH guard/session/tool seam 调用底层 ingest_* 脚本
-    from dsh.agent_loop import IngestAgentLoop
-    loop = IngestAgentLoop(mode="ingest_inbox")
+    # API 使用 DSH adapter；当前 Agent 直接调用确定性脚本入口。
+    loop = None
+    agent_events = []
+    if backend == "api":
+        from dsh.agent_loop import IngestAgentLoop
+        loop = IngestAgentLoop(mode="api")
+        session_id = loop.session_log.session_id
+    else:
+        session_id = "agent-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+
+    def audit(event: str, payload: dict) -> None:
+        if loop is not None:
+            loop.session_log.append(event, payload)
+        else:
+            agent_events.append({"event": event, "payload": payload})
+
     results = []
     tool_outputs = []
     for f, ftype, rel in classified:
         match = fingerprint_matches.get(rel)
         if not match:
             continue
-        entry = {
-            "file": f.name,
-            "type": ftype,
-            "ok": True,
-            "status": "duplicate_found",
-            "reason": "binary_sha256 exact match",
-            "raw_path": match["raw_path"],
-            "binary_sha256": match["binary_sha256"],
-        }
+        try:
+            cleanup = cleanup_exact_duplicate(f, match)
+            entry = {
+                "file": f.name,
+                "type": ftype,
+                "ok": True,
+                "status": "duplicate_found",
+                "reason": "binary_sha256 exact match; source moved to recoverable Trash",
+                "raw_path": match["raw_path"],
+                "binary_sha256": match["binary_sha256"],
+                "cleanup": cleanup,
+            }
+        except (OSError, RuntimeError, ValueError) as exc:
+            entry = {
+                "file": f.name,
+                "type": ftype,
+                "ok": False,
+                "status": "failed",
+                "reason": str(exc),
+                "raw_path": match.get("raw_path", ""),
+                "binary_sha256": match.get("binary_sha256", ""),
+                "exact_duplicate": True,
+            }
         results.append(entry)
-        loop.session_log.append("ingest/skip", entry)
+        audit("ingest/duplicate_cleanup", entry)
     classified = [item for item in classified if item[2] not in fingerprint_matches]
-    paper_batch = (not args.file and len(classified) > 1 and
+    paper_batch = (backend == "api" and not args.file and len(classified) > 1 and
                    not classification_blocks and
                    all(ftype == "paper" for _, ftype, _ in classified))
     if paper_batch:
+        assert loop is not None
         content = loop.execute("ingest_paper_inbox", {})
         tool_outputs.append({"tool": "ingest_paper_inbox", "output": content})
         parsed = loop.last_structured or _extract_last_json(content)
@@ -1159,6 +1779,28 @@ def main():
                             "status": "failed", "reason": reason})
     else:
         for f, ftype, rel in classified:
+            if ftype == "user-assertions":
+                count = inbox_plan.fact_entries(f)
+                if count:
+                    entry = user_assertions_handoff(f)
+                else:
+                    entry = {
+                        "file": f.name,
+                        "type": ftype,
+                        "ok": True,
+                        "skipped": True,
+                        "status": "completed",
+                        "reason": "facts-pending.md 无事实条目",
+                        "fact_entries": 0,
+                    }
+                results.append(entry)
+                audit("ingest/handoff", {
+                    "file": rel,
+                    "status": entry["status"],
+                    "reason": entry["reason"],
+                    "next_action": entry.get("next_action", ""),
+                })
+                continue
             if rel in classification_blocks:
                 review = classification_reviews.get(rel, {})
                 entry = {
@@ -1172,7 +1814,7 @@ def main():
                     "api_classification": review,
                 }
                 results.append(entry)
-                loop.session_log.append("ingest/skip", {
+                audit("ingest/skip", {
                     "file": rel,
                     "status": "classification_required",
                     "reason": entry["reason"],
@@ -1182,102 +1824,100 @@ def main():
                 continue
             document_type = academic_document_types.get(rel)
             if ftype == "document" and args.subproject == "academic" and not document_type:
+                resume_command = (
+                    "python3 .scripts/ingest_inbox.py --run "
+                    f"--file {shlex.quote(rel)} --subproject academic "
+                    "--document-type <editorial|academic-reference|conference-summary>"
+                )
                 entry = {
                     "file": f.name,
                     "type": ftype,
                     "ok": False,
                     "skipped": True,
                     "status": "classification_required",
-                    "reason": "academic 非论文文档缺少强分类信号；请显式选择 editorial 或 academic-reference",
+                    "reason": (
+                        "academic 非论文文档缺少强分类信号；请显式选择 editorial、"
+                        "academic-reference 或 conference-summary"
+                    ),
+                    "allowed_document_types": [
+                        "editorial", "academic-reference", "conference-summary",
+                    ],
+                    "next_action": "rerun_with_document_type",
+                    "resume_command": resume_command,
                 }
                 results.append(entry)
-                loop.session_log.append("ingest/skip", {
+                audit("ingest/skip", {
                     "file": rel,
                     "status": "classification_required",
                     "reason": entry["reason"],
                 })
                 continue
-            tool_name, tool_args = dsi_tool(
-                ftype, rel, args.subproject, document_type=document_type,
-                source_kind=classification_details.get(rel, {}).get("source_kind", "ordinary"))
-            content = loop.execute(tool_name, tool_args)
-            tool_outputs.append({"file": f.name, "tool": tool_name, "output": content})
-            # 优先使用 DSH 解析出的结构化结果；失败/拒绝时回退字符串判定
-            parsed = loop.last_structured or _extract_last_json(content)
-            if parsed:
-                parsed_status = parsed.get("status", "")
-                if parsed_status == "type_mismatch":
-                    skipped_type = parsed.get("errors", [""])[0] if parsed.get("errors") else "type_mismatch"
-                    results.append({"file": f.name, "type": ftype, "ok": False, "skipped": True,
-                                    "reason": skipped_type, "status": parsed_status})
-                elif parsed_status in {"completed", "duplicate_found"}:
-                    entry = {"file": f.name, "type": ftype, "ok": True, "status": parsed_status}
-                    for key in ("paper_id", "admin_id", "raw_dir", "wiki_path", "engine",
-                                "graph_report", "transaction_id", "proposition_status",
-                                "proposition_details", "bibliographic_worker",
-                                "relationship_worker", "semantic_repair_worker",
-                                "quality_status", "quality_warnings"):
-                        if parsed.get(key) is not None:
-                            entry[key] = parsed[key]
-                    results.append(entry)
-                elif parsed_status == "classification_required":
-                    reason = (parsed.get("errors") or ["需要显式分类"])[0]
-                    results.append({"file": f.name, "type": ftype, "ok": False,
-                                    "skipped": True, "status": parsed_status, "reason": reason})
-                elif parsed_status in {
-                    "agent_required", "failed", "partial", "bibliographic_review_required",
-                    "validation_error",
-                }:
-                    if parsed_status == "agent_required":
-                        reason = "agent 接管"
-                    elif parsed_status == "partial":
-                        reason = "部分完成"
-                    else:
-                        errors = parsed.get("errors") or []
-                        review_error = (parsed.get("bibliographic_review") or {}).get("error", "")
-                        reason = errors[0] if errors else review_error or parsed_status
-                    entry = {"file": f.name, "type": ftype, "ok": False,
-                             "status": parsed_status, "reason": reason}
-                    for key in (
-                        "transaction_id", "errors", "retryable", "next_action", "resume_from",
-                        "failure_signature", "bibliographic_review", "prompt", "write_to",
-                        "failure_disposition",
-                    ):
-                        if parsed.get(key) is not None:
-                            entry[key] = parsed[key]
-                    results.append(entry)
-                else:
-                    results.append({"file": f.name, "type": ftype, "ok": False,
-                                    "status": parsed_status or "unknown", "reason": content[:200]})
+            source_kind = classification_details.get(rel, {}).get("source_kind", "ordinary")
+            if backend == "api":
+                assert loop is not None
+                tool_name, tool_args = dsi_tool(
+                    ftype, rel, args.subproject, document_type=document_type,
+                    source_kind=source_kind,
+                    **ocr_options,
+                )
+                content = loop.execute(tool_name, tool_args)
+                parsed = loop.last_structured or _extract_last_json(content)
+                tool_outputs.append({"file": f.name, "tool": tool_name, "output": content})
             else:
-                reason = (content.splitlines()[0][:200] if content and content.splitlines()
-                          else "DSH 无结构化输出")
-                results.append({"file": f.name, "type": ftype, "ok": False,
-                                "status": "failed", "reason": reason})
+                command = dispatch_command(
+                    ftype, rel, args.subproject, document_type=document_type,
+                    source_kind=source_kind,
+                    **ocr_options,
+                )
+                completed = subprocess.run(
+                    command, cwd=REPO, text=True, capture_output=True, check=False,
+                )
+                content = completed.stdout
+                parsed = _extract_last_json(content)
+                tool_outputs.append({
+                    "file": f.name,
+                    "command": [str(part) for part in command],
+                    "returncode": completed.returncode,
+                    "stderr": completed.stderr[-2000:],
+                })
+            results.append(_result_entry(f.name, ftype, parsed, content))
+            audit("ingest/result", {
+                "file": rel, "status": results[-1]["status"],
+                "transaction_id": results[-1].get("transaction_id", ""),
+            })
 
-    # 持久化 DSH session log，保证 guard/tool 执行可审计
-    dsh_dir = REPO / "temp" / "inbox-dsh"
-    dsh_dir.mkdir(parents=True, exist_ok=True)
-    dsh_log = dsh_dir / f"{loop.session_log.session_id}.jsonl"
-    dsh_log.write_text(loop.session_log.to_jsonl() + "\n", encoding="utf-8")
+    dsh_log = None
+    agent_log = None
+    if loop is not None:
+        dsh_dir = REPO / "temp" / "inbox-dsh"
+        dsh_dir.mkdir(parents=True, exist_ok=True)
+        dsh_log = dsh_dir / f"{session_id}.jsonl"
+        dsh_log.write_text(loop.session_log.to_jsonl() + "\n", encoding="utf-8")
+    else:
+        agent_dir = REPO / "temp" / "inbox-agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        agent_log = agent_dir / f"{session_id}.jsonl"
+        agent_log.write_text("\n".join(
+            json.dumps(item, ensure_ascii=False) for item in agent_events
+        ) + ("\n" if agent_events else ""), encoding="utf-8")
 
     # 只有本次真正摄入成功才扫描全局 backlog。分类闸门/全失败必须快速返回。
-    maintenance = run_post_ingest_maintenance(results, loop.session_log.session_id)
+    maintenance = run_post_ingest_maintenance(results, session_id)
 
     # 摄入报告持久化：复盘用（引擎选择、逐文件状态、建图统计）
     report_dir = REPO / "cross-domain" / "ingest-reports"
     report_dir.mkdir(parents=True, exist_ok=True)
     report_time = datetime.now()
     report_path = report_dir / f"{report_time.strftime('%Y%m%d-%H%M%S')}.json"
+    counts = _report_counts(results)
     report = {
         "timestamp": report_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "session_id": loop.session_log.session_id,
-        "dsh_log": str(dsh_log.relative_to(REPO)),
+        "session_id": session_id,
+        "backend": backend,
+        "dsh_log": str(dsh_log.relative_to(REPO)) if dsh_log else "",
+        "agent_log": str(agent_log.relative_to(REPO)) if agent_log else "",
         "total": len(results),
-        "completed": len([r for r in results if r["ok"]]),
-        "degraded": len([r for r in results if r.get("quality_status") == "degraded"]),
-        "failed": len([r for r in results if not r["ok"] and not r.get("skipped")]),
-        "skipped": len([r for r in results if r.get("skipped")]),
+        **counts,
         "files": results,
         "classification_decisions": classification_details,
         "classification_reviews": classification_reviews,
@@ -1287,7 +1927,7 @@ def main():
         "tool_outputs": tool_outputs,
         "maintenance": maintenance,
     }
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    publish_maintenance_report(report_path, report)
     compact = _compact_summary(report, report_path)
     print(json.dumps(compact, ensure_ascii=False, separators=(",", ":")))
     if report["failed"]:

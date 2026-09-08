@@ -3,38 +3,22 @@
 > 摄入前先读 `operations/INGEST.md`。模板和惯例见 `operations/` 下对应文件。
 
 ---
----
 
-## raw 目录结构(own / others 分离 + md 与 PDF 同位)
+## Raw 目录与论文包
 
 | 目录 | 存什么 | 说明 |
 |------|--------|------|
-| `raw/works/papers/` | 自己论文(md + PDF 同名同位) | 扁平,不分年 |
-| `raw/works/books/` | 专著、教材(md + PDF) | |
-| `raw/works/patents/` | 专利(md + 证书 PDF) | 证书类 PDF 原样归档,不提取 md |
+| `raw/works/papers/` | 自己的论文包 | 每篇一个 `<paper-id>/` 目录 |
+| `raw/works/books/` | 专著、教材 | 保留原件及受管文本层 |
+| `raw/works/patents/` | 专利及证书 | 证书类 PDF 原样归档 |
 | `raw/works/software/` | 软著(md + 证书 PDF) | 同上 |
 | `raw/works/editorials/` | 自有专题导言、editorial、观点文章 | 非论文通用文档类型为 `editorial` |
 | `raw/works/proceedings/` | 会议书、会议卷 | |
-| `raw/references/` | **他人参考论文**(md + PDF 同位) | 与自己成果隔离;命名同 `author-year-slug` |
+| `raw/references/` | 他人参考论文包 | 与自己成果隔离；每篇一个 `<paper-id>/` 目录 |
 | `raw/reference-documents/` | 学术参考文档（非论文） | 报告、说明、资料汇编等；类型为 `academic-reference`，不得与他人论文混放 |
+| `raw/conferences/` | 学术会议事务记录与会议纪要 | 类型为 `conference-summary`；人工整理稿保持 `official-doc/high`，语音转写另按来源降级 |
 
-**命名规则**:PDF 与 md 同名(`<stem>.pdf` ↔ `<stem>.md`),共处同一目录。PDF 命名以 md 名为准(中文 PDF→拼音),保证可追溯配对。历史 `raw/papers/`(自己论文)与 `raw/achievements/<year>/`(PDF 按年散存)已于 2026-07-18 统一迁入 `raw/works/`。
-
----
-
-## raw 目录结构(own / others 分离 + md 与 PDF 同位)
-
-| 目录 | 存什么 | 说明 |
-|------|--------|------|
-| `raw/works/papers/` | 自己论文(md + PDF 同名同位) | 扁平,不分年 |
-| `raw/works/books/` | 专著、教材(md + PDF) | |
-| `raw/works/patents/` | 专利(md + 证书 PDF) | 证书类 PDF 原样归档,不提取 md |
-| `raw/works/software/` | 软著(md + 证书 PDF) | 同上 |
-| `raw/works/editorials/` | 综述、editorial、观点论文 | |
-| `raw/works/proceedings/` | 会议书、会议卷 | |
-| `raw/references/` | **他人参考论文**(md + PDF 同位) | 与自己成果隔离;命名同 `author-year-slug` |
-
-**命名规则**:PDF 与 md 同名(`<stem>.pdf` ↔ `<stem>.md`),共处同一目录。PDF 命名以 md 名为准(中文 PDF→拼音),保证可追溯配对。历史 `raw/papers/`(自己论文)与 `raw/achievements/<year>/`(PDF 按年散存)已于 2026-07-18 统一迁入 `raw/works/`。
+**论文包命名**：每篇论文使用 `<paper-id>/` 目录，包含规范化的 `paper.pdf`、MinerU 文本层 `paper.md`、锁定书目的 `source.yaml` 与提取元数据。`paper-id` 采用稳定的 `author-year-slug`；Wiki `sources` 指向包内 `paper.md`。
 
 
 ## 页面类型
@@ -51,10 +35,10 @@
 | 专题导言 | `editorial` | `wiki/editorials/` | 对应新摄入 `raw/works/editorials/`；仅强信号可自动分类 |
 | 学术参考文档 | `academic-reference` | `wiki/references/` | 对应新摄入 `raw/reference-documents/`，不表示论文摘要 |
 | 会议纪要 | `conference-summary` | `wiki/conferences/` | 学术会议、研讨会记录（命名见 `operations/shared-conventions.md`） |
-| 研究讨论 | `discussion` | `wiki/discussions/` | 与 AI 协作的学术讨论（规范见 `operations/DISCUSSION.md`） |
+| 研究讨论 | `discussion` | `wiki/discussions/` | 已归档的学术讨论整理稿 |
 | 科研项目 | `research-project` | `wiki/<项目目录>/` | 科研项目协议书、任务书、工作计划、项目总览（按项目建子目录，如 `wiki/中科大科研项目/`） |
 
-`academic` 非论文摄入不得回退到 `admin`。自动分类只接受专题导言、特邀编辑、本期专题等强 editorial 信号；其余文档返回 `classification_required`，由调用方显式选择 `editorial` 或 `academic-reference` 后再进入事务。存量误存 Raw 保持原位，只能通过单独迁移计划调整 Wiki/图归属。
+`academic` 非论文摄入不得回退到 `admin`。自动分类接受专题导言、特邀编辑、本期专题等强 editorial 信号，以及文件名同时含会议实体词与信息整理、记录、总结、议程、通知、安排等事务记录词的 `conference-summary` 强信号；其余文档返回 `classification_required`，由调用方显式选择 `editorial`、`academic-reference` 或 `conference-summary` 后再进入事务。存量误存 Raw 保持原位，只能通过单独迁移计划调整 Wiki/图归属。
 
 
 ### people 页定位
@@ -93,7 +77,7 @@ people 页是**人物节点**，page 即节点（不分两个）。核心功能�
 title: "页面标题"
 type: concept | paper-summary | people | comparison | review | review-guide | conference-summary | discussion | research-project
 sources:
-  - raw/papers/filename.md
+  - academic/raw/references/<paper-id>/paper.md
 source_type: official-doc | speech-recognition | ocr | web | discussion
 date: YYYY-MM-DD          # 会议纪要自动从路径提取
 authors: ["作者A", "作者B"]   # (2026-07-23 新增) 完整作者列表,从 raw 作者行忠实提取(见 INGEST),review/group/专利类页面可省略
@@ -158,62 +142,13 @@ related:
 
 ---
 
-## PDF 论文预处理规范
+## PDF 论文提取层
 
-将 PDF 转为 Markdown 全文。**自己论文**存 `raw/works/papers/`,**他人参考论文**存 `raw/references/`,PDF 与 md 同名同位。命名 `author-year-slug.md`(kebab-case)。
+论文摄入统一以 `paper.md` 作为可定位文本层，以同包 `paper.pdf` 作为原始凭据。inbox PDF 由 `ingest_paper.py` 在事务暂存区调用 `.scripts/extractor.py`，校验通过后把 `paper.pdf`、`paper.md`、`source.yaml` 和提取元数据一起提交到最终论文包。已归档论文的语义重编译走 `re_ingest.py`，复用现有 `paper.md`。
 
-### 内置 extractor 规范
+默认提取使用 MinerU；配置可用时允许回落 BLSC OCR。Docling/PyMuPDF 属显式低档选择，需通过 `--engine` 指定。提取器记录实际引擎和质量状态，摄入器在落位前检查 `paper.pdf` 与 `paper.md` 齐备。对已归档同源论文重新提取属于 Raw 红线的受管例外，须保留原位置并记录日志。
 
-PDF 原文与产出的全文 md 由本项目 `.scripts/extractor.py` 提取(多引擎 pipeline:MinerU > Docling > PyMuPDF)。遵循"不跨项目"原则:extractor 已内化进本项目,不再依赖外部项目。
-
-```bash
-python3 .scripts/extractor.py --paper <paper-id>   # 默认 works/papers/,自动按优先级提取
-python3 .scripts/extractor.py --paper <paper-id> --external-pdf academic/raw/works/papers/<paper-id>.pdf   # 软链现有 PDF,不复制
-python3 .scripts/extractor.py --paper <paper-id> --papers-dir academic/raw/references/   # 他人论文
-python3 .scripts/extractor.py --batch                # 批量处理
-python3 .scripts/extractor.py --paper <paper-id> --force   # 强制重提取
-```
-
-提取后产出的 `paper.md` 存于对应论文目录:自己论文默认 `academic/raw/works/papers/<paper-id>/paper.md`,他人论文 `academic/raw/references/<paper-id>/paper.md`(传 `--papers-dir academic/raw/references/`)。wiki 页面 `sources` 字段用相对路径引用。MinerU token 从 `.env`(键 `MINERU_API_TOKEN`)读取,Docling 需独立 venv `.venv-docling`(缺失则自动跳过该引擎,降级到 PyMuPDF)。
-
-### 来源档位与覆盖规则
-
-引擎按提取质量分档:
-
-| 档位 | 引擎 | 优先级 |
-|------|------|--------|
-| high | mineru | 3 |
-| medium | docling | 2 |
-| low | pymupdf | 1 |
-| low(等同 pymupdf) | 无来源标记 | 1 |
-
-**low 定义**:已有 md 的 frontmatter 若无来源/引擎标记(无 `parse_meta.yaml` 或无 `preferred` 字段),一律视为最低档 **low,等同 pymupdf(优先级 1)**。
-
-**覆盖规则**:
-- 高优先级引擎可覆盖低档(mineru 覆盖 docling/pymupdf/low;docling 覆盖 pymupdf/low)
-- **同档不可覆盖**(pymupdf 不可覆盖 low,需 `--force`)
-- 更低档不可覆盖
-- 覆盖时**不改位置/文件名**,仅替换内容(旧文件备份为 `.md.bak`)
-
-### 来源路径协议
-
-extractor 内化后,论文 sources 用**相对路径**:自己论文 `academic/raw/works/papers/<paper-id>/paper.md`(默认),他人论文 `academic/raw/references/<paper-id>/paper.md`。指向 SynologyDrive **跨项目**文件时才用 `synology://` 协议前缀,由本项目 `.project/config.yaml`(见 `operations/INGEST.md`)的 `synology_roots` 解析为绝对路径。禁止硬编码绝对路径。
-
-- 论文(extractor 产出):自己论文 `academic/raw/works/papers/<paper-id>/paper.md`;他人论文 `academic/raw/references/<paper-id>/paper.md`
-- 本项目内部 md(已有历史文件):相对路径如 `raw/works/papers/<author-year-slug>.md`
-- 跨项目共用产物:如 `synology://其他项目/...`(仅在确实跨项目引用时用)
-
-### 过渡方案(已有文件)
-
-- 2026-07-18 已有的 75 PDF + 68 md(works/)+ 5 references/ 为历史遗留,保持现状,sources 维持相对路径
-- 新摄入论文走新规则:调用内置 `.scripts/extractor.py`,自己论文 `--paper <id>`(默认 works/papers/),他人论文加 `--papers-dir academic/raw/references/`;sources 用相对路径
-- 未来 LINT 可加检查项:历史 sources 路径与新规则不一致的,按需逐步迁移(不强制)
-
-### 提取职责边界
-
-**始终调用 extractor,不在 WikiRan 侧另写兜底**。extractor 内部已实现 `mineru > docling > pymupdf` 三级级联——新论文(无 md)自动尝试全部引擎,MinerU 失败自动落 Docling,再落 PyMuPDF(pymupdf 兜底是 extractor 的职责,非 WikiRan 的)。WikiRan 侧不重复造兜底轮子,避免双轨制(外部兜底与 extractor 内部级联脱节)。
-
-> 历史:2026-07-19 曾误写 WikiRan 侧 pymupdf4llm 兜底条款,导致摄入时跳过 extractor 直接兜底(low 档副本堆积)。已删除——extractor 内部级联已覆盖此场景。
+论文 `sources` 使用仓库相对路径：本人论文为 `academic/raw/works/papers/<paper-id>/paper.md`，他人论文为 `academic/raw/references/<paper-id>/paper.md`。`synology://` 仅用于确实跨项目的来源。
 
 ---
 
@@ -223,12 +158,11 @@ extractor 内化后,论文 sources 用**相对路径**:自己论文 `academic/ra
 >
 > **术语说明(命名理由)**:导航段命名 `## Navigation` 而非 `## Abstract`,是为消除与页面类型 `paper-summary`/`meeting-summary`(整页忠实摘要)的摘要歧义——Navigation 是页面内导航段(供省 token 的 section retrieval 读取),paper-summary 是整页类型,两者是段 vs 页关系。中文描述用导航概述不用导航摘要,同理。
 
-### 三个标准 section(顺序固定,所有内容页必备)
+### 两个标准 section(顺序固定,所有内容页必备)
 
 | section | 用途 | 预算 |
 |---------|------|------|
 | `## Navigation` | 导航概述:页面解决什么问题 / 核心结论(2-4 句),自足但不承担证明责任 | 80-200 tokens |
-| (v4 删) 原 `## Core Triples` 段 | 关系路由改走 graph.db 图查询(边在 graph.db,不再有 md 段) | - |
 | `## Content` | 正文,原有内容(子标题降为 `###`,如 `### 一、问题与动机`) | - |
 
 > `sources` 不另设段,留 frontmatter(已有字段,单一事实源,防双份漂移)。

@@ -46,8 +46,8 @@ updated: YYYY-MM-DD
 
 ### 本子项目标准 section
 
-`## Navigation`(导航概述 80-200 tokens)/ `## Core Triples`(路由级关系 3-8 条)/ `## Content`(正文,子标题降三级)。防退化五规则与正文迁移见 `academic/SCHEMA.md`。
+`## Navigation`（导航概述 80-200 tokens）/ `## Content`（正文，子标题降三级）。结构校验规则见 `academic/SCHEMA.md`。
 
-### 关系级元数据
+### 关系存储
 
-每条 Core Triples 可带行内方括号 edge confidence [可追溯|推断|存疑] + 花括号来源元数据 {authority; temporal}(confidence 移至方括号,独立判断不继承页面级)。详细规则见 `academic/SCHEMA.md`「关系级元数据」。图由 `.scripts/graph_build.py` 从各页 Core Triples 段派生重建。
+语义执行单元只提交受限关系提案；程序经 knowledge IR、证据与 Schema 校验后，由 `.scripts/graph_ingest.py` 写入 graph.db。Wiki 正文用 Raw 脚注承载事实证据，不保存关系段副本。

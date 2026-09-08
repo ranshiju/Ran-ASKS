@@ -1,7 +1,7 @@
-"""统一的受限 LLM 调用与结构化输出校验工具。
+"""API backend 的受限 LLM 调用与结构化输出校验工具。
 
-通过 QUERY_BACKEND 显式选择 query 使用 agent 或 api，默认 agent。摄入 API 可为
-关键词选择与格式修复配置专用模型；专用模型失败时回退主模型，不切换到 Agent。
+当前 backend 必须显式为 api；宿主 Agent 使用 agent-task-v1，不进入本模块。摄入 API
+可为关键词选择与格式修复配置专用模型；专用模型失败时回退主模型，不切换到 Agent。
 API 调用按 fast/standard/deep/xdeep 档位控制 provider 推理强度；输出与重试预算由调用方独立指定。
 摄入 Worker 可根据任务类型与确定性校验错误做一次受控升档。
 结构化结果校验失败时局部重试，失败结果不得入库。
@@ -17,6 +17,7 @@ import urllib.error
 import uuid
 from pathlib import Path
 
+import agent_task
 import recovery_policy as rp
 
 REPO = Path(__file__).resolve().parent.parent
@@ -129,6 +130,7 @@ OPERATION_REASONING_PROFILES = {
     "ingest_api_repair": "fast",
     "ingest_api_claims": "standard",
     "ingest_meeting_compile": "standard",
+    "ingest_paper_workspace": "standard",
     "ingest_wiki_write": "standard",
     "ingest_wiki_repair": "fast",
     "ingest_semantic_extract": "standard",
@@ -184,7 +186,8 @@ def reasoning_decision(config: dict[str, str], operation: str,
         profile = OPERATION_REASONING_PROFILES.get(operation, "standard")
         retry = max(0, int((context or {}).get("retry", 0) or 0))
         if retry and error_class == "semantic" and operation in {
-                "ingest_meeting_compile", "ingest_wiki_write", "ingest_semantic_extract"}:
+                "ingest_meeting_compile", "ingest_paper_workspace",
+                "ingest_wiki_write", "ingest_semantic_extract"}:
             profile = _upgrade_reasoning_profile(profile)
             source = "adaptive_semantic_retry"
         elif retry:
@@ -272,7 +275,10 @@ def api_profiles(config: dict[str, str], operation: str) -> list[dict[str, str]]
         prefixes = ["INGEST_KEYWORD"]
     elif operation == "ingest_api_repair":
         prefixes = ["INGEST_REPAIR"]
-    elif operation in {"ingest_meeting_compile", "ingest_wiki_write", "ingest_wiki_repair"}:
+    elif operation in {
+        "ingest_meeting_compile", "ingest_paper_workspace",
+        "ingest_wiki_write", "ingest_wiki_repair",
+    }:
         prefixes = ["INGEST_GENERATION"]
     elif operation == "ingest_proposition":
         # 优先独立命题模型；未配置时复用已验证的 generation specialist，
@@ -300,6 +306,8 @@ def api_profiles(config: dict[str, str], operation: str) -> list[dict[str, str]]
     return profiles
 
 def execution_mode(config: dict[str, str] | None = None) -> str:
+    if config is None:
+        return agent_task.query_backend()
     config = config or load_env()
     backend = config.get("QUERY_BACKEND", "agent").strip().lower() or "agent"
     if backend not in {"agent", "api"}:
@@ -307,6 +315,8 @@ def execution_mode(config: dict[str, str] | None = None) -> str:
     return backend
 
 def ingest_mode(config: dict[str, str] | None = None) -> str:
+    if config is None:
+        return agent_task.ingest_backend()
     config = config or load_env()
     mode = config.get("INGEST_BACKEND", "agent").strip().lower() or "agent"
     if mode not in {"agent", "api"}:
@@ -325,19 +335,6 @@ def ingest_backend_notice(config: dict[str, str] | None = None, stage: int | Non
         return ""
     # api
     return f"{stage_text}：LLM=API（{configured_model(config)}）；输出必须经 schema 校验，失败不得入库。"
-
-def agent_handoff(prompt: str, schema_name: str = "structured-json") -> dict:
-    """返回给当前 agent 的接管请求；子进程不能直接调用父 agent。"""
-    return {
-        "ok": False,
-        "status": "agent_required",
-        "mode": "agent",
-        "model": "current-agent",
-        "prompt": prompt,
-        "schema": schema_name,
-        "handoff_reason": "configured_agent_backend",
-        "error": None,
-    }
 
 def strip_json_fence(text: str) -> str:
     cleaned = (text or "").strip()
@@ -405,6 +402,12 @@ def _retry_available(category: str, used: dict[str, int], limits: dict[str, int]
 
 def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束的知识库组件，只输出要求的 JSON。", max_tokens: int = 800, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", timeout_sec: float = 90) -> dict:
     config = load_env()
+    is_ingest = operation == "ingest" or operation.startswith("ingest_")
+    mode = ingest_mode(config) if is_ingest else execution_mode(config)
+    if mode != "api":
+        raise RuntimeError(
+            "llm_structured 仅支持 API backend；当前宿主 Agent 必须使用 agent-task-v1"
+        )
     audit_prompt = (json.dumps(messages, ensure_ascii=False, sort_keys=True)
                     if messages else prompt)
     decision = reasoning_decision(config, operation, reasoning, reasoning_context)
@@ -418,16 +421,6 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
     call_id = uuid.uuid4().hex
     reasoning_options = reasoning_request_options(config, profile_name)
     recovery_reasoning_options = reasoning_request_options(config, "fast")
-    is_ingest = operation == "ingest" or operation.startswith("ingest_")
-    mode = ingest_mode(config) if is_ingest else execution_mode(config)
-    if mode == "agent":
-        handoff = agent_handoff(prompt, getattr(schema_check, "__name__", "structured-json"))
-        handoff.update({
-            "event_kind": "agent_handoff", "call_id": call_id,
-            "recovery_policy_version": rp.POLICY_VERSION,
-        })
-        _log_event(operation, handoff, audit_prompt, transaction_id=transaction_id)
-        return handoff | ({"ingest_mode": mode} if is_ingest else {})
     profiles = api_profiles(config, operation)
     if not all(profiles[0][key] for key in ("base", "key", "model")):
         variable = "INGEST_BACKEND" if is_ingest else "QUERY_BACKEND"
@@ -542,12 +535,18 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
     """受限 LLM 文本调用：返回原始文本，不做 JSON 解析或 schema 校验。
 
     用于需要长文本输出的场景（如 wiki 页面撰写 + 语义槽），镜像 call_json 的 API 调用与重试逻辑，
-    但跳过 JSON 解析。agent_handoff 行为与 call_json 一致；内容校验由调用方（修复循环）负责。
+    但跳过 JSON 解析。内容校验由 API 调用方的修复循环负责。
 
     多轮对话：传入 messages（完整对话历史，含 system/user/assistant 角色条目）时，
     用它代替 system+prompt 拼装，prompt 参数仅用于重试时的提示文本。
     """
     config = load_env()
+    is_ingest = operation == "ingest" or operation.startswith("ingest_")
+    mode = ingest_mode(config) if is_ingest else execution_mode(config)
+    if mode != "api":
+        raise RuntimeError(
+            "llm_structured 仅支持 API backend；当前宿主 Agent 必须使用 agent-task-v1"
+        )
     audit_prompt = (json.dumps(messages, ensure_ascii=False, sort_keys=True)
                     if messages else prompt)
     decision = reasoning_decision(config, operation, reasoning, reasoning_context)
@@ -561,16 +560,6 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
     call_id = uuid.uuid4().hex
     reasoning_options = reasoning_request_options(config, profile_name)
     recovery_reasoning_options = reasoning_request_options(config, "fast")
-    is_ingest = operation == "ingest" or operation.startswith("ingest_")
-    mode = ingest_mode(config) if is_ingest else execution_mode(config)
-    if mode == "agent":
-        handoff = agent_handoff(prompt, "structured-text")
-        handoff.update({
-            "event_kind": "agent_handoff", "call_id": call_id,
-            "recovery_policy_version": rp.POLICY_VERSION,
-        })
-        _log_event(operation, handoff, audit_prompt, transaction_id=transaction_id)
-        return handoff | ({"ingest_mode": mode} if is_ingest else {})
     profiles = api_profiles(config, operation)
     if not all(profiles[0][key] for key in ("base", "key", "model")):
         variable = "INGEST_BACKEND" if is_ingest else "QUERY_BACKEND"

@@ -28,6 +28,11 @@
 | SQLite | `tool` | 直接依赖 | `.scripts/graph_lib.py`, `graph.db` | 图数据库存储引擎 | 2026-06 | <https://www.sqlite.org/> | Python 内置 `sqlite3` 接口；单文件数据库 |
 | PyYAML | `tool` | 直接依赖 | 多处配置文件 | YAML 配置解析（`yaml.safe_load`） | 2026-06 | <https://github.com/yaml/pyyaml> | MIT |
 | Semantica | `architecture` | 架构借鉴 | `operations/config/graph-schema.yaml`, `.scripts/graph_validate.py`, provenance 与 `temporal_facts` 机制 | 借鉴声明式图约束、可追溯记录和时间有效性，保留 ASKS 的单一图源与 Raw 证据边界 | 2026-08-23 | <https://github.com/semantica-agi/semantica> | MIT；借鉴范围见 ADR-005，不引入 RDF/OWL 运行时 |
+| Beads | `architecture` | 架构借鉴 | `.scripts/workspace_state.py`, `operations/WORKSPACE.md` | 借鉴稳定任务 ID、状态转换、审计事件与可压缩投影思路 | 2026-09-07 | <https://github.com/gastownhall/beads> | MIT；未复制代码，不作为运行时依赖 |
+| Scry | `architecture` | 架构借鉴 | `.scripts/workspace_state.py`, `operations/WORKSPACE.md` | 借鉴文件为权威、SQLite 可重建索引、适用范围与 supersedes 关系 | 2026-09-07 | <https://github.com/prmichaelsen/scry> | MIT；未复制代码，不作为运行时依赖 |
+| Backlog.md | `architecture` | 架构借鉴 | `.scripts/workspace_state.py`, `operations/WORKSPACE.md` | 借鉴 Markdown 事项、明确完成结果和里程碑式组织 | 2026-09-07 | <https://github.com/MrLesk/Backlog.md> | MIT；未复制代码，不作为运行时依赖 |
+| Graphiti | `architecture` | 架构借鉴 | `.scripts/workspace_state.py`, `operations/WORKSPACE.md` | 借鉴记忆的时间有效区间、失效和替代链 | 2026-09-07 | <https://github.com/getzep/graphiti> | Apache-2.0；未复制代码，不作为运行时依赖 |
+| Basic Memory | `architecture` | 架构借鉴 | `.scripts/workspace_state.py`, `operations/WORKSPACE.md` | 借鉴 Markdown 与派生索引的一致性检查和 doctor 机制 | 2026-09-07 | <https://github.com/basicmachines-co/basic-memory> | AGPL-3.0；仅借鉴架构思想，未复制代码且不作为运行时依赖 |
 | python-pptx | `tool` | 直接依赖 | `.scripts/visual_to_editable_ppt.py`, `projects/ASKS/manu/v9/figures/update_fig3_pptx.py` 及后续稿件版本 | 写入原生文本框、线段、自选图形、自由曲线和 Open XML PowerPoint 对象 | 2026-08-29 | <https://github.com/scanny/python-pptx> | MIT；复杂区域仍按工具契约允许可追踪位图 fallback |
 
 ## 待定 / 远期参考

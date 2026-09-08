@@ -154,6 +154,7 @@ def test_reasoning_profile_mapping_and_validation():
     assert llm_structured.reasoning_profile(config, "ingest_api_keywords") == "fast"
     assert llm_structured.reasoning_profile(config, "ingest_proposition") == "fast"
     assert llm_structured.reasoning_profile(config, "ingest_api_claims") == "standard"
+    assert llm_structured.reasoning_profile(config, "ingest_paper_workspace") == "standard"
     assert llm_structured.reasoning_profile({"LLM_REASONING_DEFAULT": "deep"}, "query") == "deep"
     assert llm_structured.reasoning_profile({"LLM_REASONING_INGEST_API_CLAIMS": "fast"}, "ingest_api_claims") == "fast"
     try:

@@ -29,6 +29,9 @@ import hub_semantics as hs
 import wiki_locator as wl
 
 REPO = Path(__file__).resolve().parent.parent
+_AUTHOR_SURNAME_PARTICLES = {
+    "da", "de", "del", "di", "la", "las", "los", "van", "von", "der",
+}
 
 # ---- 规则表(源自各 SCHEMA.md Frontmatter 模板,按域分组) ----
 # type/status 合法值按子项目域区分(academic/admin/business/teaching 各自 SCHEMA 定义);
@@ -525,6 +528,25 @@ def check_bare_abbreviation(fm):
     return warns
 
 
+def _expand_truncated_locked_authors(locked_authors, parsed_authors):
+    """Prefer Raw author text only for exact surname-particle continuations."""
+    if not locked_authors or len(locked_authors) != len(parsed_authors):
+        return locked_authors
+    expanded = False
+    for locked, parsed in zip(locked_authors, parsed_authors):
+        locked_text = " ".join(str(locked).split())
+        parsed_text = " ".join(str(parsed).split())
+        if locked_text.casefold() == parsed_text.casefold():
+            continue
+        if not (
+            parsed_text.casefold().startswith(locked_text.casefold() + " ")
+            and locked_text.split()[-1].casefold() in _AUTHOR_SURNAME_PARTICLES
+        ):
+            return locked_authors
+        expanded = True
+    return parsed_authors if expanded else locked_authors
+
+
 def check_coverage_anchors(path, fm, body):
     """轻量锚点覆盖检查(grep,非LLM全读)。
     从raw机械抽取硬锚点(标题/作者),检查wiki是否覆盖。
@@ -560,12 +582,29 @@ def check_coverage_anchors(path, fm, body):
         raw_text = raw_path.read_text(encoding='utf-8', errors='replace')
     except Exception:
         return warns
-    # 锚点1:raw标题(# 行) vs wiki frontmatter title
-    raw_title = None
-    for line in raw_text.splitlines():
-        if line.startswith('# '):
-            raw_title = line[2:].strip()
-            break
+    source_data = {}
+    bibliography = {}
+    review = {}
+    source_yaml = raw_path.parent / "source.yaml"
+    if source_yaml.is_file():
+        try:
+            source_data = yaml.safe_load(source_yaml.read_text(encoding="utf-8")) or {}
+            bibliography = source_data.get("bibliographic") or {}
+            review = bibliography.get("review") or {}
+        except Exception:
+            source_data = {}
+            bibliography = {}
+            review = {}
+    # 锚点1: 已锁定书目标题优先；旧 Raw 才回退首个 H1。
+    raw_title = (
+        str(bibliography.get("title") or "").strip()
+        if review.get("locked") is True else ""
+    )
+    if not raw_title:
+        for line in raw_text.splitlines():
+            if line.startswith('# '):
+                raw_title = line[2:].strip()
+                break
     wiki_title = str(fm.get('title', ''))
     if raw_title and wiki_title:
         # 标题差异过大(无共同词)→WARN
@@ -575,19 +614,18 @@ def check_coverage_anchors(path, fm, body):
             warns.append(f"覆盖度: raw标题与wiki title无共同词(raw='{raw_title[:50]}')")
     raw_authors = []
     locked_authors_available = False
-    source_yaml = raw_path.parent / "source.yaml"
-    if source_yaml.is_file():
+    locked_authors = bibliography.get("authors")
+    if review.get("locked") is True and isinstance(locked_authors, list):
+        locked_authors_available = True
+        raw_authors = [str(name).strip() for name in locked_authors if str(name).strip()]
+    if locked_authors_available and raw_authors:
         try:
-            source_data = yaml.safe_load(source_yaml.read_text(encoding="utf-8")) or {}
-            bibliography = source_data.get("bibliographic") or {}
-            review = bibliography.get("review") or {}
-            locked_authors = bibliography.get("authors")
-            if review.get("locked") is True and isinstance(locked_authors, list):
-                locked_authors_available = True
-                raw_authors = [str(name).strip() for name in locked_authors if str(name).strip()]
+            from wiki_skeleton import extract_authors_from_text
+            parsed_authors = extract_authors_from_text(raw_text)
+            raw_authors = _expand_truncated_locked_authors(raw_authors, parsed_authors)
         except Exception:
             pass
-    if not locked_authors_available:
+    elif not locked_authors_available:
         try:
             from wiki_skeleton import extract_authors_from_text
             raw_authors = extract_authors_from_text(raw_text)

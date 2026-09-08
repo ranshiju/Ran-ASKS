@@ -6,7 +6,7 @@
 - 事件字段齐全（ts/transaction_id/operation/.../prompt_hash/prompt_len/output_hash/output_len）
 - 不含明文 prompt/output（只有 hash + length）
 - 写盘失败静默降级，不抛异常
-- agent 模式 handoff 也记事件
+- agent backend 在进入事件或 provider 逻辑前被拒绝
 """
 import importlib.util
 import json
@@ -115,25 +115,26 @@ def test_write_failure_silent():
 
 
 @_isolated_events
-def test_agent_handoff_logged():
-    """agent 模式 handoff 也记事件（model-visible means logged 不变量）。"""
+def test_agent_backend_rejected_before_api_event():
+    """llm_structured is API-only; Agent work must use agent-task-v1."""
     os.environ["QUERY_BACKEND"] = "agent"
     try:
-        result = module.call_json("test-prompt", lambda obj: True, operation="query")
+        errors = []
+        for call in (
+            lambda: module.call_json("test-prompt", lambda obj: True, operation="query"),
+            lambda: module.call_text("test-prompt", operation="query"),
+        ):
+            try:
+                call()
+            except RuntimeError as exc:
+                errors.append(str(exc))
+            else:
+                raise AssertionError("agent backend 必须被 llm_structured 拒绝")
     finally:
         os.environ.pop("QUERY_BACKEND", None)
-    assert result["status"] == "agent_required"
-    assert result["mode"] == "agent"
-    assert result["handoff_reason"] == "configured_agent_backend"
-    assert result["error"] is None
-    events = _read_today_events()
-    agent_events = [e for e in events if e.get("operation") == "query" and e.get("status") == "agent_required"]
-    assert agent_events, "agent handoff 未记事件"
-    last_agent = agent_events[-1]
-    assert last_agent["mode"] == "agent"
-    assert last_agent["event_kind"] == "agent_handoff"
-    assert last_agent["error"] is None
-    assert last_agent["prompt_len"] == len("test-prompt")
+    assert len(errors) == 2
+    assert all("仅支持 API backend" in error for error in errors)
+    assert _read_today_events() == []
 
 
 @_isolated_events

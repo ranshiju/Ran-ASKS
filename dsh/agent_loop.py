@@ -1,4 +1,4 @@
-"""agent_loop.py — DSH cockpit 的 turn/step 驱动循环。
+"""agent_loop.py — API backend 的 DSH cockpit turn/step 驱动循环。
 
 借鉴 DSH 的 turn flow：
   turn/start → claim input → assemble prompt+schemas
@@ -7,8 +7,8 @@
     → tools/post-execute → tool/result*
   → step/end → agent/turn-stopping → turn/end
 
-API 模式：LLM 输出决策 JSON(discover/read/answer)，程序通过 hook 管道执行。
-Agent 模式：返回 agent_required 交接，由外部 agent 决定下一步。
+API 模型输出决策 JSON(discover/read/answer)，程序通过 hook 管道执行。
+当前宿主 Agent 不进入本模块。
 """
 from __future__ import annotations
 
@@ -61,7 +61,9 @@ class AgentLoop:
     组装工具注册表 + guard 管道 + session log，驱动 turn/step 循环。
     """
 
-    def __init__(self, mode: str = "agent"):
+    def __init__(self, mode: str = "api"):
+        if mode != "api":
+            raise ValueError("DSH AgentLoop 仅支持 API backend")
         self.mode = mode
         self.registry = ToolRegistry()
         self.session_log = SessionLog()
@@ -129,15 +131,13 @@ class AgentLoop:
         """执行完整 turn 循环。
 
         llm_call_fn(prompt) -> dict（含 'parsed' 和 'status'）。
-        如果 llm_call_fn 为 None 或返回 agent_required，返回 handoff。
+        llm_call_fn 必须是 API backend 的受控模型调用入口。
         """
         self.session_log.append("turn/start", {"query": query})
         self.session_log.append("user/message", {"role": "user", "content": query})
 
-        if self.mode != "api" or llm_call_fn is None:
-            self.session_log.append("turn/end", {"reason": "agent_required"})
-            return TurnResult(session_id=self.session_log.session_id,
-                              handoff={"status": "agent_required", "mode": "agent"})
+        if llm_call_fn is None:
+            raise ValueError("DSH AgentLoop requires an API llm_call_fn")
 
         last_results = []
         for round_num in range(1, self.max_rounds + 1):
@@ -209,7 +209,9 @@ class IngestAgentLoop:
     工具执行，保证 DSH 层不重写摄入状态、不直接写 raw/wiki/graph.db。
     """
 
-    def __init__(self, mode: str = "agent"):
+    def __init__(self, mode: str = "api"):
+        if mode != "api":
+            raise ValueError("DSH IngestAgentLoop 仅支持 API backend")
         self.mode = mode
         self.registry = ToolRegistry()
         self.session_log = SessionLog()
@@ -238,7 +240,8 @@ class IngestAgentLoop:
         workflow_statuses = {
             "completed", "duplicate_found", "agent_required", "failed",
             "type_mismatch", "classification_required", "bibliographic_review_required",
-            "validation_error", "partial", "error",
+            "validation_error", "partial", "error", "awaiting_agent",
+            "ready_to_commit",
         }
         cursor = 0
         while cursor < len(content):
@@ -291,6 +294,8 @@ class IngestAgentLoop:
         """从最近一次执行结果推导 DSH 工作流状态。"""
         if self.last_structured:
             status = str(self.last_structured.get("status", "")).lower()
+            if status in {"awaiting_agent", "ready_to_commit", "completed", "failed"}:
+                return status, dict(self.last_structured)
             if status == "agent_required":
                 return "agent_required", {
                     "status": "agent_required",
@@ -318,6 +323,7 @@ class IngestAgentLoop:
         if status in {
             "agent_required", "failed", "duplicate_found", "bibliographic_review_required",
             "validation_error", "classification_required", "type_mismatch", "partial",
+            "awaiting_agent", "ready_to_commit",
         }:
             self.session_log.append("ingest/handoff", {"status": status, "reason": reason, "handoff": handoff})
             self.session_log.append("turn/end", {"reason": status})
@@ -409,6 +415,18 @@ class IngestAgentLoop:
 
     def resume_paper(self, txn: str) -> str:
         return self._execute("ingest_paper_resume", {"txn": txn})
+
+    def read_paper_workspace(self, txn: str) -> str:
+        return self._execute("paper_workspace_read", {"txn": txn})
+
+    def refresh_paper_workspace(self, txn: str) -> str:
+        return self._execute("paper_workspace_refresh", {"txn": txn})
+
+    def check_paper_workspace(self, txn: str) -> str:
+        return self._execute("paper_workspace_check", {"txn": txn})
+
+    def commit_paper_workspace(self, txn: str) -> str:
+        return self._execute("paper_workspace_commit", {"txn": txn})
 
     def ingest_meeting(self, file: str, subproject: str | None = None) -> str:
         args = {"file": file}

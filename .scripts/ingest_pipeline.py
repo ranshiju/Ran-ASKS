@@ -35,6 +35,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / ".scripts"))
 
 import inbox_state
+import agent_task
 import ingest_common as ic
 import recovery_policy as rp
 import trash_util
@@ -60,8 +61,28 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
     """运行全流程，处理修复循环。progress 为进度打印函数。"""
     steps = spec["steps"]
     txn = state["transaction_id"]
+    state.setdefault("pipeline_script", spec["script_name"])
     recovery_limits = rp.limits_from_spec(spec)
     rp.ensure_state(state, recovery_limits)
+    if state.get("status") == "completed":
+        if state.get("cleanup_pending"):
+            _finish_cleanup(state, spec, progress)
+        return state
+
+    if agent_task.is_prepared(state):
+        missing = agent_task.missing_outputs(state, REPO)
+        if missing:
+            state["errors"] = [f"Agent 暂存产物尚未写入: {path}" for path in missing]
+            _save(state)
+            return state
+        resume_target = state.get("pre_handoff_status") or "write_wiki"
+        inbox_state.transition(
+            state, resume_target, reason="consume_agent_task",
+            allowed_targets={"preprocess", "write_wiki", "write_slots", "finalize", "update_graph",
+                             "validate_graph", "finalize_tail", "graph_ready"},
+        )
+        state["errors"] = []
+        _save(state)
 
     # Migrate legacy meeting transactions that were incorrectly terminalized when
     # the API returned a malformed unified compiler envelope.
@@ -171,6 +192,9 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         progress(f"[3.2] {spec['preprocess_label']}...", flush=True, end=" ")
         success, msg = steps["preprocess"](state)
         if not success:
+            if agent_task.is_prepared(state):
+                _save(state)
+                return state
             state["status"] = "failed"
             state["errors"] = [msg]
             _save(state)
@@ -187,10 +211,14 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         # 第一阶段：写 wiki
         if state["status"] == "write_wiki":
             if state.get("wiki_retry", 0) == 0 and not state.get("wiki_content"):
-                progress("\n[3.3a] 撰写 wiki（调用LLM）...", flush=True)
+                progress("\n[3.3a] 生成 wiki...", flush=True)
             elif state.get("wiki_retry", 0) > 0:
                 progress(f"\n[3.3a] 撰写 wiki（修订第{state['wiki_retry']}/{recovery_limits['wiki_revision']}次）...", flush=True)
             success, msg = steps["write_wiki"](state)
+            if agent_task.is_prepared(state):
+                state["pre_handoff_status"] = "write_wiki"
+                _save(state)
+                return state
             if state.get("agent_required"):
                 state["pre_handoff_status"] = "write_wiki"
                 state["status"] = "agent_required"
@@ -289,6 +317,10 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         else:
             progress(f"[3.3b] 抽取语义槽（修订第{state['slots_retry']}/{recovery_limits['semantic_revision']}次）...", flush=True, end=" ")
         success, msg = steps["write_slots"](state)
+        if agent_task.is_prepared(state):
+            state["pre_handoff_status"] = "write_slots"
+            _save(state)
+            return state
         if state.get("agent_required"):
             state["pre_handoff_status"] = "write_slots"
             state["status"] = "agent_required"
@@ -329,12 +361,17 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             if not rp.consume(
                     state, "deterministic_repair", recovery_limits,
                     f"blocking_warnings={len(blocking_warnings)}"):
-                state["status"] = "agent_required"
-                state["agent_required"] = True
-                state["errors"] = ["deterministic repair budget exhausted"]
+                ic.stop_for_semantic_errors(
+                    state, ["deterministic repair budget exhausted"],
+                    _resume_cmd(spec, txn), blocking_warnings,
+                )
                 _save(state)
                 return state
             repaired, repair_msg = steps["repair_slots"](state, blocking_warnings)
+            if agent_task.is_prepared(state):
+                state["pre_handoff_status"] = "write_slots"
+                _save(state)
+                return state
             if state.get("agent_required"):
                 state["status"] = "agent_required"
                 _save(state)
@@ -387,9 +424,10 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             _save(state)
             return state
         # A failed bounded repair changes strategy to specialist/manual handoff.
-        state["status"] = "agent_required"
-        state["agent_required"] = True
-        state["errors"] = [repair_msg or "semantic repair did not resolve blocking warnings"]
+        ic.stop_for_semantic_errors(
+            state, [repair_msg or "semantic repair did not resolve blocking warnings"],
+            _resume_cmd(spec, txn), slot_warnings,
+        )
         _save(state)
         return state
 
@@ -449,8 +487,6 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             _save(state)
             return state
         progress("PASS", flush=True)
-        if spec.get("cleanup_after") == "validate_graph":
-            _cleanup_sources(state, spec.get("skip_source_cleanup_if"))
         state["status"] = "finalize_tail"
         _save(state)
 
@@ -469,8 +505,6 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             state.setdefault("warnings", []).append(tail_msg)
         else:
             progress("完成", flush=True)
-        if spec.get("cleanup_after") == "finalize_tail":
-            _cleanup_sources(state, spec.get("skip_source_cleanup_if"))
         completion_errors = ic.validate_completion(state, REPO)
         if completion_errors:
             progress(f"完成校验失败: {len(completion_errors)}个错误", flush=True)
@@ -479,13 +513,34 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             _save(state)
             return state
         state["status"] = "completed"
+        state["cleanup_pending"] = spec.get("cleanup_after") in {"validate_graph", "finalize_tail"}
         _save(state)
+        if state["cleanup_pending"]:
+            _finish_cleanup(state, spec, progress)
         label = ""
         if spec.get("completion_label_key"):
             label = state.get(spec["completion_label_key"], "")
         progress(f"\n{'='*60}\n✅ 摄入完成: {label}", flush=True)
 
     return state
+
+
+def _finish_cleanup(state: dict, spec: dict, progress) -> None:
+    try:
+        _cleanup_sources(state, spec.get("skip_source_cleanup_if"))
+    except Exception as exc:
+        state["cleanup_pending"] = True
+        state["cleanup_error"] = str(exc)[:500]
+        warning = {"issue": "source_cleanup_pending", "detail": "摄入已提交，来源清理失败；resume 只重试清理"}
+        if warning not in state.setdefault("quality_warnings", []):
+            state["quality_warnings"].append(warning)
+        progress("WARN: 摄入已提交，清理待重试: " + state["cleanup_error"], flush=True)
+    else:
+        state["cleanup_pending"] = False
+        state.pop("cleanup_error", None)
+        state["quality_warnings"] = [warning for warning in state.get("quality_warnings", [])
+                                     if warning.get("issue") != "source_cleanup_pending"]
+    _save(state)
 
 
 def _cleanup_sources(state: dict, skip_source_if: str | None = None) -> None:

@@ -10,7 +10,7 @@
 - citation-guard: read_raw 记录/check 三态
 - AgentLoop: 完整循环(discover→read_raw→answer verified)
 - AgentLoop: citation 未核验
-- AgentLoop: agent 模式 handoff
+- AgentLoop: 拒绝宿主 Agent backend
 - AgentLoop: session log 不变量(model-visible means logged)
 """
 import json
@@ -319,12 +319,13 @@ def test_citation_ignores_failed_read_raw():
 
 # ============ AgentLoop ============
 
-def test_agent_mode_handoff():
-    """agent 模式返回 handoff，不调用 LLM。"""
-    loop = AgentLoop(mode="agent")
-    result = loop.run("test query")
-    assert result.handoff is not None
-    assert result.handoff["status"] == "agent_required"
+def test_agent_mode_is_rejected():
+    """当前宿主 Agent 不进入 DSH loop。"""
+    try:
+        AgentLoop(mode="agent")
+        raise AssertionError("DSH must reject the host-Agent backend")
+    except ValueError as exc:
+        assert "API backend" in str(exc)
 
 
 def test_api_mode_full_cycle_verified():

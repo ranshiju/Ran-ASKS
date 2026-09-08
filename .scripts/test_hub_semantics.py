@@ -2,6 +2,7 @@
 """Hub Scope canonical 定义、路由与 Agent 生命周期回归。"""
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import tempfile
@@ -527,6 +528,37 @@ def test_refresh_after_ingest_is_local_and_membership_only():
         ).fetchone()
 
 
+def test_refresh_after_ingest_explicit_delta_excludes_historical_neighbors():
+    conn = make_db()
+    with TempRepo() as root:
+        hub = "academic/wiki/hubs/q"
+        add_hub(conn, root, hub, "量子系统", "研究量子系统的状态、演化及其信息处理问题。")
+        page = "academic/wiki/authors/person"
+        old_concept, new_concept = "历史研究方向", "本次新增研究方向"
+        gl.ensure_node(conn, page, "Person", "page")
+        for concept in (old_concept, new_concept):
+            gl.ensure_node(conn, concept, concept, "entity", entity_subtype="keyword")
+            conn.execute(
+                "INSERT INTO edges(subject,predicate,object,confidence) VALUES(?,?,?,?)",
+                (page, "主要研究", concept, "可追溯"),
+            )
+        old_embed = hs._embed
+        hs._embed = lambda texts: np.array([[1.0, 0.0] for _ in texts], dtype=float)
+        try:
+            report = hs.refresh_after_ingest(conn, page, affected_nodes=[new_concept])
+        finally:
+            hs._embed = old_embed
+        assert report["affected_nodes"] == [new_concept]
+        assert conn.execute(
+            "SELECT 1 FROM edges WHERE subject=? AND predicate=? AND object=?",
+            (new_concept, hs.MEMBERSHIP_PREDICATE, hub),
+        ).fetchone()
+        assert not conn.execute(
+            "SELECT 1 FROM edges WHERE subject=? AND predicate=?",
+            (old_concept, hs.MEMBERSHIP_PREDICATE),
+        ).fetchone()
+
+
 def test_scope_route_requires_canonical_scope_and_margin():
     definitions = [
         hs.HubDefinition("open", "开放系统", "研究开放量子系统的动力学与耗散问题。", "", "active", True, "scope"),
@@ -668,6 +700,66 @@ def test_agent_confirmed_route_apply_replaces_hub_edge_with_evidence():
         assert amended["graph_report"]["hub_scope_route_current"]["node_id"] == target
         assert amended["route_corrections"][0]["automatic_gate"]
         assert amended["quality_status"] == "complete"
+
+
+def test_route_correction_closes_matching_maintenance_handoff():
+    with TempRepo() as root:
+        import inbox_state
+        old_state_repo = inbox_state.REPO
+        inbox_state.REPO = root
+        try:
+            route_rel = "temp/hub-route-review/resume-txn-route.json"
+            receipt_rel = "temp/inbox-maintenance/resume-txn-route.json"
+            report_rel = "cross-domain/ingest-reports/resume-txn-route.json"
+            route_path = root / route_rel
+            receipt_path = root / receipt_rel
+            report_path = root / report_rel
+            route_path.parent.mkdir(parents=True)
+            receipt_path.parent.mkdir(parents=True)
+            report_path.parent.mkdir(parents=True)
+            route_path.write_text(json.dumps([{
+                "transaction_id": "txn-route",
+                "wiki_path": "academic/wiki/papers/paper",
+                "decision": "agent_route_review_required",
+            }]), encoding="utf-8")
+            receipt = {
+                "status": "agent_required", "errors": [],
+                "actions": [{"component": "hubs", "route_review_file": route_rel}],
+                "components": {"hubs": {
+                    "status": "agent_required", "route_review_count": 1,
+                    "eligible_count": 0, "split_count": 0,
+                    "redistribution_count": 0, "route_review_file": route_rel,
+                    "next_action": "agent_review_hub_routes_and_maintenance",
+                }},
+            }
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            report_path.write_text(json.dumps({"maintenance": receipt}), encoding="utf-8")
+            inbox_state.save("txn-route", {
+                "transaction_id": "txn-route", "status": "completed",
+                "wiki_path": "academic/wiki/papers/paper", "graph_report": {},
+                "maintenance": {
+                    **receipt, "receipt_path": receipt_rel, "report_path": report_rel,
+                },
+            })
+            result = {
+                "page": "academic/wiki/papers/paper",
+                "hub": "academic/wiki/hubs/condensed", "previous_hubs": [],
+                "evidence": "academic/wiki/papers/paper#研究方向定位",
+                "automatic_gate": {"reason": "scope_margin_too_small"},
+            }
+            hs.record_paper_route_correction("txn-route", result)
+            amended = inbox_state.load("txn-route")
+        finally:
+            inbox_state.REPO = old_state_repo
+        assert amended["maintenance"]["status"] == "completed"
+        assert amended["maintenance"]["actions"] == []
+        assert amended["maintenance"]["components"]["hubs"]["status"] == "completed"
+        resolved = json.loads(route_path.read_text(encoding="utf-8"))
+        assert resolved[0]["resolution"]["hub"] == "academic/wiki/hubs/condensed"
+        persisted_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        persisted_report = json.loads(report_path.read_text(encoding="utf-8"))
+        assert persisted_receipt["status"] == "completed"
+        assert persisted_report["maintenance"]["status"] == "completed"
 
 
 def test_define_scope_updates_existing_hub_only():

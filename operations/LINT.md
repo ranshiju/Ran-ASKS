@@ -94,7 +94,7 @@
 
 ## 图相关检查（v4，2026-07-25 主数据化）
 
-graph.db 是边唯一源（不再从 md Core Triples 段派生）。LINT 增图结构检查（运行 `.scripts/graph_metrics.py` + `graph_dump.py`）：
+graph.db 是边唯一源。LINT 运行 `.scripts/graph_metrics.py` 与 `graph_dump.py` 检查图结构：
 
 | 检查项 | 说明 | 命令 |
 |--------|------|------|
@@ -124,19 +124,29 @@ graph.db 是边唯一源（不再从 md Core Triples 段派生）。LINT 增图�
 
 结果保存到 `*/outputs/lint-YYYY-MM-DD.md`
 
-## 提示词健康审计
+## 提示词审查审计
 
-`.scripts/lint_specs.py` 审计提示词规范文档（AGENTS.md / operations/*.md / */SCHEMA.md）的健康度：
+提示词审计先运行 `python3 .scripts/lint_specs.py`，由程序生成全项目提示词关系地图。地图覆盖总提示词、工程图提示约束、任务与能力规范、领域 Schema、Agent/Skill/记忆指令、按需读取的工程指南、候补策略与模板资源、YAML prompt 字段，以及 `.scripts/`、`dsh/`、`projects/` 生产代码中的运行时提示词；API `ToolDefinition` 的 description 与 input schema 随工具注册表注入模型，也按单个工具纳入。Raw、Wiki、输出、执行 trace 与测试夹具不进入审计范围。
 
-- **C1** 元说明残留（"本文件定义…"）— ERROR
-- **C2** 圆括号日期版本标记（""等过程性注解）— ERROR
-- **C3** 原则引用注解（学术引用标签、原则编号注脚）— ERROR
-- **C4** 过程性/历史性叙述（版本演进史、重构记录）— WARN
-- **C5** section 标题日期后缀（`## xxx `）— ERROR
-- **C6** 远期机制密度（section 内远期词≥3）— WARN
-- **C7** route.py 映射命中（所有 task/mode/stage 截取成功）— ERROR
-- **C8** 跨文件重复原则声明（原则词出现≥3处）— INFO
+默认调用继续生成完整七项语义审查任务。仅当调用方显式同时指定 `--task build --backend agent` 时，启用 `trusted-agent-build`：保留位置地图及仓库路径、`governed_by` 引用、拓扑顺序、必填字段和 mode 枚举的当次确定性检查，返回 `status=structural_only` 和 `semantic_review.status=skipped`，不生成审查标准、审查规则或提示词改写建议。检查状态由地图实算；扫描完整性不能由 `llm_visible=true` 自证，固定报告为 `unknown` 并留待完整语义审查。`task` 与 `backend` 必须成对提供；API backend 和其他任务保持完整审计。
 
-用法：`.scripts/lint_specs.py`（自动探测）/ `--paths a.md b.md` / `--no-c7`（跳过 route 校验省时）
+```bash
+python3 .scripts/lint_specs.py --task build --backend agent
+python3 .scripts/lint_specs.py --task build --backend agent --format json
+```
 
-校验闭环：改规范 → 跑本脚本 → 修全部 ERROR → 复验至 ERROR=0 → 完成。WARN/INFO 供人复核。
+运行时 Python/YAML 位置使用 `temp/prompt-audit/map-cache-v1.json` 按文件增量提取。元数据未变时不读取源文件；元数据变化时用 SHA-256 复核，内容变化才重新解析；新增、删除和扫描器版本变化自动更新缓存。上位关系和拓扑顺序始终根据当次位置全量重算。`--paths <path...>` 从候选发现阶段限制代码与 YAML 扫描，输出会保留目标位置的必要 `governed_by` 祖先以避免悬空关系；排障时可用 `--refresh-cache` 强制刷新本次范围，或用 `--no-cache` 禁用缓存。
+
+地图用 `artifact_type` 区分指令、记忆、契约、提示资源与运行时提示，用 `governed_by` 记录可解析且无环的直接上位关系。运行时提示优先关联同一工程节点的 LLM 可见 `script_contract`，领域模板同时关联任务规范和对应 Schema；`mode` 按具体符号、模型调用位置与 engineering node role 判定，同一文件可同时包含 agent、api 和 shared 提示面。契约是独立约束源；只有实际注入或明确供 LLM 读取的契约内容作为提示面接受语义审计，机器 Schema、类型、校验器与测试本身不计为提示词。
+
+除 `trusted-agent-build` 外，Agent 模式由当前 Agent 审查，API 模式由受控执行单元审查。审计沿 `governed_by` 关系按总到分展开：先确立上位共享约束，再审查任务、能力、领域与局部提示，最后审查运行时执行单元。完整审查集中在七项容易失误的问题：
+
+1. 出现位置是否合理；
+2. 该位置是否需要提示词介入；可由程序、契约、Schema、校验器或上层共享提示稳定承担的要求，应交给相应机制；
+3. 不同位置的提示词是否矛盾或在同一运行上下文中重复；
+4. 提示词是否符合当前版本：以上位 capability、task、script contract 确定目标，以当前 CLI 参数、Schema/validator、组件责任边界和实际代码路径核对命令、路径、角色与流程；文件日期、缓存命中和内容哈希只证明扫描新鲜，不证明语义仍有效；
+5. 表述是否冗余；简化或取消目标 Agent 已稳定具备、且不影响本项目判断与执行的通用常识，保留项目特有规则、反直觉边界、已知易错点和验收条件；
+6. 表述是否有歧义；
+7. 否定式表述是否用于红线、风险边界或已知易错点。
+
+只报告影响理解或执行的实质问题。每项发现使用“位置｜问题类型｜判断依据｜最小修改建议”；必要的自包含表述予以保留。指定范围时使用 `--paths <path...>`，程序调用使用 `--format json`。

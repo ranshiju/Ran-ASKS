@@ -11,7 +11,7 @@
 
 - 允许的抽象阶段：拆解范围与答案槽位 → 定位候选 → 按缺口取证 → 审计、综合与交付。不得写脚本、检索词、页名、证据卡、预算细节或各阶段任务卡已有规则。
 - 计划不预判证据充分性、不得绕过三审停止，也不把 `continue` 变成必经环节；每次是否续查仍由 Evidence Profile、槽位缺口和停止协议决定。
-- Agent 可维护计划和阶段状态；API 中 API 仅处理当前派发阶段的最小受控上下文。总计划由编排层确定性提供，不作为 API 的独立推理或持久化输出。
+- Agent 后端由当前宿主 Agent 维护计划和阶段状态；API 后端由程序维护计划，API LLM 只处理当前派发阶段的最小受控上下文。总计划由控制主体维护，不作为 API LLM 的独立推理或持久化输出。
 
 ---
 
@@ -32,9 +32,11 @@
 
 ## 检索策略
 
-**结构优先（v9）**：query 不让 LLM 从全库自由遍历。先由 `.scripts/query_graph.py`、索引和 `query_orchestrate.py` 完成意图允许的候选定位、去重和预算控制，再由 LLM 阅读最小候选上下文、做语义综合和证据充分性判断；事实答案仍须下钻 raw。ingest 的“先结构、后语义”是生成顺序，query 的对应形式是“先结构化检索、后语义阅读”。
+**语义执行主体**：Agent 后端由当前宿主 Agent 完成候选判断、证据综合与回答；API 后端由程序控制状态机并调用 API LLM，复杂步骤可在其 harness 内组织 worker 或 sub-agent。下文的“语义执行主体”均依当前后端取值，检索、预算、Evidence Profile 与停止门由两端共享的确定性内核提供。
 
-**行政文档自动回退（v6）**：行政问题可先执行编排动作 `admin_recall(query, topk)`。程序先用标题、别名和页面 `Navigation` 做低成本直接召回；直接无候选时自动沿图中主题/事项/版本/人物/部门边扩展。该动作只返回候选页面的 `Navigation`，不读取 `Content`，由 LLM 筛选后再定向读取正文和 raw。直接召回不足（只有弱相关候选）时，LLM 应继续用 `graph_search`/`graph_neighbors` 或 `admin_recall`，并在续检索中说明缺口与预期收益。当前页面规模下的 Navigation 扫描是轻量兜底；规模扩大后应将其改为持久化倒排索引，避免每次遍历页面。
+**结构优先（v9）**：先由 `.scripts/query_graph.py`、索引和 `query_orchestrate.py` 完成意图允许的候选定位、去重和预算控制，再由语义执行主体阅读最小候选上下文、做语义综合和证据充分性判断；事实答案仍须下钻 raw。ingest 的“先结构、后语义”是生成顺序，query 的对应形式是“先结构化检索、后语义阅读”。
+
+**行政文档自动回退（v6）**：行政问题可先执行编排动作 `admin_recall(query, topk)`。程序先用标题、别名和页面 `Navigation` 做低成本直接召回；直接无候选时自动沿图中主题/事项/版本/人物/部门边扩展。该动作只返回候选页面的 `Navigation`，由语义执行主体筛选后再定向读取正文和 raw。直接召回不足时，语义执行主体继续用 `graph_search`/`graph_neighbors` 或 `admin_recall`，并在续检索中说明缺口与预期收益。当前页面规模下的 Navigation 扫描是轻量兜底；规模扩大后应将其改为持久化倒排索引，避免每次遍历页面。
 
 **跨域统一召回（v7）**：新动作 `wiki_recall(query, domain, topk)` 复用上述流程；`domain` 可为 `academic/admin/teaching/business`，为空表示跨域。`admin_recall` 保留为兼容入口。business 结果标记 `sensitive_review=true`，回答前必须按权限/敏感性复核，不能因召回命中直接扩散合同、财务或个人信息。
 
@@ -42,7 +44,7 @@
 
 **Hub Scope 召回**：`wiki_recall` 匹配 page 标题、Navigation 和论文 `## 研究方向定位`，并与图回退结果合并。需要检查论文→Hub 路由时调用只读 `hub_route`；需要审视 Hub Scope、parent 和成员时调用 `hub_inspect`。查询不再读旧 Hub `## 关键词`。
 
-**弱模型保护（v8）**：LLM 只提交有限意图 JSON（`need_recall/need_graph/query/domain/topk`），不得自由编写动作列表；由 `query_orchestrate.py intent_to_plan` 生成白名单动作。意图缺字段或非法值时不执行；召回候选仍须先读 Navigation，再由程序/LLM决定是否读 Content/raw。
+**受限意图（v8）**：语义执行主体提交有限意图 JSON（`need_recall/need_graph/query/domain/topk`），由 `query_orchestrate.py intent_to_plan` 生成白名单动作。意图字段和取值通过校验后执行；召回候选先读 Navigation，再由程序与语义执行主体决定是否读 Content/raw。
 
 查询采用“简单事实强命中即止、复合问题双路融合”的自适应策略：
 
@@ -54,7 +56,7 @@
 >
 > **private 物理隔离（v1，2026-08-04）**：私人知识库（健康/玄学）用独立 `private/graph.db`，不在主库聚合清单。查私人数据须显式指定：`query_graph.py search <term> --db private/graph.db`；主库查询（默认 `cross-domain/graph.db`）不覆盖 private，反之亦然。resolve/neighbors 均在各自库内，不跨库。
 >
-> **硬约束(图只导航，Wiki 桥接 Raw)**:Graph 先定位相关 Wiki page；LLM 读取相关 Wiki section，再沿该节 `raw_citations`/脚注精确读取 Raw。若边填写了 locator，可直接用它缩短路径；边没有 locator 是合法状态，不触发错误或警告。`来源` 边用于取得对应 Raw 文档包。图只回答“有关联什么”，事实答案仍须回溯 Raw。
+> **硬约束(图只导航，Wiki 桥接 Raw)**:Graph 先定位相关 Wiki page；语义执行主体读取相关 Wiki section，再沿该节 `raw_citations`/脚注精确读取 Raw。若边填写了 locator，可直接用它缩短路径；边没有 locator 是合法状态，不触发错误或警告。`来源` 边用于取得对应 Raw 文档包。图只回答“有关联什么”，事实答案仍须回溯 Raw。
 >
 > **第四层联想触发条件改"图查询无命中"**(图盲区突破层),边界不变(只定位不回答,网络≠raw)。
 >
@@ -64,9 +66,9 @@
 
 **deprecated 过滤**:所有层检索结果默认过滤 `status: deprecated` 页面(遗忘策略落地后的对接口)。例外:用户明确询问历史版本/演进过程时,可读取 deprecated 页面,并配合 `superseded_by` 跳转现行版。
 
-**token 预算提示(程序预估+提示,LLM 自主决定)**:编排层 `query_orchestrate.py` 实计每次读取 token 并累计。当 `token_used > token_budget × 0.7`(budget_warned)时,程序在返回结果里附 `budget_hint`:
+**token 预算提示(程序预估+语义判断)**:编排层 `query_orchestrate.py` 实计每次读取 token 并累计。当 `token_used > token_budget × 0.7`(budget_warned)时,程序在返回结果里附 `budget_hint`:
 - 读 `Content` 时提示:后续候选页建议先读 `Navigation`(~100 tok)判相关再决定是否读 Content,或用锚点 `[[page#slug]]` 读子段
-- 程序**提示不强制**——"某 section 是否必须全文读"是语义判断,归 LLM;程序只供给预算状态
+- “某 section 是否必须全文读”由语义执行主体判断，程序供给预算状态
 - 预算耗尽(`token_used > token_budget`)则硬停(stop_reason=budget_exhausted),`allowed_next_actions` 收窄为 `[answer]`
 
 原则:降级为摘要/锚点不是放弃层——准确性优先于省 token,仅在预算压力下用摘要替代全文。
@@ -141,9 +143,9 @@
 **三层筛（v3,2026-07-25,候选管理；2026-07-27 修订：确定性优先）**：BFS 后候选分层削减,避免对全量采样浪费
 
 > **确定性优先原则**：首轮走确定性 top-k（按 confidence + 度数排序），结果可复现；证据不足时才启动概率采样（embedding softmax 温度）。概率采样记录每次命中/漏掉原因（采样日志），便于调试漏召回。真实查询数据积累后,再调温度和采样策略。
-- **层1 · 谓词硬过滤（程序,机械,近零成本）**：按 query 类型从预定义谓词集表选相关谓词,程序 `relations --predicate` 过滤
-  - 谓词集表（预定义在 QUERY.md,程序读）：合作类=[合作者/作者/通讯作者/指导/受指导于/成员]；方法类=[提出方法/对比方法/采用方法/提出度量]；领域类=[属于领域/应用于/基于]；机构类=[任职于/负责]
-  - **前缀匹配**（非精确匹配）：predicate 是自由字符串,描述进 predicate 后变成 `指导(论文术语...)`,精确匹配 `指导` 会漏。过滤用 `predicate LIKE '指导%'` 前缀匹配,兜住所有 `指导` 开头的谓词变体
+- **层1 · 谓词/谓词族硬过滤（程序,机械,近零成本）**：已知完整谓词时用 `relations --predicate` 精确过滤；按关系类别遍历时使用 `--families` 或 `--profile`
+  - `--predicate` 在 SQLite 中使用精确相等，不做前缀匹配。若需覆盖带括号变体，省略该参数，以 `operations/config/graph-schema.yaml` 登记的 predicate family 缩小范围，再按返回谓词的 base predicate 判断
+  - 合作查询不使用已退役的 `合作者` 边：先取人物的 `作者` 边定位共同论文/专利，再从这些 junction node 的 `作者` 边得到共同作者
   - 命中预定义表 → 程序硬筛；命中不了（新谓词/混合 query）→ LLM 现判谓词集（B 兜底）
 - **分支判断（层1 后候选数 vs cutoff=50【初始工程参数】）**：
   - **候选 ≤ cutoff**：直接进步骤 3c 下钻（不走层2 embedding、不走层3 LLM 确认——谓词过滤已够准,省 token 省 LLM 调用）
@@ -160,7 +162,7 @@
   - 好处:LLM 状态连续（确认时已理解候选语义,同轮给下钻指令,不切换上下文）+ 省一次 LLM 调用（确认+下钻指令合一）
   - **与小集合路径的分工**：小集合（≤cutoff）下钻是程序机械读 Navigation（无 LLM 介入,省）；大集合（>cutoff）下钻是 LLM 指挥读（有 LLM 介入,准）——两条路径各自最优,不强求对称
 
-问题类型路由：论文方法对比 → relations --predicate 提出方法/对比方法；"谁是谁的学生""谁和谁合作" → relations --predicate 合作者/指导；agent 记忆/五策略相关 → search 定位实体后 neighbors；RAG/检索/自适应探索相关 → 同上。
+问题类型路由：论文方法对比 → `relations --predicate 提出方法/对比方法`；师生关系 → `relations --predicate 指导` 或关系族遍历；合作关系 → `人 → 作者 → 论文/专利 ← 作者 ← 人` 的 junction 路径；agent 记忆/五策略相关 → search 定位实体后 neighbors；RAG/检索/自适应探索相关 → 同上。
 
 - 图返回的边可能带 `source`/`locator`，也可能为空；locator 是可选的局部读取捷径。
 - **硬约束**：图边是导航关系而非事实答案。优先读取相邻 Wiki 的目标 section，再沿该节 Raw 脚注下钻；边 locator 存在时可直接精确读取。
@@ -180,7 +182,7 @@
 当问题既含实体定位又含关系查询时（如“白生辰的论文用了什么方法”“青梧工作室与哪些人合作”），Wiki 与 Graph 召回可并行融合；Graph 内部的实体解析与关系扩展仍按依赖串联：
 
 1. **先图 search 定位主体实体**(白生辰 → people 页;青梧工作室 → Hub 页)
-2. **再图 neighbors/relations 发现关系**(relations --predicate 合作者/指导 查白生辰;relations --predicate 提出方法 查方法关系)
+2. **再图 neighbors/relations 发现关系**（合作查共享产物的双侧 `作者` 边；师生查 `指导`；方法关系查 `提出方法`）
 3. 综合两层结果读取目标页面 + 锚点
 
 并行的是两种表示的候选召回，不是 Graph 内部的依赖步骤。融合后先读 semantic address，再沿该节脚注核验 Raw。
@@ -472,7 +474,7 @@ LLM 据此判:来源是否足够、权威是否适合、时间是否匹配、标
 | "矩阵乘积纠缠是什么" | 图搜索入口 → 读取概念页 |
 | "哪些论文用了矩阵乘积态" | 图关系导航（提出方法 + 对比方法）→ 读取论文摘要页 |
 | "张量网络和量子机器学习有什么关系" | 图关系导航（属于领域 + 应用于）→ 读取概念页 |
-| "王XX和哪些人有合作" | 图关系导航（作者/合作者关系）→ 读取 people 页 |
+| "王XX和哪些人有合作" | 图关系导航（`王XX → 作者 → 共享论文/专利 ← 作者 ← 合作者`）→ 读取共享产物与 people 页 |
 | "十五五规划中关于量子信息的内容" | 图搜索入口 → Hub 关系导航 → 读取政策 + 学术页面 |
 | "专家签字表放在哪了" | **前置路由** → 直接读取 `procedures/重要物品存放位置.md` |
 | "公章在哪" | **前置路由** → 直接读取 `procedures/重要物品存放位置.md` |

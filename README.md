@@ -80,6 +80,34 @@ and structured navigation; graph edges and Hubs express the evolving knowledge
 structure and make it easier to move through that structure. Factual answers
 resolve back to the preserved source record.
 
+## Image documents and reviewed ingestion
+
+Single-frame document images now use a reusable, source-bound OCR adapter.
+The original image and its same-stem Markdown transcription form one Raw
+source; a companion metadata file records hashes, extraction provenance, and
+field-level review without becoming a separate factual source. Existing OCR
+receipts can be reused without another image upload. Remote recognition always
+requires explicit consent and uses independently configurable OCR models.
+
+Before Wiki or graph generation, a review identifies the material's risk and
+checks critical fields. Agent review is recorded separately from human review.
+Unresolved critical fields block ingestion; a non-critical uncertainty may
+remain in a completed source package. Confirming that a date field is blank does
+not authorize filling it, and an unconfirmed signature does not create a named
+responsibility relation or an automatic user task. Image pages retain their OCR
+source type, review limitations, and conservative confidence.
+
+Agent mode leaves the control loop with the host agent; API mode keeps it in
+the program. Both use the same validators and managed commit path. Source
+cleanup happens only after final validation and a persisted completion state;
+failed cleanup can be retried without replaying ingestion. See the
+[image OCR and review contract](operations/IMAGE_OCR.md) and
+[inbox workflow](operations/INBOX.md) for commands and state meanings.
+
+This is a development update on `main`, not a new tag or a change to frozen
+paper artifacts. The public repository contains the reusable implementation
+and empty content templates, not personal images, Wiki pages, databases, or keys.
+
 ## Paper and code versions
 
 Development continues on `main`, so the repository may advance more quickly

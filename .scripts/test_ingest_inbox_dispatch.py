@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""ingest_inbox.py DSH 分发层回归测试。"""
+"""ingest_inbox.py Agent/API 分发边界回归测试。"""
+import builtins
+import contextlib
+import hashlib
 import importlib.util
+import io
 import json
+import sys
 import tempfile
+import types
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name("ingest_inbox.py")
 spec = importlib.util.spec_from_file_location("ingest_inbox", SCRIPT)
@@ -34,6 +41,381 @@ def test_extract_last_json_preserves_top_level_batch_envelope():
     assert len(parsed["items"]) == 1
 
 
+def test_scan_inbox_includes_only_nonempty_facts_pending():
+    old_inbox = module.INBOX
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            inbox = Path(directory) / "inbox"
+            inbox.mkdir()
+            facts = inbox / "facts-pending.md"
+            facts.write_text("# Pending facts\n", encoding="utf-8")
+            module.INBOX = inbox
+            assert module.scan_inbox() == []
+
+            facts.write_text(
+                "# Pending facts\n\n- [2026-09-05] Alice advises Bob.\n",
+                encoding="utf-8",
+            )
+            assert module.scan_inbox() == [facts]
+    finally:
+        module.INBOX = old_inbox
+
+
+def test_facts_pending_run_returns_agent_task_without_raw_write():
+    originals = (module.REPO, module.INBOX, module.sf.ensure_index, sys.argv)
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            inbox = root / "inbox"
+            inbox.mkdir()
+            facts = inbox / "facts-pending.md"
+            original_text = (
+                "# Pending facts\n\n"
+                "- [2026-09-05] **Alice advises Bob.** {: #fact-alice-bob-20260905}\n"
+                "- [2026-09-05] **Bob belongs to Lab C.** {: #fact-bob-lab-c-20260905}\n"
+            )
+            facts.write_text(original_text, encoding="utf-8")
+            module.REPO = root
+            module.INBOX = inbox
+            module.sf.ensure_index = lambda: None
+            sys.argv = ["ingest_inbox.py", "--run"]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                module.main()
+
+            payload = json.loads(stdout.getvalue().splitlines()[-1])
+            assert payload["status"] == "prepared"
+            assert payload["awaiting_agent"] == 1
+            assert payload["failed"] == 0
+            assert payload["files"][0]["status"] == "prepared"
+            assert payload["files"][0]["fact_entries"] == 2
+            assert payload["files"][0]["next_action"] == \
+                "complete_agent_task"
+            assert payload["files"][0]["transaction_id"].startswith("user-assertions-")
+            assert payload["files"][0]["write_to"].endswith("proposal.json")
+            assert payload["files"][0]["agent_task"]["schema"] == "agent-task-v1"
+            assert facts.read_text(encoding="utf-8") == original_text
+            assert not (root / "cross-domain" / "raw").exists()
+    finally:
+        module.REPO, module.INBOX, module.sf.ensure_index, sys.argv = originals
+
+
+def test_agent_run_directly_dispatches_without_importing_dsh(fail_publication=False):
+    originals = (
+        module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
+        module.agent_task.ingest_backend, module.dispatch_command, module.subprocess.run,
+        module.run_post_ingest_maintenance, sys.argv, builtins.__import__, module._write_json_atomic,
+    )
+    dispatched = []
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            source = inbox / "notice.md"
+            source.write_text("Routine administrative notice.\n", encoding="utf-8")
+            module.REPO = root
+            module.INBOX = inbox
+            module.sf.ensure_index = lambda: None
+            module.sf.lookup_exact = lambda _path: None
+            module.agent_task.ingest_backend = lambda: "agent"
+
+            def fake_dispatch(file_type, rel_path, subproject, **kwargs):
+                dispatched.append((file_type, rel_path, subproject, kwargs))
+                return ["deterministic-ingest", rel_path]
+
+            module.dispatch_command = fake_dispatch
+            module.subprocess.run = lambda command, **_kwargs: types.SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"status": "completed", "admin_id": "notice"}),
+                stderr="",
+            )
+            module.run_post_ingest_maintenance = lambda *_args: {"status": "no_action"}
+            if fail_publication:
+                def fail_report_write(path, value):
+                    raise OSError("simulated report persistence failure")
+                module._write_json_atomic = fail_report_write
+
+            original_import = builtins.__import__
+
+            def reject_dsh_import(name, *args, **kwargs):
+                if name == "dsh.agent_loop":
+                    raise AssertionError("Agent inbox must not import DSH")
+                return original_import(name, *args, **kwargs)
+
+            builtins.__import__ = reject_dsh_import
+            sys.argv = ["ingest_inbox.py", "--run", "--subproject", "admin"]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                module.main()
+
+            payload = json.loads(stdout.getvalue().splitlines()[-1])
+            if fail_publication:
+                assert payload["file_status"] == "completed"
+                assert payload["failed"] == 0
+                assert payload["maintenance"]["status"] == "error"
+                assert payload["maintenance"]["publication"]["report_persisted"] is False
+                return
+            report = json.loads((root / payload["report_path"]).read_text(encoding="utf-8"))
+            assert payload["status"] == "completed"
+            assert report["backend"] == "agent"
+            assert report["dsh_log"] == ""
+            assert dispatched == [(
+                "document", "inbox/notice.md", "admin",
+                {"document_type": None, "source_kind": "ordinary"},
+            )]
+            assert report["tool_outputs"][0]["command"] == [
+                "deterministic-ingest", "inbox/notice.md",
+            ]
+    finally:
+        (
+            module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
+            module.agent_task.ingest_backend, module.dispatch_command, module.subprocess.run,
+            module.run_post_ingest_maintenance, sys.argv, builtins.__import__, module._write_json_atomic,
+        ) = originals
+
+
+def test_api_run_uses_dsh_loop_without_direct_dispatch():
+    originals = (
+        module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
+        module.agent_task.ingest_backend, module.dispatch_command, module.subprocess.run,
+        module.run_post_ingest_maintenance, sys.argv,
+    )
+    old_agent_loop = sys.modules.get("dsh.agent_loop")
+    calls = []
+
+    class FakeSessionLog:
+        session_id = "api-session"
+
+        @staticmethod
+        def append(event, payload):
+            calls.append(("audit", event, payload))
+
+        @staticmethod
+        def to_jsonl():
+            return ""
+
+    class FakeLoop:
+        def __init__(self, mode):
+            calls.append(("init", mode))
+            self.session_log = FakeSessionLog()
+            self.last_structured = None
+
+        def execute(self, tool_name, tool_args):
+            calls.append(("execute", tool_name, tool_args))
+            self.last_structured = {"status": "completed", "admin_id": "notice"}
+            return json.dumps(self.last_structured)
+
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            (inbox / "notice.md").write_text(
+                "Routine administrative notice.\n", encoding="utf-8"
+            )
+            module.REPO = root
+            module.INBOX = inbox
+            module.sf.ensure_index = lambda: None
+            module.sf.lookup_exact = lambda _path: None
+            module.agent_task.ingest_backend = lambda: "api"
+            module.dispatch_command = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("API inbox must not use direct dispatch")
+            )
+            module.subprocess.run = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("API inbox must not invoke ingest subprocess directly")
+            )
+            module.run_post_ingest_maintenance = lambda *_args: {"status": "no_action"}
+            fake_module = types.ModuleType("dsh.agent_loop")
+            fake_module.IngestAgentLoop = FakeLoop
+            sys.modules["dsh.agent_loop"] = fake_module
+            sys.argv = ["ingest_inbox.py", "--run", "--subproject", "admin"]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                module.main()
+
+            payload = json.loads(stdout.getvalue().splitlines()[-1])
+            report = json.loads((root / payload["report_path"]).read_text(encoding="utf-8"))
+            assert payload["status"] == "completed"
+            assert report["backend"] == "api"
+            assert report["dsh_log"].startswith("temp/inbox-dsh/")
+            assert ("init", "api") in calls
+            assert (
+                "execute", "ingest_document_file",
+                {"file": "inbox/notice.md", "subproject": "admin"},
+            ) in calls
+    finally:
+        (
+            module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
+            module.agent_task.ingest_backend, module.dispatch_command, module.subprocess.run,
+            module.run_post_ingest_maintenance, sys.argv,
+        ) = originals
+        if old_agent_loop is None:
+            sys.modules.pop("dsh.agent_loop", None)
+        else:
+            sys.modules["dsh.agent_loop"] = old_agent_loop
+
+
+def test_agent_low_confidence_classification_is_one_batch_task():
+    originals = (
+        module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
+        module.agent_task.ingest_backend, module.review_low_confidence_classification,
+        module.subprocess.run, sys.argv, builtins.__import__,
+    )
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            (inbox / "agenda.txt").write_text("会议安排\n", encoding="utf-8")
+            (inbox / "attendees.txt").write_text("参会名单\n", encoding="utf-8")
+            module.REPO = root
+            module.INBOX = inbox
+            module.sf.ensure_index = lambda: None
+            module.sf.lookup_exact = lambda _path: None
+            module.agent_task.ingest_backend = lambda: "agent"
+            module.review_low_confidence_classification = lambda *_args: (
+                (_ for _ in ()).throw(AssertionError("Agent classification must not call API"))
+            )
+            module.subprocess.run = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("Classification handoff must precede dispatch")
+            )
+            original_import = builtins.__import__
+
+            def reject_dsh_import(name, *args, **kwargs):
+                if name == "dsh.agent_loop":
+                    raise AssertionError("Agent classification must not import DSH")
+                return original_import(name, *args, **kwargs)
+
+            builtins.__import__ = reject_dsh_import
+            sys.argv = ["ingest_inbox.py", "--run", "--subproject", "admin"]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                module.main()
+
+            payload = json.loads(stdout.getvalue())
+            task = payload["agent_task"]
+            assert payload["status"] == "prepared"
+            assert payload["total"] == 2
+            assert task["schema"] == "agent-task-v1"
+            assert task["kind"] == "inbox_classification"
+            assert len(task["inputs"]) == 1
+            input_payload = json.loads(
+                (root / task["inputs"][0]["path"]).read_text(encoding="utf-8")
+            )
+            assert [item["file"] for item in input_payload["items"]] == [
+                "inbox/agenda.txt", "inbox/attendees.txt",
+            ]
+            assert len(task["outputs"]) == 1
+            assert "--classification-file" in task["commands"]["resume"]
+    finally:
+        (
+            module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
+            module.agent_task.ingest_backend, module.review_low_confidence_classification,
+            module.subprocess.run, sys.argv, builtins.__import__,
+        ) = originals
+
+
+def test_exact_duplicate_cleanup_reverifies_and_writes_receipt():
+    old_repo, old_trash = module.REPO, module.trash_util.trash_path
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "inbox" / "duplicate.pdf"
+            raw = root / "academic" / "raw" / "references" / "paper" / "paper.pdf"
+            source.parent.mkdir(parents=True)
+            raw.parent.mkdir(parents=True)
+            content = b"identical-pdf"
+            source.write_bytes(content)
+            raw.write_bytes(content)
+            expected_hash = hashlib.sha256(content).hexdigest()
+            trashed = root / "recoverable-trash" / source.name
+            module.REPO = root
+
+            def fake_trash(path):
+                trashed.parent.mkdir(parents=True)
+                Path(path).replace(trashed)
+
+            module.trash_util.trash_path = fake_trash
+            cleanup = module.cleanup_exact_duplicate(source, {
+                "raw_path": "academic/raw/references/paper/paper.pdf",
+                "binary_sha256": expected_hash,
+            })
+            receipt = json.loads(
+                (root / cleanup["receipt_path"]).read_text(encoding="utf-8")
+            )
+            assert not source.exists()
+            assert trashed.read_bytes() == content
+            assert raw.read_bytes() == content
+            assert receipt["status"] == "trashed"
+            assert receipt["binary_sha256"] == expected_hash
+    finally:
+        module.REPO, module.trash_util.trash_path = old_repo, old_trash
+
+
+def test_exact_duplicate_cleanup_refuses_sha_mismatch():
+    old_repo, old_trash = module.REPO, module.trash_util.trash_path
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "inbox" / "duplicate.pdf"
+            raw = root / "academic" / "raw" / "references" / "paper" / "paper.pdf"
+            source.parent.mkdir(parents=True)
+            raw.parent.mkdir(parents=True)
+            source.write_bytes(b"inbox-version")
+            raw.write_bytes(b"raw-version")
+            expected_hash = hashlib.sha256(b"inbox-version").hexdigest()
+            module.REPO = root
+            module.trash_util.trash_path = lambda _path: (_ for _ in ()).throw(
+                AssertionError("SHA mismatch must not invoke Trash")
+            )
+            try:
+                module.cleanup_exact_duplicate(source, {
+                    "raw_path": "academic/raw/references/paper/paper.pdf",
+                    "binary_sha256": expected_hash,
+                })
+                raise AssertionError("SHA mismatch must fail duplicate cleanup")
+            except ValueError as exc:
+                assert "SHA-256" in str(exc)
+            assert source.read_bytes() == b"inbox-version"
+            assert raw.read_bytes() == b"raw-version"
+            assert not (root / "temp" / "inbox-duplicate-receipts").exists()
+    finally:
+        module.REPO, module.trash_util.trash_path = old_repo, old_trash
+
+
+def test_report_counts_separate_duplicates_agent_waits_and_failures():
+    counts = module._report_counts([
+        {"ok": True, "status": "completed"},
+        {"ok": True, "status": "duplicate_found"},
+        {"ok": False, "status": "agent_required"},
+        {"ok": False, "status": "failed"},
+        {"ok": False, "skipped": True, "status": "classification_required"},
+    ])
+    assert counts == {
+        "completed": 1,
+        "duplicates": 1,
+        "awaiting_agent": 1,
+        "pending": 1,
+        "degraded": 0,
+        "failed": 1,
+        "skipped": 1,
+    }
+
+
+def test_duplicate_only_report_has_duplicate_terminal_status():
+    report = {
+        "total": 1,
+        **module._report_counts([{"ok": True, "status": "duplicate_found"}]),
+        "files": [{"file": "duplicate.pdf", "ok": True, "status": "duplicate_found"}],
+    }
+    report_path = module.REPO / "cross-domain" / "ingest-reports" / "duplicate.json"
+    compact = module._compact_summary(report, report_path)
+    assert compact["status"] == "duplicate_found"
+    assert compact["duplicates"] == 1
+    assert compact["failed"] == 0
+
+
 def test_dsi_tool_routes_file_types():
     assert module.dsi_tool("paper", "inbox/a.pdf", "academic") == \
         ("ingest_paper_pdf", {"pdf": "inbox/a.pdf"})
@@ -53,6 +435,8 @@ def test_dsi_tool_routes_file_types():
 
 def test_academic_document_classification_gate():
     assert module.classify_academic_document(Path("inbox/CCCF专题导言初排版-张鹏.pdf")) == "editorial"
+    assert module.classify_academic_document(
+        Path("inbox/第三届量子智能计算研讨会信息整理.md")) == "conference-summary"
     assert module.classify_academic_document(Path("inbox/量子计算背景资料.docx")) is None
     try:
         module.dsi_tool("document", "inbox/a.md", "academic")
@@ -62,6 +446,137 @@ def test_academic_document_classification_gate():
     command = module.dispatch_command(
         "document", "inbox/a.md", "academic", "academic-reference")
     assert command[-4:] == ["--subproject", "academic", "--document-type", "academic-reference"]
+    command = module.dispatch_command(
+        "document", "inbox/研讨会信息整理.md", "academic", "conference-summary")
+    assert command[-4:] == ["--subproject", "academic", "--document-type", "conference-summary"]
+
+
+def test_academic_conference_classification_uses_first_h1():
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "材料.md"
+        path.write_text(
+            "# 第二届量子物理与智能计算交叉研讨会资料汇总\n\n正文。\n",
+            encoding="utf-8",
+        )
+        assert module.classify_academic_document(path) == "conference-summary"
+
+
+def test_explicit_document_type_forces_complete_agent_dispatch():
+    originals = (
+        module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
+        module.agent_task.ingest_backend, module.classify_file_details,
+        module.dispatch_command, module.subprocess.run,
+        module.run_post_ingest_maintenance, sys.argv,
+    )
+    dispatched = []
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            inbox = root / "inbox"
+            inbox.mkdir()
+            source = inbox / "ambiguous.pdf"
+            source.write_bytes(b"not-a-real-pdf")
+            module.REPO = root
+            module.INBOX = inbox
+            module.sf.ensure_index = lambda: None
+            module.sf.lookup_exact = lambda _path: None
+            module.agent_task.ingest_backend = lambda: "agent"
+            module.classify_file_details = lambda _path: {
+                "file_type": "paper", "score": 4, "threshold": 3,
+                "confidence": "high", "needs_api_review": False,
+                "source_kind": "ordinary", "markers": ["abstract"],
+            }
+
+            def fake_dispatch(file_type, rel_path, subproject, **kwargs):
+                dispatched.append((file_type, rel_path, subproject, kwargs))
+                return ["deterministic-ingest", rel_path]
+
+            module.dispatch_command = fake_dispatch
+            module.subprocess.run = lambda command, **_kwargs: types.SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"status": "completed", "admin_id": "summary"}),
+                stderr="",
+            )
+            module.run_post_ingest_maintenance = lambda *_args: {"status": "no_action"}
+            sys.argv = [
+                "ingest_inbox.py", "--run", "--file", "inbox/ambiguous.pdf",
+                "--subproject", "academic", "--document-type", "conference-summary",
+            ]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                module.main()
+
+            payload = json.loads(stdout.getvalue().splitlines()[-1])
+            report = json.loads((root / payload["report_path"]).read_text(encoding="utf-8"))
+            assert payload["status"] == "completed"
+            assert dispatched == [(
+                "document", "inbox/ambiguous.pdf", "academic",
+                {"document_type": "conference-summary", "source_kind": "ordinary"},
+            )]
+            decision = report["classification_decisions"]["inbox/ambiguous.pdf"]
+            assert decision["program_file_type"] == "paper"
+            assert decision["file_type"] == "document"
+            assert decision["document_type"] == "conference-summary"
+            assert decision["document_type_source"] == "explicit"
+    finally:
+        (
+            module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
+            module.agent_task.ingest_backend, module.classify_file_details,
+            module.dispatch_command, module.subprocess.run,
+            module.run_post_ingest_maintenance, sys.argv,
+        ) = originals
+
+
+def test_abbreviation_todo_binds_field_and_filters_page_identity():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        page = "academic/wiki/conferences/20210924-QCAI-2021-summary"
+        state = {
+            "transaction_id": "txn",
+            "wiki_path": page,
+            "graph_report": {"descriptive_warnings": [
+                {
+                    "subject": page, "predicate": "涉及", "object": "量子算法",
+                    "issue": "bare_abbreviation", "field": "subject", "value": page,
+                },
+                {
+                    "subject": "QCAI", "predicate": "涉及", "object": "量子算法",
+                    "issue": "bare_abbreviation", "field": "subject", "value": "QCAI",
+                    "locator": "wiki.md#Navigation",
+                },
+                {
+                    "subject": "研究团队", "predicate": "涉及", "object": "QCAI",
+                    "issue": "bare_abbreviation", "field": "object", "value": "QCAI",
+                    "locator": "wiki.md#Navigation",
+                },
+                {
+                    "subject": "研究团队", "predicate": "涉及", "object": "QCAI",
+                    "issue": "bare_abbreviation", "field": "object", "value": "QCAI",
+                    "locator": "wiki.md#Navigation",
+                },
+            ]},
+        }
+        module.ic._record_abbreviation_warnings(state, root)
+        todo = root / "cross-domain" / "abbreviation-todo.jsonl"
+        entries, errors = module.ic._read_abbreviation_todo(todo)
+        assert errors == []
+        assert len(entries) == 2
+        assert {(entry["field"], module.ic._abbreviation_occurrence_target(entry))
+                for entry in entries} == {("subject", "QCAI"), ("object", "QCAI")}
+        assert all(entry["subject"] != page for entry in entries)
+
+        spec = importlib.util.spec_from_file_location(
+            "resolve_abbreviations_field_test",
+            Path(__file__).parent / "resolve_abbreviations.py",
+        )
+        resolver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(resolver)
+        resolver_entries, resolver_errors = resolver._read_todo(todo)
+        assert resolver_errors == []
+        occurrences = [resolver._todo_occurrence(entry) for entry in resolver_entries]
+        assert {(item["field"], item["path"]) for item in occurrences} == {
+            ("subject", "QCAI"), ("object", "QCAI"),
+        }
 
 
 def test_uncertain_scores_request_api_review_without_changing_program_type():
@@ -151,12 +666,15 @@ def test_api_classification_review_resolves_uncertain_program_decision():
         return {"ok": True, "parsed": parsed}
 
     original_call = module.call_json
+    original_backend = module.agent_task.ingest_backend
     module.call_json = fake_call
+    module.agent_task.ingest_backend = lambda: "api"
     try:
         review = module.review_low_confidence_classification(
             Path("inbox/borderline.pdf"), decision)
     finally:
         module.call_json = original_call
+        module.agent_task.ingest_backend = original_backend
 
     assert captured[0][1]["operation"] == "ingest_type_review"
     assert captured[0][1]["reasoning"] == "fast"
@@ -172,13 +690,36 @@ def test_api_classification_review_resolves_uncertain_program_decision():
         "ok": True,
         "parsed": review | {"doc_type": "meeting"},
     }
+    module.agent_task.ingest_backend = lambda: "api"
     try:
         invalid = module.review_low_confidence_classification(
             Path("inbox/borderline.pdf"), decision)
     finally:
         module.call_json = original_call
+        module.agent_task.ingest_backend = original_backend
     assert invalid["status"] == "review_error"
     assert "不适用于 .pdf" in invalid["error"]
+
+
+def test_agent_classification_evidence_allows_pdf_line_wrapping():
+    decision = {
+        "review_text": "A Simple Tensor Network\nAlgorithm for Two-Dimensional Systems",
+    }
+    review = {
+        "doc_type": "paper",
+        "evidence_quotes": [
+            "A Simple Tensor Network Algorithm for Two-Dimensional Systems",
+        ],
+    }
+    module._validate_agent_classification(Path("inbox/paper.pdf"), decision, review)
+
+    review["evidence_quotes"] = ["A Different Tensor Network Algorithm"]
+    try:
+        module._validate_agent_classification(Path("inbox/paper.pdf"), decision, review)
+    except ValueError as exc:
+        assert "evidence_quotes" in str(exc)
+    else:
+        raise AssertionError("Changed lexical evidence must still be rejected")
 
 
 def test_plan_ingest_order_versions_last():
@@ -247,6 +788,21 @@ def test_map_paper_batch_preserves_bibliographic_review_contract():
     assert entry["bibliographic_review"]["status"] == "validation_error"
 
 
+def test_result_entry_names_api_host_recovery_not_legacy_handoff():
+    parsed = {
+        "status": "agent_required",
+        "execution_backend": "api",
+        "transaction_id": "txn-api-repair",
+        "next_action": "repair_api_workspace_then_resume",
+        "workspace_worker": {
+            "operation": "ingest_paper_workspace", "api_called": True,
+        },
+    }
+    entry = module._result_entry("paper.pdf", "paper", parsed)
+    assert entry["reason"] == "API worker 自动恢复耗尽，等待宿主 Agent 修正暂存产物"
+    assert "legacy" not in entry["reason"]
+
+
 def test_auto_resolve_abbr_key_contract():
     import json
     from types import SimpleNamespace
@@ -290,6 +846,7 @@ def test_auto_resolve_abbr_key_contract():
 def test_compact_summary_excludes_graph_diagnostics_and_returns_report_path():
     report = {
         "total": 1, "completed": 1, "degraded": 0, "failed": 0, "skipped": 0,
+        "backend": "api",
         "files": [{
             "file": "a.pdf", "status": "completed", "quality_status": "complete",
             "transaction_id": "t1", "graph_report": {"huge": [1, 2, 3]},
@@ -300,7 +857,16 @@ def test_compact_summary_excludes_graph_diagnostics_and_returns_report_path():
     assert compact["status"] == "completed"
     assert compact["report_path"] == "cross-domain/ingest-reports/test.json"
     assert "graph_report" not in compact["files"][0]
-    blocked = {**report, "completed": 0, "failed": 1,
+    assert compact["backend"] == "api"
+    warnings = [{"issue": "ambiguous", "detail": "long" * 100, "candidates": ["large"]}] * 8
+    warned = {**report, "files": [{**report["files"][0], "quality_warnings": warnings}]}
+    warning_summary = module._compact_summary(warned, report_path)["files"][0]
+    assert warning_summary["quality_warning_count"] == 8
+    assert len(warning_summary["quality_warnings"]) == 5
+    assert len(warning_summary["quality_warnings"][0]["detail"]) == 240
+    assert "candidates" not in warning_summary["quality_warnings"][0]
+    blocked = {**report, "completed": 0, "failed": 0, "awaiting_agent": 1,
+               "pending": 1,
                "files": [{"file": "b.pdf", "status": "agent_required", "reason": "agent 接管"}]}
     assert module._compact_summary(blocked, report_path)["status"] == "agent_required"
     classification_blocked = {
@@ -311,7 +877,7 @@ def test_compact_summary_excludes_graph_diagnostics_and_returns_report_path():
     assert module._compact_summary(
         classification_blocked, report_path)["status"] == "classification_required"
     bibliographic_blocked = {
-        **report, "completed": 0, "failed": 1,
+        **report, "completed": 0, "failed": 0, "pending": 1,
         "files": [{
             "file": "review.pdf", "status": "bibliographic_review_required",
             "transaction_id": "txn-review", "retryable": False,
@@ -441,6 +1007,12 @@ def test_low_margin_hub_route_writes_agent_handoff_without_maintenance_scan():
             results[0]["graph_report"]["hub_scope_route"]["reason"] = \
                 "child_specificity_unsupported"
             assert len(module._hub_route_reviews(results)) == 1
+            results[0]["graph_report"]["hub_scope_route_current"] = {
+                "decision": "resolved",
+                "node_id": "hub-b",
+                "reason": "agent_confirmed_override",
+            }
+            assert module._hub_route_reviews(results) == []
     finally:
         module.REPO = old_repo
         module.subprocess.run = old_run
@@ -516,7 +1088,10 @@ def test_maintenance_error_does_not_override_completed_file_status():
             module.ic.detect_people_page_candidates = lambda _repo: {"status": "completed"}
             module._auto_create_hubs = lambda _session, _results: {"status": "no_action"}
             maintenance = module.run_post_ingest_maintenance(
-                [{"file": "paper.pdf", "ok": True, "status": "completed"}], "session"
+                [{
+                    "file": "paper.pdf", "ok": True, "status": "completed",
+                    "graph_report": {"hub_dynamics": {"affected_nodes": []}},
+                }], "session"
             )
             assert maintenance["status"] == "error"
             assert any("resolver failed" in error for error in maintenance["errors"])
@@ -534,6 +1109,28 @@ def test_maintenance_error_does_not_override_completed_file_status():
     finally:
         (module.REPO, module._auto_resolve_abbreviations,
          module.ic.detect_people_page_candidates, module._auto_create_hubs) = originals
+
+
+def test_maintenance_rejects_incomplete_completed_result_envelope():
+    calls = []
+    original_repo = module.REPO
+    original_abbr = module._auto_resolve_abbreviations
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            module.REPO = Path(tmp)
+            module._auto_resolve_abbreviations = lambda _session: calls.append("abbr")
+            maintenance = module.run_post_ingest_maintenance([{
+                "file": "paper.pdf", "ok": True, "status": "completed",
+                "transaction_id": "txn",
+            }], "incomplete")
+            assert maintenance["status"] == "validation_error"
+            assert maintenance["invalid_results"][0]["missing"] == \
+                "graph_report.hub_dynamics.affected_nodes"
+            assert calls == []
+            assert (module.REPO / maintenance["receipt_path"]).is_file()
+    finally:
+        module.REPO = original_repo
+        module._auto_resolve_abbreviations = original_abbr
 
 
 def test_abbreviation_decisions_require_exact_pending_tokens_and_atomic_todo():
@@ -699,20 +1296,247 @@ def test_abbreviation_decisions_cli_closes_linked_maintenance_receipt():
         sys.argv = old_argv
 
 
+def test_initial_maintenance_publication_and_historical_reconciliation(historical=True, interrupt_publication=False):
+    import inbox_state
+    import hub_semantics
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary).resolve()
+        with patch.object(module, "REPO", root), patch.object(inbox_state, "REPO", root), \
+                patch.object(hub_semantics, "REPO", root), \
+                patch.object(hub_semantics.gl, "connect", side_effect=AssertionError("no graph writes")):
+            route_rel = "temp/hub-route-review/initial.json"
+            receipt_rel = "temp/inbox-maintenance/initial.json"
+            report_path = root / "cross-domain/ingest-reports/initial.json"
+            reviews = []
+            files = []
+            for transaction_id in ("txn-first", "txn-second"):
+                page = f"academic/wiki/papers/{transaction_id}"
+                state = {
+                    "transaction_id": transaction_id, "status": "completed",
+                    "ok": True,
+                    "wiki_path": page, "graph_report": {"hub_scope_route": {
+                        "decision": "candidates", "reason": "scope_margin_too_small",
+                        "candidates": [{"path": "academic/wiki/hubs/selected", "canonical": True}],
+                    }},
+                    "quality_status": "degraded",
+                    "quality_warnings": [{"issue": "graph_navigation_ambiguous"}],
+                }
+                inbox_state.save(transaction_id, state)
+                files.append(dict(state))
+                reviews.append({"transaction_id": transaction_id, "wiki_path": page})
+            receipt = {
+                "status": "agent_required", "receipt_path": receipt_rel, "errors": [],
+                "actions": [{"component": "hubs", "route_review_file": route_rel}],
+                "components": {"hubs": {
+                    "status": "agent_required", "route_review_count": 2,
+                    "route_review_file": route_rel, "eligible_count": 0,
+                    "split_count": 0, "redistribution_count": 0,
+                }},
+            }
+            module._write_json_atomic(root / route_rel, reviews)
+            module._write_json_atomic(root / receipt_rel, receipt)
+            report = {"total": 2, **module._report_counts(files), "files": files, "maintenance": receipt}
+            module.publish_maintenance_report(report_path, report)
+            for transaction_id in ("txn-first", "txn-second"):
+                linked = inbox_state.load(transaction_id)["maintenance"]
+                assert linked["receipt_path"] == receipt_rel
+                assert linked["report_path"] == str(report_path.relative_to(root))
+            for transaction_id in ("txn-first", "txn-second"):
+                page = f"academic/wiki/papers/{transaction_id}"
+                result = {
+                    "page": page, "hub": "academic/wiki/hubs/selected",
+                    "evidence": f"{page}#研究方向定位",
+                }
+                if historical and transaction_id == "txn-second":
+                    state = inbox_state.load(transaction_id)
+                    del state["maintenance"]
+                    inbox_state.save(transaction_id, state)
+                interrupted = interrupt_publication and transaction_id == "txn-second"
+                if interrupted:
+                    original_save = inbox_state.save
+                    saves = []
+                    def interrupt_after_record(saved_transaction, saved_state):
+                        if saved_transaction == "txn-second":
+                            saves.append(saved_transaction)
+                            if len(saves) == 2:
+                                raise KeyboardInterrupt("interrupt publication after recording decision")
+                        return original_save(saved_transaction, saved_state)
+                    with patch.object(inbox_state, "save", side_effect=interrupt_after_record):
+                        try:
+                            hub_semantics.record_paper_route_correction(transaction_id, result)
+                        except KeyboardInterrupt:
+                            pass
+                        else:
+                            raise AssertionError("publication was not interrupted")
+                    assert inbox_state.load(transaction_id)["route_corrections"][-1]["hub"] == result["hub"]
+                else:
+                    hub_semantics.record_paper_route_correction(transaction_id, result)
+                current = json.loads(report_path.read_text())
+                if interrupted:
+                    assert current["maintenance"]["publication"]["status"] == "pending"
+                    continue
+                expected = "agent_required" if historical or transaction_id == "txn-first" else "completed"
+                assert current["maintenance"]["status"] == expected
+                if not historical:
+                    for member in files:
+                        assert inbox_state.load(member["transaction_id"])["maintenance"]["status"] == expected
+            summary = module.reconcile_maintenance_report(report_path)
+            assert summary["maintenance"]["status"] == "completed"
+            repaired = json.loads(report_path.read_text())
+            assert repaired["maintenance"]["components"]["hubs"]["route_review_count"] == 0
+            assert repaired["degraded"] == 2
+            for member in files:
+                linked = inbox_state.load(member["transaction_id"])["maintenance"]
+                assert linked["status"] == "completed"
+                assert linked["components"]["hubs"]["route_review_count"] == 0
+                assert linked == inbox_state.load(files[0]["transaction_id"])["maintenance"]
+            assert not module._hub_route_reviews(repaired["files"])
+            assert all(item["quality_warnings"] for item in repaired["files"])
+            assert all(item["resolution"]["status"] == "applied"
+                       for item in json.loads((root / route_rel).read_text()))
+            module.reconcile_maintenance_report(report_path)
+            assert json.loads(report_path.read_text()) == repaired
+            receipt = json.loads((root / receipt_rel).read_text())
+            receipt["actions"] = [{"component": "abbreviations", "next_action": "review"}]
+            receipt["status"] = "agent_required"
+            module._write_json_atomic(root / receipt_rel, receipt)
+            repaired["maintenance"] = receipt
+            module._write_json_atomic(report_path, repaired)
+            summary = module.reconcile_maintenance_report(report_path)
+            assert summary["maintenance"]["status"] == "agent_required"
+            assert json.loads(report_path.read_text())["maintenance"]["actions"] == receipt["actions"]
+
+
+def test_maintenance_publication_rejects_mismatched_state_before_writing():
+    import inbox_state
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary).resolve()
+        with patch.object(module, "REPO", root), patch.object(inbox_state, "REPO", root):
+            receipt_rel = "temp/inbox-maintenance/initial.json"
+            module._write_json_atomic(root / receipt_rel, {})
+            inbox_state.save("txn-mismatch", {
+                "transaction_id": "txn-mismatch", "status": "completed",
+                "wiki_path": "academic/wiki/papers/original",
+            })
+            report_path = root / "cross-domain/ingest-reports/initial.json"
+            report = {
+                "files": [{"transaction_id": "txn-mismatch", "status": "completed",
+                           "wiki_path": "academic/wiki/papers/different"}],
+                "maintenance": {"receipt_path": receipt_rel},
+            }
+            assert module.publish_maintenance_report(report_path, report) is False
+            assert "page mismatch" in report["maintenance"]["errors"][0]
+            assert report["maintenance"]["retryable"] is False
+            assert not report_path.exists()
+            assert "maintenance" not in inbox_state.load("txn-mismatch")
+            try:
+                module.reconcile_maintenance_report(root / "outside.json")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("unmanaged report accepted")
+
+
 def test_paper_batch_keeps_preclassified_fingerprint_results():
     import inspect
     source = inspect.getsource(module.main)
     assert "results.extend(batch_results)" in source
 
 
+def test_maintenance_publication_recovers_write_failures():
+    import inbox_state
+    scenarios = ("initial_report", "first_state", "second_state", "final_report", "interruption")
+    for scenario in scenarios:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            with patch.object(module, "REPO", root), patch.object(inbox_state, "REPO", root), \
+                    patch.object(module, "run_post_ingest_maintenance", side_effect=AssertionError("no global maintenance")):
+                receipt_rel = "temp/inbox-maintenance/batch.json"
+                report_path = root / "cross-domain/ingest-reports/batch.json"
+                receipt = {"status": "completed", "receipt_path": receipt_rel, "actions": [], "errors": [], "components": {}}
+                module._write_json_atomic(root / receipt_rel, receipt)
+                files = []
+                for transaction_id in ("txn-first", "txn-second"):
+                    state = {"status": "completed", "ok": True, "transaction_id": transaction_id,
+                             "wiki_path": f"academic/wiki/papers/{transaction_id}",
+                             "quality_status": "degraded", "quality_warnings": [{"issue": "independent"}]}
+                    inbox_state.save(transaction_id, state)
+                    files.append(dict(state))
+                report = {"total": 2, **module._report_counts(files), "files": files, "maintenance": receipt}
+                original_save = inbox_state.save
+                original_write = module._write_json_atomic
+                writes = []
+                def injected_write(path, value):
+                    writes.append(value["maintenance"]["publication"]["status"])
+                    if scenario == "initial_report" or scenario == "final_report" and len(writes) >= 2:
+                        raise OSError("simulated report write failure")
+                    return original_write(path, value)
+                def injected_save(transaction_id, state):
+                    if scenario == "interruption" and transaction_id == "txn-second":
+                        raise KeyboardInterrupt("simulated process interruption")
+                    if (scenario == "first_state" and transaction_id == "txn-first"
+                            or scenario == "second_state" and transaction_id == "txn-second"):
+                        raise OSError("simulated transaction write failure")
+                    return original_save(transaction_id, state)
+                with patch.object(module, "_write_json_atomic", side_effect=injected_write), \
+                        patch.object(inbox_state, "save", side_effect=injected_save):
+                    if scenario == "interruption":
+                        try:
+                            module.publish_maintenance_report(report_path, report)
+                        except KeyboardInterrupt:
+                            pass
+                        else:
+                            raise AssertionError("interruption was swallowed")
+                    else:
+                        assert module.publish_maintenance_report(report_path, report) is False
+                        compact = module._compact_summary(report, report_path)
+                        assert compact["file_status"] == "completed" and compact["failed"] == 0
+                        assert compact["maintenance"]["status"] == "error"
+                        assert compact["maintenance"]["retryable"] is True
+                if scenario == "initial_report":
+                    assert not report_path.exists()
+                    assert report["maintenance"]["publication"]["report_persisted"] is False
+                    assert all("maintenance" not in inbox_state.load(item["transaction_id"]) for item in files)
+                    assert module.publish_maintenance_report(report_path, report)
+                else:
+                    persisted = json.loads(report_path.read_text())
+                    expected = "pending" if scenario in {"final_report", "interruption"} else "error"
+                    assert persisted["maintenance"]["publication"]["status"] == expected
+                    compact = module.reconcile_maintenance_report(report_path)
+                    assert compact["maintenance"]["status"] == "completed"
+                assert json.loads((root / receipt_rel).read_text()) == receipt
+                for item in files:
+                    state = inbox_state.load(item["transaction_id"])
+                    assert state["status"] == "completed"
+                    assert state["maintenance"]["status"] == "completed"
+                    assert state["quality_warnings"] == [{"issue": "independent"}]
+                repaired = json.loads(report_path.read_text())
+                module.reconcile_maintenance_report(report_path)
+                assert json.loads(report_path.read_text()) == repaired
+
+
 def main():
     test_extract_last_json_ignores_domain_status()
     test_extract_last_json_preserves_top_level_batch_envelope()
+    test_scan_inbox_includes_only_nonempty_facts_pending()
+    test_facts_pending_run_returns_agent_task_without_raw_write()
+    test_agent_run_directly_dispatches_without_importing_dsh()
+    test_agent_run_directly_dispatches_without_importing_dsh(fail_publication=True)
+    test_api_run_uses_dsh_loop_without_direct_dispatch()
+    test_agent_low_confidence_classification_is_one_batch_task()
+    test_exact_duplicate_cleanup_reverifies_and_writes_receipt()
+    test_exact_duplicate_cleanup_refuses_sha_mismatch()
+    test_report_counts_separate_duplicates_agent_waits_and_failures()
+    test_duplicate_only_report_has_duplicate_terminal_status()
     test_dsi_tool_routes_file_types()
     test_academic_document_classification_gate()
+    test_academic_conference_classification_uses_first_h1()
+    test_explicit_document_type_forces_complete_agent_dispatch()
+    test_abbreviation_todo_binds_field_and_filters_page_identity()
     test_uncertain_scores_request_api_review_without_changing_program_type()
     test_docx_meeting_transcript_keeps_document_extractor_and_explicit_source_kind()
     test_api_classification_review_resolves_uncertain_program_decision()
+    test_agent_classification_evidence_allows_pdf_line_wrapping()
     test_plan_ingest_order_versions_last()
     test_map_paper_batch_results()
     test_map_paper_batch_preserves_bibliographic_review_contract()
@@ -722,9 +1546,15 @@ def main():
     test_hub_timeout_is_deferred_and_retryable()
     test_zero_success_skips_global_post_ingest_scans()
     test_maintenance_error_does_not_override_completed_file_status()
+    test_maintenance_rejects_incomplete_completed_result_envelope()
     test_abbreviation_decisions_require_exact_pending_tokens_and_atomic_todo()
     test_abbreviation_decisions_close_only_matching_maintenance_action()
     test_abbreviation_decisions_cli_closes_linked_maintenance_receipt()
+    test_initial_maintenance_publication_and_historical_reconciliation()
+    test_initial_maintenance_publication_and_historical_reconciliation(historical=False)
+    test_initial_maintenance_publication_and_historical_reconciliation(historical=False, interrupt_publication=True)
+    test_maintenance_publication_rejects_mismatched_state_before_writing()
+    test_maintenance_publication_recovers_write_failures()
     test_paper_batch_keeps_preclassified_fingerprint_results()
     print("ingest_inbox dispatch regression: PASS")
 

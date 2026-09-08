@@ -89,6 +89,31 @@ def test_generic_decomposed_alias_does_not_reuse_unrelated_concept():
     assert result["decision"] == "unmatched"
 
 
+def test_decomposed_method_alias_does_not_reuse_longer_compound_concept():
+    conn = make_db()
+    add_node(
+        conn,
+        "symmetric-peps",
+        "含SU(2)对称性的simple update投影纠缠对态",
+    )
+    gl.insert_aliases(conn, "symmetric-peps", ["simple update", "SU"])
+    result = ns.resolve_node(
+        conn, "简单更新simple update(SU)", node_types=["entity"]
+    )
+    assert result["decision"] != "resolved", result
+
+
+def test_full_method_name_reuses_variant_with_optional_trailing_acronym():
+    conn = make_db()
+    add_node(conn, "simple-update", "简单更新simple update(SU)")
+    result = ns.resolve_node(
+        conn, "简单更新simple update", node_types=["entity"]
+    )
+    assert result["decision"] == "resolved", result
+    assert result["node_id"] == "simple-update"
+    assert result["match_mode"] == "optional_trailing_acronym"
+
+
 def test_complexity_qualifier_does_not_become_bilingual_identity():
     conn = make_db()
     add_node(conn, "hard", "困难")

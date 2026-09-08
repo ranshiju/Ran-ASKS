@@ -71,6 +71,26 @@ def test_rebuild_does_not_modify_raw_and_skips_sidecars():
         assert before == {path: path.read_bytes() for path in paths}
 
 
+def test_image_raw_package_indexes_only_original_and_preserves_standalone_json():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        package = root / "admin/raw/references/form"
+        package.mkdir(parents=True)
+        original = package / "form.JPG"
+        original.write_bytes(b"image")
+        (package / "form.md").write_text("faithful transcription", encoding="utf-8")
+        (package / "form.JPG.source.json").write_text('{"schema":"document-source-context-v1"}', encoding="utf-8")
+        standalone = package / "data.json"
+        standalone.write_text('{"amount":15000}', encoding="utf-8")
+        before = {path: path.read_bytes() for path in package.iterdir()}
+        db = root / "fingerprints.db"
+        result = sf.rebuild(db_path=db, roots=(root / "admin/raw",), repo=root)
+        assert result["indexed"] == 2
+        assert sf.lookup_exact(original, db_path=db, repo=root)
+        assert sf.lookup_exact(standalone, db_path=db, repo=root)
+        assert before == {path: path.read_bytes() for path in package.iterdir()}
+
+
 def main():
     tests = [value for name, value in globals().items() if name.startswith("test_")]
     for test in tests:

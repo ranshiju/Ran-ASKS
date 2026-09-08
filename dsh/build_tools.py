@@ -1,4 +1,4 @@
-"""build_tools.py — 建设任务专用 DSH capability seam。
+"""build_tools.py — API backend 建设任务的 DSH capability seam。
 
 借用 DSH 的 ToolDefinition/ToolRegistry/guard chain：
 - 建设任务只暴露 impact、locator read、filtered list 三个能力。
@@ -52,7 +52,13 @@ def _impact_tool() -> ToolDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "target": {"type": "string", "description": "graph.yaml 节点名或建设目标，如 ingest_paper"},
+                "target": {
+                    "type": "string",
+                    "description": (
+                        "graph.yaml capability/canonical 节点 ID，或唯一已注册的 path、"
+                        "文件名、stem，如 ingest_paper 或 .scripts/ingest_paper.py"
+                    ),
+                },
                 "verify": {"type": "boolean", "description": "是否输出最小验证命令，建设任务默认 true", "default": True},
             },
             "required": ["target"],
@@ -113,10 +119,10 @@ def build_build_tools() -> list[ToolDefinition]:
 
 
 class BuildLocatorCockpit:
-    """建设任务读取门的最小 cockpit。
+    """API 建设任务读取门的最小 cockpit。
 
-    组合 ToolRegistry + BuildLocatorGuard + SessionLog，供具备建设定位能力的
-    驱动循环复用；不写 raw/wiki/graph，也不进入查询型 DSH 工具面。
+    组合 ToolRegistry + BuildLocatorGuard + SessionLog，供 API 驱动循环复用；
+    当前宿主 Agent 直接调用底层脚本，不经过本 cockpit。
     """
 
     def __init__(self):

@@ -29,9 +29,14 @@ def test_ingest_tool_names():
         "ingest_inbox_dry_run",
         "ingest_inbox_run",
         "ingest_inbox_run_file",
+        "ingest_user_assertions_apply",
         "ingest_paper_inbox",
         "ingest_paper_pdf",
         "ingest_paper_resume",
+        "paper_workspace_read",
+        "paper_workspace_refresh",
+        "paper_workspace_check",
+        "paper_workspace_commit",
         "ingest_meeting_txt",
         "ingest_meeting_resume",
         "ingest_document_file",
@@ -53,6 +58,10 @@ def test_guard_allows_inbox_files():
         name="ingest_document_file", arguments={
             "file": "inbox/editorial.docx", "subproject": "academic",
             "document_type": "editorial"})) is None
+    assert guard.on_pre_execute(ToolExecution(
+        name="ingest_document_file", arguments={
+            "file": "inbox/conference.md", "subproject": "academic",
+            "document_type": "conference-summary"})) is None
     assert guard.on_pre_execute(ToolExecution(
         name="re_ingest_raw", arguments={"raw": "academic/raw/references/x/paper.md"})) is None
 
@@ -84,7 +93,9 @@ def test_document_tool_schema_accepts_academic_type():
     tool = next(t for t in build_ingest_tools() if t.name == "ingest_document_file")
     properties = tool.input_schema["properties"]
     assert "academic" in properties["subproject"]["description"]
-    assert properties["document_type"]["enum"] == ["editorial", "academic-reference"]
+    assert properties["document_type"]["enum"] == [
+        "editorial", "academic-reference", "conference-summary",
+    ]
     assert properties["source_kind"]["enum"] == ["ordinary", "meeting"]
 
 
@@ -102,6 +113,23 @@ def test_guard_validates_resume_txn():
     invalid_meeting = guard.on_pre_execute(ToolExecution(
         name="ingest_meeting_resume", arguments={"txn": "../../etc"}))
     assert invalid_meeting is not None and invalid_meeting.kind == "deny"
+    for name in (
+        "paper_workspace_read", "paper_workspace_refresh",
+        "paper_workspace_check", "paper_workspace_commit",
+    ):
+        assert guard.on_pre_execute(ToolExecution(
+            name=name, arguments={"txn": "20260820-152247-663433-xkh7-gdqm"})) is None
+        denied = guard.on_pre_execute(ToolExecution(
+            name=name, arguments={"txn": "../bad"}))
+        assert denied is not None and denied.kind == "deny"
+    assert guard.on_pre_execute(ToolExecution(
+        name="ingest_user_assertions_apply",
+        arguments={"txn": "user-assertions-0123456789abcdef"},
+    )) is None
+    denied = guard.on_pre_execute(ToolExecution(
+        name="ingest_user_assertions_apply", arguments={"txn": "../bad"},
+    ))
+    assert denied is not None and denied.kind == "deny"
 
 
 def test_ingest_loop_has_guard_and_tools():
@@ -113,8 +141,39 @@ def test_ingest_loop_has_guard_and_tools():
 def test_ingest_loop_convenience_methods():
     loop = IngestAgentLoop()
     for name in ("ingest_meeting", "resume_meeting", "ingest_document", "re_ingest_raw",
-                 "ingest_paper_inbox", "execute"):
+                 "ingest_paper_inbox", "read_paper_workspace", "refresh_paper_workspace",
+                 "check_paper_workspace", "commit_paper_workspace", "execute"):
         assert hasattr(loop, name)
+
+
+def test_workspace_refresh_maps_to_explicit_archive_cli():
+    import dsh.ingest_tools as module
+    original_call = module._ingest_call
+    calls = []
+    try:
+        module._ingest_call = lambda args: calls.append(args) or "{}"
+        tool = next(
+            item for item in module.build_ingest_tools()
+            if item.name == "paper_workspace_refresh"
+        )
+        tool.execute_fn({"txn": "20260905-120000-paper"})
+    finally:
+        module._ingest_call = original_call
+    assert calls == [[
+        "ingest_paper.py", "--agent-refresh", "20260905-120000-paper",
+    ]]
+
+
+def test_workspace_public_states_are_parsed_as_top_level_workflow():
+    loop = IngestAgentLoop()
+    for status in ("awaiting_agent", "ready_to_commit", "completed", "failed"):
+        payload = {"status": status, "workflow_status": status, "transaction_id": "txn"}
+        parsed = loop._parse_structured(json.dumps(payload))
+        assert parsed == payload
+        loop.last_structured = parsed
+        projected, handoff = loop._status_from_last()
+        assert projected == status
+        assert handoff == payload
 
 
 def test_ingest_loop_does_not_retry_timeout_result():
@@ -216,12 +275,12 @@ def test_dispatch_loop():
 
 def test_run_inbox_empty():
     loop = IngestAgentLoop()
-    inbox_dir = Path(__file__).resolve().parent.parent / "inbox"
-    if any(p for p in inbox_dir.iterdir() if p.name not in {".gitkeep", ".DS_Store"}):
-        print("  SKIP test_run_inbox_empty: inbox has files (external state)")
-        return
+    calls = []
+    loop.dry_run = lambda: calls.append("dry_run") or '{"status":"completed"}'
+    loop.run_all = lambda: calls.append("run_all") or '{"status":"completed","total":0}'
     result = loop.run_inbox()
     assert result.status == "completed"
+    assert calls == ["dry_run", "run_all"]
     assert "ingest/plan" in [e.type for e in loop.session_log.events()]
 
 
@@ -316,6 +375,8 @@ def main():
     test_guard_validates_resume_txn()
     test_ingest_loop_has_guard_and_tools()
     test_ingest_loop_convenience_methods()
+    test_workspace_refresh_maps_to_explicit_archive_cli()
+    test_workspace_public_states_are_parsed_as_top_level_workflow()
     test_structured_parse()
     test_structured_parse_preserves_top_level_batch_envelope()
     test_bibliographic_review_status_and_fields_are_preserved()
@@ -332,6 +393,7 @@ def main():
     test_classify_error_honors_explicit_structured_category()
     test_classify_error_consumes_canonical_failure_disposition()
     test_error_output_includes_category()
+    test_nonzero_control_flow_status_is_not_wrapped_as_error()
     print("dsh ingest tools regression: PASS")
 
 

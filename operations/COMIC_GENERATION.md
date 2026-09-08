@@ -118,9 +118,9 @@ images/
 - 已存在图片默认拒绝覆盖；确需替换时显式传 `--overwrite`，旧版本应先由人工归档。
 - 定稿前可另行调用 `visual_qa.py` 做布局与可读性质检，但视觉 QA 不能判断科学事实真伪。
 
-## Agent 工具接口
+## API 后端 DSH 工具接口
 
-需要绘图的 DSH Agent 显式加载：
+API 后端需要绘图能力时，由 DSH harness 显式加载：
 
 ```python
 from dsh.comic_tools import build_comic_tools

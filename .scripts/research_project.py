@@ -11,17 +11,18 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PROJECTS_DIR = Path(os.environ.get("WIKIGRAPH_PROJECTS_DIR", REPO / "projects"))
 TEMPLATE_DIR = PROJECTS_DIR / "_templates" / "research"
+sys.path.insert(0, str(REPO / ".scripts"))
+
+import workspace_state
 
 REQUIRED_FILES = [
     "README.md",
@@ -102,17 +103,24 @@ def init_project(args: argparse.Namespace) -> int:
         if new_text != text:
             path.write_text(new_text, encoding="utf-8")
 
-    (target / ".research-memory" / "entries").mkdir(parents=True, exist_ok=True)
-    profile = {
+    workspace_state.REPO = REPO
+    workspace_state.PROJECTS_DIR = PROJECTS_DIR
+    workspace_state.init_workspace(
+        project, name=values["PROJECT_NAME"], profile="research", domain="academic",
+    )
+    workspace_state.save_profile(target, workspace_state.normalize_profile({
         "topic": values["TOPIC"],
         "keywords": [],
         "stage": values["STAGE"],
         "active_questions": [],
-        "updated_at": datetime.now().isoformat(),
-    }
-    (target / ".research-memory" / "profile.json").write_text(
-        json.dumps(profile, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    }, "research"))
+    workspace_state.add_item(
+        project,
+        title="启动研究项目",
+        item_type="milestone",
+        state="active",
+        next_action="完善 schema、代码文档与研究笔记",
+        content=f"当前研究主题：{values['TOPIC']}",
     )
 
     print(f"[init] 已创建研究项目: {target}")
@@ -139,10 +147,18 @@ def validate_project(args: argparse.Namespace) -> int:
             errors.append(f"缺少必需文件: {rel}")
 
     # 2. 必需目录
-    for rel in ["outputs", ".research-memory", "codes/experiments", "codes/analysis", "codes/tests"]:
+    for rel in ["outputs", "codes/experiments", "codes/analysis", "codes/tests"]:
         path = target / rel
         if not path.is_dir():
             errors.append(f"缺少必需目录: {rel}/")
+    if not (target / ".workspace").is_dir() and not (target / ".research-memory").is_dir():
+        errors.append("缺少状态记忆目录: .workspace/ 或兼容的 .research-memory/")
+    if (target / "workspace.yaml").is_file():
+        workspace_state.REPO = REPO
+        workspace_state.PROJECTS_DIR = PROJECTS_DIR
+        report = workspace_state.doctor(target)
+        errors.extend(f"workspace: {message}" for message in report.get("errors", []))
+        warnings.extend(f"workspace: {message}" for message in report.get("warnings", []))
 
     # 3. schema 内容
     schema_path = target / "schema.yaml"
@@ -176,7 +192,7 @@ def validate_project(args: argparse.Namespace) -> int:
             rel = path.relative_to(target).as_posix()
             if path.suffix.lower() not in GENERATED_SUFFIXES:
                 continue
-            if rel.startswith("outputs/") or rel.startswith(".research-memory/"):
+            if rel.startswith("outputs/") or rel.startswith(".research-memory/") or rel.startswith(".workspace/"):
                 continue
             if rel.startswith("codes/formulas/") or rel.startswith("codes/docs/") or rel.startswith("codes/experiments/") or rel.startswith("codes/analysis/") or rel.startswith("codes/tests/"):
                 continue

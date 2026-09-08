@@ -30,11 +30,11 @@ WikiRan 是一个**文件型、跨域、可回溯的知识库**。其主链路�
 - 图边和 Hub 负责定位，不是事实答案；
 - 每一个事实性回答都要沿 `sources` 或边的 `source` 回到 raw。
 
-摄入流程现在是**代码驱动编排**：一个端到端 pipeline 由纯代码掌控流程控制权（去重→提取→撰写→校验→落位→写图→收尾），LLM 只在最小语义点（撰写 wiki 与语义槽）被调用，其余步骤全由程序完成；agent 启动后不全程监控，只在结束读取最终结果。论文 API 路径以摘要、定理、结论构成的确定性证据包锚定生成，要求保留主张的对象、条件和比较基准；语义槽不得推断方向边或把研究场景误作局限。结构性语义错误早停并保留可修复产物，恢复前由程序复验；描述性对象走局部修复。详见 `operations/INGEST.md` 与 `code-guidance.md` §2。
+系统提供两套后端。**Agent 后端**由当前宿主 Agent 持有控制循环，Agent 理解任务、选择工具并完成语义工作，程序提供定位、执行、检查与校验。**API 后端**由程序持有控制循环，按状态机调用 API LLM，并按复杂度组织 DSH、worker 或 sub-agent；宿主 Agent 轻量启动并在明确交接点兜底。两端共享输入解析、schema、validator、IR/Graph、报告与事务等确定性内核，后端差异集中在语义求解和控制循环。论文语义产物以摘要、定理、结论构成的确定性证据包锚定，保留主张的对象、条件和比较基准；结构性错误早停并保留可修复产物。详见 `operations/INGEST.md` 与 `code-guidance.md` §2。
 
 写图采用一次性的内存 `GraphDelta`：先描述 Wiki、Raw 文档包、少量导航边和带 Raw locator 的 keyword 局部说明，再用确定性名称入口与受限双视图 identity gate 连接主图，并在 SAVEPOINT 中融合。精确名称多候选和单一 embedding 相似都不自动 merge；前者无法消歧时 abstain，后者在没有名称碰撞时保留本地节点、边和 gloss。query probes 只观察 anchor、Raw 到达和两跳导航效果，不因软指标未满分制造摄入错误。
 
-节点以 `nodes.path` 作为稳定 ID，配首选 `title`、多对多 `aliases` 和主导航 `description`；`node_glosses` 逐来源保存局部说明与 Raw locator，后续摄入不盲目覆盖主描述。DSH 只暴露 `node_resolve` 与 `semantic_search` 两个语义工具：前者用名称信号和 label/semantic 双视图做受限身份解析，后者只做相关召回；裸 embedding、阈值选择和 merge 写操作不交给 LLM。
+节点以 `nodes.path` 作为稳定 ID，配首选 `title`、多对多 `aliases` 和主导航 `description`；`node_glosses` 逐来源保存局部说明与 Raw locator，后续摄入不盲目覆盖主描述。API 后端的 DSH 按任务注册受 guard 约束的功能工具；例如 `node_resolve` 用名称信号和 label/semantic 双视图做受限身份解析，`semantic_search` 只做相关召回。裸 embedding、阈值选择和 merge 写操作留在确定性内核。
 
 建设 Agent 读取工程文件时采用独立的按需 locator，不混用 Raw/Wiki 证据语义：Markdown heading path、YAML JSON Pointer、Python qualified symbol 和显式行段均由代码精确截取。读取失败、歧义或超预算时直接拒绝，不回退全文；不为此维护索引或 companion。功能性任务只调用封装函数，工程 locator 不进入通用 query/DSH 工具面。具体调用见 `code-guidance.md` 的 `engineering_locator.py` 段。
 

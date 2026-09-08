@@ -6,8 +6,10 @@ import importlib.util
 import json
 import shutil
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 SCRIPT = Path(__file__).with_name("frontier.py")
 spec = importlib.util.spec_from_file_location("frontier", SCRIPT)
@@ -64,6 +66,43 @@ def good_answer(**overrides):
     }
     value.update(overrides)
     return value
+
+
+def test_agent_backend_prepares_semantic_tasks_without_model_adapter():
+    original_backend = frontier.agent_task.query_backend
+    try:
+        frontier.agent_task.query_backend = lambda: "agent"
+        assessment = frontier.run_assessment(
+            packet(), transaction_id="frontier-assessment-test",
+            commit_command="python3 .scripts/frontier.py assess test --assessment-file result.json",
+        )
+        answer = frontier.run_answer(packet(), transaction_id="frontier-answer-test")
+    finally:
+        frontier.agent_task.query_backend = original_backend
+    for result, kind in ((assessment, "frontier_assessment"), (answer, "frontier_answer")):
+        assert result["status"] == "prepared"
+        assert result["agent_task"]["schema"] == "agent-task-v1"
+        assert result["agent_task"]["kind"] == kind
+        assert result["agent_task"]["outputs"][0]["path"].startswith("temp/frontier-agent/")
+
+
+def test_api_backend_uses_model_adapter_and_shared_schema():
+    original_backend = frontier.agent_task.query_backend
+    original_module = sys.modules.get("llm_structured")
+    calls = []
+    try:
+        frontier.agent_task.query_backend = lambda: "api"
+        sys.modules["llm_structured"] = SimpleNamespace(call_json=lambda prompt, schema, **kwargs: (
+            calls.append((prompt, kwargs)) or {"ok": True, "parsed": good_assessment()}
+        ))
+        result = frontier.run_assessment(packet())
+        assert result["ok"] and calls
+    finally:
+        frontier.agent_task.query_backend = original_backend
+        if original_module is None:
+            sys.modules.pop("llm_structured", None)
+        else:
+            sys.modules["llm_structured"] = original_module
 
 
 def test_rebuild_and_fact_links():
@@ -246,6 +285,18 @@ def test_future_work_paragraph_splits_into_question_pages():
         "evaluate the method on longer contexts.",
         "determine whether the score is calibrated.",
     ]
+
+
+def test_interesting_future_study_is_an_explicit_question_unit():
+    sentence = (
+        "It is an interesting future study to investigate how the universal corner "
+        "entanglement entropy is implemented in the lattice entanglement Hamiltonian."
+    )
+    paragraph = (
+        "The method also permits higher-dimensional cuts. "
+        "Sharp edges add a universal logarithmic contribution. " + sentence
+    )
+    assert frontier.explicit_question_units(paragraph) == [sentence]
 
 
 def test_frontier_write_does_not_touch_fact_graph():

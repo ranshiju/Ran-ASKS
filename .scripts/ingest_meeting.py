@@ -23,15 +23,13 @@ REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / ".scripts"))
+import agent_task
 import inbox_state
 import trash_util
 import ingest_common as ic
 import ingest_pipeline
 import recovery_policy as rp
-from llm_structured import ingest_mode
-from dsh.meeting_compiler_agent import (
-    MeetingCompilerAgent,
-    MeetingCompilerTask,
+from meeting_compiler_contract import (
     PREPROCESS_DELIMITER,
     PROTOCOL_VERSION as MEETING_COMPILER_PROTOCOL,
     apply_transcript_replacements,
@@ -41,6 +39,9 @@ from dsh.meeting_compiler_agent import (
 from ingest_common import (validate_meta, extract_year_from_meta,
                            has_type_mismatch, has_year_mismatch,
                            progress, set_progress_file, set_progress_log_path)
+
+
+ingest_mode = agent_task.ingest_backend
 
 TEMP_EXTRACT = REPO / "temp" / "inbox-extract"
 NON_BLOCKING_ISSUES = ("bare_abbreviation", "descriptive_phrase")
@@ -54,7 +55,7 @@ PIPELINE_PLAN_AGENT = [
     {"step": "判断重复 + 候选准备", "needs_agent": False,
      "desc": "dedup(查图+查raw) → speech_entity_resolver 只生成确定性人物候选，不修改原文"},
     {"step": "会议编译", "needs_agent": True,
-     "desc": "一个 Meeting Compiler sub-agent 读原文+人物候选，一次输出 <<<PREPROCESS>>> + <<<WIKI>>> + <<<SLOTS>>>"},
+     "desc": "当前宿主 Agent 执行 Meeting Compiler 任务，读取原文+人物候选，一次输出 <<<PREPROCESS>>> + <<<WIKI>>> + <<<SLOTS>>>"},
     {"step": "更新 Graph + 校验 + 收尾", "needs_agent": False,
      "desc": "validate→落位→graph_ingest 建边→validate_graph→finalize_tail(log/index/派生同步)+清理，--resume 一次调用完成"},
 ]
@@ -236,7 +237,7 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
     error_section = ""
     if errors:
         error_section = "\n\n[上次输出的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
-    return f"""你是受限的 Meeting Compiler sub-agent。请在同一上下文中一次性完成：
+    return f"""你是受限的 Meeting Compiler 语义执行单元。请在同一上下文中一次性完成：
 1. 判断必要的转写/人物纠错；
 2. 编译会议 wiki；
 3. 抽取语义槽。
@@ -350,6 +351,86 @@ def _compiler_request(state: dict, source_text: str, entity_candidates: dict, *,
     return prompt, context_hash
 
 
+def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates: dict,
+                               output_path: Path, errors: list[str]) -> dict:
+    """Expose the shared Meeting Compiler contract without an Agent prompt."""
+    sources_path = f"{state['raw_dir']}/{state['source_filename']}"
+    context_hash = task_context_hash(
+        source_text, entity_candidates, meeting_id=state["meeting_id"],
+        target_source_path=sources_path, errors=errors,
+    )
+    inputs = [{
+        "name": "meeting_transcript", "path": state["source"],
+        "role": "authoritative_source", "read": "full",
+    }]
+    candidate_path = state.get("entity_candidates") or state.get("entity_resolution")
+    if candidate_path:
+        inputs.append({
+            "name": "entity_candidates", "path": candidate_path,
+            "role": "deterministic_candidate_catalog",
+        })
+    task = agent_task.prepare(
+        state,
+        kind="ingest_meeting",
+        transaction_id=state["transaction_id"],
+        inputs=inputs,
+        outputs=[{
+            "name": "meeting_compiler_output",
+            "path": str(output_path.relative_to(REPO)),
+            "format": MEETING_COMPILER_PROTOCOL,
+        }],
+        protocol={
+            "name": MEETING_COMPILER_PROTOCOL,
+            "order": ["META", "PREPROCESS", "WIKI", "SLOTS"],
+            "delimiters": {
+                "meta": ["<<<META>>>", "<<</META>>>"],
+                "preprocess": PREPROCESS_DELIMITER,
+                "wiki": "<<<WIKI>>>",
+                "semantics": "<<<SLOTS>>>",
+            },
+            "preprocess_schema": {
+                "protocol_version": MEETING_COMPILER_PROTOCOL,
+                "transcript_replacements": ["original", "replacement", "reason"],
+                "entity_resolutions": ["mention", "canonical", "status", "reason"],
+            },
+            "wiki": {"required_sections": ["Navigation", "Content"]},
+            "semantics": {
+                "sections": ["参会者", "汇报者", "决策", "待办", "三元组"],
+                "subject": "本会议",
+            },
+            "validator": "meeting compiler parser plus Wiki/semantic/graph validators",
+        },
+        issues=errors,
+        commands={
+            "resume": f"python3 .scripts/ingest_meeting.py --resume {state['transaction_id']}",
+        },
+        context={
+            "meeting_id": state["meeting_id"],
+            "subproject": state.get("subproject", "academic"),
+            "date": state.get("date") or None,
+            "date_inferred": bool(state.get("date_inferred")),
+            "target_source_path": sources_path,
+            "context_hash": context_hash,
+            "spec_locator": "operations/INGEST.md",
+        },
+    )
+    state["meeting_compiler"] = {
+        "protocol_version": MEETING_COMPILER_PROTOCOL,
+        "status": "prepared",
+        "reason": "current_agent_task",
+        "context_hash": context_hash,
+        "model_calls": 0,
+    }
+    return task
+
+
+def run_api_meeting_compiler(task_fields: dict):
+    """Run the API-only Meeting Compiler adapter behind a patchable seam."""
+    from dsh.meeting_compiler_agent import MeetingCompilerAgent, MeetingCompilerTask
+
+    return MeetingCompilerAgent(MeetingCompilerTask(**task_fields)).run()
+
+
 def step_prepare_unified_handoff(state: dict, errors: list[str],
                                  handoff_reason: str = "wiki_revision_budget_exhausted"
                                  ) -> tuple[bool, str]:
@@ -412,25 +493,29 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         state["log_path"] = mp["log"]
         state["index_path"] = mp["index"]
     sources_path = f"{state['raw_dir']}/{state['source_filename']}"
-    prompt, context_hash = _compiler_request(
-        state, source_text, entity_candidates, host_agent=ingest_mode() == "agent",
-    )
     errors = list(state.get("wiki_errors", []) or [])
     errors.extend(state.get("slots_errors", []) or [])
     errors.extend(state.get("compiler_errors", []) or [])
+    if not resumed_compiler and ingest_mode() == "agent":
+        state["_awaiting_agent_wiki_slots"] = True
+        prepare_meeting_agent_task(state, source_text, entity_candidates, agent_output, errors)
+        return False, "Agent task prepared"
+    prompt, context_hash = _compiler_request(
+        state, source_text, entity_candidates, host_agent=False,
+    )
     if resumed_compiler:
         if not agent_output.is_file():
             state["_awaiting_agent_wiki_slots"] = True
-            state["agent_required"] = True
+            agent_task.reopen(
+                state, [f"缺少暂存产物: {agent_output.relative_to(REPO)}"],
+            )
             return False, f"agent 输出尚未写入: {agent_output.relative_to(REPO)}"
         proposal, parse_error = parse_meeting_compiler_proposal(
             agent_output.read_text(encoding="utf-8")
         )
         if proposal is None:
             state["_awaiting_agent_wiki_slots"] = True
-            state["agent_required"] = True
-            state["agent_prompt"] = prompt + f"\n\n上次 agent 输出不符合协议：{parse_error}。请覆盖 write_to。"
-            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            agent_task.reopen(state, [parse_error])
             return False, parse_error
         state["meeting_compiler"] = {
             "protocol_version": MEETING_COMPILER_PROTOCOL,
@@ -440,16 +525,15 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             "model_calls": 0,
         }
     else:
-        task = MeetingCompilerTask(
-            transaction_id=state.get("transaction_id", ""),
-            source_path=state["source"],
-            meeting_id=state["meeting_id"],
-            target_source_path=sources_path,
-            context_hash=context_hash,
-            prompt=prompt,
-            errors=tuple(errors),
-        )
-        result = MeetingCompilerAgent(task).run()
+        result = run_api_meeting_compiler({
+            "transaction_id": state.get("transaction_id", ""),
+            "source_path": state["source"],
+            "meeting_id": state["meeting_id"],
+            "target_source_path": sources_path,
+            "context_hash": context_hash,
+            "prompt": prompt,
+            "errors": tuple(errors),
+        })
         compiler_trace = result.trace() | {"context_hash": context_hash}
         state["meeting_compiler"] = compiler_trace
         state.setdefault("meeting_compiler_attempts", []).append(compiler_trace)
@@ -458,7 +542,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             state["agent_required"] = True
             state["agent_prompt"] = result.prompt
             state["agent_write_to"] = str(agent_output.relative_to(REPO))
-            return False, "需要 Meeting Compiler sub-agent 接管"
+            return False, "需要宿主 Agent 接管 Meeting Compiler 任务"
         if result.status != "compiled" or result.proposal is None:
             if result.status == "rejected":
                 state["compiler_errors"] = [str(result.reason)]
@@ -535,9 +619,8 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     state["wiki_content"] = wiki_content
     state["slots_content"] = proposal["semantic_slots"]
     state["semantic_worker"] = "meeting-compiler-agent" if resumed_compiler else "meeting-compiler-api"
-    state["agent_required"] = False
-    state["agent_prompt"] = ""
-    state.pop("agent_write_to", None)
+    if resumed_compiler:
+        agent_task.mark_consumed(state)
     return True, ""
 
 
@@ -776,10 +859,12 @@ def main() -> None:
             "dedup_result": state.get("dedup_result"),
             "transaction_id": state["transaction_id"],
         }, ensure_ascii=False, indent=2))
+    elif agent_task.is_prepared(state):
+        print(json.dumps(agent_task.payload(state), ensure_ascii=False, indent=2))
     elif state["status"] == "agent_required":
         print(json.dumps(inbox_state.output_payload(state, {
             "status": "agent_required",
-            "message": "需要一个 Meeting Compiler sub-agent 完成预处理、Wiki 与语义槽",
+            "message": "API 自动流程需要外部 Meeting Compiler 修正",
             "prompt": state.get("agent_prompt", ""),
             "write_to": state.get("agent_write_to", ""),
             "pipeline_plan": pipeline_plan_for(ingest_mode()),

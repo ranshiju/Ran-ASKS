@@ -3,7 +3,9 @@
 import sqlite3
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import graph_delta as gd
@@ -465,6 +467,109 @@ def test_merge_nodes_preserves_source_gloss_and_target_description_priority():
     assert tuple(gloss) == ("target", "来源局部说明", 0)
 
 
+def test_merge_nodes_preserves_incoming_edge_evidence_and_origins():
+    conn = make_db()
+    for node in ("source", "target", "paper"):
+        gl.ensure_node(conn, node, node.title(), "entity", entity_subtype="keyword")
+    source_edge = conn.execute(
+        "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+        "VALUES('paper','核心方法','source','可追溯','raw/source#L2',0)"
+    ).lastrowid
+    target_edge = conn.execute(
+        "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+        "VALUES('paper','核心方法','target','可追溯','raw/target#L3',0)"
+    ).lastrowid
+    gl.add_edge_evidence(conn, source_edge, "raw/source#L2", "source quote")
+    gl.add_edge_evidence(conn, target_edge, "raw/target#L3", "target quote")
+    gl.add_edge_origin(conn, source_edge, "wiki/source", "raw/source#L2")
+    gl.add_edge_origin(conn, target_edge, "wiki/target", "raw/target#L3")
+
+    assert gi.merge_nodes(conn, "source", "target") == 1
+
+    edge = conn.execute(
+        "SELECT id FROM edges WHERE subject='paper' AND predicate='核心方法' AND object='target'"
+    ).fetchall()
+    assert len(edge) == 1
+    keep_id = edge[0]["id"]
+    evidence = {
+        row["source"] for row in conn.execute(
+            "SELECT source FROM edge_evidence WHERE edge_id=?", (keep_id,)
+        )
+    }
+    origins = {
+        (row["origin_page"], row["source"]) for row in conn.execute(
+            "SELECT origin_page,source FROM edge_origins WHERE edge_id=?", (keep_id,)
+        )
+    }
+    assert evidence == {"raw/source#L2", "raw/target#L3"}
+    assert origins == {
+        ("wiki/source", "raw/source#L2"),
+        ("wiki/target", "raw/target#L3"),
+    }
+
+
+def test_merge_nodes_migrates_audit_history_and_temporal_facts():
+    conn = make_db()
+    gl.ensure_node(conn, "source", "Source", "entity", entity_subtype="keyword")
+    gl.ensure_node(conn, "target", "Target", "entity", entity_subtype="keyword")
+    conn.execute(
+        "INSERT INTO node_description_reviews "
+        "(node_path,origin_page,source,status,reason,proposed_description) "
+        "VALUES('source','wiki/source','raw/source','accepted','','description')"
+    )
+    conn.execute(
+        "INSERT INTO hub_scope_history "
+        "(hub_path,operation,previous_scope,scope) VALUES('source','merge','','scope')"
+    )
+    conn.execute(
+        "INSERT INTO temporal_facts(subject,predicate,object,source) "
+        "VALUES('source','生效','source','raw/source')"
+    )
+
+    gi.merge_nodes(conn, "source", "target")
+
+    assert conn.execute(
+        "SELECT node_path FROM node_description_reviews"
+    ).fetchone()[0] == "target"
+    assert conn.execute(
+        "SELECT hub_path FROM hub_scope_history"
+    ).fetchone()[0] == "target"
+    assert tuple(conn.execute(
+        "SELECT subject,object FROM temporal_facts"
+    ).fetchone()) == ("target", "target")
+
+
+def test_merge_nodes_rejects_missing_or_identical_endpoints():
+    conn = make_db()
+    gl.ensure_node(conn, "target", "Target", "entity", entity_subtype="keyword")
+    for source, target, message in (
+        ("target", "target", "must differ"),
+        ("missing", "target", "source node does not exist"),
+        ("target", "missing", "target node does not exist"),
+    ):
+        try:
+            gi.merge_nodes(conn, source, target)
+        except ValueError as exc:
+            assert message in str(exc)
+        else:
+            raise AssertionError(f"merge should reject {source!r} -> {target!r}")
+
+
+def test_concept_gloss_parser_preserves_pipes_after_the_field_separator():
+    semantic = (
+        "概念说明:\n"
+        "Kullback-Leibler散度 | 相对熵 $D(\\rho\\|\\sigma)$ 用于比较网络。\n"
+    )
+    _sections, diagnostics = gi.parse_semantic_sections(semantic)
+    glosses = gi.parse_concept_glosses(semantic)
+    assert diagnostics["malformed_gloss_lines"] == []
+    assert diagnostics["concept_gloss_count"] == 1
+    assert glosses == [{
+        "mention": "Kullback-Leibler散度",
+        "description": "相对熵 $D(\\rho\\|\\sigma)$ 用于比较网络。",
+    }]
+
+
 def test_concept_gloss_parser_and_raw_locator_choose_specific_citation():
     semantic = """三元组:
 本论文 | 研究基础 | Feynman-Vernon影响泛函
@@ -634,6 +739,104 @@ def test_soft_probe_failure_does_not_block_commit():
     )
     assert report["fusion"]["soft_probe_blocking"] is False
     assert gl.node_exists(conn, "still-committed")
+
+
+def test_graph_ingest_acquires_writer_lock_before_live_graph_access():
+    events = []
+    original_lock = gi.gl.graph_writer_lock
+    original_ingest = gi._cmd_ingest_locked
+
+    @contextmanager
+    def fake_lock(db_path):
+        events.append(("acquire", Path(db_path).name))
+        yield
+        events.append(("release", Path(db_path).name))
+
+    def fake_ingest(_args):
+        assert events == [("acquire", "graph.db")]
+        events.append(("ingest", "graph.db"))
+
+    gi.gl.graph_writer_lock = fake_lock
+    gi._cmd_ingest_locked = fake_ingest
+    try:
+        gi.cmd_ingest(SimpleNamespace(
+            page="academic/wiki/papers/example", db="/tmp/graph.db",
+        ))
+    finally:
+        gi.gl.graph_writer_lock = original_lock
+        gi._cmd_ingest_locked = original_ingest
+    assert events == [
+        ("acquire", "graph.db"), ("ingest", "graph.db"), ("release", "graph.db"),
+    ]
+
+
+def test_all_graph_ingest_write_commands_share_writer_lock_boundary():
+    commands = (
+        gi.cmd_prefill,
+        gi.cmd_ingest,
+        gi.cmd_merge,
+        gi.cmd_init,
+        gi.cmd_cleanup_ghosts,
+        gi.cmd_cleanup_orphans,
+    )
+    assert all(getattr(command, "_graph_writer_locked", False) for command in commands)
+
+
+def test_graph_merge_opens_and_commits_database_inside_writer_lock():
+    events = []
+    original_lock = gi.gl.graph_writer_lock
+    original_connect = gi._connect_for
+    original_merge = gi.merge_nodes
+
+    @contextmanager
+    def fake_lock(db_path):
+        events.append(("acquire", Path(db_path).name))
+        yield
+        events.append(("release", Path(db_path).name))
+
+    class FakeConnection:
+        def commit(self):
+            events.append(("commit", "graph.db"))
+
+        def rollback(self):
+            events.append(("rollback", "graph.db"))
+
+        def close(self):
+            events.append(("close", "graph.db"))
+
+    def fake_connect(_args):
+        events.append(("connect", "graph.db"))
+        return FakeConnection()
+
+    def fake_merge(_conn, src, tgt):
+        events.append(("merge", f"{src}->{tgt}"))
+        return 2
+
+    gi.gl.graph_writer_lock = fake_lock
+    gi._connect_for = fake_connect
+    gi.merge_nodes = fake_merge
+    try:
+        gi.cmd_merge(SimpleNamespace(db="/tmp/graph.db", src="source", tgt="target"))
+    finally:
+        gi.gl.graph_writer_lock = original_lock
+        gi._connect_for = original_connect
+        gi.merge_nodes = original_merge
+    assert events == [
+        ("acquire", "graph.db"),
+        ("connect", "graph.db"),
+        ("merge", "source->target"),
+        ("commit", "graph.db"),
+        ("close", "graph.db"),
+        ("release", "graph.db"),
+    ]
+
+
+def test_graph_connection_sets_busy_timeout():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = gl.connect(Path(directory) / "graph.db")
+        timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        conn.close()
+    assert timeout == gl.GRAPH_BUSY_TIMEOUT_MS
 
 
 def main():

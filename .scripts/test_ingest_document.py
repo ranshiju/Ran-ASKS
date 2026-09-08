@@ -62,6 +62,8 @@ def test_academic_subdirs_are_explicit_and_separate():
     assert module.get_wiki_subdir("editorial", "academic") == "editorials"
     assert module.get_raw_subdir("academic-reference", "academic") == "reference-documents"
     assert module.get_wiki_subdir("academic-reference", "academic") == "references"
+    assert module.get_raw_subdir("conference-summary", "academic") == "conferences"
+    assert module.get_wiki_subdir("conference-summary", "academic") == "conferences"
     assert module.get_raw_subdir("unknown", "academic") is None
     assert module.get_wiki_subdir("unknown", "academic") is None
 
@@ -71,6 +73,36 @@ def test_academic_prompt_is_locked_to_explicit_type():
         "专题导言", "test-id", "", "academic", document_type="editorial")
     assert "页面类型（editorial）" in prompt
     assert "academic-reference）" not in prompt
+
+    conference_prompt = module.build_doc_wiki_prompt(
+        "研讨会信息整理", "test-conference", "", "academic",
+        document_type="conference-summary")
+    assert "页面类型（conference-summary）" in conference_prompt
+    combined_prompt = module.build_doc_wiki_slots_prompt(
+        "研讨会信息整理", "test-conference", "", "academic",
+        document_type="conference-summary")
+    assert '主体用"本会议"' in combined_prompt
+    separate_prompt = module.build_doc_slots_prompt(
+        conference_prompt, "academic", document_type="conference-summary")
+    assert '主体用"本会议"' in separate_prompt
+    assert '主体用"本文档"' not in combined_prompt
+    assert "<<<META>>>" not in conference_prompt
+    assert "<<<META>>>" not in combined_prompt
+
+    state = {
+        "transaction_id": "test-conference-prompt-contract",
+        "admin_id": "20260905-test-conference",
+        "subproject": "academic",
+        "document_type": "conference-summary",
+        "source_kind": "ordinary",
+        "date_str": "2026-09-05",
+    }
+    task = module.prepare_document_agent_task(
+        state, module.REPO / "AGENTS.md",
+        module.REPO / "temp" / "test-conference-prompt-contract.txt",
+    )
+    assert task["protocol"]["order"] == ["WIKI", "SLOTS"]
+    assert "meta" not in task["protocol"]["delimiters"]
 
 
 def test_academic_agent_wiki_maps_raw_and_wiki_separately():
@@ -354,10 +386,12 @@ def test_agent_mode_wiki_roundtrip():
         "sources:\n  - memory://placeholder\n"
         "source_type: official-doc\n"
         "date: 2026-07-01\n"
-        "---\n## Navigation\n\n测试。\n## Content\n\n内容。\n"
+        "---\n## Navigation\n\n测试。 <RAW#L13>\n## Content\n\n内容。 <RAW#L136>\n"
     )
     (extract_dir / "wiki.md").write_text(wiki_content, encoding="utf-8")
-    (extract_dir / "doc.md").write_text("测试依据。\n", encoding="utf-8")
+    doc_text = "\n".join(f"第 {line} 行依据。" for line in range(1, 137)) + "\n"
+    (extract_dir / "doc.md").write_text(doc_text, encoding="utf-8")
+    (extract_dir / "test.md").write_text(doc_text, encoding="utf-8")
     state = {
         "extract_dir": "temp/inbox-extract/test-agent-wiki",
         "admin_id": "20260701-test",
@@ -375,6 +409,10 @@ def test_agent_mode_wiki_roundtrip():
         assert fm["sources"] == ["admin/raw/policies/test.md"]
         assert fm["date"] == "2026-07-01"
         assert fm["created"] == fm["updated"] == state["ingested_on"]
+        assert "[^r13]" in state["wiki_content"]
+        assert "[^r136]" in state["wiki_content"]
+        assert "[^r13]6>" not in state["wiki_content"]
+        assert module.step_validate_wiki(state) == []
         assert "_awaiting_agent_wiki" not in state
         assert state["wiki_path"].startswith("admin/wiki/")
     finally:
@@ -407,12 +445,14 @@ def test_short_api_document_combines_wiki_and_slots_in_one_call():
     import shutil
     extract_dir = module.REPO / "temp" / "inbox-extract" / "test-api-combined-document"
     extract_dir.mkdir(parents=True, exist_ok=True)
-    (extract_dir / "doc.md").write_text("# 测试政策\n\n政策明确支持人才培养。\n", encoding="utf-8")
+    doc_text = "\n".join(f"第 {line} 行依据。" for line in range(1, 137)) + "\n"
+    (extract_dir / "doc.md").write_text(doc_text, encoding="utf-8")
+    (extract_dir / "test-policy.md").write_text(doc_text, encoding="utf-8")
     output = (
         "<<<META>>>\ndoc_date: 2026-09-01\ntitle: 测试政策\ndoc_type: document\n<<</META>>>\n"
         "<<<WIKI>>>\n---\ntitle: 测试政策\ntype: policy\nstatus: confirmed\n---\n"
-        "# 测试政策\n\n## Navigation\n\n本政策支持人才培养。 <RAW#L3>\n\n"
-        "## Content\n\n### 支持事项\n\n明确支持人才培养。 <RAW#L3>\n"
+        "# 测试政策\n\n## Navigation\n\n本政策支持人才培养。 <RAW#L13>\n\n"
+        "## Content\n\n### 支持事项\n\n明确支持人才培养。 <RAW#L136>\n"
         "<<<SLOTS>>>\n三元组:\n本文件 | 涉及 | 人才培养\n"
     )
     calls = []
@@ -433,6 +473,7 @@ def test_short_api_document_combines_wiki_and_slots_in_one_call():
     module.call_text = fake_call
     try:
         success, message = module.step_write_wiki(state)
+        validation_errors = module.step_validate_wiki(state) if success else []
     finally:
         module.ingest_mode, module.call_text = original_mode, original_call
         shutil.rmtree(extract_dir, ignore_errors=True)
@@ -447,6 +488,10 @@ def test_short_api_document_combines_wiki_and_slots_in_one_call():
     assert state["slots_content"].startswith("三元组:")
     assert state["semantic_worker"] == "combined-api"
     assert "admin/raw/policies/test-policy.md" in state["wiki_content"]
+    assert "[^r13]" in state["wiki_content"]
+    assert "[^r136]" in state["wiki_content"]
+    assert "[^r13]6>" not in state["wiki_content"]
+    assert validation_errors == []
 
 
 def test_agent_required_output_has_write_to():
@@ -478,6 +523,254 @@ def test_unknown_source_date_is_not_replaced_with_ingestion_date():
     assert not errors, errors
 
 
+def test_source_date_accepts_filename_formats_and_validates_calendar():
+    for name in (
+        "2026.09.06 第三届量子智能计算研讨会新闻稿 v2.docx",
+        "2026.9.6 新闻稿.docx",
+        "2026-09-06 新闻稿.docx",
+        "2026_9_6 新闻稿.docx",
+        "20260906 新闻稿.docx",
+        "2026年9月6日 新闻稿.docx",
+    ):
+        assert module.extract_admin_date(name, "", "conference-summary") == "2026-09-06", name
+        assert module.generate_admin_id(name, "新闻稿").startswith("20260906-"), name
+    for name in (
+        "2026.02.29 新闻稿.docx",
+        "2026-13-06 新闻稿.docx",
+        "20260931 新闻稿.docx",
+        "编号1202609067.docx",
+        "2026年9月 新闻稿.docx",
+    ):
+        assert module.extract_admin_date(name, "", "conference-summary") == "", name
+        assert module.generate_admin_id(name, "新闻稿").startswith("undated-"), name
+    assert module.extract_admin_date("2024.02.29 新闻稿.docx") == "2024-02-29"
+
+
+def test_source_date_uses_bounded_nearest_directory_after_explicit_evidence():
+    source = "inbox/2026.09.01/2026年9月6日/材料/新闻稿.docx"
+    event_text = "会议于2026年8月23日举办。"
+    assert module.extract_admin_date(source, event_text, "conference-summary") == "2026-09-06"
+    assert module.extract_admin_date(
+        str(module.REPO / source), event_text, "conference-summary"
+    ) == "2026-09-06"
+    assert module.extract_admin_date(
+        "inbox/2026.09.06/新闻稿.docx", "", "conference-summary"
+    ) == "2026-09-06"
+    assert module.extract_admin_date(
+        source, "整理日期：2026年9月7日", "conference-summary"
+    ) == "2026-09-07"
+    assert module.extract_admin_date(
+        "inbox/2026.09.01/2026.09.06 新闻稿.docx",
+        "整理日期：2026年9月7日", "conference-summary",
+    ) == "2026-09-06"
+    for outside in (
+        "/tmp/2026.09.06/新闻稿.docx",
+        "temp/2026.09.06/新闻稿.docx",
+        "inbox/../temp/2026.09.06/新闻稿.docx",
+    ):
+        assert module.extract_admin_date(outside, event_text, "conference-summary") == ""
+    assert module.extract_admin_date(
+        "inbox/2026.02.29/新闻稿.docx", event_text, "conference-summary"
+    ) == ""
+    assert module.extract_admin_date(
+        source, "整理日期：2026年2月29日", "conference-summary"
+    ) == "2026-09-06"
+    assert module.generate_admin_id("20260901 新闻稿.docx", "新闻稿", "2026-09-06").startswith("20260906-")
+
+
+def test_preprocess_preserves_source_path_date_for_both_backends():
+    import tempfile
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory(prefix="2025-01-01-") as temporary:
+        repo = Path(temporary)
+        source = repo / "inbox/2026.09.06/材料/新闻稿.md"
+        source.parent.mkdir(parents=True)
+        source.write_text("会议于2026年8月23日举办。", encoding="utf-8")
+        with patch.object(module, "REPO", repo):
+            for backend in ("agent", "api"):
+                with patch.dict("os.environ", {"INGEST_BACKEND": backend}):
+                    assert module.ingest_mode() == backend
+                    state = {
+                        "source": str(source.relative_to(repo)),
+                        "source_filename": source.name,
+                        "extract_dir": f"temp/extract-{backend}",
+                        "document_type": "conference-summary",
+                    }
+                    ok, message = module.step_preprocess(state)
+                    assert ok, message
+                    assert state["date_str"] == "2026-09-06"
+                    assert state["source"] == "inbox/2026.09.06/材料/新闻稿.md"
+                    context_name = state["source_context_filename"]
+                    context_path = repo / state["extract_dir"] / context_name
+                    context = json.loads(context_path.read_text(encoding="utf-8"))
+                    assert context == {
+                        "schema": "document-source-context-v1",
+                        "source": "inbox/2026.09.06/材料/新闻稿.md",
+                        "filename": "新闻稿.md",
+                        "directories": ["2026.09.06", "材料"],
+                    }
+                    assert module._manifest_raw_files(state) == ["新闻稿.md", context_name]
+                    assert module.generate_admin_id(source.name, "新闻稿", state["date_str"]).startswith("20260906-")
+            assert module.extract_admin_date("inbox/新闻稿.md", "", "conference-summary") == ""
+
+
+def test_unknown_date_is_compiled_when_model_omits_field():
+    draft = (
+        "---\ntitle: 未标日期的记录\ntype: conference-summary\nstatus: completed\n---\n"
+        "\n## Navigation\n\n导航。\n\n## Content\n\n正文。\n"
+    )
+    normalized, repairs = module.normalize_document_wiki(
+        draft, correct_sources="academic/raw/conferences/test.md",
+        source_date="", doc_text="正文。", created_at="2026-09-07",
+    )
+    frontmatter = module.yaml.safe_load(re.match(r"^---\n(.*?)\n---", normalized, re.S).group(1))
+    assert "date" in frontmatter and frontmatter["date"] is None
+    assert frontmatter["date_status"] == "unknown"
+    assert "date" in repairs
+    errors = module.step_validate_wiki({
+        "wiki_content": normalized, "subproject": "academic",
+        "document_type": "conference-summary",
+    })
+    assert not [error for error in errors if "date" in error], errors
+    repeated, _repairs = module.normalize_document_wiki(
+        normalized, correct_sources="academic/raw/conferences/test.md",
+        source_date="", doc_text="正文。", created_at="2026-09-07",
+    )
+    assert repeated == normalized
+
+
+def test_labeled_source_dates_reject_truncated_digits():
+    for document_type in ("conference-summary", "academic-reference"):
+        for text in (
+            "发布日期：2026-09-067", "发布日期：2026-09-06123",
+            "发布日期：12026-09-06", "发布日期：2026-091-06",
+            "发布日期：2026/09/067", "发布日期：2026.09.067",
+            "发布日期：12026年9月6日", "发布日期：2026年9月6日7",
+            "发布日期：2026-02-29",
+        ):
+            assert module.extract_admin_date("新闻稿.docx", text, document_type) == "", text
+        for text in (
+            "发布日期：2026-09-06。", "发布日期：2026/9/6",
+            "发布日期：2026.09.06", "发布日期：2026年9月6日",
+            "2026-09-06 发布", "发布日期：2026-09-067\n更新日期：2026-09-07",
+        ):
+            expected = "2026-09-07" if "更新" in text else "2026-09-06"
+            assert module.extract_admin_date("新闻稿.docx", text, document_type) == expected, text
+
+
+def test_document_dedup_requires_content_identity_including_nested_raw():
+    import tempfile
+    from unittest.mock import patch
+    import graph_lib
+
+    with tempfile.TemporaryDirectory() as temporary:
+        repo = Path(temporary)
+        source = repo / "inbox/2026.09.07/新闻稿[终稿].docx"
+        stored = repo / "academic/raw/conferences/新闻稿[终稿].docx"
+        source.parent.mkdir(parents=True)
+        stored.parent.mkdir(parents=True)
+        source.write_bytes(b"new-event")
+        stored.write_bytes(b"old-event")
+        state = {
+            "source": str(source.relative_to(repo)), "source_filename": source.name,
+            "subproject": "academic", "document_type": "conference-summary",
+            "dedup_result": [{"path": "stale-result"}],
+        }
+        with patch.object(module, "REPO", repo), patch.object(
+            graph_lib, "connect", side_effect=AssertionError("title is not identity"),
+        ):
+            assert module.step_dedup_check(state) == (False, "")
+            assert "dedup_result" not in state
+            stored.write_bytes(source.read_bytes())
+            assert module.step_dedup_check(state)[0] is True
+            nested = stored.parent / "20260907-新闻稿" / stored.name
+            nested.parent.mkdir()
+            stored.rename(nested)
+            assert module.step_dedup_check(state)[0] is True
+            assert state["dedup_result"][0]["path"] == str(nested.relative_to(repo))
+            assert state["dedup_result"][0]["binary_sha256"] == module.sha256_file(source)
+
+
+def test_document_dedup_revalidates_indexed_raw_and_rejects_outside_paths():
+    import tempfile
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as temporary:
+        repo = Path(temporary)
+        source = repo / "inbox/renamed.docx"
+        stored = repo / "academic/raw/conferences/original.docx"
+        source.parent.mkdir(parents=True)
+        stored.parent.mkdir(parents=True)
+        source.write_bytes(b"new-event")
+        stored.write_bytes(source.read_bytes())
+        module.sf.register_source(
+            stored, db_path=repo / "cross-domain/source-fingerprints.db", repo=repo,
+        )
+        state = {
+            "source": str(source.relative_to(repo)), "source_filename": source.name,
+            "subproject": "academic", "document_type": "conference-summary",
+        }
+        with patch.object(module, "REPO", repo):
+            with patch.object(Path, "rglob", side_effect=AssertionError("verified index hit must not scan Raw")):
+                assert module.step_dedup_check(state)[0] is True
+            stored.write_bytes(b"old-event")
+            assert module.step_dedup_check(state) == (False, "")
+            with patch.object(module.sf, "lookup_exact", return_value={"raw_path": state["source"]}):
+                assert module.step_dedup_check(state) == (False, "")
+
+
+def test_raw_allocation_checks_entire_bundle_and_reuses_reserved_path():
+    import tempfile
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as temporary:
+        repo = Path(temporary)
+        base_dir = "academic/raw/conferences"
+        base = repo / base_dir
+        base.mkdir(parents=True)
+        names = ["news.docx", "news.md", "news.docx.source.json"]
+        with patch.object(module, "REPO", repo):
+            for name in names:
+                collision = base / name
+                collision.write_bytes(b"existing")
+                state = {
+                    "admin_id": "20260907-news", "source_filename": names[0],
+                    "locator_source_filename": names[1], "source_context_filename": names[2],
+                }
+                selected = module._select_document_raw_dir(state, base_dir)
+                assert selected == base_dir + "/20260907-news"
+                (repo / selected).mkdir()
+                assert module._select_document_raw_dir(state, base_dir) == selected
+                fresh = {key: value for key, value in state.items() if key != "raw_allocation"}
+                assert module._select_document_raw_dir(fresh, base_dir) == selected + "-2"
+                (repo / selected).rmdir()
+                collision.unlink()
+
+
+def test_conference_summary_date_prefers_source_label_over_event_date():
+    text = (
+        "# 第二届量子物理与智能计算交叉研讨会资料汇总\n\n"
+        "会议时间：2021年9月24日\n"
+        "整理日期：2026年9月5日\n"
+    )
+    assert module.extract_admin_date(
+        "会议资料汇总.md", text, "conference-summary") == "2026-09-05"
+    assert module.extract_admin_date(
+        "会议资料汇总.md", "发布日期：2026-09-05\n", "conference-summary"
+    ) == "2026-09-05"
+    assert module.extract_admin_date(
+        "会议资料汇总.md",
+        "2021年10月18日发布的第四轮通知将会议改期。\n",
+        "conference-summary",
+    ) == ""
+    assert module.extract_admin_date(
+        "会议资料汇总.md", "会议时间：2021年9月24日\n", "conference-summary") == ""
+    assert module.extract_admin_date(
+        "会议资料汇总.md", "会议时间：2021年9月24日\n", "academic-reference"
+    ) == "2021-09-24"
+
+
 def test_normalize_document_wiki_compiles_mechanical_contract():
     weak_output = (
         "---\ntitle: 导师培训\ntype: policy\nsources: guessed.md\n"
@@ -503,6 +796,27 @@ def test_normalize_document_wiki_compiles_mechanical_contract():
     assert "[^r1]: admin/raw/policies/policy.md#L1" in normalized
     assert "[^r3]: admin/raw/policies/policy.md#L3" in normalized
     assert {"sources", "created", "updated", "content_heading", "source_footnotes"} <= set(repairs)
+
+
+def test_normalize_document_wiki_compiles_overlapping_line_handles_exactly():
+    weak_output = (
+        "---\ntitle: 长文档\ntype: conference-summary\nstatus: completed\n---\n\n"
+        "# 长文档\n\n## Navigation\n\n导航。 <RAW#L13>\n\n"
+        "## Content\n\n较后的事实。 <RAW#L136>\n"
+    )
+    doc_text = "\n".join(f"第 {line} 行依据。" for line in range(1, 137)) + "\n"
+    normalized, _repairs = module.normalize_document_wiki(
+        weak_output,
+        correct_sources="academic/raw/conferences/long.md",
+        source_date="2026-09-05",
+        doc_text=doc_text,
+        created_at="2026-09-05",
+    )
+    assert "[^r13]" in normalized
+    assert "[^r136]" in normalized
+    assert "[^r13]6>" not in normalized
+    assert "[^r13]: academic/raw/conferences/long.md#L13" in normalized
+    assert "[^r136]: academic/raw/conferences/long.md#L136" in normalized
 
 
 def test_transcript_normalization_sets_provenance_and_drops_inferred_department():
@@ -647,17 +961,30 @@ def main():
     test_short_api_document_combines_wiki_and_slots_in_one_call()
     test_agent_required_output_has_write_to()
     test_unknown_source_date_is_not_replaced_with_ingestion_date()
+    test_source_date_accepts_filename_formats_and_validates_calendar()
+    test_source_date_uses_bounded_nearest_directory_after_explicit_evidence()
+    test_preprocess_preserves_source_path_date_for_both_backends()
+    test_unknown_date_is_compiled_when_model_omits_field()
+    test_labeled_source_dates_reject_truncated_digits()
+    test_document_dedup_requires_content_identity_including_nested_raw()
+    test_document_dedup_revalidates_indexed_raw_and_rejects_outside_paths()
+    test_raw_allocation_checks_entire_bundle_and_reuses_reserved_path()
+    test_same_name_documents_finalize_without_overwriting_for_both_backends()
+    test_conference_summary_date_prefers_source_label_over_event_date()
     test_normalize_document_wiki_compiles_mechanical_contract()
+    test_normalize_document_wiki_compiles_overlapping_line_handles_exactly()
     test_transcript_normalization_sets_provenance_and_drops_inferred_department()
     test_validate_semantics_rejects_responsibility_inferred_from_speech()
     test_sqlite_snapshot_restores_exact_graph_state()
     test_rollback_removes_manifest_companion_restores_graph_and_marks_receipt()
     test_preprocess_binary_creates_raw_companion()
     test_preprocess_native_text_uses_original()
+    test_validate_native_text_uses_inbox_source_before_commit()
     test_preprocess_text_pdf_creates_line_locator_companion()
     test_finalize_lands_original_and_companion_together()
     test_build_source_context_document_keeps_short_full()
     test_build_source_context_document_reduces_by_heading()
+    test_reduced_api_document_context_preserves_original_raw_lines()
     test_build_source_context_meeting_uses_head_tail()
     test_remove_no_info_slot_values_drops_placeholder_only()
     test_append_source_to_existing_list()
@@ -719,6 +1046,39 @@ def test_preprocess_native_text_uses_original():
         shutil.rmtree(module.REPO / state["extract_dir"], ignore_errors=True)
 
 
+def test_validate_native_text_uses_inbox_source_before_commit():
+    """最终 Raw 尚未落位时，原生行 locator 映射到当前 source 文件。"""
+    import shutil
+    state, root = _locator_test_state("conference", ".md")
+    source = module.REPO / state["source"]
+    source.write_text("# Conference\n\nRecorded fact.\n", encoding="utf-8")
+    try:
+        ok, msg = module.step_preprocess(state)
+        assert ok, msg
+        raw_locator = "academic/raw/conferences/conference.md"
+        wiki = (
+            "---\ntitle: Conference\ntype: conference-summary\nsources:\n"
+            f"  - \"{raw_locator}\"\n"
+            "source_type: discussion\nconfidence: medium\ndate: 2026-09-05\n"
+            "---\n# Conference\n\n## Navigation\n\nRecorded fact.[^r3]\n\n"
+            "## Content\n\nRecorded fact.[^r3]\n\n"
+            f"[^r3]: {raw_locator}#L3\n"
+        )
+        extract_dir = module.REPO / state["extract_dir"]
+        (extract_dir / "wiki.md").write_text(wiki, encoding="utf-8")
+        state.update({
+            "wiki_content": wiki,
+            "subproject": "academic",
+            "document_type": "conference-summary",
+            "source_kind": "ordinary",
+            "raw_locator": raw_locator,
+        })
+        assert not module.step_validate_wiki(state)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(module.REPO / state["extract_dir"], ignore_errors=True)
+
+
 def test_preprocess_text_pdf_creates_line_locator_companion():
     """PDF prompt 使用 RAW#Lx，因此文本层 PDF 也需 Markdown companion。"""
     import fitz
@@ -745,6 +1105,79 @@ def test_preprocess_text_pdf_creates_line_locator_companion():
         shutil.rmtree(module.REPO / state["extract_dir"], ignore_errors=True)
 
 
+def test_same_name_documents_finalize_without_overwriting_for_both_backends():
+    import tempfile
+    from unittest.mock import patch
+
+    original_run = module.ic.run
+
+    def run_isolated_finalizer(command, repo):
+        actual = [command[0], str(SCRIPT.with_name("inbox_finalize.py")), *command[2:]]
+        return original_run([*actual, "--project-root", str(repo)], repo)
+
+    for backend in ("agent", "api"):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            source = repo / "inbox/2026.09.07/新闻稿.docx"
+            base = repo / "academic/raw/conferences"
+            source.parent.mkdir(parents=True)
+            base.mkdir(parents=True)
+            source.write_bytes(b"new-event")
+            old_files = {
+                "新闻稿.docx": b"old-event",
+                "新闻稿.md": b"old-text",
+                "新闻稿.docx.source.json": b"old-context",
+            }
+            for name, content in old_files.items():
+                (base / name).write_bytes(content)
+            state = {
+                "transaction_id": "test-same-name-" + backend,
+                "source": str(source.relative_to(repo)), "source_filename": source.name,
+                "subproject": "academic", "document_type": "conference-summary",
+                "extract_dir": "temp/inbox-extract/test-same-name-" + backend,
+            }
+            with patch.object(module, "REPO", repo), patch.dict(
+                "os.environ", {"INGEST_BACKEND": backend},
+            ), patch.object(module, "extract_doc_text", return_value="# 新闻稿\n\n新的会议报道。\n"), patch.object(
+                module.ic, "run", side_effect=run_isolated_finalizer,
+            ), patch.object(module, "call_text", side_effect=AssertionError("no external LLM in regression")):
+                assert module.ingest_mode() == backend
+                assert module.step_dedup_check(state) == (False, "")
+                ok, message = module.step_preprocess(state)
+                assert ok, message
+                state["admin_id"] = module.generate_admin_id(source.name, "新闻稿", state["date_str"])
+                state["_awaiting_agent_wiki"] = True
+                extract_dir = repo / state["extract_dir"]
+                (extract_dir / "wiki.md").write_text(
+                    "---\ntitle: 新闻稿\ntype: conference-summary\nstatus: completed\n---\n"
+                    "\n## Navigation\n\n会议报道。 <RAW#L3>\n\n## Content\n\n新的会议报道。 <RAW#L3>\n",
+                    encoding="utf-8",
+                )
+                ok, message = module.step_write_wiki(state)
+                assert ok, message
+                expected = "academic/raw/conferences/20260907-新闻稿"
+                assert state["raw_dir"] == expected
+                assert state["raw_locator"] == expected + "/新闻稿.md"
+                assert expected + "/新闻稿.md#L3" in state["wiki_content"]
+                state["_awaiting_agent_wiki"] = True
+                ok, message = module.step_write_wiki(state)
+                assert ok, message
+                assert state["raw_dir"] == expected
+                assert module.step_validate_wiki(state) == []
+                ok, message = module.step_finalize(state)
+                assert ok, message
+                landed = repo / state["raw_dir"]
+                assert (landed / source.name).read_bytes() == source.read_bytes()
+                assert (landed / "新闻稿.md").read_text(encoding="utf-8") == "# 新闻稿\n\n新的会议报道。\n"
+                context = json.loads((landed / "新闻稿.docx.source.json").read_text(encoding="utf-8"))
+                assert context["source"] == state["source"]
+                assert (repo / (state["wiki_path"] + ".md")).is_file()
+                for name, content in old_files.items():
+                    assert (base / name).read_bytes() == content
+                assert module.step_dedup_check(state)[0] is True
+                assert state["dedup_result"][0]["path"] == expected + "/新闻稿.docx"
+
+
 def test_finalize_lands_original_and_companion_together():
     """原文件和 Markdown companion 由同一 manifest 原子落到同一 raw 目录。"""
     import shutil
@@ -758,6 +1191,8 @@ def test_finalize_lands_original_and_companion_together():
     source.write_bytes(b"original")
     extract_dir.mkdir(parents=True, exist_ok=True)
     (extract_dir / "policy.md").write_text("# Policy\n\nExact text.\n", encoding="utf-8")
+    source_context = '{"schema":"document-source-context-v1","source":"inbox/2026.09.06/policy.docx"}\n'
+    (extract_dir / "policy.docx.source.json").write_text(source_context, encoding="utf-8")
     (extract_dir / "wiki.md").write_text("---\ntitle: Policy\n---\n", encoding="utf-8")
     state = {
         "transaction_id": token,
@@ -765,6 +1200,7 @@ def test_finalize_lands_original_and_companion_together():
         "source_filename": "policy.docx",
         "locator_source_filename": "policy.md",
         "extract_dir": str(extract_dir.relative_to(module.REPO)),
+        "source_context_filename": "policy.docx.source.json",
         "raw_dir": str(raw_dir.relative_to(module.REPO)),
         "wiki_path": str(wiki_path.relative_to(module.REPO)),
         "admin_id": token,
@@ -774,6 +1210,7 @@ def test_finalize_lands_original_and_companion_together():
         assert ok, msg
         assert (raw_dir / "policy.docx").read_bytes() == b"original"
         assert (raw_dir / "policy.md").read_text(encoding="utf-8") == "# Policy\n\nExact text.\n"
+        assert (raw_dir / "policy.docx.source.json").read_text(encoding="utf-8") == source_context
     finally:
         receipt = state.get("receipt")
         if receipt:
@@ -804,6 +1241,26 @@ def test_build_source_context_document_reduces_by_heading():
     assert "结论" in reduced
     # 各 section 被裁剪到 section_char_cap 以内，总缩减应显著
     assert len(reduced) < len(long_text) // 2
+
+
+def test_reduced_api_document_context_preserves_original_raw_lines():
+    lines = ["# 附录"]
+    lines.extend(f"无关内容 {index} " + "x" * 400 for index in range(100))
+    lines.extend(["# 结论", "最终结论。"])
+    source = "\n".join(lines) + "\n"
+    annotated = module.wl.annotate_raw_lines(source, "RAW")
+    reduced = module.ic.build_source_context("document", annotated, force_reduced=True)
+    target = f"<RAW#L{len(lines)}> 最终结论。"
+    assert target in reduced
+
+    prompt = module.build_doc_wiki_prompt(
+        reduced,
+        "20260905-long-api",
+        "2026-09-05",
+        preannotated_raw_lines=True,
+    )
+    assert target in prompt
+    assert f"<RAW#L1> {target}" not in prompt
 
 
 def test_build_source_context_meeting_uses_head_tail():
