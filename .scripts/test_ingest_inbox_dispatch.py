@@ -30,6 +30,98 @@ def test_extract_last_json_ignores_domain_status():
     assert parsed["paper_id"] == "p1"
 
 
+def test_managed_external_file_staging_and_inbox_boundary():
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / "attachment.txt"
+        source.write_text("managed intake", encoding="utf-8")
+        target = None
+        receipt_paths = []
+        try:
+            target, receipt = module.stage_external_file(
+                str(source), "test-managed-intake-20260911.txt"
+            )
+            receipt_paths.append(module.REPO / receipt["receipt_path"])
+            assert target.parent.resolve() == module.INBOX.resolve()
+            assert target.read_text(encoding="utf-8") == "managed intake"
+            assert receipt["schema"] == "inbox-intake-v1"
+            assert receipt["binary_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+            reused_target, reused = module.stage_external_file(
+                str(source), "test-managed-intake-20260911.txt"
+            )
+            receipt_paths.append(module.REPO / reused["receipt_path"])
+            assert reused_target == target
+            assert reused["action"] == "reused_exact"
+            assert receipt_paths[0] != receipt_paths[1]
+            assert module._resolve_inbox_file(str(target.relative_to(module.REPO))) == target
+            try:
+                module._resolve_inbox_file(str(source))
+                raise AssertionError("仓库外文件不应被 --file 接受")
+            except ValueError as exc:
+                assert "--import-file" in str(exc)
+        finally:
+            if target and target.exists():
+                target.unlink()
+            for receipt_path in receipt_paths:
+                if receipt_path.exists():
+                    receipt_path.unlink()
+
+
+def test_managed_external_file_rejects_symlink_target():
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / "source.txt"
+        source.write_text("source", encoding="utf-8")
+        link = module.INBOX / "test-managed-intake-symlink-20260911.txt"
+        try:
+            link.symlink_to(source)
+            try:
+                module.stage_external_file(str(source), link.name)
+                raise AssertionError("受管暂存不得复用指向 inbox 外的符号链接")
+            except ValueError as exc:
+                assert "符号链接" in str(exc)
+        finally:
+            if link.is_symlink():
+                link.unlink()
+
+
+def test_document_dispatch_marks_inbox_entrypoint():
+    command = module.dispatch_command("document", "inbox/a.md", "admin")
+    assert command[-2:] == ["--entrypoint", "inbox"]
+    tool, args = module.dsi_tool("document", "inbox/a.md", "admin")
+    assert tool == "ingest_document_file"
+    assert args["entrypoint"] == "inbox"
+
+
+def test_agent_resume_uses_same_document_transaction():
+    txn = "20260911-120000-测试图片"
+    completed = types.SimpleNamespace(
+        stdout=json.dumps({"status": "prepared", "transaction_id": txn,
+                           "semantic_backend": "agent", "ocr_backend": None}),
+        stderr="", returncode=0,
+    )
+    with patch.object(module.inbox_state, "load", return_value={
+            "pipeline_script": "ingest_document.py", "semantic_backend": "agent"}), \
+            patch.object(module.subprocess, "run", return_value=completed) as run:
+        result = module.resume_transaction(txn, "agent")
+    command = run.call_args.args[0]
+    assert command[-2:] == ["--resume", txn]
+    assert result["entrypoint"] == "inbox"
+    assert result["semantic_backend"] == "agent"
+
+
+def test_resume_ocr_parameters_only_apply_to_image_document_transaction():
+    txn = "20260911-120000-notes"
+    with patch.object(module.inbox_state, "load", return_value={
+            "pipeline_script": "ingest_document.py",
+            "semantic_backend": "agent",
+            "source": "inbox/notes.md",
+    }):
+        try:
+            module.resume_transaction(txn, "agent", allow_remote_ocr=True)
+            raise AssertionError("非图片事务不应接受 OCR 参数")
+        except ValueError as exc:
+            assert "图片文档事务" in str(exc)
+
+
 def test_extract_last_json_preserves_top_level_batch_envelope():
     payload = {
         "status": "partial",
@@ -242,7 +334,11 @@ def test_api_run_uses_dsh_loop_without_direct_dispatch():
             assert ("init", "api") in calls
             assert (
                 "execute", "ingest_document_file",
-                {"file": "inbox/notice.md", "subproject": "admin"},
+                {
+                    "file": "inbox/notice.md",
+                    "subproject": "admin",
+                    "entrypoint": "inbox",
+                },
             ) in calls
     finally:
         (
@@ -423,13 +519,15 @@ def test_dsi_tool_routes_file_types():
         ("ingest_meeting_txt", {"file": "inbox/a.txt", "subproject": "academic"})
     assert module.dsi_tool("document", "inbox/a.md", "academic", "editorial") == \
         ("ingest_document_file", {"file": "inbox/a.md", "subproject": "academic",
-                                  "document_type": "editorial"})
+                                  "entrypoint": "inbox", "document_type": "editorial"})
     assert module.dsi_tool("document", "inbox/a.md", "teaching") == \
-        ("ingest_document_file", {"file": "inbox/a.md", "subproject": "teaching"})
+        ("ingest_document_file", {"file": "inbox/a.md", "subproject": "teaching",
+                                  "entrypoint": "inbox"})
     assert module.dsi_tool(
         "document", "inbox/部署会速记.docx", "admin", source_kind="meeting") == (
             "ingest_document_file",
-            {"file": "inbox/部署会速记.docx", "subproject": "admin", "source_kind": "meeting"},
+            {"file": "inbox/部署会速记.docx", "subproject": "admin",
+             "entrypoint": "inbox", "source_kind": "meeting"},
         )
 
 
@@ -445,10 +543,12 @@ def test_academic_document_classification_gate():
         assert "classification_required" in str(exc)
     command = module.dispatch_command(
         "document", "inbox/a.md", "academic", "academic-reference")
-    assert command[-4:] == ["--subproject", "academic", "--document-type", "academic-reference"]
+    assert command[-6:] == ["--subproject", "academic", "--entrypoint", "inbox",
+                            "--document-type", "academic-reference"]
     command = module.dispatch_command(
         "document", "inbox/研讨会信息整理.md", "academic", "conference-summary")
-    assert command[-4:] == ["--subproject", "academic", "--document-type", "conference-summary"]
+    assert command[-6:] == ["--subproject", "academic", "--entrypoint", "inbox",
+                            "--document-type", "conference-summary"]
 
 
 def test_academic_conference_classification_uses_first_h1():
@@ -1517,6 +1617,11 @@ def test_maintenance_publication_recovers_write_failures():
 
 def main():
     test_extract_last_json_ignores_domain_status()
+    test_managed_external_file_staging_and_inbox_boundary()
+    test_managed_external_file_rejects_symlink_target()
+    test_document_dispatch_marks_inbox_entrypoint()
+    test_agent_resume_uses_same_document_transaction()
+    test_resume_ocr_parameters_only_apply_to_image_document_transaction()
     test_extract_last_json_preserves_top_level_batch_envelope()
     test_scan_inbox_includes_only_nonempty_facts_pending()
     test_facts_pending_run_returns_agent_task_without_raw_write()

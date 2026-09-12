@@ -91,8 +91,8 @@ temp/visual-to-ppt/<source-sha256>/<run-key>/
 VISUAL_RECONSTRUCTION_* → VISUAL_QA_* → LLM_API_*
 ```
 
-默认模型来自 `operations/config/llm-models.yaml`：主模型 `GLM-4.6V`，回退
-`GLM-4.5V`。API key、Authorization header 和图片 data URL 不进入 checkpoint 或 DSH log。
+默认模型在 `operations/config/llm-models.yaml` 登记：主模型 `GLM-5.3-Flash`，回退
+`GLM-4.5V`。2026-09-11 按用户明确指令切换主模型；未进行重建质量 A/B 对测，不代表已验证优于旧模型。API key、Authorization header 和图片 data URL 不进入 checkpoint 或 DSH log。
 
 模型返回只接受有限 JSON 对象类型、0–1 坐标和 0.90 以上置信度；路径、命令、XML、代码和
 越界对象全部丢弃。模型不能决定输出路径，也不能直接写 PPT XML。

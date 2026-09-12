@@ -26,6 +26,8 @@ workspace_state.py / research_memory.py / query_actions.py / source_locator.py�
   wg.py remember <project> --title "..." --intent <intent> [--content "..." | --stdin] [--tags a,b]
   wg.py workspace recall <workspace>
   wg.py workspace item add <workspace> --title "..." --state active --next-action "..."
+  wg.py ingest <file> --subproject admin [--allow-remote-ocr]
+  wg.py ingest --resume <transaction-id>
   wg.py abbr <term>
   wg.py frontier ask "<academic question>"
   wg.py frontier list
@@ -69,8 +71,26 @@ def envelope(action, result, sources=None, status="ok", error="", ok=None):
 
 
 def run_script(args: list[str], **kw) -> tuple[int, str, str]:
-    p = subprocess.run(args, capture_output=True, text=True, **kw)
+    binary_input = isinstance(kw.get("input"), bytes)
+    p = subprocess.run(args, capture_output=True, text=not binary_input, **kw)
+    if binary_input:
+        return p.returncode, p.stdout.decode("utf-8", errors="replace"), p.stderr.decode("utf-8", errors="replace")
     return p.returncode, p.stdout, p.stderr
+
+
+def extract_last_json(text: str) -> dict:
+    decoder = json.JSONDecoder()
+    best = None
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            value, end = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and not text[index + end:].strip():
+            best = value
+    return best or {}
 
 
 def query_graph_json(cmd: str, pos_args: list[str], opts: list[str] | None = None) -> dict:
@@ -218,6 +238,67 @@ def cmd_recall(args):
                     sources=[], status="ok")
 
 
+def cmd_ingest(args):
+    pasted = getattr(args, "stdin", False)
+    keep_source = getattr(args, "keep_source", False)
+    if sum(bool(value) for value in (args.file, args.resume, pasted)) != 1:
+        return envelope("ingest", None, status="error",
+                        error="必须且只能提供一个 file、--stdin 或 --resume")
+    if keep_source and not args.file:
+        return envelope("ingest", None, status="error", error="--keep-source 只能用于文件附件")
+    command = ["python3", str(SCRIPTS / "ingest_inbox.py"), "--run"]
+    input_options = {}
+    if args.resume:
+        command.extend(["--resume", args.resume])
+    elif pasted:
+        command.extend(["--stdin", "--subproject", args.subproject])
+        if args.name:
+            command.extend(["--import-name", args.name])
+        if args.document_type:
+            command.extend(["--document-type", args.document_type])
+        input_options["input"] = sys.stdin.buffer.read()
+    else:
+        supplied = Path(args.file).expanduser()
+        source = supplied.absolute() if keep_source else supplied.resolve()
+        try:
+            rel = source.relative_to(REPO)
+        except ValueError:
+            rel = None
+        if not keep_source and rel is not None and rel.parts and rel.parts[0] == "inbox":
+            command.extend(["--file", str(rel)])
+        else:
+            command.extend(["--import-file", str(source)])
+            if keep_source:
+                command.append("--keep-source")
+            if args.name:
+                command.extend(["--import-name", args.name])
+        command.extend(["--subproject", args.subproject])
+        if args.document_type:
+            command.extend(["--document-type", args.document_type])
+    if args.ocr_result:
+        command.extend(["--ocr-result", args.ocr_result])
+    if args.allow_remote_ocr:
+        command.append("--allow-remote-ocr")
+    rc, out, err = run_script(command, cwd=REPO, **input_options)
+    result = extract_last_json(out)
+    if not result:
+        return envelope("ingest", None, status="error",
+                        error=(err or out or "摄入入口未返回 JSON").strip()[:500])
+    sources = []
+    for item in result.get("files", []) if isinstance(result.get("files"), list) else []:
+        for key in ("raw_dir", "wiki_path"):
+            if item.get(key) and item[key] not in sources:
+                sources.append(item[key])
+    for key in ("raw_dir", "wiki_path"):
+        if result.get(key) and result[key] not in sources:
+            sources.append(result[key])
+    failed = result.get("status") in {"failed", "validation_error", "backend_mismatch"}
+    if rc != 0 and failed:
+        return envelope("ingest", result, sources=sources, status="error",
+                        error=str(result.get("errors") or result.get("error") or "摄入失败")[:500])
+    return envelope("ingest", result, sources=sources, status="ok")
+
+
 def cmd_remember(args):
     if args.stdin:
         content = sys.stdin.read()
@@ -349,6 +430,21 @@ def build_parser():
 
     p = sub.add_parser("recall", help="研究记忆恢复")
     p.add_argument("project"); p.set_defaults(func=cmd_recall)
+
+    p = sub.add_parser("ingest", help="统一 inbox 摄入入口；外部附件受管暂存后进入同一管线")
+    p.add_argument("file", nargs="?", help="inbox 文件或仓库外附件路径")
+    p.add_argument("--stdin", action="store_true", help="从 stdin 原样摄入粘贴正文")
+    p.add_argument("--keep-source", action="store_true", help="对话附件复制摄入，原件不移动、不修改、不删除")
+    p.add_argument("--resume", default="", help="恢复既有摄入事务")
+    p.add_argument("--name", default="", help="外部附件进入 inbox 时使用的文件名")
+    p.add_argument("--subproject", default="academic",
+                   choices=("academic", "admin", "teaching", "business"))
+    p.add_argument("--document-type", default="",
+                   choices=("", "editorial", "academic-reference", "conference-summary"))
+    p.add_argument("--ocr-result", default="", help="已有源绑定 OCR JSON 回执")
+    p.add_argument("--allow-remote-ocr", action="store_true",
+                   help="显式授权单张图片上传 GLM OCR API")
+    p.set_defaults(func=cmd_ingest)
 
     p = sub.add_parser("remember", help="研究记忆沉淀")
     p.add_argument("project"); p.add_argument("--title", required=True)

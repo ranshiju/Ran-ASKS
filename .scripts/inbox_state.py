@@ -282,9 +282,9 @@ def save(transaction_id: str, state: dict) -> Path:
 
 def supersede_transaction(transaction_id: str, completed_by: str) -> dict:
     """Close one stale, uncommitted transaction using a completed same-source txn."""
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", transaction_id or ""):
+    if not re.fullmatch(r"[\w.-]+", transaction_id or ""):
         raise ValueError("invalid superseded transaction id")
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", completed_by or ""):
+    if not re.fullmatch(r"[\w.-]+", completed_by or ""):
         raise ValueError("invalid replacement transaction id")
     if transaction_id == completed_by:
         raise ValueError("transaction cannot supersede itself")

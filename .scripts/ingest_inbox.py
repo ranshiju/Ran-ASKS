@@ -25,10 +25,13 @@ import hashlib
 import json
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import urllib.parse
 import unicodedata
+import uuid
+import inbox_source_policy
 from datetime import datetime
 from pathlib import Path
 
@@ -76,6 +79,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 import ingest_common as ic
 import agent_task
+import inbox_state
 import inbox_plan
 import ingest_user_assertions
 import source_fingerprints as sf
@@ -467,7 +471,8 @@ def dispatch_command(file_type: str, rel_path: str, subproject: str,
     if subproject == "academic" and not document_type:
         raise ValueError("classification_required: academic 文档缺少 document_type")
     command = [sys.executable, str(REPO / ".scripts/ingest_document.py"),
-               "--file", rel_path, "--subproject", subproject]
+               "--file", rel_path, "--subproject", subproject,
+               "--entrypoint", "inbox"]
     if document_type:
         command.extend(["--document-type", document_type])
     if source_kind != "ordinary":
@@ -490,7 +495,7 @@ def dsi_tool(file_type: str, rel_path: str, subproject: str,
         return "ingest_meeting_txt", {"file": rel_path, "subproject": subproject}
     if subproject == "academic" and not document_type:
         raise ValueError("classification_required: academic 文档缺少 document_type")
-    args = {"file": rel_path, "subproject": subproject}
+    args = {"file": rel_path, "subproject": subproject, "entrypoint": "inbox"}
     if document_type:
         args["document_type"] = document_type
     if source_kind != "ordinary":
@@ -511,6 +516,8 @@ def scan_inbox() -> list[Path]:
         if not p.is_file() or p.name in SKIP_FILES or p.name.startswith("."):
             continue
         if p.name == "facts-pending.md" and inbox_plan.fact_entries(p) == 0:
+            continue
+        if inbox_source_policy.is_retained(REPO, p):
             continue
         files.append(p)
     return files
@@ -768,6 +775,7 @@ def _result_entry(file_name: str, file_type: str, parsed: dict, content: str = "
             "proposition_details", "bibliographic_worker", "workspace_worker",
             "relationship_worker", "execution_backend",
             "semantic_repair_worker", "quality_status", "quality_warnings",
+            "entrypoint", "semantic_backend", "ocr_backend",
         ):
             if parsed.get(key) is not None:
                 entry[key] = parsed[key]
@@ -800,6 +808,7 @@ def _result_entry(file_name: str, file_type: str, parsed: dict, content: str = "
             "failure_signature", "bibliographic_review", "agent_task", "write_to",
             "failure_disposition", "workflow_status", "internal_status",
             "workspace_worker", "execution_backend",
+            "entrypoint", "semantic_backend", "ocr_backend",
         ):
             if parsed.get(key) is not None:
                 entry[key] = parsed[key]
@@ -827,6 +836,199 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _resolve_inbox_file(value: str) -> Path:
+    """Resolve a public --file argument and enforce the inbox boundary."""
+    path = (REPO / value).resolve()
+    try:
+        path.relative_to(INBOX.resolve())
+    except ValueError as exc:
+        raise ValueError("--file 只接受 inbox/ 内文件；仓库外附件请使用 --import-file") from exc
+    if not path.is_file():
+        raise ValueError(f"文件不存在: {value}")
+    if inbox_source_policy.is_retained(REPO, path):
+        raise ValueError("受保护的对话原件请使用 --keep-source 复制摄入")
+    return path
+
+
+def stage_external_file(value: str, import_name: str = "") -> tuple[Path, dict]:
+    """Copy one external attachment into inbox with a hash-bound intake receipt."""
+    source = Path(value).expanduser().resolve()
+    if not source.is_file():
+        raise ValueError(f"外部附件不存在: {value}")
+    try:
+        source.relative_to(INBOX.resolve())
+    except ValueError:
+        pass
+    else:
+        raise ValueError("--import-file 用于 inbox/ 外附件；已有 inbox 文件请使用 --file")
+    name = import_name.strip() or source.name
+    if Path(name).name != name or name.startswith(".") or name in SKIP_FILES:
+        raise ValueError("--import-name 必须是安全的单文件名")
+    digest = _sha256_file(source)
+    INBOX.mkdir(parents=True, exist_ok=True)
+    target = INBOX / name
+    action = "copied"
+    if target.exists():
+        if target.is_symlink():
+            raise ValueError(f"受管 inbox 目标不得是符号链接: {target.name}")
+        if target.is_file() and _sha256_file(target) == digest:
+            action = "reused_exact"
+        else:
+            target = INBOX / f"{Path(name).stem}-{digest[:8]}{Path(name).suffix}"
+            if target.exists():
+                if target.is_symlink() or not target.is_file() or _sha256_file(target) != digest:
+                    raise ValueError(f"受管 inbox 目标冲突: {target.name}")
+            action = "reused_exact" if target.exists() else "copied_with_hash_suffix"
+    if not target.exists():
+        shutil.copy2(source, target)
+    if _sha256_file(target) != digest:
+        raise ValueError("外部附件暂存后 SHA-256 不一致")
+    receipt = {
+        "schema": "inbox-intake-v1",
+        "created_at": datetime.now().astimezone().isoformat(),
+        "source_path": str(source),
+        "source_name": source.name,
+        "staged_path": str(target.relative_to(REPO)),
+        "binary_sha256": digest,
+        "action": action,
+    }
+    receipt_path = (
+        REPO / "temp/inbox-intake"
+        / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-{digest[:12]}.json"
+    )
+    _write_json_atomic(receipt_path, receipt)
+    receipt["receipt_path"] = str(receipt_path.relative_to(REPO))
+    return target, receipt
+
+
+def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
+                     import_name: str = "") -> tuple[Path, dict]:
+    """Create an exclusively owned inbox copy; only that copy may be cleaned up."""
+    if (source is None) == (content is None):
+        raise ValueError("provide exactly one chat attachment or pasted document")
+    provided = Path(source).expanduser() if source is not None else None
+    if provided is not None and provided.is_symlink():
+        raise ValueError("对话附件原件不得是符号链接；请提供实际文件路径")
+    original = provided.resolve() if provided is not None else None
+    if original is not None and not original.is_file():
+        raise ValueError(f"对话附件不存在: {source}")
+    name = import_name or (original.name if original else "pasted-document.txt")
+    if (Path(name).name != name or name.startswith(".") or name in SKIP_FILES
+            or name == "facts-pending.md" or "\\" in name):
+        raise ValueError("对话文档名必须是安全的普通文件名")
+    if original is None:
+        if Path(name).suffix.lower() not in {".txt", ".md"}:
+            raise ValueError("粘贴正文只接受 .txt 或 .md 文件名")
+        assert content is not None
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("粘贴正文必须是 UTF-8") from exc
+        if not text.lstrip("\ufeff").strip():
+            raise ValueError("粘贴正文不能为空")
+        digest = hashlib.sha256(content).hexdigest()
+    else:
+        digest = _sha256_file(original)
+        # Persist before any dispatch. Inbox originals remain protected on retry/scan.
+        inbox_source_policy.retain_original(REPO, original)
+    INBOX.mkdir(parents=True, exist_ok=True)
+    target = INBOX / f"{Path(name).stem}-chat-{uuid.uuid4().hex[:12]}{Path(name).suffix}"
+    created = False
+    try:
+        with target.open("xb") as handle:
+            created = True
+            if original is not None:
+                with original.open("rb") as source_handle:
+                    shutil.copyfileobj(source_handle, handle)
+            else:
+                handle.write(content)
+        if original is not None:
+            shutil.copystat(original, target)  # Preserve source timestamps used by existing date inference.
+        if _sha256_file(target) != digest:
+            raise ValueError("对话原文暂存后 SHA-256 不一致")
+    except (OSError, ValueError):
+        # Only our exclusively created copy is disposable; never touch an original.
+        if created:
+            target.unlink(missing_ok=True)
+        raise
+    receipt = {
+        "schema": "inbox-intake-v1",
+        "created_at": datetime.now().astimezone().isoformat(),
+        "origin": "chat_attachment" if original is not None else "chat_text",
+        "source_path": str(original) if original else None,
+        "source_name": original.name if original else name,
+        "staged_path": str(target.relative_to(REPO)),
+        "binary_sha256": digest,
+        "action": "copied" if original is not None else "saved_verbatim",
+        "source_policy": "retain_original" if original is not None else "no_external_file",
+        "cleanup_scope": "staged_copy_only",
+    }
+    receipt_path = REPO / "temp/inbox-intake" / f"{target.stem}.json"
+    try:
+        _write_json_atomic(receipt_path, receipt)
+    except OSError:
+        target.unlink(missing_ok=True)
+        raise
+    receipt["receipt_path"] = str(receipt_path.relative_to(REPO))
+    return target, receipt
+
+
+def resume_transaction(transaction_id: str, backend: str, *,
+                       ocr_result: str = "", allow_remote_ocr: bool = False) -> dict:
+    """Resume one existing ingest transaction through the unified inbox boundary."""
+    if not transaction_id or "/" in transaction_id or "\\" in transaction_id or ".." in transaction_id:
+        raise ValueError("事务 ID 非法")
+    state = inbox_state.load(transaction_id)
+    if not state:
+        raise ValueError(f"事务不存在: {transaction_id}")
+    pipeline = state.get("pipeline_script") or ""
+    tool_map = {
+        "ingest_document.py": "ingest_document_resume",
+        "ingest_meeting.py": "ingest_meeting_resume",
+        "ingest_paper.py": "ingest_paper_resume",
+    }
+    if pipeline not in tool_map:
+        raise ValueError(f"不支持通过 inbox 恢复的事务类型: {pipeline or 'unknown'}")
+    if ocr_result or allow_remote_ocr:
+        source = Path(str(state.get("source") or ""))
+        if pipeline != "ingest_document.py" or source.suffix.lower() not in inbox_plan.IMAGE_SUFFIXES:
+            raise ValueError("OCR 参数只适用于图片文档事务")
+    tool_args = {"txn": transaction_id}
+    if ocr_result:
+        tool_args["ocr_result"] = ocr_result
+    if allow_remote_ocr:
+        tool_args["allow_remote_ocr"] = True
+    if backend == "api":
+        from dsh.agent_loop import IngestAgentLoop
+        loop = IngestAgentLoop(mode="api")
+        content = loop.execute(tool_map[pipeline], tool_args)
+        parsed = loop.last_structured or _extract_last_json(content)
+        log_dir = REPO / "temp/inbox-dsh"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / f"{loop.session_log.session_id}.jsonl").write_text(
+            loop.session_log.to_jsonl() + "\n", encoding="utf-8"
+        )
+    else:
+        command = [sys.executable, str(REPO / ".scripts" / pipeline),
+                   "--resume", transaction_id]
+        if ocr_result:
+            command.extend(["--ocr-result", ocr_result])
+        if allow_remote_ocr:
+            command.append("--allow-remote-ocr")
+        completed = subprocess.run(
+            command, cwd=REPO, text=True, capture_output=True, check=False,
+        )
+        parsed = _extract_last_json(completed.stdout)
+    if not isinstance(parsed, dict):
+        parsed = {"status": "failed", "errors": ["恢复命令未返回结构化结果"]}
+    parsed.setdefault("transaction_id", transaction_id)
+    parsed["entrypoint"] = "inbox"
+    parsed["backend"] = backend
+    parsed.setdefault("semantic_backend", state.get("semantic_backend", backend))
+    parsed.setdefault("ocr_backend", state.get("ocr_backend"))
+    return parsed
 
 
 def _raw_duplicate_path(match: dict) -> Path:
@@ -860,6 +1062,8 @@ def cleanup_exact_duplicate(source: Path, match: dict) -> dict:
         raise ValueError("重复源文件必须位于 inbox/")
     if not source_path.is_file():
         raise ValueError("重复源文件不存在")
+    if inbox_source_policy.is_retained(REPO, source) or inbox_source_policy.is_retained(REPO, source_path):
+        raise ValueError("受保护的对话原件不得作为重复项清理")
     raw_path = _raw_duplicate_path(match)
     source_hash = _sha256_file(source_path)
     raw_hash = _sha256_file(raw_path)
@@ -1490,6 +1694,7 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
         "status": status,
         "file_status": status,
         "backend": report.get("backend"),
+        "intake": report.get("intake"),
         "total": report["total"],
         "completed": report["completed"],
         "duplicates": report.get("duplicates", 0),
@@ -1508,7 +1713,12 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
 
 def main():
     ap = argparse.ArgumentParser(description="inbox 统一摄入入口：确定性分流 + 双后端语义复核")
+    ap.add_argument("--stdin", action="store_true", help="从 stdin 原样保存 UTF-8 文档正文后摄入")
+    ap.add_argument("--keep-source", action="store_true", help="复制对话附件摄入；原件永久保留，包括 inbox 内原件")
     ap.add_argument("--file", help="指定单个文件（不扫描 inbox 全部）")
+    ap.add_argument("--import-file", help="受管暂存一个 inbox/ 外附件后摄入")
+    ap.add_argument("--import-name", default="", help="外部附件进入 inbox 时使用的安全文件名")
+    ap.add_argument("--resume", help="经统一入口恢复既有摄入事务")
     ap.add_argument("--run", action="store_true", help="实际执行分发（默认 dry run）")
     ap.add_argument("--subproject", default="academic",
                     choices=["academic", "admin", "teaching", "business"],
@@ -1525,16 +1735,51 @@ def main():
     ap.add_argument("--reconcile-maintenance-report", type=Path,
                     help="修复指定历史摄入报告的维护关联并重放已有裁决（不重摄入）")
     args = ap.parse_args()
+    backend = agent_task.ingest_backend()
+    if args.resume:
+        if not args.run:
+            ap.error("--resume 必须与 --run 同用")
+        if (args.file or args.import_file or args.import_name or args.download or args.stdin or args.keep_source
+                or args.classification_file or args.document_type
+                or args.reconcile_maintenance_report):
+            ap.error("--resume 不得与新摄入、分类或维护参数组合")
+        print(f"ingest backend={backend}", file=sys.stderr, flush=True)
+        try:
+            result = resume_transaction(
+                args.resume, backend,
+                ocr_result=args.ocr_result or "",
+                allow_remote_ocr=args.allow_remote_ocr,
+            )
+        except (OSError, ValueError) as exc:
+            result = {"status": "validation_error", "errors": [str(exc)],
+                      "transaction_id": args.resume, "entrypoint": "inbox",
+                      "backend": backend}
+        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        if result.get("status") in {"failed", "validation_error", "backend_mismatch"}:
+            raise SystemExit(1)
+        return
+    if sum(bool(value) for value in (args.file, args.import_file, args.stdin, args.download)) > 1:
+        ap.error("--file、--import-file、--stdin、--download 只能使用一个")
+    if args.keep_source and not (args.file or args.import_file):
+        ap.error("--keep-source 必须与 --file 或 --import-file 同用")
+    if (args.stdin or args.keep_source) and not args.run:
+        ap.error("对话暂存必须与 --run 同用")
+    if args.import_name and not (args.import_file or args.stdin or (args.file and args.keep_source)):
+        ap.error("--import-name 只能用于附件复制或粘贴正文")
+    if args.import_file and not args.run:
+        ap.error("--import-file 必须与 --run 同用")
     ocr_options = {}
     if args.ocr_result or args.allow_remote_ocr:
-        if not args.file or Path(args.file).suffix.lower() not in inbox_plan.IMAGE_SUFFIXES:
-            ap.error("OCR 参数只用于 --file 指定的单张图片")
+        selected_file = args.file or args.import_file or ""
+        if not selected_file or Path(selected_file).suffix.lower() not in inbox_plan.IMAGE_SUFFIXES:
+            ap.error("OCR 参数只用于 --file/--import-file 指定的单张图片")
         if args.ocr_result:
             ocr_options["ocr_result"] = args.ocr_result
         if args.allow_remote_ocr:
             ocr_options["allow_remote_ocr"] = True
     if args.reconcile_maintenance_report:
-        if args.run or args.file or args.download or args.classification_file or args.document_type:
+        if (args.run or args.file or args.import_file or args.download or args.stdin or args.keep_source
+                or args.classification_file or args.document_type):
             ap.error("--reconcile-maintenance-report 不得与摄入操作组合")
         try:
             result = reconcile_maintenance_report(REPO / args.reconcile_maintenance_report)
@@ -1543,9 +1788,8 @@ def main():
             raise SystemExit(1)
         print(json.dumps(result, ensure_ascii=False))
         return
-    if args.document_type and (args.subproject != "academic" or not args.file):
-        ap.error("--document-type 仅用于 --file 指定的 academic 文档")
-    backend = agent_task.ingest_backend()
+    if args.document_type and (args.subproject != "academic" or not (args.file or args.import_file or args.stdin)):
+        ap.error("--document-type 仅用于单文件 academic 文档")
     if args.run:
         print(f"ingest backend={backend}", file=sys.stderr, flush=True)
     supplied_classifications = {}
@@ -1562,17 +1806,35 @@ def main():
             raise SystemExit(1)
 
     # 下载模式
+    intake_receipt = None
     if args.download:
         files = download_pdfs(args.download, verbose=not args.run)
         if not files:
             print("无文件下载成功", file=sys.stderr)
             sys.exit(1)
+    elif args.stdin or args.keep_source or args.import_file:
+        try:
+            if args.stdin:
+                content = sys.stdin.buffer.read()
+                staged, intake_receipt = stage_chat_input(content=content, import_name=args.import_name)
+            elif args.keep_source:
+                staged, intake_receipt = stage_chat_input(
+                    source=args.import_file or str(REPO / args.file), import_name=args.import_name)
+            else:
+                staged, intake_receipt = stage_external_file(args.import_file, args.import_name)
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"status": "validation_error", "errors": [str(exc)]},
+                             ensure_ascii=False))
+            raise SystemExit(1)
+        files = [staged]
+        args.file = str(staged.relative_to(REPO))  # Classification resumes only this staged input.
     elif args.file:
-        f = (REPO / args.file).resolve()
-        if not f.is_file():
-            print(f"文件不存在: {args.file}", file=sys.stderr)
-            sys.exit(1)
-        files = [f]
+        try:
+            files = [_resolve_inbox_file(args.file)]
+        except ValueError as exc:
+            print(json.dumps({"status": "validation_error", "errors": [str(exc)]},
+                             ensure_ascii=False))
+            raise SystemExit(1)
     else:
         files = scan_inbox()
 
@@ -1692,6 +1954,7 @@ def main():
         print(json.dumps({
             "status": "prepared",
             "agent_task": _classification_task(classification_pending, args),
+            "intake": intake_receipt,
             "total": len(files),
         }, ensure_ascii=False, indent=2))
         return
@@ -1913,7 +2176,9 @@ def main():
     report = {
         "timestamp": report_time.strftime("%Y-%m-%d %H:%M:%S"),
         "session_id": session_id,
+        "entrypoint": "inbox",
         "backend": backend,
+        "semantic_backend": backend,
         "dsh_log": str(dsh_log.relative_to(REPO)) if dsh_log else "",
         "agent_log": str(agent_log.relative_to(REPO)) if agent_log else "",
         "total": len(results),
@@ -1924,6 +2189,7 @@ def main():
         "fingerprint_matches": fingerprint_matches,
         "fingerprint_index_error": fingerprint_index_error,
         "plan_notes": plan_notes,
+        "intake": intake_receipt,
         "tool_outputs": tool_outputs,
         "maintenance": maintenance,
     }

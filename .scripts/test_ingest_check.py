@@ -194,6 +194,32 @@ def check(text, rel="academic/wiki/papers/test.md"):
         path.unlink(missing_ok=True)
 
 
+def test_academic_non_paper_types_validate_in_final_domain():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory).resolve()
+        old_repo = ingest_check.REPO
+        ingest_check.REPO = repo
+        try:
+            for page_type, folder in (("academic-reference", "references"),
+                                      ("editorial", "editorials"),
+                                      ("conference-summary", "conferences")):
+                page = repo / "academic/wiki" / folder / "test.md"
+                page.parent.mkdir(parents=True)
+                page.write_text(
+                    f"---\ntitle: Test\ntype: {page_type}\n"
+                    "sources: [academic/raw/test.md]\nsource_type: official-doc\n"
+                    "date: 2026-09-10\nstatus: current\nconfidence: high\n"
+                    "created: 2026-09-10\nupdated: 2026-09-10\n"
+                    "---\n## Navigation\nTest\n## Content\nTest\n",
+                    encoding="utf-8",
+                )
+                errors, _warnings = ingest_check.check_file(page, set(), set())
+                assert not errors, (page_type, errors)
+                assert page_type not in ingest_check.type_enum_for("admin/wiki/references/test.md")
+        finally:
+            ingest_check.REPO = old_repo
+
+
 def test_extract_engine_warns_on_non_mineru():
     """非 mineru 提取的 raw 全文 md 应报 WARN(mineru 不报)。"""
     with tempfile.TemporaryDirectory() as directory:
@@ -430,6 +456,7 @@ def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
 
 
 def main():
+    test_academic_non_paper_types_validate_in_final_domain()
     test_graph_checks_with_isolated_database()
     test_graph_checks_rejects_cross_layer_metadata_without_requiring_locator()
     test_graph_checks_accepts_author_titles_paths_and_aliases_as_one_identity()

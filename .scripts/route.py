@@ -353,6 +353,8 @@ def filter_ingest(ingest_list, content, subproject, source_kind):
 
     is_encoding = "阶段一" in sections
     is_graph_work = "阶段二" in sections or "更新模式" in sections
+    if content != "paper" and (is_encoding or is_graph_work):
+        sections.append("表格型清单与台账")
     if is_encoding and source_kind == "meeting":
         sections.append("会议纪要预处理")
     if subproject == "academic":

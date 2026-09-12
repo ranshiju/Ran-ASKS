@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import inbox_source_policy
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ REPO = Path(__file__).resolve().parent.parent
 SUBPROJECTS = ("academic", "admin", "teaching", "business")
 PAPER_SUFFIXES = {".pdf"}
 MEETING_SUFFIXES = {".txt"}
-DOCUMENT_SUFFIXES = {".md", ".docx", ".xlsx", ".pptx"} | IMAGE_SUFFIXES
+DOCUMENT_SUFFIXES = {".md", ".docx", ".xls", ".xlsx", ".pptx"} | IMAGE_SUFFIXES
 
 
 def slugify(value: str) -> str:
@@ -70,8 +71,12 @@ def classify(path: Path) -> dict:
 
 def build_plan(inbox: Path) -> dict:
     items = []
+    retained_sources = []
     for path in sorted(inbox.iterdir() if inbox.exists() else [], key=lambda item: item.name.lower()):
         if path.name == ".gitkeep" or not path.is_file():
+            continue
+        if inbox_source_policy.is_retained(REPO, path):
+            retained_sources.append(str(path.relative_to(REPO)))
             continue
         details = classify(path)
         items.append({"path": str(path.relative_to(REPO)), "size_bytes": path.stat().st_size, **details})
@@ -83,6 +88,7 @@ def build_plan(inbox: Path) -> dict:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "inbox": str(inbox.relative_to(REPO)),
         "items": items,
+        "retained_sources": retained_sources,
         "routing": {
             "batch_eligible": batch_eligible,
             "batch_reason": "至少三份同类 academic paper 文件" if batch_eligible else "不满足至少三份同类 academic paper 文件；逐项使用 create。",

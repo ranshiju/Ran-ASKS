@@ -104,28 +104,50 @@ def validate_preprocess(value) -> bool:
 
 
 def parse_proposal(text: str) -> tuple[dict | None, str]:
+    proposal, error, _diagnostic = parse_proposal_detailed(text)
+    return proposal, error
+
+
+def parse_proposal_detailed(text: str) -> tuple[dict | None, str, dict]:
     preprocess_text = _section(text, PREPROCESS_DELIMITER, WIKI_DELIMITER)
     wiki = _section(text, WIKI_DELIMITER, SLOTS_DELIMITER)
     slots = _section(text, SLOTS_DELIMITER, None)
     if not preprocess_text:
-        return None, f"missing {PREPROCESS_DELIMITER} section"
+        error = f"missing {PREPROCESS_DELIMITER} section"
+        return None, error, {"kind": "boundary", "stage": "parse_sections",
+                             "segment": "PREPROCESS", "message": error}
+    json_text = _strip_json_fence(preprocess_text)
     try:
-        preprocess = json.loads(_strip_json_fence(preprocess_text))
-    except json.JSONDecodeError:
-        return None, "invalid preprocess JSON"
+        preprocess = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        excerpt_start = max(0, exc.pos - 100)
+        return None, "invalid preprocess JSON", {
+            "kind": "json_syntax", "stage": "parse_preprocess", "segment": "PREPROCESS",
+            "error_type": type(exc).__name__, "message": exc.msg,
+            "line": exc.lineno, "column": exc.colno, "position": exc.pos,
+            "coordinate_space": "PREPROCESS after whitespace and JSON fence stripping",
+            "excerpt_start": excerpt_start,
+            "excerpt": json_text[excerpt_start:exc.pos + 100],
+        }
     if not validate_preprocess(preprocess):
-        return None, "invalid meeting-compiler-v1 preprocess proposal"
+        error = "invalid meeting-compiler-v1 preprocess proposal"
+        return None, error, {"kind": "schema", "stage": "validate_preprocess",
+                             "segment": "PREPROCESS", "message": error}
     if not wiki:
-        return None, f"missing {WIKI_DELIMITER} section"
+        error = f"missing {WIKI_DELIMITER} section"
+        return None, error, {"kind": "boundary", "stage": "parse_sections",
+                             "segment": "WIKI", "message": error}
     if not slots:
-        return None, f"missing {SLOTS_DELIMITER} section"
+        error = f"missing {SLOTS_DELIMITER} section"
+        return None, error, {"kind": "boundary", "stage": "parse_sections",
+                             "segment": "SLOTS", "message": error}
     return {
         "protocol_version": PROTOCOL_VERSION,
         "preprocess": preprocess,
         "meta": _parse_meta(text),
         "wiki_markdown": wiki,
         "semantic_slots": slots,
-    }, ""
+    }, "", {}
 
 
 def apply_transcript_replacements(source_text: str, replacements: list[dict]) -> str:

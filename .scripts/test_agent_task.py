@@ -10,23 +10,31 @@ import agent_task
 
 
 def test_backends_are_explicit_and_independent():
+    original_repo = agent_task.REPO
     original = {name: os.environ.get(name) for name in (
         "INGEST_BACKEND", "QUERY_BACKEND", "RESEARCH_BACKEND",
     )}
     try:
-        os.environ["QUERY_BACKEND"] = "api"
-        os.environ.pop("RESEARCH_BACKEND", None)
-        assert agent_task.query_backend() == "api"
-        assert agent_task.research_backend() == "agent"
-        os.environ["RESEARCH_BACKEND"] = "api"
-        assert agent_task.research_backend() == "api"
-        os.environ["INGEST_BACKEND"] = "hybrid"
-        try:
-            agent_task.ingest_backend()
-            raise AssertionError("invalid backend must fail")
-        except RuntimeError:
-            pass
+        with tempfile.TemporaryDirectory() as directory:
+            agent_task.REPO = Path(directory)
+            for name in original:
+                os.environ.pop(name, None)
+            assert agent_task.ingest_backend() == "agent"
+            assert agent_task.query_backend() == "agent"
+            assert agent_task.research_backend() == "agent"
+            os.environ["QUERY_BACKEND"] = "api"
+            assert agent_task.query_backend() == "api"
+            assert agent_task.research_backend() == "agent"
+            os.environ["RESEARCH_BACKEND"] = "api"
+            assert agent_task.research_backend() == "api"
+            os.environ["INGEST_BACKEND"] = "hybrid"
+            try:
+                agent_task.ingest_backend()
+                raise AssertionError("invalid backend must fail")
+            except RuntimeError:
+                pass
     finally:
+        agent_task.REPO = original_repo
         for name, value in original.items():
             if value is None:
                 os.environ.pop(name, None)

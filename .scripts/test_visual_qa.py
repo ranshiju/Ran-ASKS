@@ -432,10 +432,34 @@ def test_advisory_policy_preserves_real_findings_without_fallback(tmp: Path) -> 
     assert visual_qa._normalize_vision_result(report)["verdict"] == "warn"
 
 
+def test_bundled_soffice_font_environment(tmp: Path) -> None:
+    shim = tmp / "dependencies/bin/override/soffice"
+    config = tmp / "dependencies/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/Resources/fontconfig/fonts.conf"
+    config.parent.mkdir(parents=True)
+    config.write_text("<fontconfig/>")
+    with patch.dict("os.environ", {}, clear=True):
+        assert visual_qa._soffice_env(shim)["FONTCONFIG_FILE"] == str(config)
+        native = config.parents[2] / "MacOS/soffice"
+        assert visual_qa._soffice_env(native)["FONTCONFIG_FILE"] == str(config)
+        assert "FONTCONFIG_FILE" not in visual_qa._soffice_env(Path("/usr/bin/soffice"))
+        for key in ("FONTCONFIG_FILE", "FONTCONFIG_PATH"):
+            with patch.dict("os.environ", {key: "/explicit"}):
+                assert visual_qa._soffice_env(shim) == {key: "/explicit"}
+        with patch.object(visual_qa, "_find_soffice", return_value=shim):
+            def convert(cmd, **kwargs):
+                from types import SimpleNamespace
+                assert kwargs["env"]["FONTCONFIG_FILE"] == str(config)
+                Path(cmd[cmd.index("--outdir") + 1], "deck.pdf").write_bytes(b"pdf")
+                return SimpleNamespace(returncode=0)
+            with patch.object(visual_qa.subprocess, "run", side_effect=convert):
+                visual_qa._convert_slides_to_pdf(tmp / "deck.pptx", tmp / "rendered.pdf")
+
+
 def main() -> None:
     test_page_selector()
     with tempfile.TemporaryDirectory(prefix="visual-qa-test-") as tmp_dir:
         tmp = Path(tmp_dir)
+        test_bundled_soffice_font_environment(tmp)
         test_deterministic_checks(tmp)
         test_visual_env_reuses_main_llm_credentials(tmp)
         test_image_receipt_resume_and_input_hash(tmp)

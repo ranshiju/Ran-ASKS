@@ -14,7 +14,7 @@ from dsh.harness import PreToolDecision, ToolExecution
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
-_TXN_RE = re.compile(r"^\d{8}-\d{6}-(?:\d+-)?[A-Za-z0-9_-]+$")
+_TXN_RE = re.compile(r"^\d{8}-\d{6}-[^\x00/\\]+$")
 _USER_ASSERTION_TXN_RE = re.compile(r"^user-assertions-[a-f0-9]{16}$")
 _ALLOWED_FILE_TOOLS = {"ingest_inbox_run_file", "ingest_paper_pdf", "ingest_meeting_txt", "ingest_document_file"}
 _WORKSPACE_TOOLS = {
@@ -22,7 +22,8 @@ _WORKSPACE_TOOLS = {
     "paper_workspace_commit",
 }
 _RESUME_TOOLS = {
-    "ingest_paper_resume", "ingest_meeting_resume", "ingest_user_assertions_apply",
+    "ingest_paper_resume", "ingest_meeting_resume", "ingest_document_resume",
+    "ingest_user_assertions_apply",
     *_WORKSPACE_TOOLS,
 }
 _ACADEMIC_DOCUMENT_TYPES = {
@@ -90,7 +91,7 @@ class IngestGuard:
                 _USER_ASSERTION_TXN_RE if exec_ctx.name == "ingest_user_assertions_apply"
                 else _TXN_RE
             )
-            if not matcher.match(txn):
+            if not matcher.match(txn) or ".." in txn:
                 return PreToolDecision(kind="deny", reason=f"非法事务 ID: {txn}")
             return None
 

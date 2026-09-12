@@ -244,6 +244,22 @@ def _find_soffice(explicit: str | None = None) -> Path:
     )
 
 
+def _soffice_env(soffice: Path) -> dict[str, str]:
+    """Load bundled macOS fontconfig without changing caller or global settings."""
+    env = os.environ.copy()
+    if env.get("FONTCONFIG_FILE") or env.get("FONTCONFIG_PATH"):
+        return env
+    candidates = [soffice.parent.parent / "Resources/fontconfig/fonts.conf"]
+    if soffice.parent.name == "override" and soffice.parent.parent.name == "bin":
+        candidates.append(soffice.parent.parent.parent /
+                          "native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/Resources/fontconfig/fonts.conf")
+    for config in candidates:
+        if config.is_file():
+            env["FONTCONFIG_FILE"] = str(config)
+            break
+    return env
+
+
 def _convert_slides_to_pdf(path: Path, target_pdf: Path,
                            soffice_bin: str | None = None) -> None:
     soffice = _find_soffice(soffice_bin)
@@ -254,7 +270,8 @@ def _convert_slides_to_pdf(path: Path, target_pdf: Path,
             str(soffice), "--headless", "--convert-to", "pdf",
             "--outdir", str(out_dir), str(path),
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+                              env=_soffice_env(soffice))
         converted = out_dir / f"{path.stem}.pdf"
         if proc.returncode != 0 or not converted.is_file():
             detail = (proc.stderr or proc.stdout or "conversion produced no PDF").strip()

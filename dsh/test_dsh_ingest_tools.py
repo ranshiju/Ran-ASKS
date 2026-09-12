@@ -40,6 +40,7 @@ def test_ingest_tool_names():
         "ingest_meeting_txt",
         "ingest_meeting_resume",
         "ingest_document_file",
+        "ingest_document_resume",
         "re_ingest_raw",
     } <= names
 
@@ -97,6 +98,19 @@ def test_document_tool_schema_accepts_academic_type():
         "editorial", "academic-reference", "conference-summary",
     ]
     assert properties["source_kind"]["enum"] == ["ordinary", "meeting"]
+    assert properties["entrypoint"]["enum"] == ["inbox"]
+
+
+def test_document_resume_tool_and_guard_preserve_transaction():
+    tool = next(t for t in build_ingest_tools() if t.name == "ingest_document_resume")
+    assert tool.input_schema["required"] == ["txn"]
+    guard = IngestGuard()
+    txn = "20260911-120000-科研系统截图"
+    assert guard.on_pre_execute(ToolExecution(
+        name="ingest_document_resume", arguments={"txn": txn})) is None
+    denied = guard.on_pre_execute(ToolExecution(
+        name="ingest_document_resume", arguments={"txn": "../../etc"}))
+    assert denied is not None and denied.kind == "deny"
 
 
 def test_guard_validates_resume_txn():
@@ -372,6 +386,7 @@ def main():
     test_guard_denies_unsafe_files()
     test_guard_requires_academic_document_type()
     test_document_tool_schema_accepts_academic_type()
+    test_document_resume_tool_and_guard_preserve_transaction()
     test_guard_validates_resume_txn()
     test_ingest_loop_has_guard_and_tools()
     test_ingest_loop_convenience_methods()

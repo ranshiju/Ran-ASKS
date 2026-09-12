@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
+import json
 import sys
 
 REPO = Path(__file__).resolve().parent.parent
@@ -15,6 +17,7 @@ from dsh.meeting_compiler_agent import (
     PROTOCOL_VERSION,
     apply_transcript_replacements,
     parse_proposal,
+    parse_proposal_detailed,
     task_context_hash,
 )
 
@@ -112,11 +115,86 @@ def test_replacements_are_exact_and_non_cascading():
         raise AssertionError("overlapping replacements must fail")
 
 
+def test_json_diagnostics_preserve_exact_error_and_response():
+    valid = _output()
+    failures = [
+        valid.replace('"entity_resolutions":[]}', '"entity_resolutions":[],}'),
+        valid.replace('<<<WIKI>>>', '<<</PREPROCESS>>>\n<<<WIKI>>>'),
+        valid.replace('"entity_resolutions":[]}', '"entity_resolutions":[],"note":"bad "quote""}'),
+    ]
+    for failed in failures:
+        proposal, error, diagnostic = parse_proposal_detailed(failed)
+        assert proposal is None and error == "invalid preprocess JSON"
+        assert parse_proposal(failed) == (proposal, error)
+        section = failed.split("<<<PREPROCESS>>>", 1)[1].split("<<<WIKI>>>", 1)[0].strip()
+        try:
+            json.loads(section)
+        except json.JSONDecodeError as exc:
+            assert diagnostic["message"] == exc.msg
+            assert (diagnostic["line"], diagnostic["column"], diagnostic["position"]) == (
+                exc.lineno, exc.colno, exc.pos,
+            )
+            assert section[diagnostic["excerpt_start"]:exc.pos + 100] == diagnostic["excerpt"]
+        else:
+            raise AssertionError("fixture must fail JSON parsing")
+        result = MeetingCompilerAgent(
+            _task(), lambda *args, **kwargs: {"ok": True, "text": failed},
+        ).run()
+        assert result.status == "rejected"
+        assert result.response_text == failed
+        assert result.diagnostic == diagnostic
+        assert "response_text" not in result.trace() and "diagnostic" not in result.trace()
+    fenced = valid.replace("<<<PREPROCESS>>>\n", "<<<PREPROCESS>>>\n```json\n").replace(
+        "<<<WIKI>>>", "```\n<<<WIKI>>>",
+    )
+    assert parse_proposal_detailed(fenced)[0] is not None
+    schema_failure = valid.replace(PROTOCOL_VERSION, "wrong", 1)
+    assert parse_proposal_detailed(schema_failure)[2]["kind"] == "schema"
+    assert parse_proposal_detailed("<<<WIKI>>>\ntext")[2]["kind"] == "boundary"
+
+
+def test_retry_messages_inject_output_and_use_error_specific_scope():
+    failed = _output().replace("<<<WIKI>>>", "<<</PREPROCESS>>>\n<<<WIKI>>>")
+    diagnostic = parse_proposal_detailed(failed)[2]
+    calls = []
+
+    def fake_call(prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        return {"ok": True, "text": _output()}
+
+    task = replace(_task("original task"), previous_output=failed,
+                   previous_diagnostic=diagnostic,
+                   errors=("Meeting Compiler 失败: invalid preprocess JSON",))
+    result = MeetingCompilerAgent(task, fake_call).run()
+    assert result.status == "compiled" and result.response_text == _output()
+    messages = calls[-1][1]["messages"]
+    assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
+    assert messages[1]["content"] == "original task"
+    assert messages[2]["content"] == failed
+    assert json.loads(messages[3]["content"].split("[当前校验错误与上轮解析诊断]\n")[1])["diagnostic"] == diagnostic
+    assert "本轮只修复" in messages[3]["content"]
+    assert "不添加 <<</PREPROCESS>>>" in messages[3]["content"]
+    assert calls[-1][1]["retries"] == 0
+    assert calls[-1][1]["max_tokens"] == task.budget.max_output_tokens
+    for errors, details in [
+        (("schema validation failed",), {"kind": "schema"}),
+        (("缺少 ## Content 段", "invalid preprocess JSON"), diagnostic),
+    ]:
+        MeetingCompilerAgent(replace(task, errors=errors, previous_diagnostic=details), fake_call).run()
+        repair = calls[-1][1]["messages"][-1]["content"]
+        assert "本轮只修复" not in repair
+        assert "按当前 schema/内容校验错误" in repair
+    MeetingCompilerAgent(replace(task, errors=()), fake_call).run()
+    assert calls[-1][1]["messages"] is None
+
+
 def main():
     test_single_call_returns_typed_proposal()
     test_agent_backend_returns_same_task_handoff()
     test_parser_rejects_missing_or_invalid_sections()
     test_replacements_are_exact_and_non_cascading()
+    test_json_diagnostics_preserve_exact_error_and_response()
+    test_retry_messages_inject_output_and_use_error_specific_scope()
     print("meeting compiler agent tests: PASS")
 
 

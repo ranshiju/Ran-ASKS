@@ -280,6 +280,8 @@ def build_ingest_tools() -> list[ToolDefinition]:
                                   "description": "academic 非论文类型"},
                 "source_kind": {"type": "string", "enum": ["ordinary", "meeting"],
                                 "description": "inbox 程序判定的来源种类"},
+                "entrypoint": {"type": "string", "enum": ["inbox"],
+                               "description": "统一摄入入口标记"},
                 "ocr_result": {"type": "string", "description": "显式指定的源绑定 OCR JSON 回执"},
                 "allow_remote_ocr": {"type": "boolean", "description": "调用方显式授权图片上传；默认 false"}},
                 "required": ["file"]},
@@ -287,6 +289,20 @@ def build_ingest_tools() -> list[ToolDefinition]:
                 + (["--subproject", args["subproject"]] if args.get("subproject") else [])
                 + (["--document-type", args["document_type"]] if args.get("document_type") else [])
                 + (["--source-kind", args["source_kind"]] if args.get("source_kind") else [])
+                + (["--ocr-result", args["ocr_result"]] if args.get("ocr_result") else [])
+                + (["--allow-remote-ocr"] if args.get("allow_remote_ocr") is True else [])
+                + (["--entrypoint", args["entrypoint"]] if args.get("entrypoint") else [])),
+        ),
+        ToolDefinition(
+            name="ingest_document_resume",
+            description="恢复同一通用文档事务；OCR Agent 交接后仍保留原 API 语义后端",
+            input_schema={"type": "object", "properties": {
+                "txn": {"type": "string", "description": "事务 ID"},
+                "ocr_result": {"type": "string", "description": "可选的源绑定 OCR JSON 回执"},
+                "allow_remote_ocr": {"type": "boolean", "description": "显式授权图片上传 OCR API"}},
+                "required": ["txn"]},
+            execute_fn=lambda args: _ingest_call([
+                "ingest_document.py", "--resume", args.get("txn", "")]
                 + (["--ocr-result", args["ocr_result"]] if args.get("ocr_result") else [])
                 + (["--allow-remote-ocr"] if args.get("allow_remote_ocr") is True else [])),
         ),

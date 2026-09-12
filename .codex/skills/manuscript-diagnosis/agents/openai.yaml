@@ -1,0 +1,4 @@
+interface:
+  display_name: "稿件诊断"
+  short_description: "依据期刊要求、用户既有风格与核心文献证据，诊断稿件问题并提出建议"
+  default_prompt: "使用 $manuscript-diagnosis，对 projects/稿件诊断 下指定目录中的稿件开展稿件诊断。"

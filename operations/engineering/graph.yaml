@@ -53,6 +53,18 @@ nodes:
     path: operations/config/workspace-profiles.yaml
     kind: config
     role: workspace-profile-semantics-and-profile-extraction-schemas
+  manuscript_diagnosis_skill:
+    path: .codex/skills/manuscript-diagnosis/SKILL.md
+    kind: skill
+    role: agent-only-publishable-manuscript-diagnosis-orchestrator-with-private-local-inputs-and-optional-style
+  manuscript_diagnosis_preflight:
+    path: .codex/skills/manuscript-diagnosis/scripts/diagnosis_preflight.py
+    kind: implementation
+    role: shared-read-only-diagnosis-folder-journal-manuscript-and-style-sample-discovery
+  manuscript_diagnosis_test:
+    path: .codex/skills/manuscript-diagnosis/scripts/test_diagnosis_preflight.py
+    kind: test
+    role: manuscript-diagnosis-naming-discovery-privacy-and-read-only-regression
   frontier_spec:
     path: operations/FRONTIER.md
     kind: spec
@@ -69,6 +81,14 @@ nodes:
     path: .scripts/inbox_finalize.py
     kind: implementation
     role: manifest-guarded-inbox-finalizer
+  relocate_own_ip:
+    path: .scripts/relocate_own_ip.py
+    kind: implementation
+    role: shared-hash-bound-own-ip-raw-relocation-with-transactional-graph-rewrite-and-recovery-journal
+  relocate_own_ip_test:
+    path: .scripts/test_relocate_own_ip.py
+    kind: test
+    role: own-ip-relocation-validation-rollback-and-resume-regression
   inbox_ingest:
     path: .scripts/inbox_ingest.py
     kind: implementation
@@ -124,7 +144,7 @@ nodes:
   image_ocr:
     path: .scripts/image_ocr.py
     kind: implementation
-    role: shared-image-validation-and-source-bound-ocr-receipts-with-explicit-api-only-recognition-adapter
+    role: shared-image-validation-and-source-bound-receipts-with-consented-api-transcription-and-visual-review
   image_ocr_ops:
     path: operations/IMAGE_OCR.md
     kind: spec
@@ -256,7 +276,7 @@ nodes:
   wg:
     path: .scripts/wg.py
     kind: implementation
-    role: cross-capability-unified-entry
+    role: cross-capability-unified-entry-including-managed-external-file-to-inbox-ingest-and-same-transaction-resume
   frontier:
     path: .scripts/frontier.py
     kind: implementation
@@ -312,7 +332,7 @@ nodes:
   dsh_ingest_tools:
     path: dsh/ingest_tools.py
     kind: implementation
-    role: api-only-dsh-ingest-capability-seam-with-structured-workflow-state-and-error-classification
+    role: api-only-dsh-ingest-capability-seam-with-file-and-resume-tools-structured-workflow-state-and-error-classification
   dsh_ingest_guard:
     path: dsh/guards/ingest_guard.py
     kind: guard
@@ -456,11 +476,11 @@ nodes:
   open_source_manifest:
     path: operations/engineering/open-source-manifest.yaml
     kind: policy
-    role: public-release-allowlist
+    role: public-release-allowlist-and-reader-documentation-omissions
   open_source_release:
     path: .scripts/open_source_release.py
     kind: implementation
-    role: manifest-governed-public-release-builder
+    role: manifest-governed-public-release-builder-and-reader-documentation-guard
   paper_artifact:
     path: .scripts/paper_artifact.py
     kind: implementation
@@ -610,6 +630,14 @@ nodes:
     path: .scripts/test_predicate_governance.py
     kind: test
     role: candidate-predicate-governance-regression
+  pptx_document:
+    path: .scripts/pptx_document.py
+    kind: implementation
+    role: shared-native-pptx-slide-extraction-source-bound-local-render-and-host-review-validation
+  pptx_document_test:
+    path: .scripts/test_pptx_document.py
+    kind: test
+    role: pptx-slide-order-table-notes-review-integrity-and-transaction-regression
   ingest_document:
     path: .scripts/ingest_document.py
     kind: implementation
@@ -645,11 +673,11 @@ nodes:
   ingest_common:
     path: .scripts/ingest_common.py
     kind: implementation
-    role: shared-ingest-lineage-preserving-context-health-and-cacheable-single-call-semantic-patch-mechanisms-for-paper-meeting-document
+    role: shared-ingest-lineage-preserving-context-health-strict-semantic-slot-diagnostics-and-cacheable-single-call-semantic-patch-mechanisms-for-paper-meeting-document
   ingest_inbox:
     path: .scripts/ingest_inbox.py
     kind: implementation
-    role: unified-inbox-intake-with-explicit-academic-document-routing-direct-agent-script-dispatch-api-dsh-adapter-and-auditable-post-ingest-maintenance-envelope
+    role: unified-inbox-intake-with-verbatim-chat-text-and-retained-original-staging-same-transaction-resume-explicit-academic-document-routing-agent-script-dispatch-api-dsh-adapter-and-auditable-post-ingest-maintenance-envelope
   ingest_document_test:
     path: .scripts/test_ingest_document.py
     kind: test
@@ -678,6 +706,14 @@ nodes:
     path: .scripts/extract_abbreviations.py
     kind: implementation
     role: abbreviation-pair-extraction-from-raw
+  inbox_source_policy:
+    path: .scripts/inbox_source_policy.py
+    kind: implementation
+    role: shared-persistent-chat-original-retention-policy-for-scans-and-cleanup
+  chat_intake_test:
+    path: .scripts/test_chat_intake.py
+    kind: test
+    role: shared-chat-attachment-verbatim-text-retention-and-resume-boundary-regression
   inbox_plan:
     path: .scripts/inbox_plan.py
     kind: implementation
@@ -791,6 +827,33 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - ingest_document
+  - uses
+  - pptx_document
+- - pptx_document
+  - uses
+  - visual_qa
+- - pptx_document
+  - uses
+  - image_ocr
+- - pptx_document
+  - tested_by
+  - pptx_document_test
+- - ingest
+  - specifies
+  - relocate_own_ip
+- - relocate_own_ip
+  - uses
+  - graph_lib
+- - relocate_own_ip
+  - uses
+  - ingest_check
+- - relocate_own_ip
+  - uses
+  - source_fingerprints
+- - relocate_own_ip
+  - tested_by
+  - relocate_own_ip_test
 - - agents
   - routes
   - route
@@ -1136,6 +1199,9 @@ edges:
 - - wg
   - uses
   - workspace_state
+- - wg
+  - uses
+  - ingest_inbox
 - - dsh_tools
   - uses
   - query_actions
@@ -1706,6 +1772,21 @@ edges:
 - - research
   - specifies
   - frontier_spec
+- - manuscript_diagnosis_skill
+  - specifies
+  - manuscript_diagnosis_preflight
+- - manuscript_diagnosis_preflight
+  - tested_by
+  - manuscript_diagnosis_test
+- - manuscript_diagnosis_skill
+  - tested_by
+  - manuscript_diagnosis_test
+- - manuscript_diagnosis_skill
+  - uses
+  - wg
+- - manuscript_diagnosis_skill
+  - uses
+  - research_memory
 - - frontier_spec
   - specifies
   - frontier
@@ -1736,6 +1817,24 @@ edges:
 - - adr_006
   - documents
   - frontier
+- - ingest_inbox
+  - uses
+  - inbox_source_policy
+- - ingest_pipeline
+  - uses
+  - inbox_source_policy
+- - inbox_plan
+  - uses
+  - inbox_source_policy
+- - inbox_source_policy
+  - tested_by
+  - chat_intake_test
+- - ingest_inbox
+  - tested_by
+  - chat_intake_test
+- - wg
+  - tested_by
+  - chat_intake_test
 capabilities:
   ingest:
     entry: route
@@ -1986,6 +2085,15 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  inbox_source_policy:
+  - python3 .scripts/test_chat_intake.py
+  - python3 .scripts/test_ingest_pipeline.py
+  - python3 .scripts/test_inbox_plan.py
+  pptx_document:
+  - python3 .scripts/test_pptx_document.py
+  - python3 .scripts/test_ingest_document.py
+  - python3 .scripts/test_visual_qa.py
+  - python3 .scripts/engineering_graph.py validate
   image_ocr:
   - python3 .scripts/test_image_ocr.py
   - python3 .scripts/test_inbox_plan.py
@@ -1994,6 +2102,9 @@ verification:
   - python3 .scripts/test_ingest_inbox_dispatch.py
   - python3 dsh/test_dsh_ingest_tools.py
   - python3 .scripts/engineering_graph.py validate
+  manuscript_diagnosis_skill:
+  - python3 .codex/skills/manuscript-diagnosis/scripts/test_diagnosis_preflight.py
+  - python3 .scripts/test_open_source_release.py
   route:
   - python3 .scripts/engineering_graph.py validate
   - python3 .scripts/test_prompt_audit.py
@@ -2105,15 +2216,43 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  inbox_source_policy:
+    preconditions:
+    - shared 确定性策略，无模型调用；对话原件与系统暂存副本物理分离
+    - inbox 内原件在首次分发前持久化 inbox-source-retention-v1 标记；按路径保留而非内容哈希失效，缺陷标记 fail closed
+    writes:
+    - inbox/.source-retention/*.json（仅来源生命周期保护策略，不是事实证据，不进入 Raw 或公开发布）
+    forbidden:
+    - 原件因成功、精确重复、失败恢复或后续 inbox 扫描被移动、覆盖或清理
+    - 将对话指令、摘要、重写稿或 Agent 日志充当用户粘贴原文
+    verify:
+    - python3 .scripts/test_chat_intake.py
+  relocate_own_ip:
+    preconditions:
+    - shared 确定性迁移内核，不调用模型；只接受用户已确认自有成果的 academic/raw/reference-documents PDF 与同 stem Markdown，目标限定 works/patents 或 works/software
+    - manifest 必须绑定原件、文本层和受影响 Wiki 的 SHA-256；显式声明原因及引用页，未声明的当前引用、目标冲突、软链接或缺失 graph.db 均在写入前阻断
+    writes:
+    - 仅按 manifest 原字节实体复制并在提交后清理旧 Raw；保持 Wiki 页面路径不变，精确更新来源与脚注，记录 wiki/log.md
+    - 经 graph_lib 单写者锁及单个 SQLite 事务重定位 Raw 节点、来源与 lineage，保留节点属性和边 ID，并将旧 Raw 路径保留为导航别名
+    - 提交前复用 ingest_check 的结构校验和同连接图校验；事务 marker 与持久化恢复 journal 区分未提交回滚及已提交清理重试，随后同步可重建源指纹索引
+    forbidden:
+    - 改写 Raw 正文、将临时产物作为事实源、移动 Wiki 页面、重生成语义边、跨域迁移或覆盖目标文件
+    - 回滚时覆盖迁移后人工改动；哈希不一致须停止并保留 journal，不以整库快照覆盖其他写者
+    verify:
+    - python3 .scripts/test_relocate_own_ip.py
+    - python3 .scripts/test_ingest_check.py
+    - python3 .scripts/test_source_fingerprints.py
+    - python3 .scripts/engineering_graph.py validate
   image_ocr:
     preconditions:
     - shared 复核状态与摄入事务状态正交；completed 可与 partial/review_required 并存，非关键未决项不自动生成用户待办；已确认空白的字段可 verified，不因缺值要求补填，阻断仍以风险评估及关键字段校验为准
-    - shared image-ocr-review-v1 绑定原图与正文哈希，记录风险分级、Agent/人工复核者、时间、逐字段行号和结论；风险未评估或关键字段未核对时不得进入 Wiki/图生成，普通项与非关键未决项保留警告
-    - OCR CLI --review-file 只附加本地复核记录，不调用模型；Agent 转写后可交接独立复核任务，API 摄入缺复核记录时明确停止而不隐式切换 backend
+    - shared image-ocr-review-v1 绑定原图与正文哈希，记录风险分级、API/Agent/人工复核者、时间、逐字段行号和结论；风险未评估或关键字段未核对时不得进入 Wiki/图生成，普通项与非关键未决项保留警告
+    - OCR CLI --review-file 只附加本地复核记录，不调用模型；显式 Agent 图片模式在转写后交接宿主复核任务，默认 API 图片模式缺复核时经授权调用视觉复核，无授权或失败只交接文字行动任务，不隐式切换 backend
     - API 主模型 GLM-5.3-Flash 使用 IMAGE_OCR_REASONING_EFFORT=low，兼容回退 GLM-4.6V 默认不传 reasoning_effort；独立 IMAGE_OCR_MAX_TOKENS 默认 8192，参数写入新回执，旧回执仍可源绑定复用
     - shared 内核只验证图片、源 SHA-256、OCR 文本与回执；API-only adapter 必须显式 allow_remote，不借用 DSH 或 llm_structured 控制循环
     - IMAGE_OCR_MODEL 与可选 IMAGE_OCR_FALLBACK_MODEL 选择固定模型；endpoint/key 默认复用 LLM_API_BASE/LLM_API_KEY，进程环境优先，不自动发现或提升模型
-    - Agent 摄入默认生成 image-ocr-v1 暂存任务；也可显式提供已生成的 OCR 回执，两者均经同一源绑定校验，不隐式回落到 API
+    - 图片能力独立于 semantic_backend；IMAGE_OCR_BACKEND 默认 api，只有显式 agent 才交接宿主看图；API 转写后独立调用视觉复核并标记 api-reviewed，不冒称人工或独立人工确认
+    - 摄入仅在 --allow-remote-ocr 或显式 IMAGE_OCR_ALLOW_REMOTE=true 授权后上传；无授权仅交接文字授权摘要，API 失败或关键未决项仅交接文字确认摘要，不回落宿主看图；有效转写和复核回执优先复用，未决结果不触发重复付费复核
     writes:
     - 独立 CLI 仅写 temp/image-ocr 或外部非 raw/wiki 路径的 OCR JSON 回执，不修改原图
     - 摄入阶段只在事务暂存区生成 Markdown companion；原图和 companion 由既有 manifest/validator/commit 受管落位
@@ -2148,8 +2287,25 @@ script_contracts:
     - python3 .scripts/test_research_memory.py
     - python3 .scripts/test_wg.py
     - python3 .scripts/engineering_graph.py validate
+  manuscript_diagnosis_preflight:
+    preconditions:
+    - 目标是 `projects/稿件诊断/` 下已存在的单篇稿件诊断子目录；子目录名称携带期刊信息
+    - 只扫描目标目录中的稿件候选、稿件诊断根目录中的历史报告样稿，并报告基础指南与增量画像是否存在；不读取或改写其正文
+    writes: []
+    forbidden:
+    - 修改、移动或上传稿件、历史诊断报告、raw、wiki 或 graph.db
+    - 把普通背景文献升级为必须摄入的核心论文，或绕过 WikiGraph 核心文献缺口门
+    verify:
+    - python3 .codex/skills/manuscript-diagnosis/scripts/test_diagnosis_preflight.py
+    - python3 .scripts/test_open_source_release.py
   ingest_inbox:
     preconditions:
+    - 对话文件使用 --keep-source 复制后分发；纯正文使用 --stdin 原样 UTF-8 暂存；两者共用现有分类、校验、去重与事务，正常 inbox 清理语义不变
+    - 对话提交只处理本次暂存文件；分类恢复命令绑定该文件，不再次读 stdin、不扫描无关 inbox 文件；仅系统副本允许清理
+    - inbox/.source-retention 持久标记按原件路径生效，不随内容变化解除；标记损坏或标记/目录为符号链接时失败关闭，计划以 retained_sources 明示保留项，清理不得删除保护标记
+    - 用户显式摄入的仓库外文件必须经 --import-file 受管复制到 inbox 并记录哈希回执；--file 只接受 inbox 内文件，二者不得形成第二套 Raw/Wiki/Graph 提交路径
+    - agent-task-v1 的 OCR 转写或图片复核必须通过 ingest_inbox --resume 恢复原文档事务；OCR 可由 Agent 或显式授权的远程 API 执行，但不得改变持久化的 Wiki/语义 backend
+    - 单文件报告须分别记录 entrypoint、semantic_backend 与实际 ocr_backend；API 模式下等待宿主 OCR/复核是 prepared 可续做状态，不得降格为普通 failed
     - 底层摄入 stdout 可同时包含进度文本、图报告嵌套 JSON 与最终工作流 JSON
     - 批量工作流必须把带 phase/items 的顶层 envelope 作为结构化终态；不得让 items 内的单文件 status 覆盖顶层 partial/completed
     - dry-run 与 --run 在任何提取/API 调用前查询可重建 source_fingerprints 索引；二进制 SHA-256 精确命中直接返回 duplicate_found 与既有 raw_path
@@ -2243,6 +2399,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   route:
     preconditions:
+    - 通用文档编码及建图阶段按需派发 INGEST「表格型清单与台账」，由 Agent 判断适用性；论文和收尾阶段不加载
     - 已判定 task；ingest 必须提供 subproject 与单个 stage；会议纪要须传 source-kind=meeting；query 按当前阶段传 query-stage
     - 持续工作上下文使用 --task；状态内按需规范使用 --capability；当前宿主 Agent 直接调用受管脚本或 wg.py，API backend 可经 DSH ToolRegistry
     - build 从 capability guardrails 渲染简洁的 WikiGraph 方法哲学与信息入口；工程细节由 impact 推荐 locator 按需加载
@@ -2355,7 +2512,8 @@ script_contracts:
     - 中文说明 PDF 在进入公开资产前已经过 Ghostscript 标准化并完成逐页渲染对比；Word/Quartz 原始导出只作为生成输入
     - 中英文 README 公开资产均存在，包含双向语言入口与公开联系邮箱
     - 公开 capability 的 required 节点均存在于 allowlisted 目标树；active projects/.project 路径只保留在私有工程图
-    - 个人 Codex 技能入口按 manifest 显式排除；active projects 工作区继续由公开 allowlist 的既有边界隔离
+    - Codex 技能仅发布 manifest 精确批准的功能文件；active projects、个人画像与样稿仍隔离；缺少本地风格资料不得阻止通用模式
+    - manifest 的 documentation_omissions 约束公开说明 Markdown，不影响获准技能的运行指令；文档同步不得宣传被省略的功能
     - 已发布的冻结 paper-artifacts 版本全部保留，并分别通过其声明的版本化验证器
     writes:
     - build 写入指定目标公开树（目标绝不能是 REPO 自身）
@@ -2444,6 +2602,8 @@ script_contracts:
     - python3 .scripts/test_long_document_plan.py
   source_locator:
     preconditions:
+    - shared Excel 忠实 Markdown 可用 table:<百分号编码工作表名>:<逗号分隔列字母>:R<起行>-R<止行> 投影原始值；严格验证工作表、列号和完整行范围，不计算汇总、不修改 Raw，继续遵守 Wiki/Raw 片段大小限制
+    - .xls/.xlsx 原件不接受伪行号 locator，事实读取使用受管归档的忠实 Markdown companion
     - shared 图片格式集合 IMAGE_SUFFIXES 定义于 source_locator，由 OCR 与指纹索引复用；定位内核不反向依赖 OCR/API adapter，图片本体不接受伪行号 locator
     - Raw Markdown locator 可使用行号、标题或紧随事实块后的 Kramdown 显式 ID 属性 `{: null
     - 显式事实锚点读取只返回其绑定的前一个 Markdown 块，不扩张到全文或相邻事实
@@ -2718,6 +2878,7 @@ script_contracts:
     - python3 .scripts/test_query_graph_temporal.py
   ingest_pipeline:
     preconditions:
+    - shared 语义校验每次先从 semantic_path 读取当前暂存文本并同步 slots_content，再执行领域职责校验；resume 不信任旧缓存，不要求 Agent 手改事务 JSON，缺失/非法文件仍阻断
     - 所有来源清理延后到 validate_completion 通过且 completed 状态持久化之后；清理失败保留 cleanup_pending 并可通过 completed resume 只重试清理，不重写 Wiki/图或重复收尾
     - preprocess 允许返回 prepared 的 agent-task-v1；恢复后回到 preprocess 校验源绑定 OCR，再进入 write_wiki，不能把等待图片转写误判为 failed
     - 初次生成不计为 recovery；wiki_revision、semantic_revision、deterministic_repair 与 subagent 分别消费 RecoveryPolicy 预算
@@ -2739,6 +2900,7 @@ script_contracts:
     preconditions:
     - 共享摄入器只接收事务内 staged Wiki/semantic、结构化 validator issues 与受限候选目录
     - Agent backend 生成 agent-task-v1 并等待当前宿主提交；API backend 才调用 semantic patch Worker
+    - 通用文档语义槽非空但未解析出任何三元组、三元组区存在非 pipe 三字段行或仍使用旧行政主题/行政关系 section 时，必须在 finalize 前作为结构硬错误拒绝
     writes:
     - 当前摄入事务的 staged semantic 产物与 temp 语义修补缓存
     forbidden:
@@ -2753,7 +2915,7 @@ script_contracts:
   inbox_state:
     preconditions:
     - status 必须属于已登记摄入状态；failed/agent_required 等非线性恢复只允许通过受限 transition helper 回到明确恢复点
-    - superseded 只用于关闭同源重复事务；旧事务必须仍未提交，新事务必须 completed/duplicate_found，且 source 与已有 source_hash 均一致，关闭动作仍经 transition 与原子 save 留审计轨迹
+    - superseded 只用于关闭同源重复事务；旧事务必须仍未提交，新事务必须 completed/duplicate_found，且 source 与已有 source_hash 均一致，关闭动作仍经 transition 与原子 save 留审计轨迹；事务 ID 接受文档入口生成的 Unicode 字母数字、下划线及既有点号/连字符，拒绝路径分隔符
     - failure taxonomy 保留 API、事务与 DSH 的层级差异，但事务统一产出 category/domain/disposition/retryable/owner/next_action，外层适配器优先消费结构化结果
     - JSON/协议 section 解析失败属于 worker_output_invalid；具备同协议 host-agent handoff 的编排器必须保留原事务并进入 agent_required，不得降级为 unknown_failure
     - failure taxonomy 只解释 failed/validation_error 等终态或非空 errors；write_wiki 等活动阶段在无错误时不得生成 failure
@@ -2838,6 +3000,7 @@ script_contracts:
   meeting_compiler_contract:
     preconditions:
     - API adapter 与当前 Agent 产物共同使用 meeting-compiler-v1 delimiter、context hash、parser、preprocess schema 与非级联 replacement 规则
+    - shared 的 parse_proposal_detailed 返回 proposal、兼容错误摘要与结构化诊断；JSON 位置相对去除外围空白及标准 fence 后的 PREPROCESS，保留严格解析，不吞掉尾部结束标签
     writes: []
     forbidden:
     - 导入 dsh 或 llm_structured、调用模型、写暂存/最终文件，或因 backend 改变协议解析与机械校验
@@ -2962,6 +3125,7 @@ script_contracts:
     - API Meeting Compiler 返回 rejected/协议解析错误时必须保存失败 trace，并在原事务生成 prompt/write_to 后进入 agent_required；不得新建事务或把错误归类为不可恢复 unknown_failure
     - YYYYMMDD 文件名保留显式年份；仅有 MMDD 或无日期时允许用摄入年分区，但 state 与 Wiki frontmatter 必须标记 date_inferred，禁止把推断年份伪装成 raw 明示事实
     - Meeting Compiler META 的非空 title 在落位前生成最终 meeting-id 并重算 raw/wiki 路径；sources 由程序回填最终路径，重试时保持 canonical ID 稳定
+    - 会议 sources 按 YAML 结构回填为唯一最终 Raw 来源，覆盖标量、行内列表与多行列表；Wiki validator 必须检查与事务 raw_dir/source_filename 精确一致，缺失或错位不得进入落位
     - replacement 只在原文精确命中并通过非级联应用校验后写 staged corrected.txt；Wiki 与 semantic 必须分别通过 validator
     - 所有会议语义经 knowledge-ir-v1 和绑定 hash 的 graph-plan-v1 进入 graph_ingest 唯一 writer
     writes:
@@ -2983,11 +3147,17 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_document:
     preconditions:
+    - shared PPTX 原生解析按 presentation 顺序输出逐页 Markdown、对象坐标、列表层级、原生表格空值与合并范围及独立备注；不以 pandoc plain 作为摄入正文
+    - PPTX 复用 visual_qa 本地渲染，不以版式 QA pass 代替内容复核；Agent/API 语义前均交接源、原生文本和逐页图像哈希绑定的 pptx_review agent-task-v1，保持原 semantic_backend，不自动上传或调用 DSH
+    - PPTX 复核须覆盖全部页的文字、布局及高风险数字/状态；表格另核行列，图片/非文本对象须核遗漏信息；关键未决项阻断，非关键限制持久化；独立 image_ocr 回执仅在页图源哈希匹配时复用，不另造远程视觉调用
+    - PPTX 原件、逐页 companion 与同源 source.json 同事务落位；finalize 重校源/渲染/原生文本/复核与 companion 哈希及 sidecar，任何缺失或变更均拒绝；页图/PDF 仅暂存，不进入 Raw manifest
+    - shared 表格清单原则只维护于 INGEST「表格型清单与台账」；Agent 路由与任务输入 locator 指向该段，API wiki/slots adapter 加载同一段，不新增分类调用或控制循环
+    - shared Excel 提取支持 .xls（xlrd）与 .xlsx（openpyxl），原件和忠实 Markdown companion 同事务落位；保留工作表、原始行号、空值、隐藏状态和合并范围，不静默清洗或去重；xls 单元格为保存值，xlsx 同时保留公式与缓存值，不重新计算公式
     - 图片 source_type=ocr，复核后仍不自动升为 high；shared 编译 Wiki 复核状态与正文限制，sidecar 保留完整复核记录；非正式普通文本不得仅凭 ordinary 推为官方高可信来源
-    - 独立图片走 image_ocr shared 校验与 Markdown companion；--ocr-result 显式消费源哈希匹配的回执，缺省 Agent 模式交接当前 Agent，API 模式须 --allow-remote-ocr 才调用远程识别
+    - 独立图片走 image_ocr shared 校验与 Markdown companion；--ocr-result 显式消费源哈希匹配的回执；视觉 backend 与上传授权独立配置，默认 API 转写与复核；无授权/关键未决/调用失败只输出不含原图的精简任务，显式 IMAGE_OCR_BACKEND=agent 才交接宿主；保持同一事务与原 semantic_backend
     - 图片 finalize 前重新核对原图、暂存实体 SHA-256 与 companion 全文；缺失、改动或非同源时拒绝落位，不能靠 manifest 过滤缺失文件后继续
     - 图片来源 sidecar 与原图及同 stem Markdown 必须同事务提交；finalize 从已验证 OCR 回执重建预期溯源并逐项比较，来源日志指向最终 sidecar；其元数据不是独立事实证据，OCR 时间不是业务日期
-    - inbox 通用文档（.docx/.doc/.pptx/.txt/.pdf）；--subproject 指定域(academic/admin/teaching/business)
+    - inbox 通用文档（.docx/.doc/.pptx/.txt/.pdf/.xls/.xlsx）；--subproject 指定域(academic/admin/teaching/business)
     - academic 域必须显式提供 document_type=editorial|academic-reference|conference-summary；缺失或非法时返回 classification_required，且在建立事务、预处理与落位前终止
     - academic/editorial 分别写 raw/works/editorials 与 wiki/editorials；academic-reference 分别写 raw/reference-documents 与 wiki/references，不与论文 raw/references 混用；conference-summary 分别写 raw/conferences 与 wiki/conferences
     - wiki prompt 使用提取文本的 RAW#Lx 行号时，PDF 与其他无原生行定位格式必须生成同名 Markdown locator companion；原始文件仍随同落位
@@ -3155,6 +3325,8 @@ script_contracts:
   dsh_meeting_compiler_agent:
     preconditions:
     - 仅处理已通过会议去重的 .txt；输入为只读原始纪要、确定性人物候选、程序生成的 meeting ID/目标来源路径与本轮 validator 错误
+    - api-only 修订携带最近一次同源 compiler 完整输出与诊断；纯 JSON 语法错误最小修复，schema/内容错误按当前 validator 修复，仍返回完整协议并消费原有预算
+    - API result 保留 response_text 与 diagnostic；ingest_meeting 按事务和轮次保存 temp/inbox-extract 下的 compiler-attempt-N.json，状态只引用最近一次输出，普通 trace 不包含响应正文或诊断片段
     - API 模式运行 operation=ingest_meeting_compile，优先复用 INGEST_GENERATION profile；模型目录只作审计，运行时选择仍服从 llm_structured/.env
     - 初次编译只允许一个 Meeting Compiler execution，同时返回 meeting-compiler-v1 的转写纠错决策、实体决策、Wiki 草稿和语义槽；不得拆给多个语义 Worker，provider transport/fallback 仍由 llm_structured 受控处理
     - transcript replacements 必须逐条精确命中原文且不可级联；调用方确定性应用后生成 staged corrected.txt，并分别校验 Wiki 与语义槽
@@ -3199,6 +3371,7 @@ script_contracts:
     - 带 phase/items 的批量 JSON 是不可拆分的顶层工作流 envelope；结构化解析必须跳过其内部对象
     - ingest_document_file 允许 academic 子项目，但 academic 必须同时传 document_type=editorial|academic-reference|conference-summary
     - ingest_document_file 可透传程序已判定的 source_kind=ordinary|meeting；DSH 不重新解释来源种类
+    - ingest_document_resume 只接受合法文档事务 ID，恢复同一事务并保留其既定 API semantic backend；不得以新的 --file 调用替代 resume
     writes:
     - 不直接写 raw/wiki/graph.db
     - session log 记录 tool/call 与 tool/result；不作为事实源
@@ -3266,9 +3439,10 @@ script_contracts:
     - 视觉模型默认 GLM-5.3-Flash + VISUAL_QA_REASONING_EFFORT=low，接口或输出失败时兼容回退 GLM-4.6V；回退模型不是真值裁判，不用其 pass 覆盖主模型缺陷报告
     - shared QA 缓存绑定主/回退推理档位与 VISUAL_QA_MAX_TOKENS（默认 1800）；API-only adapter 按候选发送其独立参数，default 档省略 reasoning_effort，不继承 OCR 或文本 LLM 的推理设置
     - QA prompt-v2 仅将可见、有实际影响的缺陷列入 issues；纯审美建议放 summary，不升级 warn；不机械压制模型已报告的问题，非 stop 或拒答响应不得作为成功
-    - 本次仅迁移 OCR/视觉检测；env 显式固定 VISUAL_RECONSTRUCTION_MODEL/FALLBACK_MODEL 为 GLM-4.6V/GLM-4.5V，避免可编辑 PPT 重建因继承 QA 设置而未经验证切换
+    - 本次仅迁移 OCR/视觉检测；可编辑 PPT 重建独立配置；2026-09-11 用户显式指定主模型 GLM-5.3-Flash，回退 GLM-4.5V，不以 OCR/QA 测试冒充重建质量验证
     - 运行时自动读取仓库根 `.env` 并展开同文件 `${NAME}` 引用，进程环境同名变量优先；VISUAL_QA_API_BASE/KEY 可引用主 LLM endpoint/key
     - raw、inbox、私有源材料与 paper-profile 论文/稿件 PDF 默认只做本地确定性检查；只有调用方显式 allow_remote 才允许上传页面图像到远程视觉 API
+    - shared 本地渲染对打包 macOS LibreOffice 显式加载其随附 fontconfig 配置；保留调用者 FONTCONFIG_FILE/PATH，不修改宿主字体或原件；旧渲染不覆写，摄入可新建同源事务并在成功后受管 supersede
     writes:
     - temp/visual-qa/<artifact-sha>/<profile>/<check-key>/ 下 manifest、逐页 receipt、渲染缓存与 summary
     forbidden:
@@ -3327,7 +3501,7 @@ script_contracts:
     preconditions:
     - 输入是现有图片或 PDF；矢量 PDF 优先直接提取文字与路径，位图/扫描页才进入 OCR 与图形检测，不得无条件栅格化
     - 默认 balanced 模式以视觉忠实为先；只有高置信度可见元素转为原生文本框、线段、矩形、椭圆或自由曲线，复杂区域允许保留可追踪的局部位图 fallback
-    - 远程视觉模型默认取 llm-models.yaml 登记的 GLM-4.6V，失败时回退 GLM-4.5V；敏感路径与 paper-profile 内容只有显式 allow_remote 才可上传
+    - 远程视觉 API adapter 主模型默认 GLM-5.3-Flash（2026-09-11 用户指定，重建质量未对测），失败时回退 GLM-4.5V；模型配置在 llm-models.yaml 登记，shared 确定性提取与校验不变；敏感路径与 paper-profile 内容只有显式 allow_remote 才可上传
     writes:
     - 仅写显式 output_path 与 temp/visual-to-ppt/<artifact-sha>/<run-key>/ 下 manifest、逐页中间对象、receipt、渲染缓存、差异报告和最终装配 checkpoint
     - 输出 PPTX 使用独立原生对象；fallback 位图必须在对象 manifest 中记录范围、原因和置信度，不得伪报完全可编辑

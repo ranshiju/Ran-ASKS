@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.5.0
+> Current release: v0.6.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -79,6 +79,33 @@ Wiki and graph are sibling compiled surfaces. The Wiki bridges source material
 and structured navigation; graph edges and Hubs express the evolving knowledge
 structure and make it easier to move through that structure. Factual answers
 resolve back to the preserved source record.
+
+## Chat documents and presentation ingestion
+
+Files submitted in a conversation and pasted text use the existing inbox
+classification, deduplication, validation, and managed commit pipeline—not a
+second ingestion path. Use `python3 .scripts/wg.py ingest <path> --keep-source
+--subproject academic` for a file, or pipe the original UTF-8 text to
+`python3 .scripts/wg.py ingest --stdin --name notes.txt --subproject academic`.
+Choose the appropriate domain instead of `academic` when needed. File originals
+are retained, even inside inbox; only the managed staging copy is eligible for
+cleanup. Pasted text is preserved without summarizing or normalizing its bytes.
+Ordinary inbox cleanup remains unchanged.
+
+Native `.pptx` ingestion preserves slide order, tables, notes, and object
+positions in a readable companion. Before semantic generation, the host reviews
+all locally rendered slides against the extracted content, including critical
+fields and non-text omissions. The original, companion, and provenance sidecar
+are archived together. Temporary page images stay local; legacy `.ppt` requires
+explicit conversion. See the [ingestion contract](operations/INGEST.md).
+
+This September 12, 2026 update adds compatible capabilities, establishing the
+`v0.6.0` boundary without changing frozen paper artifacts. It also binds meeting
+pages to their final Raw path after title changes and derives document dates
+from source evidence, preserving unknown dates rather than substituting the
+ingestion day. Remote image transcription/review has its own API settings and
+explicit upload permission (`IMAGE_OCR_ALLOW_REMOTE=false` by default); choosing
+that adapter does not switch the semantic backend or imply human review.
 
 ## Image documents and reviewed ingestion
 

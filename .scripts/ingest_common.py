@@ -821,6 +821,7 @@ def validate_semantics(state: dict, REPO: Path, allowed_predicates: set[str],
     from graph_ingest import is_bare_abbreviation, is_descriptive_phrase
     semantic_path = REPO / state["semantic_path"]
     sem_text = semantic_path.read_text(encoding="utf-8")
+    state["slots_content"] = sem_text
     # 裸缩写三段式第二步: alias 未命中时从 raw 全文查全称,自动补全为 full(ABBR) 格式
     # 论文管道(step_validate_semantics)已有等价逻辑;此处使文档/会议管道共享同一消解能力
     _raw_abbr_map = load_raw_abbr_map(state.get("wiki_path", ""))
@@ -841,6 +842,28 @@ def validate_semantics(state: dict, REPO: Path, allowed_predicates: set[str],
         pass
     try:
         page_path = state["wiki_path"]
+        sections, diagnostics = graph_ingest.parse_semantic_sections(sem_text)
+        state["semantic_slot_diagnostics"] = diagnostics
+        document_semantics = (
+            state.get("pipeline_script") == "ingest_document.py"
+            or page_path.startswith(("admin/wiki/", "teaching/wiki/", "business/wiki/"))
+        )
+        if document_semantics:
+            legacy_sections = sorted(set(sections) & {"行政主题", "行政关系"})
+            if legacy_sections:
+                hard_errors.append(
+                    "语义槽使用已停用 section: " + ", ".join(legacy_sections)
+                    + "；请统一改为“三元组:”和“主体 | 谓词 | 客体”"
+                )
+            for malformed in diagnostics.get("malformed_triple_lines", []):
+                hard_errors.append(
+                    f"三元组格式不合法: {malformed}；预期“主体 | 谓词 | 客体”"
+                )
+            if diagnostics.get("bare_triples_recovered", 0):
+                hard_errors.append("语义槽缺少“三元组:” section 标题")
+            if (diagnostics.get("meaningful_line_count", 0) > 0
+                    and diagnostics.get("semantic_triple_count", 0) == 0):
+                hard_errors.append("语义槽非空但解析出 0 条三元组，拒绝进入 finalize")
         triples, keywords, *_ = graph_ingest.parse_semantic_text(sem_text, page_path)
         # 谓词校验
         for t in triples:

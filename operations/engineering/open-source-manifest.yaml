@@ -7,6 +7,10 @@ include:
   - .gitignore
   - preprocess.py
   - .scripts/**
+  - .codex/skills/manuscript-diagnosis/SKILL.md
+  - .codex/skills/manuscript-diagnosis/agents/openai.yaml
+  - .codex/skills/manuscript-diagnosis/scripts/diagnosis_preflight.py
+  - .codex/skills/manuscript-diagnosis/scripts/test_diagnosis_preflight.py
   - agents/**
   - dsh/**
   - operations/**
@@ -76,3 +80,13 @@ template_dirs:
   - slide-library/inbox
   - slide-library/templates
   - slide-library/compositions
+
+documentation_omissions:
+  - paths: ["*.md"]
+    except: [.codex/skills/manuscript-diagnosis/SKILL.md]
+    terms:
+      - 稿件诊断
+      - manuscript-diagnosis
+      - manuscript_diagnosis
+      - manuscript diagnosis
+      - manuscript assessment

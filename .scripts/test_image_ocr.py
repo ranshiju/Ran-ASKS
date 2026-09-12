@@ -28,7 +28,11 @@ class ImageOCRTests(unittest.TestCase):
         self.source.parent.mkdir()
         Image.new("RGB", (80, 40), "white").save(self.source)
         self.config = {"base": "https://example.invalid/v1", "key": "secret-key",
-                       "model": "GLM-4.6V", "fallback_model": ""}
+                       "model": "GLM-4.6V", "fallback_model": "", "backend": "api", "allow_remote": "false"}
+        self.load_config = ocr.load_config
+        config_patch = patch.object(ocr, "load_config", return_value=self.config)
+        config_patch.start()
+        self.addCleanup(config_patch.stop)
 
     def receipt(self):
         info, _ = ocr.read_image(self.source)
@@ -238,7 +242,7 @@ class ImageOCRTests(unittest.TestCase):
         with patch.object(llm_structured, "load_env", return_value={
                 "LLM_API_BASE": "base", "LLM_API_KEY": "key", "LLM_MODEL": "text-model"}), \
                 patch.dict(os.environ, {"IMAGE_OCR_MODEL": "chosen"}):
-            config = ocr.load_config()
+            config = self.load_config()
         self.assertEqual(config["base"], "base")
         self.assertEqual(config["key"], "key")
         self.assertEqual(config["model"], "chosen")
@@ -272,7 +276,7 @@ class ImageOCRTests(unittest.TestCase):
                 call.assert_not_called()
 
     def test_agent_preprocess_pause_resume_and_manifest(self):
-        state = self.state()
+        state = {**self.state(), "image_backend": "agent"}
         with patch.object(document, "REPO", self.root), patch.object(document, "ingest_mode", return_value="agent"), \
                 patch.object(ocr, "call_api") as call:
             self.assertFalse(document.step_preprocess(state)[0])
@@ -298,7 +302,7 @@ class ImageOCRTests(unittest.TestCase):
             call.assert_not_called()
 
     def test_pipeline_preserves_prepared_preprocess_and_resumes_it(self):
-        state = self.state()
+        state = {**self.state(), "image_backend": "agent"}
         reached = []
 
         def stop_at_wiki(current):
@@ -345,7 +349,7 @@ class ImageOCRTests(unittest.TestCase):
                 patch.object(ocr, "recognize_image", return_value=receipt) as recognize, \
                 patch.object(document, "call_text") as semantics:
             self.assertTrue(document.step_preprocess(state)[0])
-            recognize.assert_called_once_with(self.source, allow_remote=True)
+            recognize.assert_called_once_with(self.source, allow_remote=True, config=self.config)
             semantics.assert_not_called()
             self.assertEqual(document.ingest_mode(), "agent")
             self.assertEqual(state["quality_warnings"][0]["issue"], "ocr_visual_review_required")
@@ -494,16 +498,21 @@ class ImageOCRTests(unittest.TestCase):
             self.assertFalse(document.step_finalize(state)[0])
             finalize.assert_not_called()
 
-    def test_api_ingest_requires_separate_consent(self):
+    def test_api_ingest_without_remote_consent_requests_authorization_not_host_vision(self):
+        state = self.state()
         with patch.object(document, "REPO", self.root), patch.object(document, "ingest_mode", return_value="api"), \
                 patch.object(ocr, "recognize_image") as recognize:
-            success, error = document.step_preprocess(self.state())
+            success, message = document.step_preprocess(state)
             self.assertFalse(success)
-            self.assertIn("--allow-remote-ocr", error)
+            self.assertIn("image_ocr_authorization", message)
+            self.assertTrue(agent_task.is_prepared(state))
+            self.assertEqual(state["agent_task"]["kind"], "image_ocr_authorization")
+            self.assertEqual(len(state["agent_task"]["inputs"]), 1)
+            self.assertTrue(state["agent_task"]["inputs"][0]["path"].endswith("image-action.json"))
             recognize.assert_not_called()
 
     def test_changed_source_and_empty_agent_text_stay_prepared(self):
-        state = self.state()
+        state = {**self.state(), "image_backend": "agent"}
         with patch.object(document, "REPO", self.root), patch.object(document, "ingest_mode", return_value="agent"):
             document.step_preprocess(state)
             output = self.root / state["agent_task"]["outputs"][0]["path"]
@@ -516,6 +525,180 @@ class ImageOCRTests(unittest.TestCase):
             state["status"] = "preprocess"
             self.assertFalse(document.step_preprocess(state)[0])
             self.assertTrue(agent_task.is_prepared(state))
+
+
+    def review_proposal(self, *, unresolved=False):
+        return {"risk": "critical", "checks": [
+            {"field": "金额", "locator": "L5", "critical": True,
+             "status": "unresolved" if unresolved else "verified", "note": "15000"}],
+            "limitations": ["模型复核不是人工确认"]}
+
+    def unreviewed_receipt(self):
+        return {key: value for key, value in self.receipt().items() if key != "review"}
+
+    def test_visual_review_is_source_bound_api_identity_not_human(self):
+        with patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal())) as call:
+            receipt = ocr.review_image(self.source, self.unreviewed_receipt(), allow_remote=True)
+        self.assertEqual(receipt["review_status"], "api-reviewed")
+        self.assertEqual(receipt["review"]["reviewer"], self.config["model"])
+        self.assertEqual(receipt["review"]["source_sha256"], receipt["source"]["sha256"])
+        self.assertEqual(receipt["review"]["text_sha256"], receipt["text_sha256"])
+        self.assertIn("L5:", call.call_args.kwargs["prompt"])
+        self.assertFalse(ocr.review_blockers(receipt))
+        self.assertIn("不代表人工确认", receipt["warnings"][0])
+
+    def test_visual_review_requires_consent_and_rejects_changed_source(self):
+        receipt = self.unreviewed_receipt()
+        with patch.object(ocr, "call_api") as call:
+            with self.assertRaises(ocr.ImageOCRError):
+                ocr.review_image(self.source, receipt)
+            Image.new("RGB", (80, 40), "black").save(self.source)
+            with self.assertRaises(ocr.ImageOCRError):
+                ocr.review_image(self.source, receipt, allow_remote=True)
+            call.assert_not_called()
+
+    def test_visual_review_rejects_empty_checks_bad_locators_and_false_identity(self):
+        proposals = [
+            {**self.review_proposal(), "checks": []},
+            {**self.review_proposal(), "reviewer_kind": "human"},
+            {**self.review_proposal(), "checks": [
+                {**self.review_proposal()["checks"][0], "locator": "L999"}]},
+        ]
+        for proposal in proposals:
+            with self.subTest(proposal=proposal), patch.object(ocr, "call_api", return_value=json.dumps(proposal)):
+                with self.assertRaises(ocr.ImageOCRError):
+                    ocr.review_image(self.source, self.unreviewed_receipt(), allow_remote=True)
+
+    def test_visual_review_unresolved_result_is_not_retried_or_downgraded(self):
+        with patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal(unresolved=True))) as call:
+            receipt = ocr.review_image(self.source, self.unreviewed_receipt(), allow_remote=True)
+            receipt = ocr.review_image(self.source, receipt, allow_remote=True)
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(receipt["review_status"], "partial")
+        self.assertTrue(ocr.review_blockers(receipt))
+
+    def test_ingest_api_transcribes_and_reviews_without_host_handoff(self):
+        for semantic_backend in ("agent", "api"):
+            with self.subTest(semantic_backend=semantic_backend):
+                state = {**self.state(), "semantic_backend": semantic_backend, "allow_remote_ocr": True}
+                state["extract_dir"] += "-" + semantic_backend
+                with patch.object(document, "REPO", self.root), \
+                        patch.object(ocr, "recognize_image", return_value=self.unreviewed_receipt()) as recognize, \
+                        patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal())) as review:
+                    self.assertTrue(document.step_preprocess(state)[0])
+                    self.assertTrue(document.step_preprocess(state)[0])
+                self.assertEqual(state["ocr"]["review_status"], "api-reviewed")
+                self.assertEqual(state["semantic_backend"], semantic_backend)
+                self.assertNotIn("agent_task", state)
+                recognize.assert_called_once()
+                review.assert_called_once()
+                self.assertEqual(state["ocr"]["review_attempts"][0]["model"], self.config["model"])
+
+    def test_api_confirmation_is_text_only_and_resume_does_not_repeat_paid_review(self):
+        state = {**self.state(), "allow_remote_ocr": True}
+        with patch.object(document, "REPO", self.root), \
+                patch.object(ocr, "recognize_image", return_value=self.unreviewed_receipt()) as recognize, \
+                patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal(unresolved=True))) as review:
+            self.assertFalse(document.step_preprocess(state)[0])
+            self.assertFalse(document.step_preprocess(state)[0])
+        self.assertEqual(recognize.call_count, 1)
+        self.assertEqual(review.call_count, 1)
+        self.assertEqual(state["agent_task"]["kind"], "image_confirmation")
+        summary = json.loads((self.root / state["agent_task"]["inputs"][0]["path"]).read_text())
+        self.assertEqual(summary["checks"][0]["field"], "金额")
+        self.assertNotIn("markdown", summary)
+        self.assertNotIn("ocr", state)
+
+    def test_api_failure_preserves_transcription_and_never_falls_back_to_host(self):
+        state = {**self.state(), "allow_remote_ocr": True}
+        with patch.object(document, "REPO", self.root), \
+                patch.object(ocr, "recognize_image", return_value=self.unreviewed_receipt()) as recognize, \
+                patch.object(ocr, "review_image", side_effect=ocr.ImageOCRError("API timeout")) as review:
+            self.assertFalse(document.step_preprocess(state)[0])
+            self.assertFalse(document.step_preprocess(state)[0])
+        self.assertEqual(recognize.call_count, 1)
+        self.assertEqual(review.call_count, 1)
+        self.assertEqual(state["agent_task"]["kind"], "image_api_retry")
+        self.assertTrue((self.root / state["extract_dir"] / "image-ocr.json").is_file())
+        self.assertNotIn("_awaiting_image_ocr", state)
+        self.assertNotIn("_awaiting_image_review", state)
+
+    def test_explicit_retry_reuses_successful_transcription(self):
+        state = {**self.state(), "allow_remote_ocr": True}
+        with patch.object(document, "REPO", self.root), \
+                patch.object(ocr, "recognize_image", return_value=self.unreviewed_receipt()) as recognize:
+            with patch.object(ocr, "review_image", side_effect=ocr.ImageOCRError("API timeout")):
+                self.assertFalse(document.step_preprocess(state)[0])
+            state.pop("image_api_failure")
+            state["status"] = "preprocess"
+            with patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal())) as review:
+                self.assertTrue(document.step_preprocess(state)[0])
+        recognize.assert_called_once()
+        review.assert_called_once()
+        self.assertEqual(state["agent_task"]["status"], "consumed")
+
+    def test_confirmation_can_consume_trusted_review_without_remote_call(self):
+        state = {**self.state(), "allow_remote_ocr": True}
+        with patch.object(document, "REPO", self.root), \
+                patch.object(ocr, "recognize_image", return_value=self.unreviewed_receipt()) as recognize:
+            with patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal(unresolved=True))):
+                self.assertFalse(document.step_preprocess(state)[0])
+            corrected = ocr.load_receipt(self.root / state["extract_dir"] / "image-ocr.json", self.source)
+            corrected["review"].update({"reviewer_kind": "human", "reviewer": "test-user",
+                                         "checks": self.review_proposal()["checks"]})
+            result_path = self.root / "confirmed.json"
+            ocr.save_receipt(result_path, corrected, self.source)
+            state.update({"ocr_result": str(result_path), "status": "preprocess"})
+            with patch.object(ocr, "call_api") as remote:
+                self.assertTrue(document.step_preprocess(state)[0])
+                self.assertTrue(document.step_preprocess(state)[0])
+                remote.assert_not_called()
+        recognize.assert_called_once()
+        self.assertEqual(state["ocr"]["review_status"], "human-reviewed")
+        self.assertEqual(state["agent_task"]["status"], "consumed")
+
+    def test_visual_review_fallback_records_actual_model(self):
+        self.config["fallback_model"] = "fallback-vision"
+        with patch.object(ocr, "call_api", side_effect=["invalid JSON", json.dumps(self.review_proposal())]) as call:
+            receipt = ocr.review_image(self.source, self.unreviewed_receipt(), allow_remote=True)
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(receipt["review"]["reviewer"], "fallback-vision")
+        self.assertEqual([item["status"] for item in receipt["review_attempts"]], ["failed", "reviewed"])
+
+    def test_project_consent_enables_api_for_both_visual_steps(self):
+        self.config["allow_remote"] = "true"
+        state = self.state()
+        with patch.object(document, "REPO", self.root), \
+                patch.object(ocr, "recognize_image", return_value=self.unreviewed_receipt()) as recognize, \
+                patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal())) as review:
+            self.assertTrue(document.step_preprocess(state)[0])
+        recognize.assert_called_once()
+        review.assert_called_once()
+        self.assertEqual(state["image_remote_authorization"], "project_config")
+
+    def test_authorization_resume_consumes_task_and_keeps_semantic_backend(self):
+        state = {**self.state(), "semantic_backend": "api"}
+        with patch.object(document, "REPO", self.root):
+            self.assertFalse(document.step_preprocess(state)[0])
+            self.assertEqual(state["agent_task"]["kind"], "image_ocr_authorization")
+            state.update({"allow_remote_ocr": True, "status": "preprocess"})
+            with patch.object(ocr, "recognize_image", return_value=self.unreviewed_receipt()), \
+                    patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal())):
+                self.assertTrue(document.step_preprocess(state)[0])
+        self.assertEqual(state["agent_task"]["status"], "consumed")
+        self.assertNotIn("pre_handoff_status", state)
+        self.assertEqual(state["semantic_backend"], "api")
+
+    def test_transport_records_usage_without_credentials_or_image_payload(self):
+        response = {"choices": [{"finish_reason": "stop", "message": {"content": "008"}}],
+                    "usage": {"prompt_tokens": 30, "completion_tokens": 4, "total_tokens": 34,
+                              "secret": "sensitive"}}
+        with patch.object(ocr.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(response).encode())):
+            receipt = ocr.recognize_image(self.source, allow_remote=True, config=self.config)
+        self.assertEqual(receipt["attempts"][0]["usage"], {"prompt_tokens": 30, "completion_tokens": 4, "total_tokens": 34})
+        text = json.dumps(receipt)
+        for forbidden in ("secret-key", "sensitive", "data:image", "Authorization"):
+            self.assertNotIn(forbidden, text)
 
 
 if __name__ == "__main__":

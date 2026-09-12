@@ -30,6 +30,13 @@ publication. Rebuilding the same batch does not bump again. The Markdown include
 a dated engineering addendum; the PDF
 retains the earlier reviewed layout and appends the same addendum for printing.
 
+The 2026-09-12 `v0.6.0` addendum covers chat-file/text intake with retained
+originals, native PPTX extraction with full-slide host review, evidence-derived
+source dates, final meeting-source binding, and independent visual-service
+configuration. These are compatible ingestion extensions and fixes, not a new
+paper experiment or artifact. Both the Markdown and appended PDF pages contain
+the same addendum; previously reviewed PDF pages are retained.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -62,6 +69,11 @@ Agent 摄入恢复、显式会议来源证据规则和子 Hub 特异性路由。
 版本递增；同批次重建不重复升版。
 Markdown 增加带日期的工程补充；PDF 保留之前已审阅的版式，并在末尾附上同一补充，
 用于下载和打印。
+
+2026年9月12日的 `v0.6.0` 补充说明对话文件／正文摄入与原件保留、原生 PPTX
+提取与宿主逐页复核、基于证据的来源日期、会议最终来源绑定和独立视觉服务配置。
+这些是兼容的摄入扩展与修复，不是新的论文实验或数据产物。Markdown 与 PDF 新增页
+使用同一补充内容，PDF 先前已审阅的页面予以保留。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

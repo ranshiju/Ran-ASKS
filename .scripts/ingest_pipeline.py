@@ -39,6 +39,7 @@ import agent_task
 import ingest_common as ic
 import recovery_policy as rp
 import trash_util
+import inbox_source_policy
 
 
 def _resume_cmd(spec, txn_id: str) -> str:
@@ -550,7 +551,7 @@ def _cleanup_sources(state: dict, skip_source_if: str | None = None) -> None:
     """
     if not (skip_source_if and state.get(skip_source_if)):
         source_path = REPO / state["source"]
-        if source_path.is_file():
+        if source_path.is_file() and not inbox_source_policy.is_retained(REPO, source_path):
             trash_util.trash_path(source_path)
     extract_dir = REPO / state["extract_dir"]
     if extract_dir.exists():

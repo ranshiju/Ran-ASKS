@@ -9,6 +9,7 @@ import sys
 import os
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -87,8 +88,6 @@ def test_focused_prompt_review_task():
 
     assert any(item["path"] == "AGENTS.md" and item["layer"] == "global-instruction"
                for item in locations)
-    assert any(item["path"] == "projects/ASKS/AGENTS.md"
-               and item["layer"] == "scoped-instruction" for item in locations)
     assert any(item["id"] == "graph:capability:build" for item in locations)
     assert any(item["id"] == "graph:contract:route"
                and item["artifact_type"] == "contract" for item in locations)
@@ -122,13 +121,17 @@ def test_focused_prompt_review_task():
                and item["governed_by"] == ["graph:capability:build"]
                for item in locations)
     assert all(item["path"] != "operations/DISCUSSION.md" for item in locations)
+    memory_path = REPO / "memory/MEMORY.md"
     assert any(item["path"] == "memory/MEMORY.md"
-               and item["artifact_type"] == "memory" for item in locations)
-    memory = (REPO / "memory/MEMORY.md").read_text(encoding="utf-8")
-    assert "# 用户级长期记忆" in memory
-    legacy_home = Path("/", "Users", "apple").as_posix() + "/"
-    assert legacy_home not in memory
-    assert '当用户发出"汇总"指令时' not in memory
+               and item["artifact_type"] == "memory" for item in locations) == memory_path.is_file()
+    # Personal memory is absent from public templates; fixture discovery below
+    # remains mandatory, while these content-migration checks apply when present.
+    if memory_path.is_file():
+        memory = memory_path.read_text(encoding="utf-8")
+        assert "# 用户级长期记忆" in memory
+        legacy_home = Path("/", "Users", "apple").as_posix() + "/"
+        assert legacy_home not in memory
+        assert '当用户发出"汇总"指令时' not in memory
     academic_schema = (REPO / "academic/SCHEMA.md").read_text(encoding="utf-8")
     assert academic_schema.count("## Raw 目录与论文包") == 1
     assert "MinerU > Docling > PyMuPDF" not in academic_schema
@@ -161,17 +164,11 @@ def test_focused_prompt_review_task():
     assert any(item["path"] == ".scripts/ingest_paper.py"
                and item.get("symbol") == "build_paper_semantic_contract" for item in locations)
     assert any(item["path"] == "dsh/meeting_compiler_agent.py"
-               and item.get("symbol", "").endswith(":system") for item in locations)
+               and item.get("symbol") in {"system", "llm_call_fn:system"}
+               and item["artifact_type"] == "runtime-prompt"
+               and item["mode"] == "api" for item in locations)
     assert any(item["path"] == "dsh/agent_loop.py"
                and item.get("symbol") == "_build_prompt" and item["mode"] == "api"
-               for item in locations)
-    assert any(item["path"] == "projects/ASKS/experiments/e2b-agent-navigation-audit/run.py"
-               and item.get("symbol") == "SYSTEM_PROMPT"
-               and item["governed_by"] == ["doc:projects/ASKS/AGENTS.md"]
-               for item in locations)
-    assert any(item["path"] == "projects/asks-ai-agent/notes/02-knowledge-drift-storyboard.yaml"
-               and item["selector"] == "yaml:/assets/0/prompt"
-               and item["artifact_type"] == "runtime-prompt"
                for item in locations)
 
     focused = run(
@@ -190,6 +187,58 @@ def test_focused_prompt_review_task():
     assert "AGENTS.md#document" in focused
     assert ".scripts/ingest_paper.py#L" in focused
     assert "operations/INGEST.md" not in focused
+
+
+def test_project_prompt_discovery_uses_isolated_fixtures():
+    """Public regressions must exercise project discovery without private projects."""
+    spec = importlib.util.spec_from_file_location(
+        "project_prompt_audit_under_test", REPO / ".scripts/lint_specs.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        fixtures = {
+            "AGENTS.md": "# Global instructions\nUse source evidence.\n",
+            "memory/MEMORY.md": "# Test memory\nUse the confirmed project terminology.\n",
+            "projects/demo/AGENTS.md": "# Project instructions\nRead the project sources.\n",
+            "projects/demo/run.py": 'SYSTEM_PROMPT = "You must read source evidence and return a grounded answer."\n',
+            "projects/demo/storyboard.yaml": "assets:\n  - id: example\n    prompt: '请生成示意图，只使用已核对的来源。'\n",
+        }
+        for relative, content in fixtures.items():
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        with patch.multiple(
+            module, REPO=root, CODE_ROOTS=(root / "projects",),
+            ENGINEERING_GRAPH=root / "operations/engineering/graph.yaml",
+            _ENGINEERING_GRAPH_CACHE={
+                "nodes": {}, "edges": [], "capabilities": {}, "script_contracts": {},
+            },
+        ):
+            locations, _ = module.collect_prompt_map(cache_enabled=False)
+            assert any(item["path"] == "memory/MEMORY.md"
+                       and item["artifact_type"] == "memory"
+                       and item["governed_by"] == ["doc:AGENTS.md"] for item in locations)
+            assert any(item["path"] == "projects/demo/AGENTS.md"
+                       and item["layer"] == "scoped-instruction" for item in locations)
+            assert any(item["path"] == "projects/demo/run.py"
+                       and item.get("symbol") == "SYSTEM_PROMPT"
+                       and item["governed_by"] == ["doc:projects/demo/AGENTS.md"]
+                       for item in locations)
+            assert any(item["path"] == "projects/demo/storyboard.yaml"
+                       and item["selector"] == "yaml:/assets/0/prompt"
+                       and item["artifact_type"] == "runtime-prompt"
+                       and item["governed_by"] == ["doc:projects/demo/AGENTS.md"]
+                       for item in locations)
+            for relative in fixtures:
+                if relative != "AGENTS.md":
+                    (root / relative).unlink()
+            # A fresh CLI invocation rebuilds its per-process source-file index.
+            module._SOURCE_FILE_INDEX = None
+            remaining, _ = module.collect_prompt_map(cache_enabled=False)
+            assert [item["path"] for item in remaining] == ["AGENTS.md"]
 
 
 def test_trusted_agent_build_profile_skips_semantic_review():
@@ -886,6 +935,7 @@ def test_trace_rules():
 
 if __name__ == "__main__":
     test_focused_prompt_review_task()
+    test_project_prompt_discovery_uses_isolated_fixtures()
     test_trusted_agent_build_profile_skips_semantic_review()
     test_runtime_prompt_surface_boundaries()
     test_incremental_prompt_map_cache()

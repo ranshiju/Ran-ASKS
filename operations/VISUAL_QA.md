@@ -25,7 +25,7 @@ VISUAL_QA_MAX_TOKENS=1800
 
 主/回退推理档位分别设置，允许 `low/high/default`；`default` 表示不发送该字段。常规 QA 用 low，复杂页面可显式 `--reasoning-effort high`；`--max-tokens` 可单次覆盖输出预算。CLI/Python 显式参数优先于环境配置。这些设置与 OCR、文本模型独立，不因升级模型而改变远程授权。
 
-2026-09-07 在三张固定合成页面上按原 QA 协议对照后，经用户确认启用新默认；这不是整体准确率排名。可编辑 PPT 重建另由 `.env` 的 `VISUAL_RECONSTRUCTION_MODEL=GLM-4.6V` 与 `VISUAL_RECONSTRUCTION_FALLBACK_MODEL=GLM-4.5V` 固定，暂不随 QA 切换。
+2026-09-07 在三张固定合成页面上按原 QA 协议对照后，经用户确认启用新默认；这不是整体准确率排名。可编辑 PPT 重建另由 `.env` 的 `VISUAL_RECONSTRUCTION_MODEL=GLM-5.3-Flash` 与 `VISUAL_RECONSTRUCTION_FALLBACK_MODEL=GLM-4.5V` 独立配置；重建主模型于 2026-09-11 按用户明确指令切换，并未进行重建质量对测。
 
 ## 使用
 
@@ -88,3 +88,7 @@ prompt-v2 仅将有可见证据且影响阅读、解释或可访问性的缺陷�
 - `status=partial`：至少一页被隐私策略阻断、API 未配置或模型调用失败。
 
 所有模型问题都是视觉建议，不是 Raw 事实证据；工具不会自动修改数据、图件、论文、Wiki 或 graph.db。
+
+### 本地 PPT 字体与重做核验
+
+打包 macOS LibreOffice 渲染时，shared 入口显式加载随附的 fontconfig 配置以发现系统中文字体；调用方已有 `FONTCONFIG_FILE` / `FONTCONFIG_PATH` 时保留其选择，不安装或改写宿主字体。字体替代仍可能改变换行，须逐页核对。旧渲染缓存不覆盖；摄入核验发现坏渲染时，新建同源事务生成证据，成功后用 `inbox_state.py --supersede <旧事务> --by <完成事务>` 关闭未提交旧事务，保留审计。

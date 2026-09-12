@@ -802,7 +802,7 @@ def test_normalize_document_wiki_compiles_overlapping_line_handles_exactly():
     weak_output = (
         "---\ntitle: 长文档\ntype: conference-summary\nstatus: completed\n---\n\n"
         "# 长文档\n\n## Navigation\n\n导航。 <RAW#L13>\n\n"
-        "## Content\n\n较后的事实。 <RAW#L136>\n"
+        "## Content\n\n较后的事实。 `<RAW#L136>`，`RAW#L13`。无效：`<RAW#L999>`，代码 `example`。\n"
     )
     doc_text = "\n".join(f"第 {line} 行依据。" for line in range(1, 137)) + "\n"
     normalized, _repairs = module.normalize_document_wiki(
@@ -815,6 +815,8 @@ def test_normalize_document_wiki_compiles_overlapping_line_handles_exactly():
     assert "[^r13]" in normalized
     assert "[^r136]" in normalized
     assert "[^r13]6>" not in normalized
+    assert "`[^r136]`" not in normalized and "`[^r13]`" not in normalized
+    assert "`<RAW#L999>`" in normalized and "`example`" in normalized
     assert "[^r13]: academic/raw/conferences/long.md#L13" in normalized
     assert "[^r136]: academic/raw/conferences/long.md#L136" in normalized
 
@@ -860,6 +862,132 @@ def test_validate_semantics_rejects_responsibility_inferred_from_speech():
     finally:
         module.ic.validate_semantics = original_validate
         shutil.rmtree(extract_dir, ignore_errors=True)
+
+
+def test_semantic_validation_refreshes_cache_before_responsibility_checks():
+    import tempfile
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        extract_dir = repo / "extract"
+        extract_dir.mkdir()
+        (extract_dir / "doc.md").write_text("方复全校长讲话\n", encoding="utf-8")
+        semantic_path = repo / "semantic.txt"
+        clean = "三元组:\n本文件 | 涉及 | 科研项目\n"
+        unsupported = "三元组:\n本文件 | 负责人 | 方复全\n"
+        state = {"semantic_path": "semantic.txt", "extract_dir": "extract",
+                 "wiki_path": "admin/wiki/references/test-cache", "subproject": "admin",
+                 "pipeline_script": "ingest_document.py", "slots_content": unsupported}
+        with patch.object(module, "REPO", repo), \
+                patch.object(module.ic, "load_raw_abbr_map", return_value={}):
+            semantic_path.write_text(clean, encoding="utf-8")
+            errors, _warnings = module.step_validate_semantics(state)
+            assert not errors, errors
+            assert state["slots_content"] == clean
+            semantic_path.write_text(unsupported, encoding="utf-8")
+            errors, _warnings = module.step_validate_semantics(state)
+            assert any("负责人关系缺少" in item for item in errors), errors
+            assert state["slots_content"] == unsupported
+            malformed = "三元组:\n本文件 → 涉及 → 科研项目\n"
+            semantic_path.write_text(malformed, encoding="utf-8")
+            errors, _warnings = module.step_validate_semantics(state)
+            assert errors
+            assert state["slots_content"] == malformed
+            semantic_path.unlink()
+            try:
+                module.step_validate_semantics(state)
+            except FileNotFoundError:
+                pass
+            else:
+                raise AssertionError("Missing artifact must not fall back to cached semantic text")
+
+
+def test_api_semantic_backend_requests_ocr_authorization_in_same_transaction():
+    """未授权只交接文字授权摘要，不切换整个事务后端或交接宿主看图。"""
+    import tempfile
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory(dir=module.REPO / "temp") as directory:
+        root = Path(directory)
+        source = root / "image.png"
+        source.write_bytes(b"image")
+        extract_dir = root / "extract"
+        extract_dir.mkdir()
+        state = {
+            "transaction_id": "20260911-120000-image",
+            "source": str(source.relative_to(module.REPO)),
+            "entrypoint": "inbox",
+            "semantic_backend": "api",
+        }
+        with patch.object(module, "ingest_mode", return_value="api"), \
+                patch.object(module.image_ocr, "load_config", return_value={"backend": "api", "allow_remote": "false"}), \
+                patch.object(module.image_ocr, "read_image",
+                             return_value=({"sha256": "abc123"}, b"image")):
+            success, message = module.prepare_image_ocr(state, source, extract_dir)
+        assert not success and "image_ocr_authorization" in message
+        assert state["semantic_backend"] == "api"
+        assert state["agent_task"]["kind"] == "image_ocr_authorization"
+        assert state["agent_task"]["commands"]["resume"] == (
+            "python3 .scripts/wg.py ingest --resume 20260911-120000-image"
+        )
+
+
+def test_resume_rejects_semantic_backend_switch_with_nonzero_exit():
+    """恢复事务时 backend 不一致须结构化失败并返回非零。"""
+    import contextlib
+    import io
+    from unittest.mock import patch
+    state = {
+        "transaction_id": "20260911-120000-backend",
+        "status": "preprocess",
+        "semantic_backend": "api",
+    }
+    stdout = io.StringIO()
+    with patch.object(module.inbox_state, "load", return_value=state), \
+            patch.object(module, "ingest_mode", return_value="agent"), \
+            patch("sys.argv", ["ingest_document.py", "--resume", state["transaction_id"]]), \
+            contextlib.redirect_stdout(stdout):
+        try:
+            module.main()
+            raise AssertionError("backend mismatch 应返回非零")
+        except SystemExit as exc:
+            assert exc.code == 1
+    assert json.loads(stdout.getvalue())["status"] == "backend_mismatch"
+
+
+def test_document_semantics_rejects_arrow_and_legacy_sections_before_finalize():
+    """旧 section 或箭头行不得静默解析为零条导航边。"""
+    import shutil
+    root = module.REPO / "temp/test-document-semantic-contract"
+    root.mkdir(parents=True, exist_ok=True)
+    semantic = root / "semantic.txt"
+    text = (
+        "行政主题:\n"
+        "- 科研项目绩效支取\n"
+        "三元组:\n"
+        "- 本文件 → 涉及 → 科研项目绩效支取\n"
+    )
+    semantic.write_text(text, encoding="utf-8")
+    state = {
+        "pipeline_script": "ingest_document.py",
+        "semantic_path": str(semantic.relative_to(module.REPO)),
+        "slots_content": text,
+        "wiki_path": "admin/wiki/references/test-semantic-contract",
+        "extract_dir": str(root.relative_to(module.REPO)),
+    }
+    try:
+        errors, _warnings = module.step_validate_semantics(state)
+        assert any("已停用 section" in item for item in errors)
+        assert any("三元组格式不合法" in item for item in errors)
+        assert any("解析出 0 条" in item for item in errors)
+    finally:
+        shutil.rmtree(root)
+
+
+def test_normalize_slots_accepts_only_harmless_markdown_wrappers():
+    text = "三元组:\n- 本文件 ｜ 涉及 ｜ 科研项目绩效支取\n"
+    assert module.normalize_slots(text) == (
+        "三元组:\n本文件 | 涉及 | 科研项目绩效支取\n"
+    )
 
 
 def test_sqlite_snapshot_restores_exact_graph_state():
@@ -936,6 +1064,9 @@ def test_rollback_removes_manifest_companion_restores_graph_and_marks_receipt():
 
 
 def main():
+    test_tabular_principles_shared_by_agent_api_and_route()
+    test_spreadsheet_extraction_preserves_rows_and_structure()
+    test_spreadsheet_preprocess_keeps_original_and_companion()
     test_domain_config_keys()
     test_get_subdir_admin()
     test_get_subdir_teaching()
@@ -975,6 +1106,11 @@ def main():
     test_normalize_document_wiki_compiles_overlapping_line_handles_exactly()
     test_transcript_normalization_sets_provenance_and_drops_inferred_department()
     test_validate_semantics_rejects_responsibility_inferred_from_speech()
+    test_semantic_validation_refreshes_cache_before_responsibility_checks()
+    test_api_semantic_backend_requests_ocr_authorization_in_same_transaction()
+    test_resume_rejects_semantic_backend_switch_with_nonzero_exit()
+    test_document_semantics_rejects_arrow_and_legacy_sections_before_finalize()
+    test_normalize_slots_accepts_only_harmless_markdown_wrappers()
     test_sqlite_snapshot_restores_exact_graph_state()
     test_rollback_removes_manifest_companion_restores_graph_and_marks_receipt()
     test_preprocess_binary_creates_raw_companion()
@@ -1341,6 +1477,121 @@ def test_related_to_step_calls_graph_ingest():
         "--related-to 分支必须调用 ic.step_update_graph 创建页面节点"
     assert 'state["status"] = "completed"' not in src, \
         "--related-to 分支不应手动设 status（管线统一管理状态转换）"
+
+def test_tabular_principles_shared_by_agent_api_and_route():
+    import route
+    rules = module.tabular_ingest_principles()
+    for prompt in (
+        module.build_doc_wiki_prompt("来源", "test", ""),
+        module.build_doc_wiki_slots_prompt("来源", "test", ""),
+        module.build_doc_slots_prompt("Wiki"),
+    ):
+        assert prompt.count(rules) == 1
+    source = module.REPO / "temp/inbox-extract/test-tabular/doc.md"
+    output = source.with_name("agent-wiki-slots.txt")
+    task = module.prepare_document_agent_task({"transaction_id": "test-tabular", "admin_id": "test-tabular"}, source, output)
+    rule_input = next(item for item in task["inputs"] if item["role"] == "instructions")
+    assert rule_input["path"] == "operations/INGEST.md"
+    assert rule_input["read"] == "section"
+    assert "prompt" not in task
+    for stage in ("阶段一", "阶段二", "更新模式"):
+        assert rule_input["locator"] in route.filter_ingest([stage], "other", "admin", "ordinary")
+    assert rule_input["locator"] not in route.filter_ingest(["阶段一"], "paper", "academic", "ordinary")
+    assert rule_input["locator"] not in route.filter_ingest(["阶段三"], "other", "admin", "ordinary")
+
+
+def test_spreadsheet_extraction_preserves_rows_and_structure():
+    import tempfile
+    import xlwt
+    import openpyxl
+    import inbox_plan
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / "清单.xls"
+        book = xlwt.Workbook()
+        sheet = book.add_sheet("记录")
+        for row_index, values in enumerate((("题名", "年份", "备注"), ("重复", 2025, "换行\n保留"), ("重复", 2025, ""))):
+            for column_index, value in enumerate(values):
+                sheet.write(row_index, column_index, value)
+        sheet.row(2).hidden = True
+        sheet.col(2).hidden = True
+        sheet.write_merge(4, 5, 0, 1, "合并值")
+        hidden_sheet = book.add_sheet("隐藏页")
+        hidden_sheet.visibility = 1
+        hidden_sheet.write(0, 0, "保留")
+        book.save(str(source))
+        before = source.read_bytes()
+        text = module.extract_doc_text(source)
+        rows = dict(re.findall(r"^R(\d+): (.*)$", text.split('## 工作表 "隐藏页"')[0], re.M))
+        assert json.loads(rows["2"]) == ["重复", 2025, "换行\n保留"]
+        assert json.loads(rows["3"]) == ["重复", 2025, ""]
+        assert json.loads(rows["4"]) == ["", "", ""]
+        assert "隐藏行号：[3]" in text and "隐藏列号：[3]" in text
+        assert "[[5, 6, 1, 2]]" in text and '工作表 "隐藏页"' in text
+        assert "公式缓存值" in text and source.read_bytes() == before
+        assert inbox_plan.classify(source)["kind"] == "document"
+        assert not module.sl.valid_locator("L1", source)
+
+        companion = source.with_suffix(".md")
+        companion.write_text(text, encoding="utf-8")
+        locator = "table:记录:A,B:R2-R3"
+        assert module.sl.locator_status(locator, companion) == "present"
+        projected = module.sl.read_locator_text(companion, locator)
+        assert 'R2: ["重复", 2025.0]' in projected
+        assert 'R3: ["重复", 2025.0]' in projected
+        assert "换行" not in projected and "隐藏页" not in projected
+        for invalid in ("table:记录:Z:R2-R3", "table:记录:A:R3-R2", "table:记录:A:R2-R99", "table:缺失页:A:R2", "table:记录:A:R0"):
+            assert module.sl.locator_status(invalid, companion) == "missing"
+            assert module.sl.read_locator_text(companion, invalid) is None
+        assert module.sl.read_locator_text(companion, "table:%E9%9A%90%E8%97%8F%E9%A1%B5:A:R1").endswith('R1: ["保留"]')
+
+        source = Path(directory) / "清单.xlsx"
+        book = openpyxl.Workbook()
+        sheet = book.active
+        sheet.title = "记录"
+        sheet.append(["题名", "值", "公式"])
+        sheet.append(["重复", 2, "=B2*2"])
+        sheet.append(["重复", None, "#DIV/0!"])
+        sheet.row_dimensions[3].hidden = True
+        sheet.column_dimensions["B"].hidden = True
+        sheet.merge_cells("A5:B6")
+        sheet["A5"] = "合并值"
+        hidden_sheet = book.create_sheet("隐藏页")
+        hidden_sheet.sheet_state = "hidden"
+        hidden_sheet["A1"] = "保留"
+        book.save(source)
+        book.close()
+        before = source.read_bytes()
+        text = module.extract_doc_text(source)
+        rows = dict(re.findall(r"^R(\d+): (.*)$", text.split('## 工作表 "隐藏页"')[0], re.M))
+        assert json.loads(rows["2"])[2] == {"formula": "=B2*2", "cached_value": None}
+        assert json.loads(rows["3"]) == ["重复", None, {"error": "#DIV/0!"}]
+        assert "隐藏行号：[3]" in text and '"2:2"' in text and "A5:B6" in text
+        assert source.read_bytes() == before
+        assert not module.sl.valid_locator("L1", source)
+
+
+def test_spreadsheet_preprocess_keeps_original_and_companion():
+    import tempfile
+    from unittest.mock import patch
+    import xlwt
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        source = repo / "inbox/台账.xls"
+        source.parent.mkdir()
+        book = xlwt.Workbook()
+        book.add_sheet("记录").write(0, 0, "原始值")
+        book.save(str(source))
+        before = source.read_bytes()
+        state = {"source": "inbox/台账.xls", "source_filename": "台账.xls",
+                 "extract_dir": "temp/inbox-extract/test", "subproject": "admin"}
+        with patch.object(module, "REPO", repo):
+            success, message = module.step_preprocess(state)
+            assert success, message
+            assert module._manifest_raw_files(state) == ["台账.xls", "台账.md"]
+        assert state["locator_source_filename"] == "台账.md"
+        assert (repo / state["extract_dir"] / "台账.md").read_text() == module.extract_doc_text(source)
+        assert source.read_bytes() == before
+
 
 if __name__ == "__main__":
     main()

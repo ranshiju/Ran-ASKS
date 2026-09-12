@@ -12,12 +12,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
@@ -33,7 +36,7 @@ from meeting_compiler_contract import (
     PREPROCESS_DELIMITER,
     PROTOCOL_VERSION as MEETING_COMPILER_PROTOCOL,
     apply_transcript_replacements,
-    parse_proposal as parse_meeting_compiler_proposal,
+    parse_proposal_detailed,
     task_context_hash,
 )
 from ingest_common import (validate_meta, extract_year_from_meta,
@@ -284,6 +287,7 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
 只使用以上谓词；未列出的谓词不要使用。汇报者、决策、待办是独立 section，不要重复写进三元组。
 
 [输出格式]
+PREPROCESS 中仅放一个合法 JSON 对象，之后直接接 <<<WIKI>>>；不添加 <<</PREPROCESS>>> 结束标签。
 <<<META>>>
 doc_date: <会议日期，从纪要内容提取；有什么提什么，如 2024-03 或 2024-03-15>
 title: <会议标题>
@@ -431,6 +435,49 @@ def run_api_meeting_compiler(task_fields: dict):
     return MeetingCompilerAgent(MeetingCompilerTask(**task_fields)).run()
 
 
+def _compiler_retry_context(state: dict, input_hash: str) -> dict:
+    attempts = state.get("meeting_compiler_attempts") or []
+    if not attempts or not attempts[-1].get("output_artifact"):
+        return {}
+    latest = attempts[-1]
+    if latest.get("input_hash") != input_hash:
+        return {}
+    expected = REPO / state["extract_dir"] / f"compiler-attempt-{len(attempts)}.json"
+    artifact = REPO / latest["output_artifact"]
+    if artifact.resolve() != expected.resolve():
+        raise ValueError("compiler retry artifact does not match latest transaction attempt")
+    encoded = artifact.read_bytes()
+    if hashlib.sha256(encoded).hexdigest() != latest.get("artifact_sha256"):
+        raise ValueError("compiler retry artifact hash mismatch")
+    payload = json.loads(encoded)
+    if (payload.get("transaction_id") != state.get("transaction_id", "")
+            or payload.get("attempt") != len(attempts)
+            or payload.get("input_hash") != input_hash):
+        raise ValueError("compiler retry artifact identity mismatch")
+    return {"previous_output": payload["response_text"],
+            "previous_diagnostic": payload["diagnostic"]}
+
+
+def _record_compiler_output(state: dict, result, trace: dict, input_hash: str) -> None:
+    attempts = state.setdefault("meeting_compiler_attempts", [])
+    attempts.append(trace)
+    if not hasattr(result, "response_text"):
+        return
+    artifact = REPO / state["extract_dir"] / f"compiler-attempt-{len(attempts)}.json"
+    payload = {
+        "transaction_id": state.get("transaction_id", ""), "attempt": len(attempts),
+        "input_hash": input_hash, "context_hash": trace["context_hash"],
+        "status": result.status, "reason": result.reason,
+        "response_text": result.response_text, "diagnostic": result.diagnostic,
+    }
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    artifact.write_bytes(encoded)
+    artifact.chmod(0o600)
+    trace.update({"output_artifact": str(artifact.relative_to(REPO)),
+                  "artifact_sha256": hashlib.sha256(encoded).hexdigest(),
+                  "input_hash": input_hash})
+
+
 def step_prepare_unified_handoff(state: dict, errors: list[str],
                                  handoff_reason: str = "wiki_revision_budget_exhausted"
                                  ) -> tuple[bool, str]:
@@ -459,6 +506,28 @@ def step_prepare_unified_handoff(state: dict, errors: list[str],
     }
     state["agent_required"] = True
     return True, ""
+
+
+def _meeting_frontmatter(markdown: str) -> tuple[dict, str]:
+    """Parse only the YAML header; never interpret or rewrite meeting body text."""
+    match = re.match(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?=\r?\n|\Z)", markdown, re.S)
+    if not match:
+        raise ValueError("frontmatter 格式错误")
+    try:
+        frontmatter = yaml.safe_load(match.group(1))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"frontmatter YAML 无效: {exc}") from exc
+    if not isinstance(frontmatter, dict):
+        raise ValueError("frontmatter 必须是 YAML mapping")
+    return frontmatter, markdown[match.end():]
+
+
+def bind_meeting_source(markdown: str, source_path: str) -> str:
+    """Bind the program-owned canonical Raw path regardless of proposal YAML style."""
+    frontmatter, body = _meeting_frontmatter(markdown)
+    frontmatter["sources"] = [source_path]
+    header = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).rstrip("\n")
+    return f"---\n{header}\n---{body}"
 
 
 def step_write_wiki(state: dict) -> tuple[bool, str]:
@@ -510,12 +579,12 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
                 state, [f"缺少暂存产物: {agent_output.relative_to(REPO)}"],
             )
             return False, f"agent 输出尚未写入: {agent_output.relative_to(REPO)}"
-        proposal, parse_error = parse_meeting_compiler_proposal(
+        proposal, parse_error, diagnostic = parse_proposal_detailed(
             agent_output.read_text(encoding="utf-8")
         )
         if proposal is None:
             state["_awaiting_agent_wiki_slots"] = True
-            agent_task.reopen(state, [parse_error])
+            agent_task.reopen(state, [parse_error, json.dumps(diagnostic, ensure_ascii=False)])
             return False, parse_error
         state["meeting_compiler"] = {
             "protocol_version": MEETING_COMPILER_PROTOCOL,
@@ -525,6 +594,13 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             "model_calls": 0,
         }
     else:
+        input_hash = task_context_hash(
+            source_text, entity_candidates, meeting_id="", target_source_path="",
+        )
+        try:
+            retry_context = _compiler_retry_context(state, input_hash) if errors else {}
+        except (OSError, ValueError) as exc:
+            return False, f"Meeting Compiler 重试上下文读取失败: {exc}"
         result = run_api_meeting_compiler({
             "transaction_id": state.get("transaction_id", ""),
             "source_path": state["source"],
@@ -533,10 +609,14 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             "context_hash": context_hash,
             "prompt": prompt,
             "errors": tuple(errors),
+            **retry_context,
         })
         compiler_trace = result.trace() | {"context_hash": context_hash}
         state["meeting_compiler"] = compiler_trace
-        state.setdefault("meeting_compiler_attempts", []).append(compiler_trace)
+        try:
+            _record_compiler_output(state, result, compiler_trace, input_hash)
+        except OSError as exc:
+            return False, f"Meeting Compiler 产出暂存失败: {exc}"
         if result.status == "agent_required":
             state["_awaiting_agent_wiki_slots"] = True
             state["agent_required"] = True
@@ -594,11 +674,12 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         wiki_content = re.sub(
             r"(?m)^(date:\s*.*)$", r"\1\ndate_inferred: true", wiki_content, count=1,
         )
-    # sources 回填：年份/type 纠正后 raw_dir 已变，用最终路径覆盖（与 ingest_document 一致）
+    # Canonical ID may have changed after META; bind YAML, not one list spelling.
     correct_source = f"{state['raw_dir']}/{state['source_filename']}"
-    wiki_content = re.sub(
-        r'(sources:\s*\n\s*-\s*)(?:path:\s*)?"?[^\n]+"?',
-        f'\\1"{correct_source}"', wiki_content, count=1)
+    try:
+        wiki_content = bind_meeting_source(wiki_content, correct_source)
+    except ValueError as exc:
+        return False, str(exc)
     corrected_path = extract_dir / "corrected.txt"
     corrected_path.write_text(corrected_text, encoding="utf-8")
     resolution = dict(entity_candidates)
@@ -633,19 +714,25 @@ def step_validate_wiki(state: dict) -> list[str]:
     if not wiki.startswith("---"):
         errors.append("缺少 frontmatter 起始 ---")
         return errors
-    fm_match = re.match(r"^---\n(.*?)\n---", wiki, re.S)
-    if not fm_match:
-        errors.append("frontmatter 格式错误")
-        return errors
-    fm = fm_match.group(1)
+    try:
+        fm, _body = _meeting_frontmatter(wiki)
+    except ValueError as exc:
+        return [str(exc)]
     required = ["title", "type", "sources", "source_type", "date"]
     for field in required:
         if field not in fm:
             errors.append(f"frontmatter 缺字段: {field}")
-    if "conference-summary" not in fm:
+    if fm.get("type") != "conference-summary":
         errors.append("type 应为 conference-summary")
-    if "memory:" in fm:
-        errors.append("sources 不得用 memory:// 占位路径，必须指向 raw/ 下的真实文件")
+    if not state.get("raw_dir") or not state.get("source_filename"):
+        errors.append("sources 缺少事务最终 Raw 路径，不能校验来源绑定")
+    else:
+        expected = f"{state['raw_dir']}/{state['source_filename']}"
+        actual = fm.get("sources")
+        if isinstance(actual, str):
+            actual = [actual]
+        if actual != [expected]:
+            errors.append(f"sources 必须精确绑定最终 Raw 路径: {expected}")
     if "## Navigation" not in wiki:
         errors.append("缺少 ## Navigation 段")
     if "## Content" not in wiki:

@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import fitz
 from PIL import Image, ImageDraw
@@ -152,27 +153,25 @@ def test_vision_guidance_is_schema_limited(tmp: Path) -> None:
     source = tmp / "vision.png"
     output = tmp / "vision-editable.pptx"
     _raster_figure(source)
-    prior_base = os.environ.get("VISUAL_RECONSTRUCTION_API_BASE")
-    prior_key = os.environ.get("VISUAL_RECONSTRUCTION_API_KEY")
-    os.environ["VISUAL_RECONSTRUCTION_API_BASE"] = "https://vision.invalid/v1"
-    os.environ["VISUAL_RECONSTRUCTION_API_KEY"] = "test-key"
-    try:
+    calls = []
+
+    def call(model, *args):
+        calls.append(model)
+        return _vision_stub(model, *args)
+
+    # Isolate from repository/user overrides: exercise the code default itself.
+    with patch("visual_to_editable_ppt._load_env", return_value={
+        "VISUAL_RECONSTRUCTION_API_BASE": "https://vision.invalid/v1",
+        "VISUAL_RECONSTRUCTION_API_KEY": "test-key",
+    }):
         summary = run_visual_to_editable_ppt(
             source,
             output_path=output,
             receipt_root=tmp / "vision-receipts",
-            vision_call=_vision_stub,
+            vision_call=call,
             mode="faithful",
         )
-    finally:
-        if prior_base is None:
-            os.environ.pop("VISUAL_RECONSTRUCTION_API_BASE", None)
-        else:
-            os.environ["VISUAL_RECONSTRUCTION_API_BASE"] = prior_base
-        if prior_key is None:
-            os.environ.pop("VISUAL_RECONSTRUCTION_API_KEY", None)
-        else:
-            os.environ["VISUAL_RECONSTRUCTION_API_KEY"] = prior_key
+    assert calls == ["GLM-5.3-Flash"], calls
     page_model_path = Path(summary["run_dir"]) / "pages" / "page-0001" / "objects.json"
     model = json.loads(page_model_path.read_text(encoding="utf-8"))
     vision_objects = [item for item in model["objects"] if item.get("source_method") == "vision_guidance"]
@@ -180,6 +179,31 @@ def test_vision_guidance_is_schema_limited(tmp: Path) -> None:
     if vision_objects:
         assert vision_objects[0]["kind"] == "text"
         assert vision_objects[0]["text"] == "VISION LABEL"
+
+
+def test_reconstruction_model_fallback(tmp: Path) -> None:
+    source = tmp / "fallback.png"
+    _raster_figure(source)
+    calls = []
+
+    def call(model, *args):
+        calls.append(model)
+        if model == "GLM-5.3-Flash":
+            raise RuntimeError("synthetic primary failure")
+        return _vision_stub(model, *args)
+
+    with patch("visual_to_editable_ppt._load_env", return_value={
+        "VISUAL_RECONSTRUCTION_API_BASE": "https://vision.invalid/v1",
+        "VISUAL_RECONSTRUCTION_API_KEY": "test-key",
+    }):
+        run_visual_to_editable_ppt(
+            source,
+            output_path=tmp / "fallback.pptx",
+            receipt_root=tmp / "fallback-receipts",
+            vision_call=call,
+            mode="faithful",
+        )
+    assert calls == ["GLM-5.3-Flash", "GLM-4.5V"], calls
 
 
 def test_forbidden_output_area(tmp: Path) -> None:
@@ -208,6 +232,7 @@ def main() -> None:
         test_vector_pdf_is_native_editable_and_resumable(tmp)
         test_raster_uses_editable_objects_and_honest_fallback(tmp)
         test_vision_guidance_is_schema_limited(tmp)
+        test_reconstruction_model_fallback(tmp)
         test_forbidden_output_area(tmp)
     print("visual to editable ppt regression: PASS")
 

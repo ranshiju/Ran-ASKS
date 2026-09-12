@@ -114,8 +114,37 @@ def test_parser_has_all_subcommands():
                   if hasattr(a, "choices") and a.choices}
     # 子命令名在 choices
     for cmd in ("lookup", "neighbors", "relations", "hub-of", "read-section",
-                "read-raw", "recall", "remember", "workspace", "abbr", "frontier"):
+                "read-raw", "recall", "remember", "workspace", "abbr", "frontier",
+                "ingest"):
         assert cmd in _subcommand_names(ap), f"缺子命令 {cmd}"
+
+
+def test_ingest_wrapper_routes_external_file_and_resume_through_inbox():
+    calls = []
+    original = module.run_script
+    module.run_script = lambda command, **_kwargs: (
+        calls.append(command) or (0, json.dumps({"status": "prepared",
+                                                "transaction_id": "txn"}), "")
+    )
+    try:
+        args = type("A", (), {
+            "file": "/tmp/external.png", "resume": "", "name": "2026-09-11-截图.png",
+            "subproject": "admin", "document_type": "", "ocr_result": "",
+            "allow_remote_ocr": False,
+        })()
+        result = capture_call(module.cmd_ingest, args)
+        assert result["ok"] is True
+        assert "--import-file" in calls[-1]
+        assert "--import-name" in calls[-1]
+        resume_args = type("A", (), {
+            "file": None, "resume": "20260911-120000-image", "name": "",
+            "subproject": "academic", "document_type": "", "ocr_result": "",
+            "allow_remote_ocr": False,
+        })()
+        capture_call(module.cmd_ingest, resume_args)
+        assert calls[-1][-2:] == ["--resume", "20260911-120000-image"]
+    finally:
+        module.run_script = original
 
 
 def _subcommand_names(ap):
@@ -524,6 +553,7 @@ def main():
     test_collect_sources_empty()
     test_collect_sources_skips_missing_source()
     test_parser_has_all_subcommands()
+    test_ingest_wrapper_routes_external_file_and_resume_through_inbox()
     test_parser_defaults()
     test_wiki_locator_reads_one_section_and_raw_citations()
     test_wiki_locator_minimal_validation()

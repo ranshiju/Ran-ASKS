@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前发布版本: v0.5.0
+> 当前发布版本: v0.6.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -92,6 +92,26 @@ PATCH／MINOR／MAJOR，不按文件数或行数排号；脚本记录依据、�
 发布校验拒绝同版本或倒退更新。同批次重建不重复升版，详见
 [发布规范](operations/engineering/open-source-release.md)。公开仓库只包含通用实现
 和空内容模板，不包含个人图片、Wiki 页面、数据库或密钥。
+
+## 对话文档与演示文稿摄入
+
+对话中的文件和粘贴正文复用 inbox 的分类、去重、校验与受管提交，不另建一套摄入管线。
+文件使用 `python3 .scripts/wg.py ingest <path> --keep-source --subproject academic`；
+粘贴正文通过标准输入传给
+`python3 .scripts/wg.py ingest --stdin --name notes.txt --subproject academic`。
+按内容选择实际领域，不必固定为 academic。文件原件即使位于 inbox 也保留，
+只清理受管暂存副本；纯文本按原始 UTF-8 字节保存，不先摘要或规范化正文。
+普通 inbox 的完成后清理规则不变。
+
+原生 `.pptx` 摄入逐页保存文字、表格、备注和对象位置，并在语义生成前由当前宿主
+对照本地页图复核全部页面、关键字段与非文本信息遗漏。原件、可读 companion 和
+来源记录共同归档，临时页图留在本地；旧 `.ppt` 需要显式转换。
+具体限制见[摄入契约](operations/INGEST.md)。
+
+2026年9月12日更新以兼容新增能力建立 `v0.6.0` 边界，不改变冻结论文产物。
+会议页在标题确定后绑定最终 Raw 路径；通用文档日期取自来源证据，未知时显式保留未知，
+不以摄入日代替。远程图片转写与复核使用独立 API 配置和显式上传许可
+（`IMAGE_OCR_ALLOW_REMOTE` 默认 false），不改变语义 backend，也不冒充人工复核。
 
 ## 论文与代码版本
 

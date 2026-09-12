@@ -1,4 +1,4 @@
-updated: '2026-09-07'
+updated: '2026-09-11'
 source: user-provided-provider-catalog
 enforced: false
 notes:
@@ -20,10 +20,12 @@ preferred:
   meeting_compiler: GLM-5.3-Flash
   ingest_proposition: MiniMax-M3
   visual_qa: GLM-5.3-Flash
+  visual_reconstruction: GLM-5.3-Flash
   semantic_recovery_agent: GLM-5.3-Flash
 fallback:
   image_ocr: GLM-4.6V
   visual_qa: GLM-4.6V
+  visual_reconstruction: GLM-4.5V
 image_generation:
   status: pending_probe
   api_profile: COMIC_IMAGE
@@ -68,6 +70,14 @@ agent_profiles:
     required_capabilities: [structured_json, multi_turn_tool_use, evidence_bounded_repair]
     activation: inherit_primary_model_until_evaluated
 visual_capabilities:
+  visual_reconstruction_selection:
+    date: '2026-09-11'
+    selected: GLM-5.3-Flash
+    fallback: GLM-4.5V
+    activation: explicit_user_instruction
+    probe_status: reconstruction_not_tested
+    notes:
+      - 用户明确要求直接替换原主模型 GLM-4.6V；未进行可编辑 PPT 重建质量对测，不借用 OCR/QA 结果宣称重建能力已验证。
   visual_qa_probe:
     date: '2026-09-07'
     endpoint: inherited_LLM_API_BASE

@@ -7,6 +7,27 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-12
+
+### Version decision
+
+- MINOR: Add compatible chat file/text intake with original retention and native PPTX ingestion with source-bound slide review; preserve existing managed commits and frozen paper artifacts.
+
+### Highlights
+
+- Added chat-file and UTF-8 text intake through the existing inbox pipeline,
+  preserving original files across success, duplicate handling, and recovery.
+- Added native PPTX extraction and source-bound, full-slide host review before
+  semantic generation, with atomic original/companion/provenance archiving.
+- Bound meeting sources to final Raw paths after title changes; derive ordinary
+  document dates from evidence and retain unknown dates instead of ingestion dates.
+- Separated consent-gated image API transcription/review from the semantic
+  backend, improved retry diagnostics and visual configuration, and expanded
+  ingestion and source-integrity regression coverage. The editable-PPT model
+  default changes independently; no reconstruction-quality improvement is claimed.
+- Synchronized the English/Chinese guides and printable introduction; preserved
+  the existing frozen paper artifacts and experimental boundaries.
+
 ## [0.5.0] - 2026-09-08
 
 ### Version decision

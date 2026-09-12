@@ -38,7 +38,7 @@ _AUTHOR_SURNAME_PARTICLES = {
 # 路径首段定域,未知域(cross-domain/projects/agents 等)回落到全集并集避免误伤非知识页
 TYPE_ENUM_BY_DOMAIN = {
     "academic": {"concept", "paper-summary", "people", "comparison", "review",
-                 "review-guide", "conference-summary", "discussion", "web-reference", "research-project", "topic-hub"},
+                 "review-guide", "editorial", "academic-reference", "conference-summary", "discussion", "web-reference", "research-project", "topic-hub"},
     "admin": {"policy", "procedure", "decision", "meeting-summary", "timeline-entry", "timeline-summary",
               "speech", "activity", "application", "profile", "reference", "web-reference", "topic-hub"},  # v4 加 timeline-summary; web-reference 2026-07-29
     "business": {"plan", "research", "competitor", "strategy", "project",
@@ -706,7 +706,7 @@ def extract_section_body(non_code_lines, name):
     return "\n".join(out)
 
 
-def graph_checks(path):
+def graph_checks(path, connection=None):
     """校验本页是否已入图，并做 paper 的确定性跨层一致性检查。"""
     import sqlite3
     try:
@@ -721,7 +721,7 @@ def graph_checks(path):
         db_path = REPO / "cross-domain" / "graph.db"
     if not db_path.exists():
         return ["graph: graph.db 不存在"], []
-    conn = sqlite3.connect(db_path)
+    conn = connection if connection is not None else sqlite3.connect(db_path)
     try:
         node = conn.execute("SELECT 1 FROM nodes WHERE path=?", (rel,)).fetchone()
         if not node:
@@ -900,7 +900,8 @@ def graph_checks(path):
 
         return errors, warnings
     finally:
-        conn.close()
+        if connection is None:
+            conn.close()
 
 
 def main():

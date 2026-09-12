@@ -137,7 +137,31 @@ def check_version_progression() -> None:
         assert release.version_progression_errors(repository, "0.5.0", changes, base)
 
 
+def check_documentation_omissions() -> None:
+    manifest = release.load_manifest()
+    with tempfile.TemporaryDirectory() as temporary:
+        destination = Path(temporary)
+        for path, term in [
+            ("README.md", "稿件诊断"),
+            ("README.zh-CN.md", "manuscript-diagnosis"),
+            ("CHANGELOG.md", "Manuscript Diagnosis"),
+            ("docs/introduction/example.md", "MANUSCRIPT ASSESSMENT"),
+            ("operations/engineering/open-source-assets/README.md", "manuscript_diagnosis"),
+        ]:
+            target = destination / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(term, encoding="utf-8")
+            errors = release.documentation_omission_errors(destination, manifest, {path})
+            assert len(errors) == 1 and path in errors[0], errors
+        skill_path = ".codex/skills/manuscript-diagnosis/SKILL.md"
+        target = destination / skill_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("稿件诊断 manuscript-diagnosis", encoding="utf-8")
+        assert not release.documentation_omission_errors(destination, manifest, {skill_path})
+
+
 def main() -> None:
+    check_documentation_omissions()
     check_version_preparation()
     check_version_progression()
     expected_version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
@@ -147,6 +171,28 @@ def main() -> None:
         subprocess.run(["git", "init", "-q"], cwd=destination, check=True)
         verified = run("verify", str(destination))
         assert "Public release verified" in verified.stdout
+        skill = destination / ".codex/skills/manuscript-diagnosis"
+        assert {p.relative_to(skill).as_posix() for p in skill.rglob("*") if p.is_file()} == {
+            "SKILL.md", "agents/openai.yaml", "scripts/diagnosis_preflight.py",
+            "scripts/test_diagnosis_preflight.py",
+        }
+        assert not (destination / "projects").exists()
+        private_ignored = subprocess.run(
+            ["git", "check-ignore", "projects/local-input/manuscript.pdf"],
+            cwd=destination, text=True, capture_output=True,
+        )
+        assert private_ignored.returncode == 0, private_ignored.stderr
+        skill_check = subprocess.run(
+            [sys.executable, "-B", str(skill / "scripts/test_diagnosis_preflight.py")],
+            cwd=destination, text=True, capture_output=True,
+        )
+        assert skill_check.returncode == 0, skill_check.stdout + skill_check.stderr
+        readme_path = destination / "README.md"
+        original_readme = readme_path.read_text(encoding="utf-8")
+        readme_path.write_text(original_readme + "\n稿件诊断\n", encoding="utf-8")
+        omitted = run("verify", str(destination), expected=1)
+        assert "unlisted feature in public documentation: README.md" in omitted.stderr
+        readme_path.write_text(original_readme, encoding="utf-8")
         assert (destination / "README.md").is_file()
         assert (destination / "README.zh-CN.md").is_file()
         assert (destination / "CHANGELOG.md").is_file()
@@ -273,6 +319,11 @@ def main() -> None:
         assert (destination / "operations/engineering/open-source-assets/README.md").is_file()
         graph_text = (destination / "operations/engineering/graph.yaml").read_text(encoding="utf-8")
         assert "frontier_store:" in graph_text
+        assert "manuscript_diagnosis_skill:" in graph_text
+        assert "manuscript_diagnosis_preflight:" in graph_text
+        assert "manuscript_diagnosis_style:" not in graph_text
+        assert "manuscript_diagnosis_style_library:" not in graph_text
+        assert "0730 PRL" not in graph_text
         assert "e1_experiment_workspace:" not in graph_text
         assert "e1_experiment_plan:" not in graph_text
         assert "e1_analysis:" not in graph_text

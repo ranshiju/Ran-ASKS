@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """来源定位解析与校验工具函数。"""
 from pathlib import Path
+import json
 import re
+from urllib.parse import unquote
 
 REPO = Path(__file__).resolve().parent.parent
 LOCATOR_RE = re.compile(r"^(?P<path>[^#]+)(?:#(?P<locator>.+))?$")
@@ -10,9 +12,10 @@ EXPLICIT_ANCHOR_RE = re.compile(
     r"\{:\s*#(?P<anchor>[A-Za-z][A-Za-z0-9_.:-]*)[^}]*\}"
 )
 PAGE_LOCATOR_RE = re.compile(r"^(?:page-?)?(?P<start>\d+)(?:-(?P<end>\d+))?$", re.I)
+TABLE_LOCATOR_RE = re.compile(r"^table:([^:]+):([A-Z]+(?:,[A-Z]+)*):R([1-9]\d*)(?:-R?([1-9]\d*))?$")
 TEXT_LOCATOR_SUFFIXES = {".md", ".txt", ".yaml", ".yml", ".json", ".jsonl", ".csv"}
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"})
-BINARY_SUFFIXES = {".pdf", ".docx", ".doc", ".pptx"} | IMAGE_SUFFIXES
+BINARY_SUFFIXES = {".pdf", ".docx", ".doc", ".pptx", ".xls", ".xlsx"} | IMAGE_SUFFIXES
 FACT_PREDICATES = {
     "作者", "通讯作者", "发表于", "引用", "参会", "就读", "所属", "主讲",
     "指导", "师从", "受指导于", "任职于", "研究关键词", "研究基础",
@@ -145,6 +148,52 @@ def valid_locator(locator, target):
         return locator == "全篇" or bool(line_range(locator)) or bool(locator.strip())
     return bool(locator)
 
+def table_locator_text(text, locator):
+    match = TABLE_LOCATOR_RE.fullmatch(locator)
+    if not match:
+        return None
+    sheet_name, column_names, first_row, last_row = match.groups()
+    sheet_name = unquote(sheet_name)
+    start, end = int(first_row), int(last_row or first_row)
+    if end < start:
+        return None
+    columns = []
+    for name in column_names.split(","):
+        number = 0
+        for character in name:
+            number = number * 26 + ord(character) - ord("A") + 1
+        columns.append(number - 1)
+    current_sheet = None
+    values_by_row = {}
+    try:
+        for line in text.splitlines():
+            if line.startswith("## 工作表 "):
+                current_sheet = json.loads(line.removeprefix("## 工作表 "))
+            if current_sheet != sheet_name:
+                continue
+            row_match = re.fullmatch(r"R(\d+): (.*)", line)
+            if not row_match:
+                continue
+            row_number = int(row_match.group(1))
+            if row_number != 1 and not start <= row_number <= end:
+                continue
+            values = json.loads(row_match.group(2))
+            if not isinstance(values, list) or max(columns) >= len(values) or row_number in values_by_row:
+                return None
+            values_by_row[row_number] = [values[column] for column in columns]
+    except (ValueError, TypeError):
+        return None
+    if 1 not in values_by_row or end - start + 1 > len(values_by_row):
+        return None
+    if any(row_number not in values_by_row for row_number in range(start, end + 1)):
+        return None
+    header = json.dumps(values_by_row[1], ensure_ascii=False)
+    lines = [f"工作表 {json.dumps(sheet_name, ensure_ascii=False)}；原始列 {column_names}；R1: {header}"]
+    lines.extend(f"R{row_number}: {json.dumps(values_by_row[row_number], ensure_ascii=False)}"
+                 for row_number in range(start, end + 1))
+    return "\n".join(lines)
+
+
 def locator_status(locator, target):
     """返回 present/missing/unverifiable，区分不存在与二进制材料不可机械核验。"""
     if not locator:
@@ -168,6 +217,8 @@ def locator_status(locator, target):
     if target.suffix.lower() in BINARY_SUFFIXES:
         return "unverifiable" if valid_locator(locator, target) else "missing"
     text = target.read_text(encoding="utf-8", errors="replace")
+    if locator.startswith("table:"):
+        return "present" if table_locator_text(text, locator) is not None else "missing"
     if locator == "全篇":
         return "present"
     lines = text.splitlines()
@@ -210,6 +261,8 @@ def read_locator_text(target, locator):
     if target.suffix.lower() in BINARY_SUFFIXES:
         return None
     text = target.read_text(encoding="utf-8", errors="replace")
+    if locator and locator.startswith("table:"):
+        return table_locator_text(text, locator)
     if not locator or locator == "全篇":
         return text
     requested = line_range(locator)

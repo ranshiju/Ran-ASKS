@@ -1908,6 +1908,23 @@ def test_inbox_state_supersede_requires_completed_same_source():
             assert stale["status"] == "superseded"
             assert stale["superseded_by"] == "new-txn"
 
+            old_document = "20260910-旧事务-软著证书"
+            new_document = "20260910-量子心电-软件著作权登记证书"
+            inbox_state.save(old_document, {**shared, "status": "agent_required"})
+            inbox_state.save(new_document, {**shared, "status": "completed"})
+            receipt = inbox_state.supersede_transaction(old_document, new_document)
+            assert receipt["status"] == "superseded"
+            assert inbox_state.load(old_document)["superseded_by"] == new_document
+
+            for invalid_id in ("../new-txn", "/tmp/new-txn", "..\\new-txn", "", "new-txn\n"):
+                for old_id, new_id in ((invalid_id, new_document), (old_document, invalid_id)):
+                    try:
+                        inbox_state.supersede_transaction(old_id, new_id)
+                    except ValueError as error:
+                        assert "invalid" in str(error)
+                    else:
+                        raise AssertionError("unsafe transaction ID must be rejected")
+
             inbox_state.save("other-txn", {
                 **shared, "source": "inbox/other.pdf", "status": "completed",
             })

@@ -395,6 +395,22 @@ def git_ignored_files(destination: Path, paths: set[str]) -> list[str]:
     return [line for line in checked.stdout.splitlines() if line]
 
 
+def documentation_omission_errors(destination: Path, manifest: dict, files: set[str]) -> list[str]:
+    """Keep explicitly unlisted features out of reader-facing Markdown, not runtime instructions."""
+    failures = []
+    for rule in manifest.get("documentation_omissions", []):
+        for path in sorted(files):
+            if not any(matches(path, pattern) for pattern in rule["paths"]):
+                continue
+            if any(matches(path, pattern) for pattern in rule.get("except", [])):
+                continue
+            text = (destination / path).read_text(encoding="utf-8", errors="ignore").casefold()
+            for term in rule["terms"]:
+                if term.casefold() in text:
+                    failures.append(f"unlisted feature in public documentation: {path} ({term})")
+    return failures
+
+
 def verify(destination: Path) -> int:
     manifest = load_manifest()
     destination = destination.resolve()
@@ -403,6 +419,7 @@ def verify(destination: Path) -> int:
         failures.append(f"missing release marker: {MARKER}")
     expected = expected_files(manifest)
     actual = actual_files(destination)
+    failures.extend(documentation_omission_errors(destination, manifest, actual))
     version = read_version()
     if version is None:
         failures.append(f"invalid or missing source release version: {VERSION_PATH.name}")

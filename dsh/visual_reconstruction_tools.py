@@ -105,7 +105,7 @@ def build_visual_reconstruction_tools() -> list[ToolDefinition]:
                     },
                     "model": {
                         "type": "string",
-                        "description": "主视觉模型，默认 GLM-4.6V",
+                        "description": "主视觉模型，默认 GLM-5.3-Flash",
                     },
                     "fallback_model": {
                         "type": "string",
