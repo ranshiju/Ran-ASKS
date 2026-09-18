@@ -7,8 +7,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-import fitz
+try:
 
+    import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+
+except ImportError:  # 旧版 PyMuPDF 只有 fitz
+
+    import fitz
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / ".scripts"))

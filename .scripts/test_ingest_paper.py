@@ -625,7 +625,10 @@ def test_agent_workspace_check_aggregates_independent_diagnostics():
 
 
 def test_extract_pdf_bibliography_reads_metadata_and_first_page_footer():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "thorne-2018-fever.pdf"
         doc = fitz.open()
@@ -651,7 +654,10 @@ def test_extract_pdf_bibliography_reads_metadata_and_first_page_footer():
 
 
 def test_extract_pdf_bibliography_prefers_published_year_and_aps_doi_venue():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -668,7 +674,10 @@ def test_extract_pdf_bibliography_prefers_published_year_and_aps_doi_venue():
 
 
 def test_extract_pdf_bibliography_reads_aps_venue_from_metadata_subject():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -683,7 +692,10 @@ def test_extract_pdf_bibliography_reads_aps_venue_from_metadata_subject():
 
 
 def test_extract_pdf_bibliography_reads_npj_venue_from_metadata_subject():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -724,7 +736,10 @@ def test_bibliographic_review_blocks_empty_venue_when_candidate_exists():
 
 
 def test_extract_pdf_bibliography_reads_published_conference_venue():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -739,7 +754,10 @@ def test_extract_pdf_bibliography_reads_published_conference_venue():
 
 
 def test_extract_pdf_bibliography_reads_iop_citation_venue():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -924,7 +942,10 @@ Discussion of the results.
 
 
 def test_extract_pdf_bibliography_reads_iop_wrapper_second_page_header():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -1776,8 +1797,10 @@ Published in Navigation Journal
 
 
 def test_agent_workspace_exposes_first_two_pdf_pages_for_bibliography():
-    import fitz
-
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         extract_dir = root / "temp/inbox-extract/txn-pages"

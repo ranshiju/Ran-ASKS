@@ -459,7 +459,10 @@ def detect_raw_relationship(state: dict, dup_graph: list) -> dict:
     filename_tokens = set(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", pdf_path.stem.lower()))
     # 从 PDF 第一页提取文本
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(pdf_path))
         first_page_text = doc[0].get_text("text")
         doc.close()
@@ -916,7 +919,10 @@ def ensure_unique_paper_id(paper_id: str) -> str:
 
 def extract_title_from_pdf(pdf_path: Path) -> str:
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(pdf_path))
         try:
             # 优先使用 PDF metadata title（最可靠，避免误提期刊抬头/页眉）
@@ -990,7 +996,10 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
         "arxiv_id": "", "doi": "", "evidence": {},
     }
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(pdf_path))
         try:
             metadata = doc.metadata or {}
@@ -3273,7 +3282,10 @@ def _file_sha256(path: Path) -> str:
 def materialize_bibliographic_pages(pdf_path: Path, output_path: Path) -> bool:
     """Write a bounded, page-labelled view for Agent bibliography review."""
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         document = fitz.open(str(pdf_path))
         try:
             pages = []

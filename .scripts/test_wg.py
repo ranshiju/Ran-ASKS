@@ -507,7 +507,10 @@ def test_read_raw_oversized_locator_requires_refinement():
 
 def test_read_raw_pdf_page_native():
     """有文本层 PDF 使用原始页码 locator，不需要 Markdown companion。"""
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     TEMP_TEST_DIR.mkdir(parents=True, exist_ok=True)
     p = TEMP_TEST_DIR / "native_pages.pdf"
     document = fitz.open()

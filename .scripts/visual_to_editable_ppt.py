@@ -36,7 +36,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-import fitz
+try:
+
+    import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+
+except ImportError:  # 旧版 PyMuPDF 只有 fitz
+
+    import fitz
 import numpy as np
 from PIL import Image, ImageColor, ImageDraw
 

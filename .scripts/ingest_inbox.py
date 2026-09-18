@@ -101,7 +101,10 @@ def read_pdf_text(path: Path, max_pages: int = 2) -> str:
     短篇 PDF（≤6 页）自动读全部页，避免末页参考文献漏读导致误分类。
     """
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(path))
         total = len(doc)
         pages = total if total <= 6 else min(max_pages, total)
@@ -128,7 +131,10 @@ def _is_academic_by_metadata(path: Path) -> bool:
     dvips/TeX/LaTeX 等生成器是强学术信号（几乎只用于论文/书籍排版）。
     """
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(path))
         creator = (doc.metadata.get("creator") or "").lower()
         producer = (doc.metadata.get("producer") or "").lower()

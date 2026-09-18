@@ -349,7 +349,10 @@ def _blsc_ocr_config() -> dict:
 def _render_pdf_pages(pdf_path: Path, dpi: int) -> Optional[list]:
     """将 PDF 每页渲染为 PNG 字节列表；PyMuPDF 不可用时返回 None。"""
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
     except ImportError:
         logger.warning("  ⚠️ BLSC OCR: PyMuPDF 未安装，无法渲染 PDF 页面")
         return None
@@ -538,7 +541,10 @@ def extract_pymupdf(paper_dir: Path, paper_id: str) -> Optional[str]:
         return None
     
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
     except ImportError:
         logger.warning("  ⚠️ PyMuPDF 未安装，跳过")
         return None

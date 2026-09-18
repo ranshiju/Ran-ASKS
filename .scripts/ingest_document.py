@@ -355,7 +355,10 @@ def _responsibility_supported(person: str, doc_text: str) -> bool:
 def _is_scanned_pdf(pdf_path: Path) -> bool:
     """检测 PDF 是否为扫描件：用 pymupdf 检查每页文本量，平均 <50 字符/页视为扫描件。"""
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(pdf_path))
         if len(doc) == 0:
             return True
