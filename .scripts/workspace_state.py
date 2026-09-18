@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import sqlite3
+from contextlib import closing
 import sys
 import tempfile
 from datetime import date, datetime, timezone
@@ -119,7 +120,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
@@ -682,7 +683,9 @@ def rebuild_index(root: Path) -> dict:
     fd, temporary = tempfile.mkstemp(prefix=".index.", suffix=".sqlite", dir=directory)
     os.close(fd)
     try:
-        with sqlite3.connect(temporary) as conn:
+        # closing(): sqlite3 的 with 只管事务不关连接；Windows 上残留句柄会锁住
+        # 该文件，令随后的替换/删除失败。
+        with closing(sqlite3.connect(temporary)) as conn:
             conn.executescript("""
                 PRAGMA journal_mode=DELETE;
                 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -1218,7 +1221,9 @@ def doctor(value: str | Path) -> dict:
         warnings.append("缺少 index.sqlite；运行 rebuild")
     else:
         try:
-            with sqlite3.connect(f"file:{index}?mode=ro", uri=True) as conn:
+            # URI 里必须是正斜杠，Windows 路径需先转换
+            uri = f"file:{index.resolve().as_posix()}?mode=ro"
+            with closing(sqlite3.connect(uri, uri=True)) as conn:
                 check = conn.execute("PRAGMA quick_check").fetchone()[0]
                 indexed_items = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
                 indexed_memories = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]

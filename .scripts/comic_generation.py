@@ -48,7 +48,7 @@ def _write_json_atomic(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(value, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
         os.replace(temporary, path)
@@ -62,7 +62,7 @@ def _write_json_atomic(path: Path, value: Any) -> None:
 
 def _append_jsonl(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(value, ensure_ascii=False) + "\n")
 
 
@@ -452,7 +452,7 @@ def generate_asset(
     plan = {
         "status": "dry_run" if dry_run else "planned",
         "project": project,
-        "output_root": str(directory.parent.parent.relative_to(repo.resolve())),
+        "output_root": directory.parent.parent.relative_to(repo.resolve()).as_posix(),
         "article_id": article_id,
         "asset_id": asset_id,
         "model": model,

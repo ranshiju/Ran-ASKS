@@ -12,7 +12,7 @@ def test_graph_flag_is_not_treated_as_path():
     import subprocess
     result = subprocess.run(
         [sys.executable, str(Path(__file__).with_name("ingest_check.py")), "--graph", "--help"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     assert "路径不存在,跳过: --graph" not in result.stderr
 
@@ -23,7 +23,7 @@ def test_graph_checks_with_isolated_database():
         repo = Path(directory).resolve()
         page = repo / "academic/wiki/papers/test.md"
         page.parent.mkdir(parents=True)
-        page.write_text("---\ntitle: Test\n---\n", encoding="utf-8")
+        page.write_text("---\ntitle: Test\n---\n", encoding="utf-8", newline="\n")
         db = repo / "cross-domain/graph.db"
         db.parent.mkdir()
         conn = sqlite3.connect(db)
@@ -109,7 +109,7 @@ def test_graph_checks_accepts_author_titles_paths_and_aliases_as_one_identity():
             "authors: [Shi-Ju Ran, Gang Su]\n"
             "venue: Journal\n---\n## Navigation\nX\n## Content\nX\n",
             encoding="utf-8",
-        )
+        newline="\n")
         db = repo / "cross-domain/graph.db"
         db.parent.mkdir()
         conn = sqlite3.connect(db)
@@ -157,7 +157,7 @@ def test_graph_checks_treats_proceedings_and_conference_venue_as_equivalent():
             "venue: 'Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing'\n"
             "---\n## Navigation\nX\n## Content\nX\n",
             encoding="utf-8",
-        )
+        newline="\n")
         db = repo / "cross-domain/graph.db"
         db.parent.mkdir()
         conn = sqlite3.connect(db)
@@ -185,7 +185,7 @@ def test_graph_checks_treats_proceedings_and_conference_venue_as_equivalent():
 
 
 def check(text, rel="academic/wiki/papers/test.md"):
-    with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8", delete=False) as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8", delete=False, newline="\n") as f:
         f.write(text)
         path = Path(f.name)
     try:
@@ -212,7 +212,7 @@ def test_academic_non_paper_types_validate_in_final_domain():
                     "created: 2026-09-10\nupdated: 2026-09-10\n"
                     "---\n## Navigation\nTest\n## Content\nTest\n",
                     encoding="utf-8",
-                )
+                newline="\n")
                 errors, _warnings = ingest_check.check_file(page, set(), set())
                 assert not errors, (page_type, errors)
                 assert page_type not in ingest_check.type_enum_for("admin/wiki/references/test.md")
@@ -226,8 +226,8 @@ def test_extract_engine_warns_on_non_mineru():
         repo = Path(directory).resolve()
         raw_dir = repo / "academic/raw/references/test-engine"
         raw_dir.mkdir(parents=True)
-        (raw_dir / "paper.md").write_text("# title\n", encoding="utf-8")
-        (raw_dir / "parse_meta.yaml").write_text("preferred: pymupdf\n", encoding="utf-8")
+        (raw_dir / "paper.md").write_text("# title\n", encoding="utf-8", newline="\n")
+        (raw_dir / "parse_meta.yaml").write_text("preferred: pymupdf\n", encoding="utf-8", newline="\n")
         page = repo / "academic/wiki/papers/test.md"
         page.parent.mkdir(parents=True)
         page.write_text(
@@ -238,7 +238,7 @@ def test_extract_engine_warns_on_non_mineru():
             "created: 2026-07-27\nupdated: 2026-07-27\n"
             "---\n## Navigation\nx\n## Content\ny\n",
             encoding="utf-8",
-        )
+        newline="\n")
         old_repo = ingest_check.REPO
         ingest_check.REPO = repo
         try:
@@ -249,7 +249,7 @@ def test_extract_engine_warns_on_non_mineru():
         assert any("mineru" in w for w in warnings), f"expected non-mineru warn, got {warnings}"
 
         # mineru 不报
-        (raw_dir / "parse_meta.yaml").write_text("preferred: mineru\n", encoding="utf-8")
+        (raw_dir / "parse_meta.yaml").write_text("preferred: mineru\n", encoding="utf-8", newline="\n")
         ingest_check.REPO = repo
         try:
             errors, warnings = ingest_check.check_file(page, set(), set())
@@ -264,7 +264,7 @@ def test_bibliographic_consistency_uses_published_year_and_aps_doi():
         repo = Path(directory).resolve()
         raw_dir = repo / "academic/raw/references/demo"
         raw_dir.mkdir(parents=True)
-        (raw_dir / "paper.md").write_text("# Demo\n", encoding="utf-8")
+        (raw_dir / "paper.md").write_text("# Demo\n", encoding="utf-8", newline="\n")
         (raw_dir / "source.yaml").write_text(
             "bibliographic:\n"
             "  year: '2012'\n"
@@ -283,7 +283,7 @@ def test_bibliographic_consistency_uses_published_year_and_aps_doi():
             "status: current\ncreated: 2026-08-24\nupdated: 2026-08-24\n---\n"
             "## Navigation\nx\n## Content\ny\n",
             encoding="utf-8",
-        )
+        newline="\n")
         old_repo = ingest_check.REPO
         ingest_check.REPO = repo
         try:
@@ -346,7 +346,7 @@ def test_coverage_anchors_prefer_locked_title_over_publisher_wrapper_h1():
         (raw_dir / "paper.md").write_text(
             "# COMMUNICATIONS PHYSICS\n\n# Complex networks from classical to quantum\n",
             encoding="utf-8",
-        )
+        newline="\n")
         (raw_dir / "source.yaml").write_text(
             "bibliographic:\n"
             "  title: Complex networks from classical to quantum\n"
@@ -391,7 +391,7 @@ def test_coverage_anchors_expand_only_truncated_locked_surname_particle():
             "# Energy as a Detector of Nonlocality\n\n"
             "J. Tura, G. De las Cuevas, R. Augusiak\n",
             encoding="utf-8",
-        )
+        newline="\n")
         (raw_dir / "source.yaml").write_text(
             "bibliographic:\n"
             "  authors: [J. Tura, G. De, R. Augusiak]\n"
@@ -423,7 +423,7 @@ def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
         page = repo / "academic/wiki/papers/demo.md"
         raw.parent.mkdir(parents=True)
         page.parent.mkdir(parents=True)
-        raw.write_text("# Demo\n\nSupported fact.\n", encoding="utf-8")
+        raw.write_text("# Demo\n\nSupported fact.\n", encoding="utf-8", newline="\n")
         page.write_text(
             "---\ntitle: Demo\ntype: paper-summary\n"
             "sources: [academic/raw/references/demo/paper.md]\n"
@@ -433,7 +433,7 @@ def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
             "## Content\n\n### Method\n\nSupported fact.[^r1]\n\n"
             "## Sources\n\n[^r1]: academic/raw/references/demo/paper.md#L3\n",
             encoding="utf-8",
-        )
+        newline="\n")
         old_repos = (ingest_check.REPO, ingest_check.wl.REPO,
                      ingest_check.wl.raw_locator.REPO)
         ingest_check.REPO = repo
@@ -444,10 +444,10 @@ def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
             assert not errors
             valid_text = page.read_text(encoding="utf-8")
             page.write_text(valid_text.replace("Supported fact.[^r1]", "Supported fact.[^r1]6>"),
-                            encoding="utf-8")
+                            encoding="utf-8", newline="\n")
             errors, _warnings = ingest_check.check_file(page, set(), set())
             assert any("残缺 RAW 脚注引用" in error for error in errors)
-            page.write_text(valid_text.replace("#L3", "#L30"), encoding="utf-8")
+            page.write_text(valid_text.replace("#L3", "#L30"), encoding="utf-8", newline="\n")
             errors, _warnings = ingest_check.check_file(page, set(), set())
         finally:
             (ingest_check.REPO, ingest_check.wl.REPO,

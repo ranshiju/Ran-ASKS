@@ -26,7 +26,7 @@ def test_derive_evidence_profile_from_retrieved_pages():
             "related: ['[[papers/other]]']\n"
             "---\n\n## Navigation\nExample.\n",
             encoding="utf-8",
-        )
+        newline="\n")
         original_repo = MODULE.REPO
         MODULE.REPO = root
         try:

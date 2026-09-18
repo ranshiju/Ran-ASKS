@@ -276,13 +276,13 @@ def extract_pdf_with_mineru(
             "batch_id": batch_id,
             "model_version": model_version,
             "state": result.get("state"),
-            "markdown_name": str(markdown_path.relative_to(job_dir)),
+            "markdown_name": markdown_path.relative_to(job_dir).as_posix(),
             "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         }
         (job_dir / "mineru_meta.json").write_text(
             json.dumps(meta, ensure_ascii=False, indent=2),
             encoding="utf-8",
-        )
+        newline="\n")
         return content
     finally:
         if temp_root is not None:

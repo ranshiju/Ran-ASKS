@@ -87,7 +87,7 @@ def check_all_hubs():
             text = f.read_text(encoding="utf-8")
             if "hub_subtype: research-direction" not in text:
                 continue
-            cnt = hub_keyword_count(str(f.relative_to(REPO)))
+            cnt = hub_keyword_count(f.relative_to(REPO).as_posix())
             if cnt >= SPLIT_THRESHOLD:
                 over.append({"path": f.relative_to(REPO).as_posix(), "count": cnt})
     return over
@@ -238,7 +238,7 @@ updated: {today}
 ## 关键词
 
 """
-    sub_file.write_text(content, encoding="utf-8")
+    sub_file.write_text(content, encoding="utf-8", newline="\n")
     return sub_path
 
 
@@ -457,7 +457,7 @@ def _update_hub_seeds(hub_path, seeds):
     fm["seeds"] = seeds
     new_fm = yaml.dump(fm, allow_unicode=True, default_flow_style=False, sort_keys=False)
     new_text = m.group(1) + new_fm + m.group(3) + text[m.end():]
-    p.write_text(new_text, encoding="utf-8")
+    p.write_text(new_text, encoding="utf-8", newline="\n")
 
 
 def ensure_hub_seeds(hub_path, min_seeds=MIN_SEEDS, target_count=SUBHUB_SEED_COUNT, exclude_seeds=None):
@@ -952,7 +952,7 @@ def _reparent_children(conn, source_hub, target_hub):
         if fm.get("parent") == source_hub:
             fm["parent"] = target_hub
             new_fm = yaml.dump(fm, allow_unicode=True, default_flow_style=False, sort_keys=False)
-            child_file.write_text(m.group(1) + new_fm + m.group(3) + text[m.end():], encoding="utf-8")
+            child_file.write_text(m.group(1) + new_fm + m.group(3) + text[m.end():], encoding="utf-8", newline="\n")
 
 def execute_merge_group(conn, group_hubs):
     """执行一个合并组: 选 keyword 最多的为 target, 其余合并进去。
@@ -1182,7 +1182,7 @@ def dedup_seeds():
             resolved += len(old_seeds) - len(new_seeds)
             direction["seeds"] = new_seeds
     yaml_path.write_text(yaml.dump(yaml_data, allow_unicode=True, default_flow_style=False, sort_keys=False),
-                         encoding="utf-8")
+                         encoding="utf-8", newline="\n")
 
     # Apply removals to hub frontmatter (sub-directions)
     for name, seeds_to_remove in removals.items():
@@ -1285,7 +1285,7 @@ def rename_hub(conn, old_path, new_name):
         return {"old": old_path, "new": new_path, "merged": True}
 
     # 2. Write to new file & delete old
-    new_file.write_text(text, encoding="utf-8")
+    new_file.write_text(text, encoding="utf-8", newline="\n")
     old_file.unlink()
 
     # 3. Update graph.db: nodes path
@@ -1316,7 +1316,7 @@ def rename_hub(conn, old_path, new_name):
         if fm.get("parent") and old_path in str(fm["parent"]):
             fm["parent"] = new_path
             new_fm = yaml.dump(fm, allow_unicode=True, default_flow_style=False, sort_keys=False)
-            child_file.write_text(m.group(1) + new_fm + m.group(3) + ct[m.end():], encoding="utf-8")
+            child_file.write_text(m.group(1) + new_fm + m.group(3) + ct[m.end():], encoding="utf-8", newline="\n")
             children_updated += 1
 
     edges_updated = conn.execute(
@@ -1440,7 +1440,7 @@ def enforce_name_seed_exclusivity():
             direction["seeds"] = new_seeds
 
     yaml_path.write_text(yaml.dump(yaml_data, allow_unicode=True, default_flow_style=False, sort_keys=False),
-                         encoding="utf-8")
+                         encoding="utf-8", newline="\n")
 
     # Check & remove from hub frontmatter (sub-directions)
     refilled = 0

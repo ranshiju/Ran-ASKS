@@ -79,8 +79,8 @@ def test_sync_file_nodes_groups_same_stem_raw_companions():
             "---\ntitle: Demo\ntype: paper-summary\nsources:\n"
             "  - academic/raw/references/demo/paper.md\n---\n",
             encoding="utf-8",
-        )
-        (raw_dir / "paper.md").write_text("# Demo\n", encoding="utf-8")
+        newline="\n")
+        (raw_dir / "paper.md").write_text("# Demo\n", encoding="utf-8", newline="\n")
         (raw_dir / "paper.pdf").write_bytes(b"%PDF-1.4")
         original_repo = gl.REPO
         try:
@@ -162,8 +162,8 @@ def test_description_audit_only_selects_source_backed_keyword_origins():
             "---\ntitle: Demo\ntype: paper-summary\nsources:\n"
             "  - academic/raw/references/demo/paper.md\n---\n",
             encoding="utf-8",
-        )
-        raw.write_text("# Demo\n", encoding="utf-8")
+        newline="\n")
+        raw.write_text("# Demo\n", encoding="utf-8", newline="\n")
         original_repo = gl.REPO
         try:
             gl.REPO = root

@@ -99,12 +99,12 @@ def prepare_version(level: str, reason: str, from_version: str, *, apply: bool =
     writes = {VERSION_PATH: new_version + "\n", changelog: updated, REPO / "CHANGELOG.md": updated}
     plan = {"status": "applied" if apply else "planned", "from": current, "to": new_version,
             "level": level, "reason": reason.strip(), "date": dated,
-            "writes": [str(path.relative_to(REPO)) for path in writes]}
+            "writes": [path.relative_to(REPO).as_posix() for path in writes]}
     if apply:
         originals = {path: path.read_bytes() if path.exists() else None for path in writes}
         try:
             for path, content in writes.items():
-                path.write_text(content, encoding="utf-8")
+                path.write_text(content, encoding="utf-8", newline="\n")
         except OSError:
             for path, content in originals.items():
                 if content is None:
@@ -175,7 +175,7 @@ def git_publication_diff(destination: Path) -> tuple[set[str], str | None]:
     inside = subprocess.run(
         ["git", "rev-parse", "--is-inside-work-tree"],
         cwd=destination,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
     )
     if inside.returncode != 0 or inside.stdout.strip() != "true":
@@ -183,7 +183,7 @@ def git_publication_diff(destination: Path) -> tuple[set[str], str | None]:
     has_head = subprocess.run(
         ["git", "rev-parse", "--verify", "HEAD"],
         cwd=destination,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
     )
     if has_head.returncode != 0:
@@ -191,14 +191,14 @@ def git_publication_diff(destination: Path) -> tuple[set[str], str | None]:
     tracked = subprocess.run(
         ["git", "diff", "HEAD", "--name-only", "--"],
         cwd=destination,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=True,
     )
     untracked = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard"],
         cwd=destination,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=True,
     )
@@ -212,7 +212,7 @@ def git_publication_diff(destination: Path) -> tuple[set[str], str | None]:
     has_parent = subprocess.run(
         ["git", "rev-parse", "--verify", "HEAD^"],
         cwd=destination,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
     )
     if has_parent.returncode != 0:
@@ -220,7 +220,7 @@ def git_publication_diff(destination: Path) -> tuple[set[str], str | None]:
     latest = subprocess.run(
         ["git", "diff", "HEAD^", "HEAD", "--name-only", "--"],
         cwd=destination,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=True,
     )
@@ -235,7 +235,7 @@ def version_progression_errors(destination: Path, version: str, changes: set[str
     if not changes or base is None:
         return []
     previous = subprocess.run(["git", "show", f"{base}:VERSION"], cwd=destination,
-                              text=True, capture_output=True)
+                              text=True, encoding="utf-8", errors="replace", capture_output=True)
     if previous.returncode != 0:
         return ["public update baseline has no VERSION; review the baseline before publishing"]
     old_version = previous.stdout.strip()
@@ -292,7 +292,7 @@ def write_projected_engineering_graph(destination: Path) -> None:
         yaml.safe_dump(projected_engineering_graph(destination), allow_unicode=True,
                        width=100000, sort_keys=False),
         encoding="utf-8",
-    )
+    newline="\n")
 
 
 def clear_destination(destination: Path) -> None:
@@ -363,7 +363,7 @@ def stamp_readmes(destination: Path, version: str) -> None:
                 raise ValueError(f"destination {name} has no first heading for version stamping")
             insert_at = match.end()
             text = text[:insert_at] + badge + "\n" + text[insert_at:]
-        readme.write_text(text, encoding="utf-8")
+        readme.write_text(text, encoding="utf-8", newline="\n")
 
 
 def actual_files(destination: Path) -> set[str]:
@@ -378,21 +378,24 @@ def git_ignored_files(destination: Path, paths: set[str]) -> list[str]:
     probe = subprocess.run(
         ["git", "rev-parse", "--is-inside-work-tree"],
         cwd=destination,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
     )
     if probe.returncode != 0:
         return []
+    # 用字节流收发：文本模式在 Windows 上会把写入 stdin 的 \n 转成 \r\n，
+    # git 会把尾随的 \r 当成路径的一部分。
     checked = subprocess.run(
         ["git", "check-ignore", "--no-index", "--stdin"],
         cwd=destination,
-        input="\n".join(sorted(paths)) + "\n",
-        text=True,
+        input=("\n".join(sorted(paths)) + "\n").encode("utf-8"),
         capture_output=True,
     )
     if checked.returncode not in (0, 1):
-        raise ValueError(f"git ignore audit failed: {checked.stderr.strip()}")
-    return [line for line in checked.stdout.splitlines() if line]
+        stderr = checked.stderr.decode("utf-8", "replace")
+        raise ValueError(f"git ignore audit failed: {stderr.strip()}")
+    stdout = checked.stdout.decode("utf-8", "replace")
+    return [line for line in stdout.splitlines() if line]
 
 
 def documentation_omission_errors(destination: Path, manifest: dict, files: set[str]) -> list[str]:

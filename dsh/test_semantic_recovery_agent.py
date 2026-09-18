@@ -182,7 +182,7 @@ def test_ingest_accepts_only_validator_passed_proposal():
         semantic = root / "temp" / "inbox-state" / "semantic.txt"
         semantic.parent.mkdir(parents=True)
         original = "三元组:\n本文 | 实验/结果 | 纠缠熵增长\n"
-        semantic.write_text(original, encoding="utf-8")
+        semantic.write_text(original, encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "txn-integration",
             "semantic_path": "temp/inbox-state/semantic.txt",
@@ -230,7 +230,7 @@ def test_ingest_restores_rejected_candidate():
         semantic = root / "temp" / "inbox-state" / "semantic.txt"
         semantic.parent.mkdir(parents=True)
         original = "三元组:\n本文 | 实验/结果 | 纠缠熵增长\n"
-        semantic.write_text(original, encoding="utf-8")
+        semantic.write_text(original, encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "txn-rollback",
             "semantic_path": "temp/inbox-state/semantic.txt",
@@ -276,7 +276,7 @@ def test_ingest_rejects_non_staged_semantic_path_without_model_call():
         root = Path(directory)
         raw = root / "raw" / "source.txt"
         raw.parent.mkdir(parents=True)
-        raw.write_text("三元组:\n本文 | 实验/结果 | B\n", encoding="utf-8")
+        raw.write_text("三元组:\n本文 | 实验/结果 | B\n", encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "txn-redline",
             "semantic_path": "raw/source.txt",
@@ -330,7 +330,7 @@ def test_eval_routing_policy_allows_no_fallback_and_excludes_gpt():
                     "text_model: AWS-GPT-5.6-Terra",
                 ),
                 encoding="utf-8",
-            )
+            newline="\n")
             try:
                 sre.validate_routing_policy()
             except ValueError as exc:

@@ -2,6 +2,10 @@ import importlib.util
 import json
 import tempfile
 from pathlib import Path
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / ".scripts"))
+import platform_compat as _pc
 
 SCRIPT = Path(__file__).with_name("inbox_finalize.py")
 spec = importlib.util.spec_from_file_location("inbox_finalize", SCRIPT)
@@ -19,7 +23,7 @@ def workspace():
 
 def manifest(extract, raw_files, wiki_file="wiki.md"):
     path = extract / "manifest.json"
-    path.write_text(json.dumps({"raw_files": raw_files, "wiki_file": wiki_file}), encoding="utf-8")
+    path.write_text(json.dumps({"raw_files": raw_files, "wiki_file": wiki_file}), encoding="utf-8", newline="\n")
     return path
 
 
@@ -34,9 +38,9 @@ def test_manifest_only_copies_declared_entity_files_and_writes_receipt():
     directory, root, extract = workspace()
     try:
         (extract / "paper.pdf").write_bytes(b"pdf")
-        (extract / "paper.md").write_text("# paper", encoding="utf-8")
-        (extract / "entity-resolution.json").write_text("derived", encoding="utf-8")
-        (extract / "wiki.md").write_text("---\ntitle: Demo\n---", encoding="utf-8")
+        (extract / "paper.md").write_text("# paper", encoding="utf-8", newline="\n")
+        (extract / "entity-resolution.json").write_text("derived", encoding="utf-8", newline="\n")
+        (extract / "wiki.md").write_text("---\ntitle: Demo\n---", encoding="utf-8", newline="\n")
         manifest(extract, ["paper.pdf", "paper.md"])
 
         receipt = finalize(root, extract)
@@ -56,7 +60,7 @@ def test_rejects_existing_destination_without_partial_write():
     directory, root, extract = workspace()
     try:
         (extract / "paper.pdf").write_bytes(b"pdf")
-        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8", newline="\n")
         manifest(extract, ["paper.pdf"])
         existing = root / "academic/raw/references/demo"
         existing.mkdir(parents=True)
@@ -75,12 +79,12 @@ def test_rejects_existing_destination_without_partial_write():
 def test_allows_existing_raw_container_only_with_explicit_flag():
     directory, root, extract = workspace()
     try:
-        (extract / "0731.txt").write_text("meeting", encoding="utf-8")
-        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        (extract / "0731.txt").write_text("meeting", encoding="utf-8", newline="\n")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8", newline="\n")
         manifest(extract, ["0731.txt"])
         container = root / "academic/raw/conferences/2026"
         container.mkdir(parents=True)
-        (container / "0730.txt").write_text("existing meeting", encoding="utf-8")
+        (container / "0730.txt").write_text("existing meeting", encoding="utf-8", newline="\n")
 
         receipt = module.finalize(
             root, "0731", container, root / "academic/wiki/conferences/0731.md",
@@ -98,12 +102,12 @@ def test_allows_existing_raw_container_only_with_explicit_flag():
 def test_existing_raw_container_rejects_manifest_file_collision():
     directory, root, extract = workspace()
     try:
-        (extract / "0731.txt").write_text("new", encoding="utf-8")
-        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        (extract / "0731.txt").write_text("new", encoding="utf-8", newline="\n")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8", newline="\n")
         manifest(extract, ["0731.txt"])
         container = root / "academic/raw/conferences/2026"
         container.mkdir(parents=True)
-        (container / "0731.txt").write_text("existing", encoding="utf-8")
+        (container / "0731.txt").write_text("existing", encoding="utf-8", newline="\n")
 
         try:
             module.finalize(
@@ -120,12 +124,15 @@ def test_existing_raw_container_rejects_manifest_file_collision():
 
 
 def test_rejects_derived_symlink_and_cleanup_only_follows_commit():
+    if not _pc.symlinks_available():
+        print("  SKIP test_rejects_derived_symlink_and_cleanup_only_follows_commit: " + _pc.SYMLINK_SKIP_REASON)
+        return
     directory, root, extract = workspace()
     try:
         external = root / "external.pdf"
         external.write_bytes(b"pdf")
         (extract / "paper.pdf").symlink_to(external)
-        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8", newline="\n")
         manifest(extract, ["paper.pdf"])
 
         try:
@@ -142,7 +149,7 @@ def test_cleanup_removes_only_committed_item_directory():
     directory, root, extract = workspace()
     try:
         (extract / "paper.pdf").write_bytes(b"pdf")
-        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8", newline="\n")
         manifest(extract, ["paper.pdf"])
 
         original_check = module.run_ingest_check
@@ -163,9 +170,9 @@ def test_cleanup_removes_hidden_extractor_directories():
     directory, root, extract = workspace()
     try:
         (extract / "paper.pdf").write_bytes(b"pdf")
-        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8", newline="\n")
         (extract / ".mineru").mkdir()
-        (extract / ".mineru" / "trace.json").write_text("{}", encoding="utf-8")
+        (extract / ".mineru" / "trace.json").write_text("{}", encoding="utf-8", newline="\n")
         manifest(extract, ["paper.pdf"])
         original_check = module.run_ingest_check
         module.run_ingest_check = lambda project_root, wiki_path: None
@@ -183,7 +190,7 @@ def test_failed_ingest_check_retains_committed_files_and_extract_directory():
     directory, root, extract = workspace()
     try:
         (extract / "paper.pdf").write_bytes(b"pdf")
-        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8", newline="\n")
         manifest(extract, ["paper.pdf"])
         original_check = module.run_ingest_check
         module.run_ingest_check = lambda project_root, wiki_path: (_ for _ in ()).throw(ValueError("ingest_check failed"))
@@ -205,7 +212,7 @@ def test_rejects_paths_outside_inbox_raw_and_wiki_boundaries():
     directory, root, extract = workspace()
     try:
         (extract / "paper.pdf").write_bytes(b"pdf")
-        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8", newline="\n")
         manifest(extract, ["paper.pdf"])
 
         try:

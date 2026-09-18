@@ -17,7 +17,7 @@ def run(path: Path, expected: int = 0) -> subprocess.CompletedProcess:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "verify", str(path)],
         cwd=REPO,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
     )
     assert result.returncode == expected, result.stdout + result.stderr
@@ -48,7 +48,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         copied = Path(temporary) / "artifact"
         shutil.copytree(ARTIFACT, copied)
-        with (copied / "metrics/trajectory.csv").open("a", encoding="utf-8") as handle:
+        with (copied / "metrics/trajectory.csv").open("a", encoding="utf-8", newline="\n") as handle:
             handle.write("tampered\n")
         failed = run(copied, expected=1)
         assert "checksum mismatch" in failed.stderr

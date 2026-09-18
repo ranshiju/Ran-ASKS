@@ -514,7 +514,7 @@ def main():
             ap.error("--output 必须位于仓库内")
         from contextlib import redirect_stdout
         output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("w", encoding="utf-8") as handle, redirect_stdout(handle):
+        with output.open("w", encoding="utf-8", newline="\n") as handle, redirect_stdout(handle):
             gen_skeleton(args.page, args, args.raw, args.source)
     else:
         gen_skeleton(args.page, args, args.raw, args.source)

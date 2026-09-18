@@ -72,7 +72,7 @@ def _log_event(operation: str, result: dict, prompt: str, output_text: str = "",
         }
         EVENTS_DIR.mkdir(parents=True, exist_ok=True)
         day = time.strftime("%Y-%m-%d")
-        with (EVENTS_DIR / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
+        with (EVENTS_DIR / f"{day}.jsonl").open("a", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
         return event
     except Exception:

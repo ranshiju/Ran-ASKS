@@ -37,7 +37,7 @@ def test_text_hash_is_candidate_only():
         text = raw.with_name("paper.md")
         raw.parent.mkdir(parents=True)
         raw.write_bytes(b"pdf-a")
-        text.write_text("Title\n\nBody", encoding="utf-8")
+        text.write_text("Title\n\nBody", encoding="utf-8", newline="\n")
         candidate = root / "candidate.md"
         candidate.write_text(" title   body ", encoding="utf-8")
         sf.register_source(raw, text_path=text, db_path=db, repo=root)
@@ -55,14 +55,14 @@ def test_rebuild_does_not_modify_raw_and_skips_sidecars():
         md = package / "paper.md"
         source = package / "source.yaml"
         pdf.write_bytes(b"pdf")
-        md.write_text("content", encoding="utf-8")
-        source.write_text("source_type: copy\n", encoding="utf-8")
+        md.write_text("content", encoding="utf-8", newline="\n")
+        source.write_text("source_type: copy\n", encoding="utf-8", newline="\n")
         docx = package / "report.docx"
         companion = package / "report.md"
         docx.write_bytes(b"docx")
-        companion.write_text("generated extraction", encoding="utf-8")
+        companion.write_text("generated extraction", encoding="utf-8", newline="\n")
         standalone = package / "notes.md"
-        standalone.write_text("original markdown", encoding="utf-8")
+        standalone.write_text("original markdown", encoding="utf-8", newline="\n")
         paths = (pdf, md, source, docx, companion, standalone)
         before = {path: path.read_bytes() for path in paths}
         db = root / "fingerprints.db"
@@ -78,10 +78,10 @@ def test_image_raw_package_indexes_only_original_and_preserves_standalone_json()
         package.mkdir(parents=True)
         original = package / "form.JPG"
         original.write_bytes(b"image")
-        (package / "form.md").write_text("faithful transcription", encoding="utf-8")
-        (package / "form.JPG.source.json").write_text('{"schema":"document-source-context-v1"}', encoding="utf-8")
+        (package / "form.md").write_text("faithful transcription", encoding="utf-8", newline="\n")
+        (package / "form.JPG.source.json").write_text('{"schema":"document-source-context-v1"}', encoding="utf-8", newline="\n")
         standalone = package / "data.json"
-        standalone.write_text('{"amount":15000}', encoding="utf-8")
+        standalone.write_text('{"amount":15000}', encoding="utf-8", newline="\n")
         before = {path: path.read_bytes() for path in package.iterdir()}
         db = root / "fingerprints.db"
         result = sf.rebuild(db_path=db, roots=(root / "admin/raw",), repo=root)

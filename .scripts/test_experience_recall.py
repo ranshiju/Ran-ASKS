@@ -19,7 +19,7 @@ def recall(*args):
     return subprocess.run(
         [sys.executable, str(SCRIPT), "recall", *args],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=True,
     )
 
@@ -95,7 +95,7 @@ def test_unknown_capability_rejected():
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "recall", "--capability", "unknown"],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     assert result.returncode != 0
     assert "invalid choice" in result.stderr

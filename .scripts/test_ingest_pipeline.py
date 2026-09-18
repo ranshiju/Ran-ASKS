@@ -157,8 +157,8 @@ def test_conference_skeleton_raw_lookup():
         raw = repo / "academic/raw/conferences/2026/0728-1-demo/0728-1-demo.txt"
         corrected = raw.parent / "corrected.md"
         raw.parent.mkdir(parents=True)
-        raw.write_text("会议原文\n", encoding="utf-8")
-        corrected.write_text("历史修正版\n", encoding="utf-8")
+        raw.write_text("会议原文\n", encoding="utf-8", newline="\n")
+        corrected.write_text("历史修正版\n", encoding="utf-8", newline="\n")
         old_repo = wiki_skeleton.REPO
         wiki_skeleton.REPO = repo
         try:
@@ -174,7 +174,7 @@ def test_conference_skeleton_contract():
         repo = Path(directory).resolve()
         raw = repo / "academic/raw/conferences/2026/0728-1-demo/0728-1-demo.txt"
         raw.parent.mkdir(parents=True)
-        raw.write_text("会议原文\n", encoding="utf-8")
+        raw.write_text("会议原文\n", encoding="utf-8", newline="\n")
         old_repo = wiki_skeleton.REPO
         wiki_skeleton.REPO = repo
         try:
@@ -355,7 +355,7 @@ def test_conference_prefill_uses_meeting_keyword_slot(capsys):
         repo = Path(directory).resolve()
         page = repo / "academic/wiki/conferences/0728-demo.md"
         page.parent.mkdir(parents=True)
-        page.write_text("---\ntitle: 会议金样\ntype: conference-summary\n---\n", encoding="utf-8")
+        page.write_text("---\ntitle: 会议金样\ntype: conference-summary\n---\n", encoding="utf-8", newline="\n")
         old_repo, old_db = graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB
         graph_ingest.gl.REPO = repo
         graph_ingest.gl.GRAPH_DB = repo / "cross-domain/graph.db"
@@ -377,7 +377,7 @@ def test_graph_check_end_to_end_fixture():
         repo = Path(directory).resolve()
         page = repo / "academic/wiki/papers/test.md"
         page.parent.mkdir(parents=True)
-        page.write_text("---\ntitle: Test\n---\n", encoding="utf-8")
+        page.write_text("---\ntitle: Test\n---\n", encoding="utf-8", newline="\n")
         db = repo / "cross-domain/graph.db"
         db.parent.mkdir()
         conn = sqlite3.connect(db)
@@ -408,7 +408,7 @@ def test_replayable_conference_ingest():
         page.parent.mkdir(parents=True)
         catch_all.parent.mkdir(parents=True)
         (repo / "cross-domain").mkdir()
-        raw.write_text("# 0728 demo\n", encoding="utf-8")
+        raw.write_text("# 0728 demo\n", encoding="utf-8", newline="\n")
         page.write_text("""---
 title: 会议金样
 type: conference-summary
@@ -426,10 +426,10 @@ status: current
 ## Content
 ### 一、讨论
 模型压缩。
-""", encoding="utf-8")
-        catch_all.write_text("# 未归类关键词\n\n## 关键词\n", encoding="utf-8")
+""", encoding="utf-8", newline="\n")
+        catch_all.write_text("# 未归类关键词\n\n## 关键词\n", encoding="utf-8", newline="\n")
         legacy_catch_all = catch_all.read_text(encoding="utf-8")
-        semantic.write_text("参会者:\ncnu-wu-xi\n三元组:\n本会议 | 讨论 | 模型压缩\n本会议 | 规划 | CoT评测\n", encoding="utf-8")
+        semantic.write_text("参会者:\ncnu-wu-xi\n三元组:\n本会议 | 讨论 | 模型压缩\n本会议 | 规划 | CoT评测\n", encoding="utf-8", newline="\n")
         old_repo, old_db = graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB
         old_check_repo = ingest_check.REPO
         graph_ingest.gl.REPO = repo
@@ -479,8 +479,8 @@ def test_paper_ingest_filters_unsupported_derived_direction():
             "updated: 2026-07-31\nstatus: current\n---\n## Navigation\n\n"
             "This page does not name the derived direction or its seed.\n\n## Content\n",
             encoding="utf-8",
-        )
-        semantic.write_text("研究关键词:\nkeyword-one\nkeyword-two\n", encoding="utf-8")
+        newline="\n")
+        semantic.write_text("研究关键词:\nkeyword-one\nkeyword-two\n", encoding="utf-8", newline="\n")
         old_repo, old_db = graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB
         graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB = repo, repo / "cross-domain/graph.db"
         try:
@@ -648,7 +648,7 @@ def test_upsert_page_node_preserves_unknown_date_as_empty():
         page_file.write_text(
             "---\ntitle: Undated conference\ntype: conference-summary\ndate: null\n---\n",
             encoding="utf-8",
-        )
+        newline="\n")
         conn = graph_ingest.gl.connect(db_path)
         graph_ingest.gl.init_schema(conn)
         page = "academic/wiki/conferences/undated-conference"
@@ -785,7 +785,7 @@ def test_fallback_single_hit_direction_not_promoted():
         page.write_text(
             "---\ntitle: Demo paper\ntype: paper-summary\nsources: []\nsource_type: official-doc\n"
             "date: 2026\nconfidence: high\ncreated: 2026-08-23\nupdated: 2026-08-23\nstatus: current\n---\n"
-            "## Navigation\n\nNo direction named here.\n\n## Content\n", encoding="utf-8")
+            "## Navigation\n\nNo direction named here.\n\n## Content\n", encoding="utf-8", newline="\n")
         semantic = repo / "semantic.txt"
         # 三元组段 + 研究关键词谓词 → 填充 keywords(触发方向派生 fallback)
         semantic.write_text(
@@ -1012,7 +1012,7 @@ def test_inbox_state_records_telemetry_events():
     with tempfile.TemporaryDirectory() as directory:
         repo = Path(directory)
         source = repo / "source.txt"
-        source.write_text("hello", encoding="utf-8")
+        source.write_text("hello", encoding="utf-8", newline="\n")
         original_repo = inbox_state.REPO
         inbox_state.REPO = repo
         try:
@@ -1113,14 +1113,14 @@ def test_inbox_state_runtime_summary_uses_canonical_events():
             "errors": ["semantic review required"],
             "quality_warnings": [{"issue": "demo"}],
             "recovery": {"attempts": {"semantic_revision": 1}},
-        }), encoding="utf-8")
+        }), encoding="utf-8", newline="\n")
         api_event = {
             "event_version": "execution-event-v1", "event_kind": "llm_api_call",
             "transaction_id": "txn", "operation": "ingest_wiki_write", "status": "ok",
             "latency_sec": 1.25, "usage": {"total_tokens": 120},
         }
         (events / "events.jsonl").write_text(
-            json.dumps(api_event) + "\nnot-json\n", encoding="utf-8")
+            json.dumps(api_event) + "\nnot-json\n", encoding="utf-8", newline="\n")
         report = inbox_state.summarize_runtime(states, events)
     assert report["transactions"] == 1
     assert report["by_status"] == {"agent_required": 1}
@@ -1137,7 +1137,7 @@ def test_inbox_state_runtime_summary_uses_canonical_events():
         empty_states.mkdir()
         unrelated_events.mkdir()
         (unrelated_events / "events.jsonl").write_text(
-            json.dumps(api_event) + "\n", encoding="utf-8")
+            json.dumps(api_event) + "\n", encoding="utf-8", newline="\n")
         empty_report = inbox_state.summarize_runtime(empty_states, unrelated_events)
     assert empty_report["transactions"] == 0
     assert empty_report["api"]["calls"] == 0
@@ -1168,7 +1168,7 @@ def test_validate_completion_blocks_stale_errors_and_empty_graph():
         repo = Path(directory)
         sem = repo / "temp/test.sem"
         sem.parent.mkdir(parents=True)
-        sem.write_text("三元组:\n本论文 | 研究关键词 | 测试\n", encoding="utf-8")
+        sem.write_text("三元组:\n本论文 | 研究关键词 | 测试\n", encoding="utf-8", newline="\n")
         stale = {"errors": ["历史失败"], "semantic_path": "temp/test.sem",
                  "graph_report": {"edges_added": 1, "dup_skipped": 0, "nodes_created": 1}}
         assert ic.validate_completion(stale, repo)
@@ -1194,7 +1194,7 @@ def test_cleanup_waits_for_completion_and_retries_without_replaying_ingest():
             extract = repo / "temp/extract"
             extract.mkdir(parents=True)
             semantic = extract / "semantic.txt"
-            semantic.write_text("valid semantic", encoding="utf-8")
+            semantic.write_text("valid semantic", encoding="utf-8", newline="\n")
             state = {"transaction_id": "cleanup-test", "status": "finalize_tail", "errors": [],
                      "source": "inbox/image.jpg", "extract_dir": "temp/extract",
                      "semantic_path": "temp/extract/semantic.txt", "graph_report": {"edges_added": 1}}
@@ -1313,14 +1313,14 @@ def test_raw_original_and_locator_companion_share_node_and_wiki_source_edge():
         raw_dir = root / "academic/raw/references/demo"
         raw_dir.mkdir(parents=True)
         (raw_dir / "paper.pdf").write_bytes(b"pdf")
-        (raw_dir / "paper.md").write_text("# Demo\n", encoding="utf-8")
+        (raw_dir / "paper.md").write_text("# Demo\n", encoding="utf-8", newline="\n")
         page = root / "academic/wiki/papers/demo.md"
         page.parent.mkdir(parents=True)
         page.write_text(
             "---\ntitle: Demo\ntype: paper-summary\n"
             "sources: [academic/raw/references/demo/paper.md]\n---\n",
             encoding="utf-8",
-        )
+        newline="\n")
         old_repo = graph_ingest.gl.REPO
         graph_ingest.gl.REPO = root
         try:
@@ -1351,14 +1351,14 @@ def test_agent_slots_resume_does_not_rewrite_wiki():
         root = Path(directory)
         write_to = root / "temp" / "agent-slots.txt"
         write_to.parent.mkdir(parents=True)
-        write_to.write_text("三元组:\n本文件 | 涉及 | 测试主题\n", encoding="utf-8")
+        write_to.write_text("三元组:\n本文件 | 涉及 | 测试主题\n", encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "agent-slots-resume",
             "status": "agent_required",
             "pre_handoff_status": "write_slots",
             "_awaiting_agent_slots": True,
             "agent_required": True,
-            "agent_write_to": str(write_to.relative_to(root)),
+            "agent_write_to": write_to.relative_to(root).as_posix(),
             "wiki_content": "existing wiki",
             "errors": [],
         }
@@ -1713,7 +1713,7 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
     fake = ModuleType("ingest_inbox")
     fake._write_json_atomic = lambda path, value: (
         path.parent.mkdir(parents=True, exist_ok=True),
-        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8"),
+        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8", newline="\n"),
     )
     fake.publish_maintenance_report = fake._write_json_atomic
     fake.run_post_ingest_maintenance = lambda results, session_id: calls.append(
@@ -1757,7 +1757,7 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
             assert deferred["pending_count"] == 1
             assert calls == []
 
-            facts.write_text("# Pending facts\n", encoding="utf-8")
+            facts.write_text("# Pending facts\n", encoding="utf-8", newline="\n")
             maintenance = ic.run_resume_post_maintenance(state)
             assert maintenance == {
                 "status": "agent_required", "receipt_path": "temp/receipt.json",
@@ -1804,7 +1804,7 @@ def test_resume_reconciles_parent_batch_before_maintenance():
     fake = ModuleType("ingest_inbox")
     fake._write_json_atomic = lambda path, value: (
         path.parent.mkdir(parents=True, exist_ok=True),
-        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8"),
+        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8", newline="\n"),
     )
     fake.publish_maintenance_report = fake._write_json_atomic
     fake._report_counts = lambda items: {
@@ -1843,7 +1843,7 @@ def test_resume_reconciles_parent_batch_before_maintenance():
                 "quality_status": "degraded", "quality_warnings": [{"issue": "demo"}],
                 "repo": str(repo),
             }
-            (state_dir / "txn-1.json").write_text(json.dumps(first), encoding="utf-8")
+            (state_dir / "txn-1.json").write_text(json.dumps(first), encoding="utf-8", newline="\n")
             report_path = report_dir / "20260906-120000.json"
             report_path.write_text(json.dumps({
                 "session_id": "agent-batch",

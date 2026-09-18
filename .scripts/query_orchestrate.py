@@ -339,7 +339,7 @@ def _save(session: QuerySession):
          "search_strategy": session.search_strategy,
          "steps": session.steps, "stage": session.stage, "mode": session.mode,
          "read_sources": session.read_sources}
-    (SESSIONS_DIR / f"{session.session_id}.json").write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    (SESSIONS_DIR / f"{session.session_id}.json").write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
 
 def _load(sid: str) -> QuerySession:
     f = SESSIONS_DIR / f"{sid}.json"

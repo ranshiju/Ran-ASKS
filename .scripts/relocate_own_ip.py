@@ -65,11 +65,14 @@ def atomic_write(path, content):
         if path.exists():
             shutil.copymode(path, temporary)
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        # 目录 fsync 是 POSIX 语义；Windows 不允许 os.open 打开目录，
+        # 且 os.replace 在其上本身就是原子的 ReplaceFile，无需再同步目录。
+        if os.name != "nt":
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -84,17 +87,51 @@ def require_hash(path, expected):
         raise ValueError(f"missing file or SHA-256 mismatch: {path}")
 
 
+_SKIP_SUFFIXES = (".jsonl",)
+
+
+def _scan_references_python(root, roots, prefixes):
+    """纯 Python 的引用发现，用于未安装 ripgrep 的环境(含多数 Windows)。
+
+    与 rg 调用保持同一套排除规则：*.db*、*.jsonl、**/log.md、
+    **/ingest-reports/**，返回仓库相对的 POSIX 路径。
+    """
+    hits = []
+    for name in roots:
+        for path in sorted((root / name).rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(root)
+            parts = relative.parts
+            if ".db" in path.name or path.suffix in _SKIP_SUFFIXES:
+                continue
+            if path.name == "log.md" or "ingest-reports" in parts:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if any(prefix in text for prefix in prefixes):
+                hits.append(relative.as_posix())
+    return hits
+
+
 def check_references(root, prefixes, declared):
     roots = [name for name in ("academic", "admin", "teaching", "business", "projects", "cross-domain")
              if (root / name).is_dir()]
-    command = ["rg", "-l", "-F", "--glob", "!*.db*", "--glob", "!*.jsonl",
-               "--glob", "!**/log.md", "--glob", "!**/ingest-reports/**"]
-    for prefix in prefixes:
-        command.extend(["-e", prefix])
-    result = subprocess.run(command + ["--"] + roots, cwd=root, capture_output=True, text=True)
-    if result.returncode not in (0, 1):
-        raise ValueError(f"reference discovery failed: {result.stderr}")
-    extra = set(result.stdout.splitlines()) - set(declared)
+    if shutil.which("rg"):
+        command = ["rg", "-l", "-F", "--glob", "!*.db*", "--glob", "!*.jsonl",
+                   "--glob", "!**/log.md", "--glob", "!**/ingest-reports/**"]
+        for prefix in prefixes:
+            command.extend(["-e", prefix])
+        result = subprocess.run(command + ["--"] + roots, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if result.returncode not in (0, 1):
+            raise ValueError(f"reference discovery failed: {result.stderr}")
+        # rg 在 Windows 上输出反斜杠路径；声明清单用 POSIX 写法。
+        found = {line.replace("\\", "/") for line in result.stdout.splitlines() if line}
+    else:
+        found = set(_scan_references_python(root, roots, prefixes))
+    extra = found - set(declared)
     if extra:
         raise ValueError(f"undeclared references require review: {sorted(extra)}")
 
@@ -110,10 +147,10 @@ def prepare(root, manifest):
         if (source.parent != SOURCE_DIR or destination.parent not in TARGET_DIRS
                 or source.suffix != ".pdf" or destination.name != source.name):
             raise ValueError("only same-name reference-document PDF pairs to own patents/software are supported")
-        if str(source) in mapping:
+        if source.as_posix() in mapping:
             raise ValueError("duplicate source in manifest")
         for suffix, field in ((".pdf", "sha256"), (".md", "companion_sha256")):
-            old, new = str(source.with_suffix(suffix)), str(destination.with_suffix(suffix))
+            old, new = source.with_suffix(suffix).as_posix(), destination.with_suffix(suffix).as_posix()
             source_path, target_path = local_path(root, old), local_path(root, new)
             require_hash(source_path, item[field])
             if target_path.exists():
@@ -122,7 +159,7 @@ def prepare(root, manifest):
                 raise ValueError(f"destination directory must already exist: {new}")
             files.append({"source": old, "destination": new, "sha256": item[field]})
             mapping[old] = new
-        old_node, new_node = str(source.with_suffix("")), str(destination.with_suffix(""))
+        old_node, new_node = source.with_suffix("").as_posix(), destination.with_suffix("").as_posix()
         mapping[old_node] = new_node
         wiki = item["wiki"]
         if not wiki.startswith("academic/wiki/") or not wiki.endswith(".md"):
@@ -130,7 +167,7 @@ def prepare(root, manifest):
         wiki_path = local_path(root, wiki)
         require_hash(wiki_path, item["wiki_sha256"])
         content = wiki_path.read_text(encoding="utf-8")
-        if str(source.with_suffix(".md")) not in content:
+        if source.with_suffix(".md").as_posix() not in content:
             raise ValueError(f"wiki does not cite this source: {wiki}")
         references[wiki] = content
     if len({item["destination"] for item in files}) != len(files):
@@ -247,7 +284,7 @@ def relocate(root, manifest=None, apply=False, resume=None):
                 receipt_path = local_path(root, resume)
                 if not receipt_path.is_relative_to(root / "temp/raw-relocations"):
                     raise ValueError("resume receipt must be in temp/raw-relocations")
-                receipt = json.loads(receipt_path.read_text())
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
                 if receipt.get("schema") != "own-ip-relocation-receipt-v1":
                     raise ValueError("invalid relocation receipt schema")
                 if receipt.get("marker") != f"raw-relocation:{receipt_path.parent.name}":
@@ -287,7 +324,7 @@ def relocate(root, manifest=None, apply=False, resume=None):
                        "manifest_sha256": digest_bytes(json.dumps(manifest, sort_keys=True).encode()),
                        "marker": f"raw-relocation:{transaction}", "files": files,
                        "graph_mapping": mapping, "wiki_pages": list(rewrites)[:-1], "rewrites": [],
-                       "receipt_path": str(receipt_path.relative_to(root))}
+                       "receipt_path": receipt_path.relative_to(root).as_posix()}
             for number, (relative, (before, after)) in enumerate(rewrites.items()):
                 backup = f"before-{number}.bin"
                 atomic_write(directory / backup, before)
@@ -304,7 +341,9 @@ def relocate(root, manifest=None, apply=False, resume=None):
                     staged = directory / f"raw-{number}.bin"
                     shutil.copy2(source, staged)
                     require_hash(staged, item["sha256"])
-                    with staged.open("rb") as handle:
+                    # 以可写方式打开再 fsync：Windows 对只读句柄执行 _commit
+                    # 会抛 OSError(Errno 9)。
+                    with staged.open("rb+") as handle:
                         os.fsync(handle.fileno())
                     os.link(staged, target)
                     staged.unlink()
@@ -335,7 +374,7 @@ def main():
     source.add_argument("--resume", help="repository-relative receipt path")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    manifest = json.loads(args.manifest.read_text()) if args.manifest else None
+    manifest = json.loads(args.manifest.read_text(encoding="utf-8")) if args.manifest else None
     result = relocate(REPO, manifest, apply=args.apply, resume=args.resume)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

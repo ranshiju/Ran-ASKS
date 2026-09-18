@@ -28,6 +28,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import platform_compat
+
 try:
     import fitz  # PyMuPDF
 except ImportError:  # pragma: no cover - reported at use site
@@ -131,7 +134,7 @@ def _write_json_atomic(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(data, encoding="utf-8")
+    tmp.write_text(data, encoding="utf-8", newline="\n")
     os.replace(tmp, path)
 
 
@@ -227,10 +230,12 @@ def _find_soffice(explicit: str | None = None) -> Path:
         candidates.append(Path(explicit).expanduser())
     if os.environ.get("SOFFICE_BIN"):
         candidates.append(Path(os.environ["SOFFICE_BIN"]).expanduser())
-    found = shutil.which("soffice") or shutil.which("libreoffice")
-    if found:
-        candidates.append(Path(found))
-    candidates.append(Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"))
+    for name in platform_compat.soffice_names():
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+    # 各平台默认安装位置(Windows: Program Files\LibreOffice\program\soffice.exe)
+    candidates.extend(platform_compat.soffice_candidates())
     runtime_root = Path.home() / ".cache" / "codex-runtimes"
     if runtime_root.exists():
         candidates.extend(sorted(runtime_root.glob(
@@ -270,7 +275,7 @@ def _convert_slides_to_pdf(path: Path, target_pdf: Path,
             str(soffice), "--headless", "--convert-to", "pdf",
             "--outdir", str(out_dir), str(path),
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
                               env=_soffice_env(soffice))
         converted = out_dir / f"{path.stem}.pdf"
         if proc.returncode != 0 or not converted.is_file():

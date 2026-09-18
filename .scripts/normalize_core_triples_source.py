@@ -24,7 +24,7 @@ def process(path, apply):
         return 0
     if apply:
         nt = t[:m.start(2)] + new_section + t[m.end(2):]
-        path.write_text(nt, encoding="utf-8")
+        path.write_text(nt, encoding="utf-8", newline="\n")
     return n
 
 def main():

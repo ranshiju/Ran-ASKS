@@ -330,7 +330,7 @@ def test_agent_mode_is_rejected():
 
 def test_api_mode_full_cycle_verified():
     """API 模式完整循环：discover → read_raw → answer(verified)。"""
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir=str(REPO / "temp"))
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir=str(REPO / "temp"), newline="\n")
     tmp.write("# Title\n\ntest content for dsh")
     tmp.close()
     rel = os.path.relpath(tmp.name, str(REPO))

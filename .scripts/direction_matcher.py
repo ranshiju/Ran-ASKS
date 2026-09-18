@@ -509,7 +509,7 @@ def collect_all_hub_keywords():
         return []
     all_kws = set()
     for md in hubs_dir.glob("*.md"):
-        kws = parse_hub_keywords(str(md.relative_to(REPO)))
+        kws = parse_hub_keywords(md.relative_to(REPO).as_posix())
         all_kws.update(kws)
     return list(all_kws)
 

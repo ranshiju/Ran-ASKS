@@ -31,14 +31,14 @@ def collect_wiki_pages():
         for p in root.rglob("*.md"):
             if gl.is_manage_file(p):
                 continue
-            s = str(p.relative_to(gl.REPO))[:-3].replace("\\", "/")
+            s = p.relative_to(gl.REPO).as_posix()[:-3].replace("\\", "/")
             pages.append(s)
     # Hub 页
     if gl.HUB_DIR.exists():
         for p in gl.HUB_DIR.glob("*.md"):
             if p.name == "_index.md":
                 continue
-            s = str(p.relative_to(gl.REPO))[:-3].replace("\\", "/")
+            s = p.relative_to(gl.REPO).as_posix()[:-3].replace("\\", "/")
             pages.append(s)
     return sorted(pages)
 
@@ -83,7 +83,7 @@ def main():
     conn.close()
     report = build_report(pages, ingested)
     if args.write:
-        PENDING_PATH.write_text(report, encoding="utf-8")
+        PENDING_PATH.write_text(report, encoding="utf-8", newline="\n")
         print(f"已写入 {PENDING_PATH}")
         n = len(pages) - len(ingested)
         print(f"  待补: {n}/{len(pages)}")

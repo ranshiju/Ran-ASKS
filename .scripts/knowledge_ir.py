@@ -402,7 +402,7 @@ def write_json(path: str | Path, value: dict) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(target.name + ".tmp")
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     os.replace(temp, target)
 
 

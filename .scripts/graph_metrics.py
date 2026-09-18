@@ -160,7 +160,7 @@ def load_state():
 
 
 def save_state(state):
-    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
 
 
 def diff_clusters(current, prev):

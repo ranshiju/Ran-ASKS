@@ -627,7 +627,7 @@ class PromptMapCache:
             with tempfile.NamedTemporaryFile(
                 "w", encoding="utf-8", dir=self.path.parent,
                 prefix=f".{self.path.name}.", suffix=".tmp", delete=False,
-            ) as stream:
+            newline="\n") as stream:
                 json.dump({
                     "schema": CACHE_SCHEMA,
                     "scanner_sha256": self.scanner_sha256,

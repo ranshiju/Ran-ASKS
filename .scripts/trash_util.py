@@ -23,7 +23,7 @@ def trash_path(path) -> None:
         return
     # 优先：/usr/bin/trash（NSWorkspace.recycleURLs，移入系统废纸篓）
     if _TRASH_BIN:
-        result = subprocess.run([_TRASH_BIN, str(p)], capture_output=True, text=True)
+        result = subprocess.run([_TRASH_BIN, str(p)], capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode == 0 and not p.exists():
             return  # 成功移入系统废纸篓
     # 回退：项目内 temp/trash/（可见、可恢复，避免永久丢失）

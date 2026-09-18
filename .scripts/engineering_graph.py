@@ -414,7 +414,7 @@ def apply_forget(target, dry_run=False):
             c['nodes'] = [x for x in c['nodes'] if x != target]
     MANIFEST.write_text(
         yaml.dump(data, allow_unicode=True, width=100000, sort_keys=False,
-                  default_flow_style=False, indent=2), encoding='utf-8')
+                  default_flow_style=False, indent=2), encoding='utf-8', newline="\n")
     print(f'  已写回 {MANIFEST}；请运行 python3 .scripts/engineering_graph.py validate 复核')
 
 

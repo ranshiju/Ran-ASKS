@@ -216,7 +216,7 @@ def main():
     
     for fname, content in files.items():
         out_path = Path("cross-domain") / fname.replace(".md", ".rebuilt.md")
-        out_path.write_text(content, encoding="utf-8")
+        out_path.write_text(content, encoding="utf-8", newline="\n")
         print(f"派生版写入: {out_path}")
     
     if args.diff:
@@ -228,7 +228,7 @@ def main():
                 print(f"{fname}: 手动版不存在(新文件)")
                 continue
             import subprocess
-            r = subprocess.run(["diff", str(manual), str(rebuilt)], capture_output=True, text=True)
+            r = subprocess.run(["diff", str(manual), str(rebuilt)], capture_output=True, text=True, encoding="utf-8", errors="replace")
             if r.returncode == 0:
                 print(f"{fname}: ✅ 一致")
             else:
@@ -241,7 +241,7 @@ def main():
         print("\n=== --apply 覆盖现有文件 ===")
         for fname, content in files.items():
             target = Path("cross-domain") / fname
-            target.write_text(content, encoding="utf-8")
+            target.write_text(content, encoding="utf-8", newline="\n")
             print(f"  ✅ {target} 已覆盖(头部保留+关系段重建)")
         for f in Path("cross-domain").glob("*.rebuilt.md"):
             f.unlink()

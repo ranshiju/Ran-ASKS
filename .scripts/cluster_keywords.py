@@ -33,7 +33,7 @@ def _load_env():
     env = {}
     p = BASE / ".env"
     if p.exists():
-        for line in p.read_text().splitlines():
+        for line in p.read_text(encoding="utf-8").splitlines():
             if "=" in line and not line.startswith("#"):
                 k, v = line.split("=", 1)
                 env[k.strip()] = v.strip()
@@ -87,7 +87,7 @@ def parse_hub_keywords(hub_path):
     """解析 hub 页正文 ## 关键词 段的 keyword 列表"""
     if not os.path.exists(hub_path):
         return []
-    with open(hub_path) as f:
+    with open(hub_path, encoding="utf-8") as f:
         content = f.read()
     m = re.search(r'## 关键词\s*\n(.*?)(?=\n## |\Z)', content, re.DOTALL)
     if not m:
@@ -105,7 +105,7 @@ def parse_hub_keywords(hub_path):
 
 def remove_keywords_from_hub(hub_path, keywords_to_remove):
     """从 hub 正文 ## 关键词 段移除指定 keyword"""
-    with open(hub_path) as f:
+    with open(hub_path, encoding="utf-8") as f:
         content = f.read()
     m = re.search(r'(## 关键词\s*\n)(.*?)(?=\n## |\Z)', content, re.DOTALL)
     if not m:
@@ -118,12 +118,12 @@ def remove_keywords_from_hub(hub_path, keywords_to_remove):
             if kw not in line
         )
     content = content[:m.start(2)] + section_body + content[m.end(2):]
-    with open(hub_path, 'w') as f:
+    with open(hub_path, 'w', encoding="utf-8", newline="\n") as f:
         f.write(content)
 
 def remove_keyword_from_hub(hub_path, keyword):
     """从 hub 正文 ## 关键词 段精确移除单个 keyword(行清理后完全匹配)。"""
-    with open(hub_path) as f:
+    with open(hub_path, encoding="utf-8") as f:
         content = f.read()
     m = re.search(r'(## 关键词\s*\n)(.*?)(?=\n## |\Z)', content, re.DOTALL)
     if not m:
@@ -138,12 +138,12 @@ def remove_keyword_from_hub(hub_path, keyword):
         new_lines.append(line)
     new_section = '\n'.join(new_lines)
     content = content[:m.start(2)] + new_section + content[m.end(2):]
-    with open(hub_path, 'w') as f:
+    with open(hub_path, 'w', encoding="utf-8", newline="\n") as f:
         f.write(content)
 
 def add_keywords_to_hub(hub_path, keywords):
     """向 hub 正文 ## 关键词 段追加 keyword（去重）"""
-    with open(hub_path) as f:
+    with open(hub_path, encoding="utf-8") as f:
         content = f.read()
     existing = set(parse_hub_keywords(hub_path))
     new_kws = [k for k in keywords if k not in existing]
@@ -158,7 +158,7 @@ def add_keywords_to_hub(hub_path, keywords):
         # 无 ## 关键词 段，追加
         addition = '\n## 关键词\n\n' + ''.join(f'- {k}\n' for k in new_kws)
         content = content.rstrip() + '\n' + addition
-    with open(hub_path, 'w') as f:
+    with open(hub_path, 'w', encoding="utf-8", newline="\n") as f:
         f.write(content)
 
 def create_hub_page(hub_name, keywords, subproject="academic"):
@@ -182,8 +182,8 @@ updated: {time.strftime("%Y-%m-%d")}
 
 {kw_list}
 """
-    hub_path.write_text(content)
-    return str(hub_path.relative_to(BASE))
+    hub_path.write_text(content, encoding="utf-8", newline="\n")
+    return hub_path.relative_to(BASE).as_posix()
 
 def get_all_keyword_hubs():
     """获取所有含 ## 关键词 段的 hub 页（含 catch-all）"""
@@ -195,7 +195,7 @@ def get_all_keyword_hubs():
         for f in hubs_dir.glob("*.md"):
             kws = parse_hub_keywords(str(f))
             if kws:
-                rel = str(f.relative_to(BASE))
+                rel = f.relative_to(BASE).as_posix()
                 hubs[rel] = kws
     return hubs
 

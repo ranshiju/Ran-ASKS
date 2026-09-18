@@ -48,8 +48,8 @@ def read_section(page: str, section: str = "") -> tuple[str, int]:
 def graph_query(command: str, args: list[str]) -> tuple[str, int]:
     """执行只读图查询；图结果纳入统一编排轨迹和 token 计量。"""
     db_script = _SCRIPTS / "query_graph.py"
-    r = subprocess.run(["python3", str(db_script), command, *args, "--json"],
-                       capture_output=True, text=True, cwd=_REPO)
+    r = subprocess.run([sys.executable, str(db_script), command, *args, "--json"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=_REPO)
     text = r.stdout.strip() or r.stderr.strip()
     return text, _tok(text)
 
@@ -193,7 +193,7 @@ def wiki_recall(query: str = "", domain: str = "", topk: str = "8") -> tuple[str
             match = re.search(r"^## Navigation\s*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
             nav = match.group(1).strip() if match else ""
             title = path.stem
-            rel = str(path.relative_to(_REPO)).removesuffix(".md")
+            rel = path.relative_to(_REPO).as_posix().removesuffix(".md")
             pages[rel] = (title, nav)
             profile = hs.read_paper_profile(rel)
             if profile is not None:
@@ -449,7 +449,7 @@ def read_raw(locator: str = "") -> tuple[str, int]:
     target = sl.resolve_path(path_part)
     if target is None:
         return f"[ERROR raw 路径未解析: {path_part}]", 0
-    rel = str(target.resolve().relative_to(_REPO)) if target.is_absolute() else str(target)
+    rel = target.resolve().relative_to(_REPO).as_posix() if target.is_absolute() else str(target)
     if not loc or loc == "全篇":
         return "[ERROR read_raw 需要精确 locator（标题、Lx-Ly 或 page-x-y）；不向 LLM 返回全文]", 0
     status = sl.locator_status(loc, target) if loc else "present"

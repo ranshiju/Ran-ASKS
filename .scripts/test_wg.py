@@ -29,7 +29,7 @@ def setup_temp_file(name: str, content: str) -> Path:
     """在 temp/test_wg_tmp/ 下建临时 md，返回 repo 相对路径（无后缀）。"""
     TEMP_TEST_DIR.mkdir(parents=True, exist_ok=True)
     p = TEMP_TEST_DIR / f"{name}.md"
-    p.write_text(content, encoding="utf-8")
+    p.write_text(content, encoding="utf-8", newline="\n")
     return p
 
 
@@ -174,8 +174,8 @@ def setup_locator_wiki() -> tuple[Path, Path]:
     wiki = TEMP_TEST_DIR / "wiki" / "page.md"
     raw.parent.mkdir(parents=True, exist_ok=True)
     wiki.parent.mkdir(parents=True, exist_ok=True)
-    raw.write_text("# Raw\n\n第一条事实。\n第二条事实。\n第三条事实。\n", encoding="utf-8")
-    raw_rel = str(raw.relative_to(REPO))
+    raw.write_text("# Raw\n\n第一条事实。\n第二条事实。\n第三条事实。\n", encoding="utf-8", newline="\n")
+    raw_rel = raw.relative_to(REPO).as_posix()
     wiki.write_text(
         "# Demo\n\n"
         "## Retrieval Control\n\n"
@@ -186,14 +186,14 @@ def setup_locator_wiki() -> tuple[Path, Path]:
         f"[^r1]: {raw_rel}#L3\n"
         f"[^r2]: {raw_rel}#L4\n",
         encoding="utf-8",
-    )
+    newline="\n")
     return raw, wiki
 
 
 def test_wiki_locator_reads_one_section_and_raw_citations():
     _raw, wiki = setup_locator_wiki()
     try:
-        rel = str(wiki.relative_to(REPO))
+        rel = wiki.relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_section,
                          type("A", (), {
                              "page": f"{rel}#retrieval-control",
@@ -218,7 +218,7 @@ def test_wiki_locator_minimal_validation():
         assert module.wl.validate_wiki_page(wiki, require_citations=True) == []
         text = wiki.read_text(encoding="utf-8").replace(
             "## Other", "## Retrieval Control", 1).replace("[^r2]:", "[^missing]:", 1)
-        wiki.write_text(text, encoding="utf-8")
+        wiki.write_text(text, encoding="utf-8", newline="\n")
         errors = module.wl.validate_wiki_page(wiki, require_citations=True)
         assert any("heading slug 重复" in error for error in errors)
         assert any("脚注未定义" in error for error in errors)
@@ -233,7 +233,7 @@ def test_wiki_locator_rejects_raw_handle_and_truncated_footnote():
             "系统按证据缺口继续检索。[^r1]",
             "系统按证据缺口继续检索。[^r1]6> <RAW#L4>",
         )
-        wiki.write_text(text, encoding="utf-8")
+        wiki.write_text(text, encoding="utf-8", newline="\n")
         errors = module.wl.validate_wiki_page(wiki, require_citations=True)
         assert any("残缺 RAW 脚注引用" in error for error in errors)
         assert any("残留未编译 RAW handle" in error for error in errors)
@@ -267,7 +267,7 @@ def test_wiki_graph_source_ranks_nonidentical_chinese_proposition_by_bigrams():
 [^r2]: academic/raw/references/demo/paper.md#L2
 """,
             encoding="utf-8",
-        )
+        newline="\n")
         source, evidence = module.wl.graph_wiki_source(
             wiki, "具有零空间的局域哈密顿量拥有面积律纠缠标度的零模式并打破强热化假设",
         )
@@ -366,7 +366,7 @@ def test_read_raw_present_section():
     content = "# Title\n\n## Navigation\n\n这是导航内容。\n\n## Content\n\n正文。\n"
     p = setup_temp_file("present_test", content)
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#Navigation"})())
         assert d["ok"] is True
@@ -382,7 +382,7 @@ def test_read_raw_missing_section():
     content = "## Navigation\n\n导航。\n"
     p = setup_temp_file("missing_test", content)
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#不存在段"})())
         assert d["ok"] is False
@@ -397,7 +397,7 @@ def test_read_raw_full_doc():
     content = "# Full Doc\n\n全文内容在这里。\n"
     p = setup_temp_file("full_test", content)
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#全篇"})())
         assert d["ok"] is False
@@ -412,7 +412,7 @@ def test_read_raw_authors_is_precise_header_block():
     content = "# Paper\n\nAlice, Bob\nUniversity\n\n## Abstract\n\nSECRET ABSTRACT\n"
     p = setup_temp_file("authors_test", content)
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#authors"})())
         assert d["ok"] is True
@@ -427,7 +427,7 @@ def test_read_raw_participants_is_precise_line():
     content = "会议主题：测试\n参会人员：张三、李四\n讨论：SECRET TIMELINE\n"
     p = setup_temp_file("participants_test", content)
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#participants"})())
         assert d["ok"] is True
@@ -441,7 +441,7 @@ def test_read_raw_line_range_exact():
     """Lx-Ly 只返回指定行，不回退全文。"""
     p = setup_temp_file("line_range_test", "alpha\nbeta\ngamma\ndelta\n")
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#L2-L3"})())
         assert d["ok"] is True
@@ -454,7 +454,7 @@ def test_read_raw_line_range_out_of_bounds():
     """越界行号明确失败。"""
     p = setup_temp_file("line_range_missing", "one\ntwo\n")
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#L2-L3"})())
         assert d["ok"] is False
@@ -473,7 +473,7 @@ def test_read_raw_explicit_fact_anchor_returns_only_bound_assertion():
     )
     p = setup_temp_file("fact_anchor", content)
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         first = capture_call(module.cmd_read_raw, type(
             "A", (), {"locator": f"{rel}#fact-first-20260901"},
         )())
@@ -494,7 +494,7 @@ def test_read_raw_oversized_locator_requires_refinement():
     content = "## Large\n\n" + ("x" * (module.RAW_PREVIEW_CHARS + 1)) + "\n"
     p = setup_temp_file("oversized_locator", content)
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#Large"})())
         assert d["ok"] is False
@@ -516,7 +516,7 @@ def test_read_raw_pdf_page_native():
     document.save(str(p))
     document.close()
     try:
-        rel = str(p.resolve().relative_to(REPO))
+        rel = p.resolve().relative_to(REPO).as_posix()
         d = capture_call(module.cmd_read_raw,
                          type("A", (), {"locator": f"{rel}#page-2"})())
         assert d["ok"] is True

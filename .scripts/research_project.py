@@ -101,7 +101,7 @@ def init_project(args: argparse.Namespace) -> int:
             continue
         new_text = render_text(text, values)
         if new_text != text:
-            path.write_text(new_text, encoding="utf-8")
+            path.write_text(new_text, encoding="utf-8", newline="\n")
 
     workspace_state.REPO = REPO
     workspace_state.PROJECTS_DIR = PROJECTS_DIR

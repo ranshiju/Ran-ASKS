@@ -22,18 +22,18 @@ def _fixture(root: Path, *, same_bytes: bool = True):
         raw = root / "academic/raw/references" / raw_id
         raw.mkdir(parents=True)
         (raw / "paper.pdf").write_bytes(payload)
-        (raw / "paper.md").write_text("# Same paper\n", encoding="utf-8")
+        (raw / "paper.md").write_text("# Same paper\n", encoding="utf-8", newline="\n")
         wiki = root / f"{page}.md"
         wiki.parent.mkdir(parents=True, exist_ok=True)
         wiki.write_text(
             "---\ntitle: Same paper\ntype: paper-summary\n"
             f"sources: [academic/raw/references/{raw_id}/paper.md]\n---\n# Same paper\n",
             encoding="utf-8",
-        )
+        newline="\n")
     wiki_dir = root / "academic/wiki"
     (wiki_dir / "index.md").write_text(
-        "- [[papers/paper]]\n- [[papers/paper-2]]\n", encoding="utf-8")
-    (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8")
+        "- [[papers/paper]]\n- [[papers/paper-2]]\n", encoding="utf-8", newline="\n")
+    (wiki_dir / "log.md").write_text("# Log\n", encoding="utf-8", newline="\n")
     db = root / "cross-domain/graph.db"
     db.parent.mkdir()
     conn = sqlite3.connect(db)
@@ -75,7 +75,7 @@ def test_dry_run_is_read_only_and_apply_preserves_raw():
         assert not (root / f"{duplicate}.md").exists()
         assert (root / result["archive"]).is_file()
         assert raw_before == {path: path.read_bytes() for path in raw_before}
-        assert "[[papers/paper-2]]" not in (root / "academic/wiki/index.md").read_text()
+        assert "[[papers/paper-2]]" not in (root / "academic/wiki/index.md").read_text(encoding="utf-8")
         conn = sqlite3.connect(db)
         assert not conn.execute("SELECT 1 FROM nodes WHERE path=?", (duplicate,)).fetchone()
         assert not conn.execute(

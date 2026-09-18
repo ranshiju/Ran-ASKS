@@ -113,14 +113,14 @@ def build_plan(
         "status": "ready",
         "canonical_page": canonical_page,
         "duplicate_page": duplicate_page,
-        "canonical_wiki": str(canonical_file.relative_to(repo)),
-        "duplicate_wiki": str(duplicate_file.relative_to(repo)),
+        "canonical_wiki": canonical_file.relative_to(repo).as_posix(),
+        "duplicate_wiki": duplicate_file.relative_to(repo).as_posix(),
         "canonical_source": canonical_source,
         "duplicate_source": duplicate_source,
         "canonical_raw": canonical_raw,
         "duplicate_raw": duplicate_raw,
-        "canonical_pdf": str(canonical_pdf.relative_to(repo)),
-        "duplicate_pdf": str(duplicate_pdf.relative_to(repo)),
+        "canonical_pdf": canonical_pdf.relative_to(repo).as_posix(),
+        "duplicate_pdf": duplicate_pdf.relative_to(repo).as_posix(),
         "binary_sha256": canonical_hash,
         "size_bytes": canonical_stat.st_size,
         "graph_db": str(Path(db_path)),
@@ -213,20 +213,20 @@ def apply_plan(plan: dict, *, repo: Path = REPO, graph_db: Path | None = None) -
         if old_index is not None:
             duplicate_link = f"[[papers/{Path(plan['duplicate_page']).name}]]"
             kept = [line for line in old_index.splitlines() if duplicate_link not in line]
-            index_path.write_text("\n".join(kept).rstrip() + "\n", encoding="utf-8")
+            index_path.write_text("\n".join(kept).rstrip() + "\n", encoding="utf-8", newline="\n")
         audit = {
             **plan,
             "status": "remediated",
             "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "archive": str(archive.relative_to(repo)),
+            "archive": archive.relative_to(repo).as_posix(),
             "graph": graph_result,
         }
         log_dir = repo / "cross-domain" / "duplicate-remediation"
         log_dir.mkdir(parents=True, exist_ok=True)
-        with (log_dir / "log.jsonl").open("a", encoding="utf-8") as handle:
+        with (log_dir / "log.jsonl").open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(audit, ensure_ascii=False, sort_keys=True) + "\n")
         if old_log is not None:
-            with wiki_log.open("a", encoding="utf-8") as handle:
+            with wiki_log.open("a", encoding="utf-8", newline="\n") as handle:
                 handle.write(
                     f"\n- {audit['timestamp'][:10]}: 精确重复治理 `{plan['duplicate_page']}` -> "
                     f"`{plan['canonical_page']}`（SHA-256 `{plan['binary_sha256']}`；Raw 保留不变）。\n"
@@ -252,9 +252,9 @@ def apply_plan(plan: dict, *, repo: Path = REPO, graph_db: Path | None = None) -
             duplicate_file.parent.mkdir(parents=True, exist_ok=True)
             os.replace(archive, duplicate_file)
         if old_index is not None:
-            index_path.write_text(old_index, encoding="utf-8")
+            index_path.write_text(old_index, encoding="utf-8", newline="\n")
         if old_log is not None:
-            wiki_log.write_text(old_log, encoding="utf-8")
+            wiki_log.write_text(old_log, encoding="utf-8", newline="\n")
         raise
 
 

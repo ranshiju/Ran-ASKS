@@ -94,7 +94,7 @@ def test_prompt_includes_last_results():
 
 def test_loop_discover_read_answer():
     """3 轮循环：discover → read_raw → answer(citation 核验通过)。"""
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir=str(REPO / "temp"))
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, dir=str(REPO / "temp"), newline="\n")
     tmp.write("# Title\n\ntest raw content")
     tmp.close()
     rel = os.path.relpath(tmp.name, str(REPO))

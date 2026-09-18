@@ -18,6 +18,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from datetime import datetime
 from glob import escape as glob_escape
 from itertools import chain
@@ -28,6 +29,7 @@ sys.path.insert(0, str(REPO / ".scripts"))
 import agent_task
 import inbox_state
 import image_ocr
+import platform_compat
 import pptx_document
 import trash_util
 import ingest_common as ic
@@ -258,11 +260,7 @@ def extract_doc_text(source_path: Path, extract_dir: Path | None = None) -> str:
     if suffix in (".txt", ".md"):
         return source_path.read_text(encoding="utf-8")
     if suffix in (".docx", ".doc"):
-        result = subprocess.run(
-            ["textutil", "-convert", "txt", "-stdout", str(source_path)],
-            capture_output=True, text=True,
-        )
-        return result.stdout if result.returncode == 0 else ""
+        return platform_compat.word_document_text(source_path)
     if suffix == ".pptx":
         return pptx_document.extract(source_path)[0]
     if suffix == ".pdf":
@@ -271,11 +269,11 @@ def extract_doc_text(source_path: Path, extract_dir: Path | None = None) -> str:
         paper_id = "extern"
         # 默认用 mineru；失败时检测是否扫描件，降级到 blsc_ocr（LLM 视觉模型 OCR）
         result = subprocess.run(
-            ["python3", str(REPO / ".scripts/extractor.py"),
+            [sys.executable, str(REPO / ".scripts/extractor.py"),
              "--paper", paper_id,
              "--external-pdf", str(source_path),
              "--papers-dir", str(extract_dir)],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         md_path = extract_dir / paper_id / "paper.md"
         if md_path.is_file():
@@ -284,12 +282,12 @@ def extract_doc_text(source_path: Path, extract_dir: Path | None = None) -> str:
         if _is_scanned_pdf(source_path):
             # 降级到 blsc_ocr（LLM 视觉模型逐页 OCR）
             subprocess.run(
-                ["python3", str(REPO / ".scripts/extractor.py"),
+                [sys.executable, str(REPO / ".scripts/extractor.py"),
                  "--paper", paper_id,
                  "--external-pdf", str(source_path),
                  "--papers-dir", str(extract_dir),
                  "--engine", "blsc_ocr"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
             )
             if md_path.is_file():
                 return md_path.read_text(encoding="utf-8")
@@ -580,16 +578,25 @@ def normalize_document_wiki(markdown: str, *, correct_sources: str,
     return f"---\n{dumped}\n---{body}", repairs
 
 
+def _readonly_uri(path: Path) -> str:
+    """SQLite 只读 URI。URI 里必须是正斜杠，Windows 路径需先转换。"""
+    return f"file:{Path(path).resolve().as_posix()}?mode=ro"
+
+
 def backup_sqlite_database(source: Path, snapshot: Path) -> None:
     """Create a transaction-local, consistent SQLite snapshot."""
     snapshot.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as src, sqlite3.connect(snapshot) as dst:
+    # closing(): sqlite3 连接的 with 只管事务，不关连接;
+    # Windows 上残留句柄会锁住 db 文件，导致后续删除/重命名失败。
+    with closing(sqlite3.connect(_readonly_uri(source), uri=True)) as src, \
+            closing(sqlite3.connect(snapshot)) as dst:
         src.backup(dst)
 
 
 def restore_sqlite_database(snapshot: Path, destination: Path) -> None:
     """Restore an exact SQLite snapshot after a failed graph transaction."""
-    with sqlite3.connect(f"file:{snapshot}?mode=ro", uri=True) as src, sqlite3.connect(destination) as dst:
+    with closing(sqlite3.connect(_readonly_uri(snapshot), uri=True)) as src, \
+            closing(sqlite3.connect(destination)) as dst:
         src.backup(dst)
         dst.commit()
 
@@ -601,7 +608,7 @@ def ensure_graph_snapshot(state: dict) -> None:
     graph_db = Path(gl.graph_db_for(state.get("wiki_path", "")))
     snapshot = REPO / state["extract_dir"] / "graph-before.sqlite"
     backup_sqlite_database(graph_db, snapshot)
-    state["graph_snapshot"] = str(snapshot.relative_to(REPO))
+    state["graph_snapshot"] = snapshot.relative_to(REPO).as_posix()
     state["graph_db_path"] = str(graph_db)
 
 
@@ -666,7 +673,7 @@ def step_dedup_check(state: dict) -> tuple[bool, str]:
             continue
         if candidate.stat().st_size != source_size or sha256_file(candidate) != source_hash:
             continue
-        raw_path = str(candidate.resolve().relative_to(REPO.resolve()))
+        raw_path = candidate.resolve().relative_to(REPO.resolve()).as_posix()
         state["dedup_result"] = [{"path": raw_path, "binary_sha256": source_hash}]
         return True, f"已摄入(SHA-256): {raw_path}"
     return False, ""
@@ -684,7 +691,7 @@ def _select_document_raw_dir(state: dict, base_dir: str) -> str:
         while destination.exists() or destination.is_symlink():
             destination = REPO / base_dir / f"{state['admin_id']}-{suffix}"
             suffix += 1
-    selected = str(destination.relative_to(REPO))
+    selected = destination.relative_to(REPO).as_posix()
     state["raw_allocation"] = {
         "base_dir": base_dir, "document_id": state["admin_id"], "raw_dir": selected,
     }
@@ -702,13 +709,13 @@ def prepare_image_action(state: dict, extract_dir: Path, kind: str,
     if receipt:
         summary["checks"] = [check for check in receipt.get("review", {}).get("checks", [])
                              if check["critical"] and check["status"] == "unresolved"]
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     state["_awaiting_image_action"] = True
     state["pre_handoff_status"] = "preprocess"
     agent_task.prepare(
         state, kind=kind, transaction_id=state["transaction_id"],
-        inputs=[{"name": "action_summary", "path": str(summary_path.relative_to(REPO)), "read": "full"}],
-        outputs=[{"name": "reviewed_receipt", "path": str((extract_dir / "reviewed-ocr.json").relative_to(REPO)),
+        inputs=[{"name": "action_summary", "path": summary_path.relative_to(REPO).as_posix(), "read": "full"}],
+        outputs=[{"name": "reviewed_receipt", "path": (extract_dir / "reviewed-ocr.json").relative_to(REPO).as_posix(),
                   "format": "image-ocr-v1", "required": False}],
         protocol={"name": "image-action-v1", "host_policy": summary["host_policy"],
                   "resolution": "授权/明确重试后用 --allow-remote-ocr；可信复核回执用 --ocr-result 恢复同一事务。"},
@@ -760,7 +767,7 @@ def prepare_image_ocr(state: dict, source_path: Path, extract_dir: Path) -> tupl
                 state, kind="image_ocr", transaction_id=state["transaction_id"],
                 inputs=[{"name": "source_image", "path": state["source"],
                          "role": "original_image", "read": "full"}],
-                outputs=[{"name": "transcription", "path": str(output.relative_to(REPO)),
+                outputs=[{"name": "transcription", "path": output.relative_to(REPO).as_posix(),
                           "format": "markdown"}],
                 protocol={"name": image_ocr.SCHEMA, "source_sha256": info["sha256"],
                           "transcription": "按阅读顺序忠实转写，保留表格行列、数字与空白字段",
@@ -789,7 +796,7 @@ def prepare_image_ocr(state: dict, source_path: Path, extract_dir: Path) -> tupl
             receipt = image_ocr.validate_receipt({**receipt, "review": review}, source_path)
         image_ocr.save_receipt(receipt_path, receipt, source_path)
         if state.get("ocr_result"):
-            state["ocr_result"] = str(receipt_path.relative_to(REPO))
+            state["ocr_result"] = receipt_path.relative_to(REPO).as_posix()
         state["ocr_backend"] = receipt.get("backend") or "unknown"
         blockers = image_ocr.review_blockers(receipt)
         if blockers:
@@ -802,8 +809,8 @@ def prepare_image_ocr(state: dict, source_path: Path, extract_dir: Path) -> tupl
             agent_task.prepare(
                 state, kind="image_review", transaction_id=state["transaction_id"],
                 inputs=[{"name": "original_image", "path": state["source"], "read": "full"},
-                        {"name": "ocr_receipt", "path": str(receipt_path.relative_to(REPO)), "read": "full"}],
-                outputs=[{"name": "review", "path": str(review_path.relative_to(REPO)), "format": "json"}],
+                        {"name": "ocr_receipt", "path": receipt_path.relative_to(REPO).as_posix(), "read": "full"}],
+                outputs=[{"name": "review", "path": review_path.relative_to(REPO).as_posix(), "format": "json"}],
                 protocol={"name": "image-ocr-review-v1", "source_sha256": receipt["source"]["sha256"],
                           "text_sha256": receipt["text_sha256"], "reviewer_kind": "agent",
                           "required": ["reviewer", "reviewed_at", "risk", "checks", "limitations"],
@@ -858,11 +865,11 @@ def prepare_pptx_review(state: dict, source_path: Path, extract_dir: Path) -> tu
             agent_task.prepare(
                 state, kind="pptx_review", transaction_id=state["transaction_id"],
                 inputs=[{"name": "original_pptx", "path": state["source"], "read": "reference"},
-                        {"name": "native_text", "path": str((extract_dir / "pptx-native.md").relative_to(REPO)), "read": "full"},
-                        {"name": "page_manifest", "path": str((extract_dir / "pptx-manifest.json").relative_to(REPO)), "read": "full"}]
-                       + [{"name": f"slide_{p['number']}", "path": str((extract_dir / "pptx-renders" / p["image"]).relative_to(REPO)), "read": "full"}
+                        {"name": "native_text", "path": (extract_dir / "pptx-native.md").relative_to(REPO).as_posix(), "read": "full"},
+                        {"name": "page_manifest", "path": (extract_dir / "pptx-manifest.json").relative_to(REPO).as_posix(), "read": "full"}]
+                       + [{"name": f"slide_{p['number']}", "path": (extract_dir / "pptx-renders" / p["image"]).relative_to(REPO).as_posix(), "read": "full"}
                           for p in manifest["pages"]],
-                outputs=[{"name": "review", "path": str(review_path.relative_to(REPO)), "format": "json"}],
+                outputs=[{"name": "review", "path": review_path.relative_to(REPO).as_posix(), "format": "json"}],
                 protocol=pptx_document.review_protocol(manifest),
                 issues=["逐页对照原生文本与页面图像；尚未完成内容保真复核"],
                 commands={"resume": resume_command(state)},
@@ -874,7 +881,7 @@ def prepare_pptx_review(state: dict, source_path: Path, extract_dir: Path) -> tu
             if warning not in state.setdefault("quality_warnings", []):
                 state["quality_warnings"].append(warning)
         state["quality_status"] = receipt["review_status"]
-        (extract_dir / "doc.md").write_text(text, encoding="utf-8")
+        (extract_dir / "doc.md").write_text(text, encoding="utf-8", newline="\n")
         state.pop("_awaiting_pptx_review", None)
         state.pop("pre_handoff_status", None)
         agent_task.mark_consumed(state)
@@ -936,7 +943,7 @@ def step_preprocess(state: dict) -> tuple[bool, str]:
         doc_text = extract_doc_text(source_path, extract_dir)
     if not doc_text.strip():
         return False, "文档提取失败（空文本）"
-    (extract_dir / "doc.md").write_text(doc_text, encoding="utf-8")
+    (extract_dir / "doc.md").write_text(doc_text, encoding="utf-8", newline="\n")
     source_kind = str(state.get("source_kind") or "").strip()
     if source_kind not in SOURCE_KINDS:
         source_kind = detect_document_source_kind(state["source_filename"], doc_text)
@@ -951,7 +958,7 @@ def step_preprocess(state: dict) -> tuple[bool, str]:
         companion_name = sl.locator_companion_name(state["source_filename"])
         companion_path = extract_dir / companion_name
         if companion_path.name != "doc.md":
-            companion_path.write_text(doc_text, encoding="utf-8")
+            companion_path.write_text(doc_text, encoding="utf-8", newline="\n")
         state["raw_locator_kind"] = "companion"
         state["locator_source_filename"] = companion_name
     state["date_str"] = extract_admin_date(
@@ -964,7 +971,7 @@ def step_preprocess(state: dict) -> tuple[bool, str]:
         context_name = state["source_filename"] + ".source.json"
         (extract_dir / context_name).write_text(
             json.dumps(context, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-        )
+        newline="\n")
         state["source_context_filename"] = context_name
     return True, ""
 
@@ -1100,7 +1107,7 @@ def prepare_document_agent_task(state: dict, doc_path: Path, output_path: Path,
         transaction_id=state["transaction_id"],
         inputs=[{
             "name": "source_text",
-            "path": str(doc_path.relative_to(REPO)),
+            "path": doc_path.relative_to(REPO).as_posix(),
             "role": "authoritative_extracted_source",
             "read": "full",
         }, {
@@ -1113,7 +1120,7 @@ def prepare_document_agent_task(state: dict, doc_path: Path, output_path: Path,
                 "locator": "演示文稿（PPTX）", "read": "section"}] if state.get("pptx") else []),
         outputs=[{
             "name": "wiki_and_semantics",
-            "path": str(output_path.relative_to(REPO)),
+            "path": output_path.relative_to(REPO).as_posix(),
             "format": "document-wiki-slots-v1",
         }],
         protocol={
@@ -1207,7 +1214,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             prompt = (build_doc_wiki_slots_prompt(
                 context_text, state["admin_id"], state.get("date_str", ""),
                 state.get("subproject", "admin"), errors, state.get("document_type"),
-                source_path=(str(doc_path.relative_to(REPO)) if mode == "agent" else None))
+                source_path=(doc_path.relative_to(REPO).as_posix() if mode == "agent" else None))
                 if combined_worker else build_doc_wiki_prompt(
                     context_text, state["admin_id"], state.get("date_str", ""),
                     state.get("subproject", "admin"), errors, state.get("document_type"),
@@ -1233,7 +1240,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             state["_awaiting_agent_wiki_slots"] = True
             state["agent_required"] = True
             state["agent_prompt"] = result.get("prompt", "")
-            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            state["agent_write_to"] = agent_output.relative_to(REPO).as_posix()
             return False, "需要 agent 接管"
         if not result.get("ok"):
             return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
@@ -1253,7 +1260,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
                 return False, "LLM 输出缺少 <<<SLOTS>>> 段"
             state["slots_content"] = slots_content
             state["semantic_worker"] = "combined-api" if mode == "api" else "combined-agent"
-        wiki_file.write_text(wiki_content, encoding="utf-8")
+        wiki_file.write_text(wiki_content, encoding="utf-8", newline="\n")
         state["wiki_content"] = wiki_content
         if resumed_combined:
             agent_task.mark_consumed(state)
@@ -1312,7 +1319,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             "fields": repairs,
         })
     wiki_content = wl.replace_raw_placeholder(wiki_content, correct_sources)
-    wiki_file.write_text(wiki_content, encoding="utf-8")
+    wiki_file.write_text(wiki_content, encoding="utf-8", newline="\n")
     state["wiki_content"] = wiki_content
     return True, ""
 
@@ -1493,7 +1500,7 @@ def rollback_committed(state: dict) -> list[str]:
             receipt["status"] = "rolled_back"
             receipt["rolled_back_at"] = datetime.now().astimezone().isoformat()
             receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n",
-                                    encoding="utf-8")
+                                    encoding="utf-8", newline="\n")
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -1599,12 +1606,11 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
             kind="ingest_document_semantics",
             transaction_id=state["transaction_id"],
             inputs=[{
-                "name": "validated_wiki", "path": str(
-                    (REPO / state["extract_dir"] / "wiki.md").relative_to(REPO)
-                ), "role": "semantic_source",
+                "name": "validated_wiki", "path": 
+                    (REPO / state["extract_dir"] / "wiki.md").relative_to(REPO).as_posix(), "role": "semantic_source",
             }],
             outputs=[{
-                "name": "semantic_slots", "path": str(slots_file.relative_to(REPO)),
+                "name": "semantic_slots", "path": slots_file.relative_to(REPO).as_posix(),
                 "format": "semantic-slots-v1",
             }],
             protocol={
@@ -1646,7 +1652,7 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
         state["_awaiting_agent_slots"] = True
         state["agent_required"] = True
         state["agent_prompt"] = result.get("prompt", "")
-        state["agent_write_to"] = str(slots_file.relative_to(REPO))
+        state["agent_write_to"] = slots_file.relative_to(REPO).as_posix()
         return False, "需要 agent 接管"
     if not result.get("ok"):
         return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
@@ -1654,7 +1660,7 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
     slots_content = parse_delimited(text, SLOTS_DELIMITER)
     if not slots_content:
         return False, "LLM 输出缺少 <<<SLOTS>>> 段"
-    slots_file.write_text(slots_content, encoding="utf-8")
+    slots_file.write_text(slots_content, encoding="utf-8", newline="\n")
     state["slots_content"] = slots_content
     return True, ""
 
@@ -1837,7 +1843,7 @@ def step_update_graph(state: dict) -> tuple[bool, str]:
         if target_file.is_file() and not state.get("related_target_backup"):
             backup = REPO / state["extract_dir"] / "related-target-before.md"
             backup.write_bytes(target_file.read_bytes())
-            state["related_target_backup"] = str(backup.relative_to(REPO))
+            state["related_target_backup"] = backup.relative_to(REPO).as_posix()
         # 1. 正常 graph_ingest：创建页面节点 + 语义/机械边（与普通文档一致）
         ok, msg = ic.step_update_graph(state, REPO)
         if not ok:
@@ -1943,7 +1949,7 @@ def main() -> None:
         state = {
             "transaction_id": txn_id,
             "status": "dedup_check",
-            "source": str(file_path.relative_to(REPO)),
+            "source": file_path.relative_to(REPO).as_posix(),
             "subproject": args.subproject,
             "document_type": args.document_type,
             "source_kind": args.source_kind or "",
@@ -1990,7 +1996,7 @@ def main() -> None:
         import os
         os.makedirs("temp/inbox-state", exist_ok=True)
         log_path = f"temp/inbox-state/{state['transaction_id']}.log"
-        set_progress_file(open(log_path, "a", encoding="utf-8"))
+        set_progress_file(open(log_path, "a", encoding="utf-8", newline="\n"))
         set_progress_log_path(log_path)
         progress(f"ingest_document.py 日志: {log_path}")
     cleanup_only_resume = is_resume and state.get("status") == "completed"

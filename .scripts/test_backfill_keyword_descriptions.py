@@ -24,7 +24,7 @@ def make_fixture():
     raw.write_text(
         "矩阵乘积态用于以一维张量链压缩表示量子多体波函数及其纠缠结构。\n",
         encoding="utf-8",
-    )
+    newline="\n")
     page = "academic/wiki/papers/demo"
     wiki = root / f"{page}.md"
     wiki.parent.mkdir(parents=True)
@@ -34,7 +34,7 @@ def make_fixture():
         "本文使用矩阵乘积态表示量子多体波函数。[^r1]\n\n"
         f"## Sources\n\n[^r1]: {raw_rel}#L1\n",
         encoding="utf-8",
-    )
+    newline="\n")
     conn = sqlite3.connect(root / "graph.db")
     conn.row_factory = sqlite3.Row
     gl.init_schema(conn)
@@ -91,8 +91,8 @@ def test_agent_apply_rejects_cross_namespace_paths():
         bad_dir.mkdir(parents=True)
         input_path = bad_dir / "input.json"
         result_path = bad_dir / "result.json"
-        input_path.write_text(json.dumps({"records": []}), encoding="utf-8")
-        result_path.write_text(json.dumps({"descriptions": [], "uncertain": []}), encoding="utf-8")
+        input_path.write_text(json.dumps({"records": []}), encoding="utf-8", newline="\n")
+        result_path.write_text(json.dumps({"descriptions": [], "uncertain": []}), encoding="utf-8", newline="\n")
         bk.ingest_mode = lambda: "agent"
         try:
             bk.main([

@@ -11,6 +11,10 @@ import graph_lib as gl
 import ingest_check
 import relocate_own_ip as migration
 import source_fingerprints as fingerprints
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import platform_compat as _pc
 
 
 @contextmanager
@@ -20,7 +24,7 @@ def workspace():
         for relative in [migration.SOURCE_DIR, *migration.TARGET_DIRS,
                          Path("academic/wiki/references"), Path("cross-domain")]:
             (root / relative).mkdir(parents=True, exist_ok=True)
-        (root / "academic/wiki/log.md").write_text("# Log\n", encoding="utf-8")
+        (root / "academic/wiki/log.md").write_text("# Log\n", encoding="utf-8", newline="\n")
         for module in (gl, ingest_check, ingest_check.wl, ingest_check.wl.raw_locator):
             stack.enter_context(patch.object(module, "REPO", root))
         db = root / "cross-domain/graph.db"
@@ -33,16 +37,16 @@ def workspace():
             destination = Path("academic/raw/works") / category / source.name
             wiki = f"academic/wiki/references/{name}.md"
             page = wiki[:-3]
-            raw = str(source.with_suffix(""))
-            locator = str(source.with_suffix(".md"))
+            raw = source.with_suffix("").as_posix()
+            locator = source.with_suffix(".md").as_posix()
             (root / source).write_bytes(f"binary-{number}".encode())
-            (root / source.with_suffix(".md")).write_text("# Certificate\n\nRegistered.\n", encoding="utf-8")
+            (root / source.with_suffix(".md")).write_text("# Certificate\n\nRegistered.\n", encoding="utf-8", newline="\n")
             (root / wiki).write_text(
                 f"---\ntitle: Certificate\ntype: academic-reference\nsources: [{locator}]\n"
                 "source_type: official-doc\ndate: 2026-09-10\nstatus: current\n"
                 "confidence: high\ncreated: 2026-09-10\nupdated: 2026-09-10\n---\n"
                 f"## Navigation\nCertificate.\n## Content\nRegistered.[^r3]\n"
-                f"## Sources\n[^r3]: {locator}#L3\n", encoding="utf-8")
+                f"## Sources\n[^r3]: {locator}#L3\n", encoding="utf-8", newline="\n")
             conn.execute("INSERT INTO nodes(path,title,type) VALUES (?,?,?)", (page, "Certificate", "page"))
             conn.execute("INSERT INTO nodes(path,title,type) VALUES (?,?,?)", (raw, name, "raw"))
             conn.execute("INSERT INTO edges(subject,predicate,object,source) VALUES (?,?,?,?)",
@@ -56,7 +60,7 @@ def workspace():
                          (raw, page, locator + "#L3", "Local certificate"))
             fingerprints.register_source(root / source, text_path=root / source.with_suffix(".md"),
                                          db_path=root / "cross-domain/source-fingerprints.db", repo=root)
-            manifest["items"].append({"source": str(source), "destination": str(destination), "wiki": wiki,
+            manifest["items"].append({"source": source.as_posix(), "destination": destination.as_posix(), "wiki": wiki,
                                       "sha256": migration.sha256_file(root / source),
                                       "companion_sha256": migration.sha256_file(root / source.with_suffix(".md")),
                                       "wiki_sha256": migration.sha256_file(root / wiki)})
@@ -75,15 +79,15 @@ def test_preview_and_complete_preserve_hashes_ids_and_lineage():
         assert receipt["warnings"] == []
         conn = gl.connect(root / "cross-domain/graph.db")
         for item in manifest["items"]:
-            old = str(Path(item["source"]).with_suffix(""))
-            new = str(Path(item["destination"]).with_suffix(""))
+            old = Path(item["source"]).with_suffix("").as_posix()
+            new = Path(item["destination"]).with_suffix("").as_posix()
             assert not (root / item["source"]).exists()
             assert migration.sha256_file(root / item["destination"]) == item["sha256"]
             assert migration.sha256_file((root / item["destination"]).with_suffix(".md")) == item["companion_sha256"]
             assert conn.execute("SELECT type FROM nodes WHERE path=?", (new,)).fetchone()[0] == "raw"
             assert conn.execute("SELECT node_path FROM aliases WHERE alias=?", (old,)).fetchone()[0] == new
             assert conn.execute("SELECT source FROM node_origins WHERE node_path=?", (new,)).fetchone()[0] == new + ".md#L3"
-            assert old not in (root / item["wiki"]).read_text()
+            assert old not in (root / item["wiki"]).read_text(encoding="utf-8")
             errors, _warnings = ingest_check.graph_checks(root / item["wiki"], connection=conn)
             assert not errors
             assert conn.execute("SELECT 1").fetchone()[0] == 1
@@ -97,6 +101,9 @@ def test_preview_and_complete_preserve_hashes_ids_and_lineage():
 
 
 def test_preflight_rejects_hash_collision_symlink_and_unlisted_reference():
+    if not _pc.symlinks_available():
+        print("  SKIP test_preflight_rejects_hash_collision_symlink_and_unlisted_reference: " + _pc.SYMLINK_SKIP_REASON)
+        return
     for failure in ("hash", "collision", "symlink", "reference", "domain", "missing-db"):
         with workspace() as (root, original):
             manifest = copy.deepcopy(original)
@@ -110,7 +117,7 @@ def test_preflight_rejects_hash_collision_symlink_and_unlisted_reference():
                 source.rename(source.with_suffix(".original"))
                 source.symlink_to(source.with_suffix(".original"))
             elif failure == "reference":
-                (root / "academic/wiki/another.md").write_text(item["source"])
+                (root / "academic/wiki/another.md").write_text(item["source"], encoding="utf-8", newline="\n")
             elif failure == "domain":
                 item["destination"] = "private/raw/health/test.pdf"
             else:
@@ -137,7 +144,7 @@ def test_validation_failure_rolls_back_without_touching_originals():
             assert migration.sha256_file(root / item["source"]) == item["sha256"]
             assert migration.sha256_file(root / item["wiki"]) == item["wiki_sha256"]
             assert not (root / item["destination"]).exists()
-        receipt = json.loads(next((root / "temp/raw-relocations").glob("*/receipt.json")).read_text())
+        receipt = json.loads(next((root / "temp/raw-relocations").glob("*/receipt.json")).read_text(encoding="utf-8"))
         assert receipt["status"] == "rolled_back"
         assert migration.relocate(root, manifest)["status"] == "planned"
 
@@ -152,12 +159,12 @@ def test_postcommit_failure_resumes_cleanup():
             else:
                 raise AssertionError("expected fingerprint failure")
         receipt_path = next((root / "temp/raw-relocations").glob("*/receipt.json"))
-        receipt = json.loads(receipt_path.read_text())
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         assert receipt["status"] == "committed"
         for item in manifest["items"]:
             assert (root / item["source"]).is_file()
             assert (root / item["destination"]).is_file()
-        result = migration.relocate(root, resume=str(receipt_path.relative_to(root)))
+        result = migration.relocate(root, resume=receipt_path.relative_to(root).as_posix())
         assert result["status"] == "completed"
 
 
@@ -189,14 +196,14 @@ def test_uncommitted_recovery_preserves_later_edits():
         staged = wiki.read_bytes()
         wiki.write_bytes(staged + b"\nHuman edit.\n")
         try:
-            migration.relocate(root, resume=str(receipt_path.relative_to(root)))
+            migration.relocate(root, resume=receipt_path.relative_to(root).as_posix())
         except ValueError as error:
             assert "later edit" in str(error)
         else:
             raise AssertionError("must not overwrite later edits")
         assert b"Human edit" in wiki.read_bytes()
         wiki.write_bytes(staged)
-        assert migration.relocate(root, resume=str(receipt_path.relative_to(root)))["status"] == "rolled_back"
+        assert migration.relocate(root, resume=receipt_path.relative_to(root).as_posix())["status"] == "rolled_back"
 
 
 if __name__ == "__main__":

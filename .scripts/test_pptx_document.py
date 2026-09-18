@@ -81,7 +81,7 @@ class PPTXTests(unittest.TestCase):
         return self.manifest
 
     def write_review(self):
-        (self.directory / 'pptx-review.json').write_text(json.dumps(self.review, ensure_ascii=False))
+        (self.directory / 'pptx-review.json').write_text(json.dumps(self.review, ensure_ascii=False), encoding="utf-8", newline="\n")
 
     def test_native_order_notes_tables_groups_hidden(self):
         before = self.source.read_bytes()
@@ -153,8 +153,8 @@ class PPTXTests(unittest.TestCase):
         for backend in ['agent', 'api']:
             with self.subTest(backend=backend):
                 directory = self.repo / ('temp/inbox-extract/' + backend)
-                state = {'source': str(self.source.relative_to(self.repo)), 'source_filename': self.source.name,
-                         'extract_dir': str(directory.relative_to(self.repo)), 'transaction_id': backend,
+                state = {'source': self.source.relative_to(self.repo).as_posix(), 'source_filename': self.source.name,
+                         'extract_dir': directory.relative_to(self.repo).as_posix(), 'transaction_id': backend,
                          'subproject': 'admin', 'semantic_backend': backend}
                 with patch.object(ingest, 'call_text', side_effect=AssertionError('no API before review')):
                     ok, _ = ingest.step_preprocess(state)
@@ -162,8 +162,8 @@ class PPTXTests(unittest.TestCase):
                 self.assertEqual(state['agent_task']['kind'], 'pptx_review')
                 self.assertEqual(state['pre_handoff_status'], 'preprocess')
                 self.assertEqual(state['semantic_backend'], backend)
-                manifest = json.loads((directory / 'pptx-manifest.json').read_text())
-                (directory / 'pptx-review.json').write_text(json.dumps(reviewed(manifest)))
+                manifest = json.loads((directory / 'pptx-manifest.json').read_text(encoding="utf-8"))
+                (directory / 'pptx-review.json').write_text(json.dumps(reviewed(manifest)), encoding="utf-8", newline="\n")
                 ok, message = ingest.step_preprocess(state)
                 self.assertTrue(ok, message)
                 self.assertEqual(ingest._manifest_raw_files(state), [self.source.name, self.source.stem + '.md', self.source.name + '.source.json'])
@@ -183,9 +183,9 @@ class PPTXTests(unittest.TestCase):
 
     def test_pptx_wiki_identity_uses_source_not_extractor_heading(self):
         self.directory.mkdir(parents=True)
-        (self.directory / 'doc.md').write_text('# PPTX 逐页原生提取\n\n# Slide title')
+        (self.directory / 'doc.md').write_text('# PPTX 逐页原生提取\n\n# Slide title', encoding="utf-8", newline="\n")
         state = {'source_filename': '20260911-设备更新答辩.PPTX',
-                 'extract_dir': str(self.directory.relative_to(self.repo)),
+                 'extract_dir': self.directory.relative_to(self.repo).as_posix(),
                  'date_str': '2026-09-11', 'subproject': 'admin',
                  'document_type': 'application'}
         # Stop at the semantic adapter boundary after identity is selected.
@@ -203,7 +203,7 @@ class PPTXTests(unittest.TestCase):
         info, _ = image_ocr.read_image(self.directory / 'pptx-renders/page-0002.png')
         receipt = image_ocr.make_receipt(info, 'wrong page OCR', backend='agent')
         path = self.directory / 'wrong-ocr.json'
-        path.write_text(json.dumps(receipt))
+        path.write_text(json.dumps(receipt), encoding="utf-8", newline="\n")
         self.review['pages'][0]['ocr_receipt'] = str(path)
         self.write_review()
         with self.assertRaises(image_ocr.ImageOCRError):

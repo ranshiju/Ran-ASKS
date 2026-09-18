@@ -164,7 +164,7 @@ def resolve_abbreviation_todo(conn, repo=None):
         todo_path.write_text(
             "\n".join(_json.dumps(e, ensure_ascii=False) for e in remaining) + ("\n" if remaining else ""),
             encoding="utf-8"
-        )
+        , newline="\n")
 
     return resolved, len(remaining)
 

@@ -29,7 +29,7 @@ def repo_path(value: str, label: str) -> Path:
 
 
 def run(command: list[str]) -> str:
-    result = subprocess.run(command, cwd=REPO, text=True, capture_output=True)
+    result = subprocess.run(command, cwd=REPO, text=True, encoding="utf-8", errors="replace", capture_output=True)
     if result.stdout:
         print(result.stdout, end="")
     if result.stderr:
@@ -47,7 +47,7 @@ def write_manifest(extract_dir: Path) -> None:
     (extract_dir / "manifest.json").write_text(
         json.dumps({"raw_files": raw_files, "wiki_file": "wiki.md"}, ensure_ascii=False) + "\n",
         encoding="utf-8",
-    )
+    newline="\n")
 
 
 def cmd_plan(_: argparse.Namespace) -> None:

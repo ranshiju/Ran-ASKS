@@ -145,18 +145,18 @@ def prepare_transaction(path: Path | None = None, repo: Path | None = None) -> d
         transaction_id=transaction_id,
         inputs=[{
             "name": "assertion_manifest",
-            "path": str(manifest_path.relative_to(repo)),
+            "path": manifest_path.relative_to(repo).as_posix(),
             "role": "immutable_pending_snapshot_and_output_contract",
             "read": "full",
         }],
         outputs=[{
             "name": "proposal",
-            "path": str(proposal_path.relative_to(repo)),
+            "path": proposal_path.relative_to(repo).as_posix(),
             "format": PROPOSAL_SCHEMA,
         }],
         protocol={
             "name": PROPOSAL_SCHEMA,
-            "schema_source": str(manifest_path.relative_to(repo)),
+            "schema_source": manifest_path.relative_to(repo).as_posix(),
             "validator": "ingest_user_assertions._validate_proposal",
         },
         commands={
@@ -172,8 +172,8 @@ def prepare_transaction(path: Path | None = None, repo: Path | None = None) -> d
         "agent_task": task,
         "transaction_id": transaction_id,
         "fact_entries": len(facts),
-        "write_to": str(proposal_path.relative_to(repo)),
-        "manifest_path": str(manifest_path.relative_to(repo)),
+        "write_to": proposal_path.relative_to(repo).as_posix(),
+        "manifest_path": manifest_path.relative_to(repo).as_posix(),
         "retryable": False,
         "next_action": "complete_agent_task",
         "apply_command": (
@@ -222,7 +222,7 @@ def _validate_proposal(repo: Path, manifest: dict, proposal: dict) -> tuple[list
         if not isinstance(update, dict):
             raise ValueError("wiki update must be an object")
         target = _managed_wiki_path(repo, update.get("page", ""))
-        relative = str(target.relative_to(repo))
+        relative = target.relative_to(repo).as_posix()
         if relative in pages:
             raise ValueError(f"duplicate wiki update: {relative}")
         pages.add(relative)
@@ -265,7 +265,7 @@ def _validate_proposal(repo: Path, manifest: dict, proposal: dict) -> tuple[list
 
 
 def _run_command(command: list[str], repo: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(command, cwd=repo, text=True, capture_output=True)
+    return subprocess.run(command, cwd=repo, text=True, encoding="utf-8", errors="replace", capture_output=True)
 
 
 def _last_json_object(text: str) -> dict:
@@ -394,7 +394,7 @@ def apply_transaction(transaction_id: str, repo: Path | None = None) -> dict:
             "pending_sha256_after": _file_sha256(pending),
         }
         _write_json(receipt_path, receipt)
-        return {**receipt, "ok": True, "receipt_path": str(receipt_path.relative_to(repo))}
+        return {**receipt, "ok": True, "receipt_path": receipt_path.relative_to(repo).as_posix()}
     except Exception as exc:
         _restore(raw, raw_existed, original_raw)
         for update in updates:
@@ -411,7 +411,7 @@ def apply_transaction(transaction_id: str, repo: Path | None = None) -> dict:
             "errors": [f"{type(exc).__name__}: {exc}"],
         }
         _write_json(receipt_path, receipt)
-        return {**receipt, "ok": False, "receipt_path": str(receipt_path.relative_to(repo))}
+        return {**receipt, "ok": False, "receipt_path": receipt_path.relative_to(repo).as_posix()}
 
 
 def main(argv: list[str] | None = None) -> int:

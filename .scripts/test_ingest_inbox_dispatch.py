@@ -11,6 +11,10 @@ import tempfile
 import types
 from pathlib import Path
 from unittest.mock import patch
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import platform_compat as _pc
 
 SCRIPT = Path(__file__).with_name("ingest_inbox.py")
 spec = importlib.util.spec_from_file_location("ingest_inbox", SCRIPT)
@@ -33,7 +37,7 @@ def test_extract_last_json_ignores_domain_status():
 def test_managed_external_file_staging_and_inbox_boundary():
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory) / "attachment.txt"
-        source.write_text("managed intake", encoding="utf-8")
+        source.write_text("managed intake", encoding="utf-8", newline="\n")
         target = None
         receipt_paths = []
         try:
@@ -52,7 +56,7 @@ def test_managed_external_file_staging_and_inbox_boundary():
             assert reused_target == target
             assert reused["action"] == "reused_exact"
             assert receipt_paths[0] != receipt_paths[1]
-            assert module._resolve_inbox_file(str(target.relative_to(module.REPO))) == target
+            assert module._resolve_inbox_file(target.relative_to(module.REPO).as_posix()) == target
             try:
                 module._resolve_inbox_file(str(source))
                 raise AssertionError("仓库外文件不应被 --file 接受")
@@ -67,9 +71,12 @@ def test_managed_external_file_staging_and_inbox_boundary():
 
 
 def test_managed_external_file_rejects_symlink_target():
+    if not _pc.symlinks_available():
+        print("  SKIP test_managed_external_file_rejects_symlink_target: " + _pc.SYMLINK_SKIP_REASON)
+        return
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory) / "source.txt"
-        source.write_text("source", encoding="utf-8")
+        source.write_text("source", encoding="utf-8", newline="\n")
         link = module.INBOX / "test-managed-intake-symlink-20260911.txt"
         try:
             link.symlink_to(source)
@@ -140,7 +147,7 @@ def test_scan_inbox_includes_only_nonempty_facts_pending():
             inbox = Path(directory) / "inbox"
             inbox.mkdir()
             facts = inbox / "facts-pending.md"
-            facts.write_text("# Pending facts\n", encoding="utf-8")
+            facts.write_text("# Pending facts\n", encoding="utf-8", newline="\n")
             module.INBOX = inbox
             assert module.scan_inbox() == []
 
@@ -166,7 +173,7 @@ def test_facts_pending_run_returns_agent_task_without_raw_write():
                 "- [2026-09-05] **Alice advises Bob.** {: #fact-alice-bob-20260905}\n"
                 "- [2026-09-05] **Bob belongs to Lab C.** {: #fact-bob-lab-c-20260905}\n"
             )
-            facts.write_text(original_text, encoding="utf-8")
+            facts.write_text(original_text, encoding="utf-8", newline="\n")
             module.REPO = root
             module.INBOX = inbox
             module.sf.ensure_index = lambda: None
@@ -205,7 +212,7 @@ def test_agent_run_directly_dispatches_without_importing_dsh(fail_publication=Fa
             inbox = root / "inbox"
             inbox.mkdir()
             source = inbox / "notice.md"
-            source.write_text("Routine administrative notice.\n", encoding="utf-8")
+            source.write_text("Routine administrative notice.\n", encoding="utf-8", newline="\n")
             module.REPO = root
             module.INBOX = inbox
             module.sf.ensure_index = lambda: None
@@ -305,7 +312,7 @@ def test_api_run_uses_dsh_loop_without_direct_dispatch():
             inbox.mkdir()
             (inbox / "notice.md").write_text(
                 "Routine administrative notice.\n", encoding="utf-8"
-            )
+            , newline="\n")
             module.REPO = root
             module.INBOX = inbox
             module.sf.ensure_index = lambda: None
@@ -363,8 +370,8 @@ def test_agent_low_confidence_classification_is_one_batch_task():
             root = Path(directory)
             inbox = root / "inbox"
             inbox.mkdir()
-            (inbox / "agenda.txt").write_text("会议安排\n", encoding="utf-8")
-            (inbox / "attendees.txt").write_text("参会名单\n", encoding="utf-8")
+            (inbox / "agenda.txt").write_text("会议安排\n", encoding="utf-8", newline="\n")
+            (inbox / "attendees.txt").write_text("参会名单\n", encoding="utf-8", newline="\n")
             module.REPO = root
             module.INBOX = inbox
             module.sf.ensure_index = lambda: None
@@ -557,7 +564,7 @@ def test_academic_conference_classification_uses_first_h1():
         path.write_text(
             "# 第二届量子物理与智能计算交叉研讨会资料汇总\n\n正文。\n",
             encoding="utf-8",
-        )
+        newline="\n")
         assert module.classify_academic_document(path) == "conference-summary"
 
 
@@ -723,7 +730,7 @@ def test_uncertain_scores_request_api_review_without_changing_program_type():
 
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "notes.txt"
-        path.write_text("会议安排", encoding="utf-8")
+        path.write_text("会议安排", encoding="utf-8", newline="\n")
         decision = module.classify_file_details(path)
         assert decision["file_type"] == "document"
         assert decision["score"] == 1
@@ -1278,7 +1285,7 @@ def test_abbreviation_decisions_close_only_matching_maintenance_action():
             review.parent.mkdir(parents=True)
             review.write_text(json.dumps({
                 "candidates": [{"token": "QA", "occurrences": [{"page": "page"}]}],
-            }), encoding="utf-8")
+            }), encoding="utf-8", newline="\n")
             receipt_path = resolver.REPO / "temp/inbox-maintenance/session.json"
             receipt_path.parent.mkdir(parents=True)
             receipt_path.write_text(json.dumps({
@@ -1344,7 +1351,7 @@ def test_abbreviation_decisions_cli_closes_linked_maintenance_receipt():
             review.parent.mkdir(parents=True)
             review.write_text(json.dumps({
                 "candidates": [{"token": "QA", "occurrences": [{"page": "page"}]}],
-            }), encoding="utf-8")
+            }), encoding="utf-8", newline="\n")
             receipt = resolver.REPO / "temp/inbox-maintenance/session.json"
             receipt.parent.mkdir(parents=True)
             receipt.write_text(json.dumps({
@@ -1364,7 +1371,7 @@ def test_abbreviation_decisions_cli_closes_linked_maintenance_receipt():
             decisions = resolver.REPO / "decisions.json"
             decisions.write_text(json.dumps({"decisions": [{
                 "token": "QA", "resolution_kind": "canonical_name",
-            }]}), encoding="utf-8")
+            }]}), encoding="utf-8", newline="\n")
 
             resolver.gl.connect = lambda: FakeConnection()
             resolver.apply_decisions = lambda _conn, _decisions, _todo: {
@@ -1440,7 +1447,7 @@ def test_initial_maintenance_publication_and_historical_reconciliation(historica
             for transaction_id in ("txn-first", "txn-second"):
                 linked = inbox_state.load(transaction_id)["maintenance"]
                 assert linked["receipt_path"] == receipt_rel
-                assert linked["report_path"] == str(report_path.relative_to(root))
+                assert linked["report_path"] == report_path.relative_to(root).as_posix()
             for transaction_id in ("txn-first", "txn-second"):
                 page = f"academic/wiki/papers/{transaction_id}"
                 result = {
@@ -1471,7 +1478,7 @@ def test_initial_maintenance_publication_and_historical_reconciliation(historica
                     assert inbox_state.load(transaction_id)["route_corrections"][-1]["hub"] == result["hub"]
                 else:
                     hub_semantics.record_paper_route_correction(transaction_id, result)
-                current = json.loads(report_path.read_text())
+                current = json.loads(report_path.read_text(encoding="utf-8"))
                 if interrupted:
                     assert current["maintenance"]["publication"]["status"] == "pending"
                     continue
@@ -1482,7 +1489,7 @@ def test_initial_maintenance_publication_and_historical_reconciliation(historica
                         assert inbox_state.load(member["transaction_id"])["maintenance"]["status"] == expected
             summary = module.reconcile_maintenance_report(report_path)
             assert summary["maintenance"]["status"] == "completed"
-            repaired = json.loads(report_path.read_text())
+            repaired = json.loads(report_path.read_text(encoding="utf-8"))
             assert repaired["maintenance"]["components"]["hubs"]["route_review_count"] == 0
             assert repaired["degraded"] == 2
             for member in files:
@@ -1493,10 +1500,10 @@ def test_initial_maintenance_publication_and_historical_reconciliation(historica
             assert not module._hub_route_reviews(repaired["files"])
             assert all(item["quality_warnings"] for item in repaired["files"])
             assert all(item["resolution"]["status"] == "applied"
-                       for item in json.loads((root / route_rel).read_text()))
+                       for item in json.loads((root / route_rel).read_text(encoding="utf-8")))
             module.reconcile_maintenance_report(report_path)
-            assert json.loads(report_path.read_text()) == repaired
-            receipt = json.loads((root / receipt_rel).read_text())
+            assert json.loads(report_path.read_text(encoding="utf-8")) == repaired
+            receipt = json.loads((root / receipt_rel).read_text(encoding="utf-8"))
             receipt["actions"] = [{"component": "abbreviations", "next_action": "review"}]
             receipt["status"] = "agent_required"
             module._write_json_atomic(root / receipt_rel, receipt)
@@ -1504,7 +1511,7 @@ def test_initial_maintenance_publication_and_historical_reconciliation(historica
             module._write_json_atomic(report_path, repaired)
             summary = module.reconcile_maintenance_report(report_path)
             assert summary["maintenance"]["status"] == "agent_required"
-            assert json.loads(report_path.read_text())["maintenance"]["actions"] == receipt["actions"]
+            assert json.loads(report_path.read_text(encoding="utf-8"))["maintenance"]["actions"] == receipt["actions"]
 
 
 def test_maintenance_publication_rejects_mismatched_state_before_writing():
@@ -1599,20 +1606,20 @@ def test_maintenance_publication_recovers_write_failures():
                     assert all("maintenance" not in inbox_state.load(item["transaction_id"]) for item in files)
                     assert module.publish_maintenance_report(report_path, report)
                 else:
-                    persisted = json.loads(report_path.read_text())
+                    persisted = json.loads(report_path.read_text(encoding="utf-8"))
                     expected = "pending" if scenario in {"final_report", "interruption"} else "error"
                     assert persisted["maintenance"]["publication"]["status"] == expected
                     compact = module.reconcile_maintenance_report(report_path)
                     assert compact["maintenance"]["status"] == "completed"
-                assert json.loads((root / receipt_rel).read_text()) == receipt
+                assert json.loads((root / receipt_rel).read_text(encoding="utf-8")) == receipt
                 for item in files:
                     state = inbox_state.load(item["transaction_id"])
                     assert state["status"] == "completed"
                     assert state["maintenance"]["status"] == "completed"
                     assert state["quality_warnings"] == [{"issue": "independent"}]
-                repaired = json.loads(report_path.read_text())
+                repaired = json.loads(report_path.read_text(encoding="utf-8"))
                 module.reconcile_maintenance_report(report_path)
-                assert json.loads(report_path.read_text()) == repaired
+                assert json.loads(report_path.read_text(encoding="utf-8")) == repaired
 
 
 def main():

@@ -44,9 +44,9 @@ def build_corpus():
                 if sec.startswith("## "):
                     current_header = sec
                 elif current_header == "header":
-                    chunks.append({"page": str(f.relative_to(REPO)), "section": "frontmatter", "text": sec[:2000]})
+                    chunks.append({"page": f.relative_to(REPO).as_posix(), "section": "frontmatter", "text": sec[:2000]})
                 else:
-                    chunks.append({"page": str(f.relative_to(REPO)), "section": current_header, "text": sec[:2000]})
+                    chunks.append({"page": f.relative_to(REPO).as_posix(), "section": current_header, "text": sec[:2000]})
     return chunks
 
 def main():
@@ -91,7 +91,7 @@ def main():
     if args.output == "-":
         print(out)
     else:
-        Path(args.output).write_text(out, encoding="utf-8")
+        Path(args.output).write_text(out, encoding="utf-8", newline="\n")
         print(f"结果写入 {args.output} ({len(results)} 题)", file=sys.stderr)
 
 if __name__ == "__main__":

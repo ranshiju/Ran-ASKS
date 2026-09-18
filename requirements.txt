@@ -1,0 +1,33 @@
+# Ran-ASKS Python 依赖
+#
+# 安装：python -m pip install -r requirements.txt
+#
+# 按需安装即可：只有用到相应工作流时才需要对应依赖。核心的摄入、
+# 图构建与校验只依赖 PyYAML。
+
+# --- 核心：配置、图 schema、校验 ---
+PyYAML>=6.0
+
+# --- 文档摄入：PDF 抽取、渲染、元数据 ---
+PyMuPDF>=1.24            # 即 fitz
+python-pptx>=0.6.23      # 原生可编辑 PowerPoint 生成
+openpyxl>=3.1            # .xlsx 读取
+xlrd>=2.0                # 旧版 .xls 读取
+xlwt>=1.3                # 旧版 .xls 写出
+
+# --- 视觉 QA 与图像重建 ---
+Pillow>=10.0
+numpy>=1.26
+scipy>=1.11              # 可选：缺失时降级，不影响主流程
+
+# --- 模型后端与 token 计量 ---
+requests>=2.31
+python-dotenv>=1.0
+tiktoken>=0.7
+
+# --- 图分析与可视化 ---
+networkx>=3.0
+matplotlib>=3.8
+
+# --- 论文实验基线（仅运行 baseline_* 脚本时需要）---
+rank-bm25>=0.2.2

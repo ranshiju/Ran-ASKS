@@ -86,7 +86,7 @@ def dump_jsonl(conn, out_path):
     for r in conn.execute("SELECT id,subject,predicate,object,confidence,source,is_sr FROM edges ORDER BY id"):
         lines.append(json.dumps({"_t": "edge", **dict(r)}, ensure_ascii=False))
     out = Path(out_path)
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     print(f"jsonl快照: {out} ({len(lines)} 行)")
 
 

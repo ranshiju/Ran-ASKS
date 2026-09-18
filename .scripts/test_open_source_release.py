@@ -14,7 +14,7 @@ SCRIPT = REPO / ".scripts/open_source_release.py"
 
 
 def run(*args: str, expected: int = 0) -> subprocess.CompletedProcess:
-    result = subprocess.run([sys.executable, str(SCRIPT), *args], cwd=REPO, text=True,
+    result = subprocess.run([sys.executable, str(SCRIPT), *args], cwd=REPO, text=True, encoding="utf-8", errors="replace",
                             capture_output=True)
     assert result.returncode == expected, result.stdout + result.stderr
     return result
@@ -37,9 +37,9 @@ def check_version_preparation() -> None:
         changelog = repository / "public-CHANGELOG.md"
         mirror = repository / "CHANGELOG.md"
         original = "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- Image OCR.\n\n## [0.4.0] - 2026-09-04\n\n- Earlier work.\n"
-        version_path.write_text("0.4.0\n", encoding="utf-8")
-        changelog.write_text(original, encoding="utf-8")
-        mirror.write_text("old mirror\n", encoding="utf-8")
+        version_path.write_text("0.4.0\n", encoding="utf-8", newline="\n")
+        changelog.write_text(original, encoding="utf-8", newline="\n")
+        mirror.write_text("old mirror\n", encoding="utf-8", newline="\n")
         manifest = {"public_assets": {"CHANGELOG.md": changelog.name}}
         with patch.object(release, "REPO", repository), patch.object(release, "VERSION_PATH", version_path), patch.object(release, "load_manifest", return_value=manifest):
             arguments = {"level": "minor", "reason": "Compatible image ingestion capability", "from_version": "0.4.0", "release_date": "2026-09-08"}
@@ -56,7 +56,7 @@ def check_version_preparation() -> None:
                     raise AssertionError(changes)
                 assert all(item.read_bytes() == content for item, content in snapshot.items())
             for invalid in ["# Changelog\n", "## [Unreleased]\n\n### Added\n", original + "\n## [0.5.0]\n"]:
-                changelog.write_text(invalid, encoding="utf-8")
+                changelog.write_text(invalid, encoding="utf-8", newline="\n")
                 try:
                     release.prepare_version(**arguments, apply=True)
                 except ValueError:
@@ -65,7 +65,7 @@ def check_version_preparation() -> None:
                     raise AssertionError(invalid)
                 assert version_path.read_bytes() == snapshot[version_path]
                 assert mirror.read_bytes() == snapshot[mirror]
-            changelog.write_text(original, encoding="utf-8")
+            changelog.write_text(original, encoding="utf-8", newline="\n")
             original_write = Path.write_text
 
             def fail_mirror(target, *args, **kwargs):
@@ -83,9 +83,9 @@ def check_version_preparation() -> None:
             assert all(item.read_bytes() == content for item, content in snapshot.items())
             applied = release.prepare_version(**arguments, apply=True)
             assert applied["status"] == "applied"
-            assert version_path.read_text() == "0.5.0\n"
+            assert version_path.read_text(encoding="utf-8") == "0.5.0\n"
             assert mirror.read_bytes() == changelog.read_bytes()
-            updated = changelog.read_text()
+            updated = changelog.read_text(encoding="utf-8")
             assert "## [Unreleased]\n\n## [0.5.0] - 2026-09-08" in updated
             assert "- MINOR: Compatible image ingestion capability" in updated
             assert "- Image OCR." in updated and "- Earlier work." in updated
@@ -102,7 +102,7 @@ def check_version_progression() -> None:
         repository = Path(temporary)
 
         def git(*arguments):
-            return subprocess.run(["git", *arguments], cwd=repository, check=True, capture_output=True, text=True)
+            return subprocess.run(["git", *arguments], cwd=repository, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
         assert release.git_publication_diff(repository) == (set(), None)
         git("init", "-q")
@@ -110,17 +110,17 @@ def check_version_progression() -> None:
         git("config", "user.email", "release-test@example.invalid")
         assert release.git_publication_diff(repository) == (set(), None)
         version_path = repository / "VERSION"
-        version_path.write_text("0.4.0\n")
+        version_path.write_text("0.4.0\n", encoding="utf-8", newline="\n")
         git("add", "-A")
         git("commit", "-qm", "baseline")
         assert release.git_publication_diff(repository) == (set(), None)
-        (repository / "README.md").write_text("New capability\n")
+        (repository / "README.md").write_text("New capability\n", encoding="utf-8")
         changes, base = release.git_publication_diff(repository)
         assert changes == {"README.md"} and base == "HEAD"
         for candidate in ["0.4.0", "0.3.9"]:
             assert release.version_progression_errors(repository, candidate, changes, base)
         assert not release.version_progression_errors(repository, "0.5.0", changes, base)
-        version_path.write_text("0.5.0\n")
+        version_path.write_text("0.5.0\n", encoding="utf-8", newline="\n")
         git("add", "-A")
         changes, base = release.git_publication_diff(repository)
         assert changes == {"VERSION", "README.md"} and base == "HEAD"
@@ -130,7 +130,7 @@ def check_version_progression() -> None:
         assert not release.version_progression_errors(repository, "0.5.0", changes, base)
         for candidate in ["0.4.0", "0.3.9"]:
             assert release.version_progression_errors(repository, candidate, changes, base)
-        (repository / "README.md").write_text("Same-version edit\n")
+        (repository / "README.md").write_text("Same-version edit\n", encoding="utf-8", newline="\n")
         git("add", "-A")
         git("commit", "-qm", "unversioned update")
         changes, base = release.git_publication_diff(repository)
@@ -150,13 +150,13 @@ def check_documentation_omissions() -> None:
         ]:
             target = destination / path
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(term, encoding="utf-8")
+            target.write_text(term, encoding="utf-8", newline="\n")
             errors = release.documentation_omission_errors(destination, manifest, {path})
             assert len(errors) == 1 and path in errors[0], errors
         skill_path = ".codex/skills/manuscript-diagnosis/SKILL.md"
         target = destination / skill_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("稿件诊断 manuscript-diagnosis", encoding="utf-8")
+        target.write_text("稿件诊断 manuscript-diagnosis", encoding="utf-8", newline="\n")
         assert not release.documentation_omission_errors(destination, manifest, {skill_path})
 
 
@@ -179,20 +179,20 @@ def main() -> None:
         assert not (destination / "projects").exists()
         private_ignored = subprocess.run(
             ["git", "check-ignore", "projects/local-input/manuscript.pdf"],
-            cwd=destination, text=True, capture_output=True,
+            cwd=destination, text=True, encoding="utf-8", errors="replace", capture_output=True,
         )
         assert private_ignored.returncode == 0, private_ignored.stderr
         skill_check = subprocess.run(
             [sys.executable, "-B", str(skill / "scripts/test_diagnosis_preflight.py")],
-            cwd=destination, text=True, capture_output=True,
+            cwd=destination, text=True, encoding="utf-8", errors="replace", capture_output=True,
         )
         assert skill_check.returncode == 0, skill_check.stdout + skill_check.stderr
         readme_path = destination / "README.md"
         original_readme = readme_path.read_text(encoding="utf-8")
-        readme_path.write_text(original_readme + "\n稿件诊断\n", encoding="utf-8")
+        readme_path.write_text(original_readme + "\n稿件诊断\n", encoding="utf-8", newline="\n")
         omitted = run("verify", str(destination), expected=1)
         assert "unlisted feature in public documentation: README.md" in omitted.stderr
-        readme_path.write_text(original_readme, encoding="utf-8")
+        readme_path.write_text(original_readme, encoding="utf-8", newline="\n")
         assert (destination / "README.md").is_file()
         assert (destination / "README.zh-CN.md").is_file()
         assert (destination / "CHANGELOG.md").is_file()
@@ -290,14 +290,14 @@ def main() -> None:
                 "verify",
                 "paper-artifacts/v0.2.0",
             ],
-            cwd=destination, text=True, capture_output=True,
+            cwd=destination, text=True, encoding="utf-8", errors="replace", capture_output=True,
         )
         assert artifact_check.returncode == 0, artifact_check.stdout + artifact_check.stderr
         assert (destination / "paper-artifacts/v0.2.1/metadata.json").is_file()
         audit_artifact_check = subprocess.run(
             [sys.executable, "verify.py"],
             cwd=destination / "paper-artifacts/v0.2.1",
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             capture_output=True,
         )
         assert audit_artifact_check.returncode == 0, (
@@ -331,7 +331,7 @@ def main() -> None:
         assert "path: projects/ForBetterScience" not in graph_text
         graph_check = subprocess.run(
             [sys.executable, ".scripts/engineering_graph.py", "validate"],
-            cwd=destination, text=True, capture_output=True,
+            cwd=destination, text=True, encoding="utf-8", errors="replace", capture_output=True,
         )
         assert graph_check.returncode == 0, graph_check.stdout + graph_check.stderr
 
@@ -341,10 +341,10 @@ def main() -> None:
             cwd=destination,
             check=True,
         )
-        (destination / "VERSION").write_text("0.0.0\n", encoding="utf-8")
+        (destination / "VERSION").write_text("0.0.0\n", encoding="utf-8", newline="\n")
         subprocess.run(["git", "add", "-A"], cwd=destination, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=destination, check=True)
-        (destination / "VERSION").write_text(expected_version + "\n", encoding="utf-8")
+        (destination / "VERSION").write_text(expected_version + "\n", encoding="utf-8", newline="\n")
 
         changed_path = destination / "AGENTS.md"
         original_changed = changed_path.read_bytes()
@@ -372,27 +372,27 @@ def main() -> None:
         gitignore.write_text(original_gitignore + "\npaper-artifacts/**\n", encoding="utf-8")
         ignored = run("verify", str(destination), expected=1)
         assert "release file ignored by destination .gitignore" in ignored.stderr
-        gitignore.write_text(original_gitignore, encoding="utf-8")
+        gitignore.write_text(original_gitignore, encoding="utf-8", newline="\n")
 
         changelog_path = destination / "CHANGELOG.md"
         original_changelog = changelog_path.read_text(encoding="utf-8")
         changelog_path.write_text(
             original_changelog.replace(f"## [{expected_version}]", "## [9.9.9]", 1),
             encoding="utf-8",
-        )
+        newline="\n")
         stale_changelog = run("verify", str(destination), expected=1)
         assert "CHANGELOG.md missing current release heading" in stale_changelog.stderr
-        changelog_path.write_text(original_changelog, encoding="utf-8")
+        changelog_path.write_text(original_changelog, encoding="utf-8", newline="\n")
 
         changelog_path.write_text(
             original_changelog.replace("## [Unreleased]", "## [Unreleased]\n\n## [9.9.9]", 1),
             encoding="utf-8",
-        )
+        newline="\n")
         misordered = run("verify", str(destination), expected=1)
         assert "newest release heading must match VERSION" in misordered.stderr
-        changelog_path.write_text(original_changelog, encoding="utf-8")
+        changelog_path.write_text(original_changelog, encoding="utf-8", newline="\n")
 
-        (destination / "academic/raw/leak.txt").write_text("private", encoding="utf-8")
+        (destination / "academic/raw/leak.txt").write_text("private", encoding="utf-8", newline="\n")
         failed = run("verify", str(destination), expected=1)
         assert "unexpected file" in failed.stderr
 

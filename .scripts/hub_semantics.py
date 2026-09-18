@@ -263,7 +263,7 @@ def read_paper_profile(path: str | Path) -> DirectionProfile | None:
     if not text or section is None:
         return None
     target = _page_file(path)
-    rel = str(target.resolve().relative_to(_page_root().resolve())).removesuffix(".md")
+    rel = target.resolve().relative_to(_page_root().resolve()).as_posix().removesuffix(".md")
     return DirectionProfile(
         page=rel,
         locator=f"{rel}#{section.slug}",
@@ -587,8 +587,8 @@ def record_paper_route_correction(transaction_id: str, result: dict) -> str:
         for item in closed_report.get("files", [])
     ):
         result["maintenance"] = state["maintenance"]
-        return str(state_path.relative_to(REPO))
-    return str(inbox_state.save(transaction_id, state).relative_to(REPO))
+        return state_path.relative_to(REPO).as_posix()
+    return inbox_state.save(transaction_id, state).relative_to(REPO).as_posix()
 
 
 def _read_json(path: Path):
@@ -726,7 +726,7 @@ def read_people_profile(path: str | Path) -> NodeProfile | None:
         return None
     target = _page_file(path)
     try:
-        rel = str(target.resolve().relative_to(REPO.resolve())).removesuffix(".md")
+        rel = target.resolve().relative_to(REPO.resolve()).as_posix().removesuffix(".md")
     except ValueError:
         return None
     return NodeProfile(rel, "people", text, f"{rel}#{section.slug}")

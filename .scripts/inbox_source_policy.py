@@ -48,7 +48,7 @@ def retain_original(repo: Path, source: Path) -> None:
     marker.parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation: never overwrite a pre-existing lifecycle policy.
     try:
-        with marker.open("x", encoding="utf-8") as handle:
+        with marker.open("x", encoding="utf-8", newline="\n") as handle:
             json.dump({"schema": SCHEMA, "source": relative, "policy": "retain_original"},
                       handle, ensure_ascii=False)
     except FileExistsError:

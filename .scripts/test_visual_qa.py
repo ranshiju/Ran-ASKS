@@ -87,7 +87,7 @@ def test_visual_env_reuses_main_llm_credentials(tmp: Path) -> None:
         "VISUAL_QA_MODEL=GLM-4.6V\n"
         "VISUAL_QA_FALLBACK_MODEL=GLM-4.5V\n",
         encoding="utf-8",
-    )
+    newline="\n")
     values = load_visual_env(env_file)
     assert values["VISUAL_QA_API_BASE"] == "https://provider.example/v1"
     assert values["VISUAL_QA_API_KEY"] == "test-secret"
@@ -358,7 +358,7 @@ def test_reasoning_budget_and_prompt_invalidate_cache(tmp: Path) -> None:
         assert changed["resumed_pages"] == 0
     with patch.object(visual_qa, "PROMPT_VERSION", "old-prompt"):
         assert run_visual_qa(image, **options)["check_key"] != first["check_key"]
-    manifest = json.loads(Path(first["receipt_dir"], "manifest.json").read_text())
+    manifest = json.loads(Path(first["receipt_dir"], "manifest.json").read_text(encoding="utf-8"))
     assert manifest["check_key_inputs"]["reasoning_effort"] == "low"
     assert manifest["check_key_inputs"]["max_tokens"] == 1800
 
@@ -396,7 +396,7 @@ def test_vision_transport_settings_and_completion_guard(tmp: Path) -> None:
 
 def test_qa_env_overrides_and_parameter_validation(tmp: Path) -> None:
     env_file = tmp / "qa.env"
-    env_file.write_text("VISUAL_QA_REASONING_EFFORT=low\nVISUAL_QA_MAX_TOKENS=1800\n")
+    env_file.write_text("VISUAL_QA_REASONING_EFFORT=low\nVISUAL_QA_MAX_TOKENS=1800\n", encoding="utf-8", newline="\n")
     with patch.dict("os.environ", {"VISUAL_QA_REASONING_EFFORT": "high", "VISUAL_QA_MAX_TOKENS": "2400"}):
         env = load_visual_env(env_file)
     assert env["VISUAL_QA_REASONING_EFFORT"] == "high"
@@ -436,7 +436,7 @@ def test_bundled_soffice_font_environment(tmp: Path) -> None:
     shim = tmp / "dependencies/bin/override/soffice"
     config = tmp / "dependencies/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/Resources/fontconfig/fonts.conf"
     config.parent.mkdir(parents=True)
-    config.write_text("<fontconfig/>")
+    config.write_text("<fontconfig/>", encoding="utf-8", newline="\n")
     with patch.dict("os.environ", {}, clear=True):
         assert visual_qa._soffice_env(shim)["FONTCONFIG_FILE"] == str(config)
         native = config.parents[2] / "MacOS/soffice"

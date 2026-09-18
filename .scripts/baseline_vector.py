@@ -15,7 +15,7 @@ env_path = REPO / ".env"
 api_base = ""
 api_key = ""
 if env_path.exists():
-    for line in env_path.read_text().splitlines():
+    for line in env_path.read_text(encoding="utf-8").splitlines():
         if line.startswith("LLM_API_BASE="): api_base = line.split("=",1)[1].strip()
         if line.startswith("LLM_API_KEY="): api_key = line.split("=",1)[1].strip()
 
@@ -48,9 +48,9 @@ def build_corpus():
                 if not sec: continue
                 if sec.startswith("## "): current = sec
                 elif current == "header":
-                    chunks.append({"page": str(f.relative_to(REPO)), "section": "frontmatter", "text": sec[:2000]})
+                    chunks.append({"page": f.relative_to(REPO).as_posix(), "section": "frontmatter", "text": sec[:2000]})
                 else:
-                    chunks.append({"page": str(f.relative_to(REPO)), "section": current, "text": sec[:2000]})
+                    chunks.append({"page": f.relative_to(REPO).as_posix(), "section": current, "text": sec[:2000]})
     return chunks
 
 def get_embeddings(texts, batch_size=16):
@@ -59,7 +59,7 @@ def get_embeddings(texts, batch_size=16):
     
     cache_file = CACHE_DIR / f"corpus_{len(texts)}_chunks.json"
     if cache_file.exists():
-        return json.loads(cache_file.read_text())
+        return json.loads(cache_file.read_text(encoding="utf-8"))
     
     all_embeddings = []
     for i in range(0, len(texts), batch_size):
@@ -82,7 +82,7 @@ def get_embeddings(texts, batch_size=16):
             all_embeddings.extend([[0.0]*2048]*len(batch))
         time.sleep(0.3)  # 避免 rate limit
     
-    cache_file.write_text(json.dumps(all_embeddings))
+    cache_file.write_text(json.dumps(all_embeddings), encoding="utf-8", newline="\n")
     return all_embeddings
 
 def get_query_embedding(text):
@@ -154,7 +154,7 @@ def main():
     out = json.dumps(results, ensure_ascii=False, indent=2)
     if args.output == "-": print(out)
     else:
-        Path(args.output).write_text(out, encoding="utf-8")
+        Path(args.output).write_text(out, encoding="utf-8", newline="\n")
         print(f"B2 结果写入 {args.output} ({len(results)} 题)", file=sys.stderr)
 
 if __name__ == "__main__":

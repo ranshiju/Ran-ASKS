@@ -2,6 +2,10 @@ import importlib.util
 import os
 import tempfile
 from pathlib import Path
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / ".scripts"))
+import platform_compat as _pc
 
 SCRIPT = Path(__file__).with_name("relativize_internal_symlinks.py")
 spec = importlib.util.spec_from_file_location("relativize_internal_symlinks", SCRIPT)
@@ -11,6 +15,9 @@ spec.loader.exec_module(module)
 
 
 def test_only_project_internal_absolute_links_are_selected():
+    if not _pc.symlinks_available():
+        print("  SKIP test_only_project_internal_absolute_links_are_selected: " + _pc.SYMLINK_SKIP_REASON)
+        return
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory) / "renamable-project"
         root.mkdir()
@@ -34,6 +41,9 @@ def test_only_project_internal_absolute_links_are_selected():
 
 
 def test_relative_link_survives_copy_and_directory_rename():
+    if not _pc.symlinks_available():
+        print("  SKIP test_relative_link_survives_copy_and_directory_rename: " + _pc.SYMLINK_SKIP_REASON)
+        return
     with tempfile.TemporaryDirectory() as directory:
         original = Path(directory) / "WikiRan"
         source = original / "source" / "file.pdf"

@@ -24,7 +24,7 @@ def test_long_structured_document_requires_semantic_review():
         raw.write_text("\n".join(
             f"## Topic {index}\n\n" + ("evidence " * 80)
             for index in range(1, 5)
-        ), encoding="utf-8")
+        ), encoding="utf-8", newline="\n")
         plan = long_document_plan.make_plan(raw, char_threshold=1000)
     assert plan["candidate_trigger"]
     assert plan["semantic_review_required"]
@@ -37,7 +37,7 @@ def test_long_structured_document_requires_semantic_review():
 def test_long_unstructured_document_does_not_auto_split():
     with tempfile.TemporaryDirectory() as directory:
         raw = Path(directory) / "long.txt"
-        raw.write_text("x" * 9000, encoding="utf-8")
+        raw.write_text("x" * 9000, encoding="utf-8", newline="\n")
         plan = long_document_plan.make_plan(raw)
     assert plan["candidate_trigger"]
     assert not plan["semantic_review_required"]

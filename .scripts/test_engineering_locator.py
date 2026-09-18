@@ -28,7 +28,7 @@ def write(root: Path, relative: str, content: str | bytes) -> Path:
     if isinstance(content, bytes):
         path.write_bytes(content)
     else:
-        path.write_text(content, encoding="utf-8")
+        path.write_text(content, encoding="utf-8", newline="\n")
     return path
 
 
@@ -192,7 +192,7 @@ def test_path_and_file_boundaries():
             write(root, "cross-domain/graph.db", "not a database")
             write(root, "operations/binary.txt", b"hello\x00world")
             outsider = base / "outside.md"
-            outsider.write_text("# Outside\n", encoding="utf-8")
+            outsider.write_text("# Outside\n", encoding="utf-8", newline="\n")
 
             for locator in (
                 "raw/secret.md#L1-L1",

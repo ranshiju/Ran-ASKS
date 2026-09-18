@@ -598,7 +598,7 @@ Feynman-Vernon影响泛函 | Feynman 与 Vernon 在线性耦合谐振子浴下�
             "[^r1]: academic/raw/references/example/paper.md#L1\n"
             "[^r2]: academic/raw/references/example/paper.md#L2\n",
             encoding="utf-8",
-        )
+        newline="\n")
         original_gl_repo = gl.REPO
         original_wl_repo = gi.wl.REPO
         original_locator_repo = gi.wl.raw_locator.REPO

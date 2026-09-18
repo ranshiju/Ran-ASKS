@@ -12,7 +12,7 @@ spec.loader.exec_module(module)
 
 
 def _paper(text):
-    tmp = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8")
+    tmp = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8", newline="\n")
     tmp.write(text)
     tmp.close()
     return Path(tmp.name)
