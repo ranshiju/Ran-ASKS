@@ -1,0 +1,35 @@
+# 换行规范：内容哈希是这个项目的数据契约的一部分。
+#
+# 源指纹、require_hash 与 CHECKSUMS.sha256 都对文件字节取 SHA-256，所以
+# 同一份内容在任何平台上落盘的字节必须一致。Git for Windows 默认
+# core.autocrlf=true，检出时会把 LF 改写成 CRLF，从而让这些校验全部失效。
+# 下面的规则优先于用户的 autocrlf 设置，保证检出结果跨平台一致。
+
+# 默认：所有文本文件入库与检出都用 LF
+* text=auto eol=lf
+
+# 冻结的论文产物必须字节精确复现(其中部分数据文件本身就是 CRLF)，
+# 不接受任何换行转换，否则 paper_artifact.py verify 会失败。
+paper-artifacts/** -text
+
+# 二进制：明确排除在文本处理之外
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.bmp   binary
+*.tif   binary
+*.tiff  binary
+*.webp  binary
+*.ico   binary
+*.pdf   binary
+*.db    binary
+*.sqlite binary
+*.zip   binary
+*.gz    binary
+*.docx  binary
+*.xlsx  binary
+*.xls   binary
+*.pptx  binary
+*.ppt   binary
+*.doc   binary
