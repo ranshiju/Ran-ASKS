@@ -59,8 +59,10 @@ def get_text(step, trace_query):
         for fn in files:
             p = os.path.join("cross-domain", fn)
             if os.path.exists(p):
-                r = subprocess.run(["grep","^## ", p], capture_output=True, text=True, encoding="utf-8", errors="replace")
-                if r.stdout: out.append(f"# {fn}\n{r.stdout}")
+                # 跨平台：Windows 没有 grep，直接在 Python 里筛 '^## ' 行
+                with open(p, encoding="utf-8") as handle:
+                    hits = [line for line in handle if line.startswith("## ")]
+                if hits: out.append(f"# {fn}\n" + "".join(hits))
         return "\n".join(out) if out else None
     return None  # completeness_check / answer 推理类
 

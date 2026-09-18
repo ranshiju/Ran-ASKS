@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 
@@ -53,7 +54,15 @@ def main() -> int:
 
     for link_path, _, relative_target in changes:
         link_path.unlink()
-        link_path.symlink_to(relative_target)
+        try:
+            link_path.symlink_to(relative_target)
+        except OSError as exc:
+            # Windows 未开开发者模式时无权创建符号链接。原链接已被删除，
+            # 这里必须明确报错而不是留下半完成的状态。
+            print(f"ERROR: cannot create symlink {link_path}: {exc}", file=sys.stderr)
+            print("Windows 需开启开发者模式(设置 → 系统 → 开发者选项)"
+                  "或以管理员身份运行；其余链接未处理。", file=sys.stderr)
+            return 1
     print(f"Converted: {len(changes)} internal absolute symlink(s).")
     return 0
 
