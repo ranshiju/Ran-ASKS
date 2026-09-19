@@ -207,7 +207,7 @@ def test_kb_packet_uses_recall_and_relations():
         raw_dir = TEMP_REPO_AREA / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
         raw_file = raw_dir / "packet.md"
-        raw_file.write_text("line 1\nline 2\n", encoding="utf-8")
+        raw_file.write_text("line 1\nline 2\n", encoding="utf-8", newline="\n")
         raw_rel = raw_file.relative_to(REPO).as_posix()
         def fake_relations(page):
             return json.dumps({"edges": [{"subject": page, "predicate": "涉及", "object": "entity/X", "source": f"{raw_rel}#L2"}]}), 10
@@ -253,7 +253,7 @@ def setup_paper_source():
     wiki.write_text(
         "---\ntitle: Demo\nsources:\n  - temp/test_frontier_sources/raw/paper.md\n---\n# Demo\n",
         encoding="utf-8",
-    )
+    newline="\n")
     return wiki
 
 
@@ -377,7 +377,7 @@ def test_exact_question_reuses_page_and_adds_source_mention():
             first = frontier.extract_paper_candidates(root, str(wiki), limit=1)
             assert first["count"] == 1
             second_wiki = wiki.with_name("demo-2.md")
-            second_wiki.write_text(wiki.read_text(encoding="utf-8"), encoding="utf-8")
+            second_wiki.write_text(wiki.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
             second = frontier.extract_paper_candidates(root, str(second_wiki), limit=1)
             assert second["count"] == 0
             assert second["reused"] == first["captured"]

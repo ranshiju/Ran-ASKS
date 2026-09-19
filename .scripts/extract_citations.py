@@ -440,7 +440,7 @@ def log_unmatched(paper_path, results):
     gaps = [r for r in results if r["status"] in ("template-gap", "unparsable")]
     if not gaps:
         return
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
+    with open(LOG_FILE, "a", encoding="utf-8", newline="\n") as f:
         f.write(f"\n## {paper_path} ({len(gaps)} unmatched)\n")
         for r in gaps:
             f.write(f"  [{r['status']}] {r['raw_citation']}\n")

@@ -184,7 +184,7 @@ def record_predicate_candidates(state: dict) -> None:
     if state.get("predicate_candidates_recorded") or not state.get("predicate_candidates"):
         return
     PREDICATE_CANDIDATES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with PREDICATE_CANDIDATES_PATH.open("a", encoding="utf-8") as handle:
+    with PREDICATE_CANDIDATES_PATH.open("a", encoding="utf-8", newline="\n") as handle:
         for candidate in state["predicate_candidates"]:
             handle.write(json.dumps({
                 "transaction_id": state["transaction_id"],
@@ -239,7 +239,7 @@ def new_state_for_pdf(pdf_path: Path) -> dict:
     return {
         "transaction_id": datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-" + slugify(pdf_path.stem)[:20],
         "status": "dedup_check",
-        "source": str(pdf_path.relative_to(REPO)),
+        "source": pdf_path.relative_to(REPO).as_posix(),
         "retry_count": 0,
         "errors": [],
     }
@@ -253,12 +253,12 @@ def new_state_for_raw(raw_path: Path) -> dict:
     """
     import shutil
     paper_id = raw_path.parent.name
-    raw_md_rel = str(raw_path.relative_to(REPO))
+    raw_md_rel = raw_path.relative_to(REPO).as_posix()
     txn = "raw-" + datetime.now().strftime("%Y%m%d-%H%M%S-") + slugify(paper_id)[:30]
     extract_dir = REPO / "temp" / "raw-extract" / txn
     extract_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(raw_path, extract_dir / "paper.md")
-    raw_dir = str(raw_path.parent.relative_to(REPO))
+    raw_dir = raw_path.parent.relative_to(REPO).as_posix()
     md_text = raw_path.read_text(encoding="utf-8")
     bibliography, corrections = repair_archived_bibliography(
         load_bibliographic_metadata(raw_path.parent), md_text)
@@ -266,7 +266,7 @@ def new_state_for_raw(raw_path: Path) -> dict:
         "transaction_id": txn,
         "status": "write_wiki",
         "source": raw_md_rel,
-        "extract_dir": str(extract_dir.relative_to(REPO)),
+        "extract_dir": extract_dir.relative_to(REPO).as_posix(),
         "raw_dir": raw_dir,
         "wiki_path": f"academic/wiki/papers/{paper_id}",
         "paper_id": paper_id,
@@ -459,7 +459,10 @@ def detect_raw_relationship(state: dict, dup_graph: list) -> dict:
     filename_tokens = set(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", pdf_path.stem.lower()))
     # 从 PDF 第一页提取文本
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(pdf_path))
         first_page_text = doc[0].get_text("text")
         doc.close()
@@ -666,7 +669,7 @@ def _save_relationship_cache(transaction_id: str, input_hash: str, decision: dic
     temp_path = path.with_suffix(path.suffix + ".tmp")
     temp_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-    )
+    newline="\n")
     temp_path.replace(path)
 
 
@@ -829,8 +832,9 @@ def _resume_relationship_review(state: dict) -> bool:
     if (review_state.get("status") == "agent_required"
             and state.get("status") not in {"prepared", "agent_required", "write_wiki"}):
         return False
-    draft_path = REPO / str(
-        review_state.get("draft_path") or _relationship_review_draft_path(state).relative_to(REPO)
+    draft_path = REPO / (
+        review_state.get("draft_path")
+        or _relationship_review_draft_path(state).relative_to(REPO).as_posix()
     )
     if not draft_path.is_file():
         return False
@@ -860,7 +864,7 @@ def _resume_relationship_review(state: dict) -> bool:
         "catalog": review_state.get("catalog") or {},
         "input_hash": review_state.get("input_hash", ""),
         "worker": review_state.get("worker") or {},
-        "draft_path": str(draft_path.relative_to(REPO)),
+        "draft_path": draft_path.relative_to(REPO).as_posix(),
     }
     persist_bibliographic_metadata(REPO / state["extract_dir"], state.get("bibliographic_meta"))
     inbox_state.transition(state, "write_wiki", reason="relationship_review_accepted")
@@ -915,7 +919,10 @@ def ensure_unique_paper_id(paper_id: str) -> str:
 
 def extract_title_from_pdf(pdf_path: Path) -> str:
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(pdf_path))
         try:
             # 优先使用 PDF metadata title（最可靠，避免误提期刊抬头/页眉）
@@ -989,7 +996,10 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
         "arxiv_id": "", "doi": "", "evidence": {},
     }
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(pdf_path))
         try:
             metadata = doc.metadata or {}
@@ -1240,7 +1250,7 @@ def persist_bibliographic_metadata(extract_dir: Path, bibliography: dict | None)
         source = yaml.safe_load(source_path.read_text(encoding="utf-8")) or {}
     source["bibliographic"] = bibliography
     source_path.write_text(
-        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        yaml.safe_dump(source, allow_unicode=True, sort_keys=False), encoding="utf-8", newline="\n")
 
 
 def load_bibliographic_metadata(raw_dir: Path) -> dict:
@@ -1978,7 +1988,7 @@ def _save_bibliographic_decision_cache(
         "decision": decision,
     }
     temp_path = path.with_suffix(path.suffix + ".tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     temp_path.replace(path)
 
 
@@ -2679,7 +2689,7 @@ def _graph_retry_context(state: dict) -> str:
     for path in paths:
         if path.is_file():
             stat = path.stat()
-            snapshot.append((str(path.relative_to(REPO)), stat.st_size, stat.st_mtime_ns))
+            snapshot.append((path.relative_to(REPO).as_posix(), stat.st_size, stat.st_mtime_ns))
     return hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -2785,7 +2795,7 @@ def step_dedup_check(state: dict) -> tuple[bool, str]:
             if ratio > TITLE_DEDUP_GATE:
                 dup_raw.append({"dir": d.name, "title": existing_title,
                                 "ratio": round(ratio, 2),
-                                "raw_path": str(raw_md.relative_to(REPO))})
+                                "raw_path": raw_md.relative_to(REPO).as_posix()})
     if dup_graph or dup_raw:
         state["dedup_result"] = {"graph": dup_graph, "raw": dup_raw}
         state["relation_candidates"] = dup_graph + dup_raw
@@ -2831,10 +2841,10 @@ def _review_pending_relationship_after_bibliography(
             draft_path.write_text(
                 json.dumps(relationship_result["decision"], ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
-            )
+            newline="\n")
         state["agent_required"] = True
         state["pre_handoff_status"] = "extract"
-        state["agent_write_to"] = str(draft_path.relative_to(REPO))
+        state["agent_write_to"] = draft_path.relative_to(REPO).as_posix()
         state["agent_prompt"] = (
             relationship_result.get("prompt", "")
             + f"\n\n请将符合 {RELATION_DECISION_PROTOCOL} 的裁决 JSON 写入 "
@@ -2881,7 +2891,7 @@ def step_extract(state: dict) -> tuple[bool, str]:
         return False, "提取未生成 paper.pdf 和 paper.md"
     (extract_dir / "manifest.json").write_text(
         json.dumps({"raw_files": raw_files, "wiki_file": "wiki.md"}, ensure_ascii=False) + "\n",
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     engine = "unknown"
     meta_path = extract_dir / "parse_meta.yaml"
     if meta_path.is_file():
@@ -2889,7 +2899,7 @@ def step_extract(state: dict) -> tuple[bool, str]:
         m = re.search(r"preferred:\s*(\S+)", meta)
         if m:
             engine = m.group(1)
-    state["extract_dir"] = str(extract_dir.relative_to(REPO))
+    state["extract_dir"] = extract_dir.relative_to(REPO).as_posix()
     state["engine"] = engine
     md_text = paper_md.read_text(encoding="utf-8")
     review_result = review_bibliographic_metadata(
@@ -2944,7 +2954,7 @@ def step_extract(state: dict) -> tuple[bool, str]:
             (extract_dir / "bibliographic-review.json").write_text(
                 json.dumps(review_result["review"], ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
-            )
+            newline="\n")
         state["bibliographic_review_required"] = True
         state["bibliographic_review"] = {
             "status": review_result.get("status", "bibliographic_review_required"),
@@ -3250,14 +3260,14 @@ def _write_workspace_skeleton(
     run([
         sys.executable, str(REPO / ".scripts/wiki_skeleton.py"),
         "--page", "academic/wiki/papers/__agent_locked_paper_id__",
-        "--raw", str(paper_md.relative_to(REPO)),
+        "--raw", paper_md.relative_to(REPO).as_posix(),
         "--source", raw_placeholder,
-        "--output", str(skeleton_path.relative_to(REPO)),
+        "--output", skeleton_path.relative_to(REPO).as_posix(),
     ])
     skeleton = apply_bibliographic_frontmatter(
         skeleton_path.read_text(encoding="utf-8"), state.get("bibliographic_meta"),
     )
-    skeleton_path.write_text(skeleton, encoding="utf-8")
+    skeleton_path.write_text(skeleton, encoding="utf-8", newline="\n")
     return skeleton_path, skeleton, raw_placeholder
 
 
@@ -3272,7 +3282,10 @@ def _file_sha256(path: Path) -> str:
 def materialize_bibliographic_pages(pdf_path: Path, output_path: Path) -> bool:
     """Write a bounded, page-labelled view for Agent bibliography review."""
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         document = fitz.open(str(pdf_path))
         try:
             pages = []
@@ -3286,7 +3299,7 @@ def materialize_bibliographic_pages(pdf_path: Path, output_path: Path) -> bool:
         return False
     if not pages:
         return False
-    output_path.write_text("\n\n".join(pages) + "\n", encoding="utf-8")
+    output_path.write_text("\n\n".join(pages) + "\n", encoding="utf-8", newline="\n")
     return True
 
 
@@ -3305,36 +3318,36 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
     catalog_path.write_text(
         json.dumps(review_result.get("catalog", {}), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
-    )
+    newline="\n")
     task_inputs = [{
         "name": "source_pdf_first_two_pages",
-        "path": str((extract_dir / "paper.pdf").relative_to(REPO)),
+        "path": (extract_dir / "paper.pdf").relative_to(REPO).as_posix(),
         "role": "authoritative_near_source_bibliographic_evidence",
         "read": "pages:1-2",
     }]
     if bibliographic_pages_path.is_file():
         task_inputs.append({
             "name": "bibliographic_first_two_pages",
-            "path": str(bibliographic_pages_path.relative_to(REPO)),
+            "path": bibliographic_pages_path.relative_to(REPO).as_posix(),
             "role": "bounded_near_source_bibliographic_evidence",
             "read": "full",
         })
     task_inputs.extend([
         {
-            "name": "paper_text", "path": str(paper_md.relative_to(REPO)),
+            "name": "paper_text", "path": paper_md.relative_to(REPO).as_posix(),
             "role": "authoritative_extracted_source", "read": "full",
         },
         {
-            "name": "wiki_skeleton", "path": str(skeleton_path.relative_to(REPO)),
+            "name": "wiki_skeleton", "path": skeleton_path.relative_to(REPO).as_posix(),
             "role": "program_owned_structure",
         },
         {
-            "name": "bibliographic_candidates", "path": str(catalog_path.relative_to(REPO)),
+            "name": "bibliographic_candidates", "path": catalog_path.relative_to(REPO).as_posix(),
             "role": "evidence_bound_candidate_catalog",
         },
     ])
     task_outputs = [{
-        "name": "paper_workspace", "path": str(output_path.relative_to(REPO)),
+        "name": "paper_workspace", "path": output_path.relative_to(REPO).as_posix(),
         "format": AGENT_WORKSPACE_PROTOCOL,
     }]
     task_order = ["BIBLIOGRAPHIC", "WIKI", "SLOTS"]
@@ -3348,28 +3361,28 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
         relationship_catalog_path.write_text(
             json.dumps(relationship_catalog, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
-        )
+        newline="\n")
         task_inputs.append({
             "name": "relationship_candidates",
-            "path": str(relationship_catalog_path.relative_to(REPO)),
+            "path": relationship_catalog_path.relative_to(REPO).as_posix(),
             "role": "bounded_existing_paper_candidates",
         })
         task_outputs.append({
             "name": "relationship_decision",
-            "path": str(relationship_output_path.relative_to(REPO)),
+            "path": relationship_output_path.relative_to(REPO).as_posix(),
             "format": RELATION_DECISION_PROTOCOL,
         })
         task_order.insert(1, "RELATIONSHIP")
         relationship_protocol = {
             "contract": RELATION_DECISION_PROTOCOL,
-            "selection_source": str(relationship_catalog_path.relative_to(REPO)),
+            "selection_source": relationship_catalog_path.relative_to(REPO).as_posix(),
             "relations": ["version", "unrelated", "ambiguous"],
         }
         state["relationship_review"] = {
             "status": "prepared",
             "catalog": relationship_catalog,
             "input_hash": relationship_hash,
-            "draft_path": str(relationship_output_path.relative_to(REPO)),
+            "draft_path": relationship_output_path.relative_to(REPO).as_posix(),
             "worker": {
                 "protocol_version": RELATION_DECISION_PROTOCOL,
                 "input_hash": relationship_hash,
@@ -3391,7 +3404,7 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
             if bibliographic_pages_path.is_file() else ""
         ),
         "bibliographic_input_hash": review_result.get("input_hash", ""),
-        "output_path": str(output_path.relative_to(REPO)),
+        "output_path": output_path.relative_to(REPO).as_posix(),
         "raw_source_placeholder": raw_placeholder,
         "candidate_provider_contract": BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION,
         "relationship_input_hash": (
@@ -3407,7 +3420,7 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
         "catalog": review_result.get("catalog", {}),
         "input_hash": review_result.get("input_hash", ""),
         "worker": review_result.get("worker", {}),
-        "draft_path": str(review_path.relative_to(REPO)),
+        "draft_path": review_path.relative_to(REPO).as_posix(),
     }
     agent_task.prepare(
         state,
@@ -3426,14 +3439,14 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
             },
             "bibliography": {
                 "contract": BIBLIOGRAPHIC_DECISION_PROTOCOL,
-                "selection_source": str(catalog_path.relative_to(REPO)),
+                "selection_source": catalog_path.relative_to(REPO).as_posix(),
                 "priority_evidence": [
                     {
-                        "path": str((extract_dir / "paper.pdf").relative_to(REPO)),
+                        "path": (extract_dir / "paper.pdf").relative_to(REPO).as_posix(),
                         "read": "pages:1-2",
                     },
                     *([{
-                        "path": str(bibliographic_pages_path.relative_to(REPO)),
+                        "path": bibliographic_pages_path.relative_to(REPO).as_posix(),
                         "read": "full",
                     }] if bibliographic_pages_path.is_file() else []),
                 ],
@@ -3441,7 +3454,7 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
             },
             **({"relationship": relationship_protocol} if relationship_protocol else {}),
             "wiki": {
-                "base": str(skeleton_path.relative_to(REPO)),
+                "base": skeleton_path.relative_to(REPO).as_posix(),
                 "required_sections": ["Navigation", "研究方向定位", "Content", "Sources"],
                 "evidence": "Raw line footnotes bound to paper.md",
             },
@@ -3494,7 +3507,7 @@ def execute_api_paper_workspace(
     catalog_path = extract_dir / "bibliographic-candidates.json"
     catalog_path.write_text(
         json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-    )
+    newline="\n")
     output_path = extract_dir / "agent-workspace.txt"
     review_path = extract_dir / "bibliographic-review.json"
     pdf_path = extract_dir / "paper.pdf"
@@ -3506,7 +3519,7 @@ def execute_api_paper_workspace(
         "paper_md_sha256": _file_sha256(paper_md),
         "source_pdf_sha256": _file_sha256(pdf_path) if pdf_path.is_file() else "",
         "bibliographic_input_hash": review_result.get("input_hash", ""),
-        "output_path": str(output_path.relative_to(REPO)),
+        "output_path": output_path.relative_to(REPO).as_posix(),
         "raw_source_placeholder": raw_placeholder,
         "candidate_provider_contract": BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION,
         "repair_scope": "all",
@@ -3521,7 +3534,7 @@ def execute_api_paper_workspace(
         "catalog": catalog,
         "input_hash": review_result.get("input_hash", ""),
         "worker": review_result.get("worker", {}),
-        "draft_path": str(review_path.relative_to(REPO)),
+        "draft_path": review_path.relative_to(REPO).as_posix(),
     }
     state["status"] = "prepared"
     prompt = build_api_paper_workspace_prompt(
@@ -3560,7 +3573,7 @@ def execute_api_paper_workspace(
         state["status"] = "agent_required"
         state["agent_required"] = True
         state["agent_prompt"] = result.get("prompt", prompt)
-        state["agent_write_to"] = str(output_path.relative_to(REPO))
+        state["agent_write_to"] = output_path.relative_to(REPO).as_posix()
         state["execution_backend"] = "api"
         state["retryable"] = False
         state["next_action"] = "repair_api_workspace_then_resume"
@@ -3581,7 +3594,7 @@ def execute_api_paper_workspace(
             )
             workspace["bibliographic_segment_source"] = "deterministic_locked_decision"
             state["agent_workspace"] = workspace
-    output_path.write_text(generated_text, encoding="utf-8")
+    output_path.write_text(generated_text, encoding="utf-8", newline="\n")
     try:
         decision, _wiki, _slots = _parse_agent_workspace(
             output_path.read_text(encoding="utf-8"),
@@ -3590,7 +3603,7 @@ def execute_api_paper_workspace(
         state["status"] = "agent_required"
         state["agent_required"] = True
         state["agent_prompt"] = prompt + f"\n\n程序诊断：{exc}"
-        state["agent_write_to"] = str(output_path.relative_to(REPO))
+        state["agent_write_to"] = output_path.relative_to(REPO).as_posix()
         state["execution_backend"] = "api"
         state["retryable"] = False
         state["next_action"] = "repair_api_workspace_then_resume"
@@ -3603,7 +3616,7 @@ def execute_api_paper_workspace(
         state["status"] = "agent_required"
         state["agent_required"] = True
         state["agent_prompt"] = prompt + "\n\n程序诊断：\n- " + "\n- ".join(errors)
-        state["agent_write_to"] = str(output_path.relative_to(REPO))
+        state["agent_write_to"] = output_path.relative_to(REPO).as_posix()
         state["execution_backend"] = "api"
         state["retryable"] = False
         state["next_action"] = "repair_api_workspace_then_resume"
@@ -3632,7 +3645,7 @@ def _archive_agent_workspace_output(state: dict, output_path: Path, workspace: d
         "from_provider_contract": workspace.get("candidate_provider_contract", ""),
         "to_provider_contract": BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION,
         "output_sha256": output_sha256,
-        "archived_output": str(archive_path.relative_to(REPO)),
+        "archived_output": archive_path.relative_to(REPO).as_posix(),
     }
     state.setdefault("workspace_refresh_history", []).append(entry)
     return entry
@@ -3779,7 +3792,7 @@ def resume_agent_workspace(
         review_path = _bibliographic_review_draft_path(state)
         review_path.write_text(
             json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-        )
+        newline="\n")
         if not _resume_bibliographic_review(state):
             return False
         if state.get("status") == "bibliographic_review_required":
@@ -3822,10 +3835,10 @@ def resume_agent_workspace(
     combined_path.write_text(
         f"{WIKI_DELIMITER}\n{materialized_wiki}\n{SLOTS_DELIMITER}\n{slots}\n",
         encoding="utf-8",
-    )
+    newline="\n")
     workspace["status"] = "submitted"
     workspace["output_sha256"] = _file_sha256(output_path)
-    workspace["materialized_output"] = str(combined_path.relative_to(REPO))
+    workspace["materialized_output"] = combined_path.relative_to(REPO).as_posix()
     state["agent_workspace"] = workspace
     if repair_scope == "slots" and materialized_wiki:
         state["slots_content"] = slots
@@ -3833,7 +3846,7 @@ def resume_agent_workspace(
         state.pop("_awaiting_agent_wiki_slots", None)
     else:
         state["_awaiting_agent_wiki_slots"] = True
-        state["agent_write_to"] = str(combined_path.relative_to(REPO))
+        state["agent_write_to"] = combined_path.relative_to(REPO).as_posix()
     agent_task.mark_consumed(state)
     state.pop("agent_required", None)
     state.pop("agent_prompt", None)
@@ -3946,19 +3959,19 @@ def read_agent_workspace(state: dict) -> dict:
     else:
         fallback_inputs = [{
             "name": "source_pdf_first_two_pages",
-            "path": str((REPO / state["extract_dir"] / "paper.pdf").relative_to(REPO)),
+            "path": (REPO / state["extract_dir"] / "paper.pdf").relative_to(REPO).as_posix(),
             "role": "authoritative_near_source_bibliographic_evidence",
             "read": "pages:1-2",
         }]
         if bibliographic_pages_path.is_file():
             fallback_inputs.append({
                 "name": "bibliographic_first_two_pages",
-                "path": str(bibliographic_pages_path.relative_to(REPO)),
+                "path": bibliographic_pages_path.relative_to(REPO).as_posix(),
                 "role": "bounded_near_source_bibliographic_evidence",
                 "read": "full",
             })
         fallback_inputs.append({
-            "name": "paper_text", "path": str(paper_path.relative_to(REPO)),
+            "name": "paper_text", "path": paper_path.relative_to(REPO).as_posix(),
             "role": "authoritative_extracted_source", "read": "full",
         })
         task = agent_task.make_task(
@@ -3986,12 +3999,12 @@ def read_agent_workspace(state: dict) -> dict:
         "internal_status": state.get("status", ""),
         "versions": _agent_versions(),
         "input_integrity": {
-            "paper_md": str(paper_path.relative_to(REPO)),
+            "paper_md": paper_path.relative_to(REPO).as_posix(),
             "paper_md_sha256": workspace.get("paper_md_sha256", ""),
-            "source_pdf": str((REPO / state["extract_dir"] / "paper.pdf").relative_to(REPO)),
+            "source_pdf": (REPO / state["extract_dir"] / "paper.pdf").relative_to(REPO).as_posix(),
             "source_pdf_sha256": workspace.get("source_pdf_sha256", ""),
             "bibliographic_pages": (
-                str(bibliographic_pages_path.relative_to(REPO))
+                bibliographic_pages_path.relative_to(REPO).as_posix()
                 if bibliographic_pages_path.is_file() else ""
             ),
             "bibliographic_pages_sha256": workspace.get(
@@ -4077,12 +4090,12 @@ def run_agent_graph_preflight(state: dict) -> tuple[list[str], dict]:
     command = [
         sys.executable, str(REPO / ".scripts/graph_ingest.py"), "ingest",
         "--page", state["wiki_path"],
-        "--page-file", str(wiki_path.relative_to(REPO)),
-        "--raw-source-override", str(raw_override.relative_to(REPO)),
-        "--semantic", str(semantic_path.relative_to(REPO)),
+        "--page-file", wiki_path.relative_to(REPO).as_posix(),
+        "--raw-source-override", raw_override.relative_to(REPO).as_posix(),
+        "--semantic", semantic_path.relative_to(REPO).as_posix(),
         "--transaction-id", transaction_id,
-        "--knowledge-ir-out", str(ir_path.relative_to(REPO)),
-        "--graph-plan-out", str(plan_path.relative_to(REPO)),
+        "--knowledge-ir-out", ir_path.relative_to(REPO).as_posix(),
+        "--graph-plan-out", plan_path.relative_to(REPO).as_posix(),
         "--plan-only",
     ]
     raw_relationship = state.get("raw_relationship")
@@ -4096,7 +4109,7 @@ def run_agent_graph_preflight(state: dict) -> tuple[list[str], dict]:
             "--raw-relationship-json",
             json.dumps(raw_relationship, ensure_ascii=False, separators=(",", ":")),
         ])
-    result = subprocess.run(command, cwd=REPO, text=True, capture_output=True)
+    result = subprocess.run(command, cwd=REPO, text=True, encoding="utf-8", errors="replace", capture_output=True)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "Graph preflight failed").strip()
         return [detail[-2000:]], {}
@@ -4117,8 +4130,8 @@ def run_agent_graph_preflight(state: dict) -> tuple[list[str], dict]:
         return [f"Graph plan 回执校验失败: {error}" for error in plan_errors], report
     preflight = {
         "validator_version": GRAPH_PREFLIGHT_VALIDATOR_VERSION,
-        "knowledge_ir_path": str(ir_path.relative_to(REPO)),
-        "graph_plan_path": str(plan_path.relative_to(REPO)),
+        "knowledge_ir_path": ir_path.relative_to(REPO).as_posix(),
+        "graph_plan_path": plan_path.relative_to(REPO).as_posix(),
         "knowledge_ir": report.get("knowledge_ir", {}),
         "graph_plan": report.get("graph_plan", {}),
         "graph_delta": report.get("graph_delta", {}),
@@ -4320,11 +4333,11 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     skeleton_path = extract_dir / "skeleton.md"
     if not skeleton_path.exists():
         run([sys.executable, str(REPO / ".scripts/wiki_skeleton.py"), "--page", state["wiki_path"],
-             "--raw", str(paper_md.relative_to(REPO)), "--source", source_ref,
-             "--output", str(skeleton_path.relative_to(REPO))])
+             "--raw", paper_md.relative_to(REPO).as_posix(), "--source", source_ref,
+             "--output", skeleton_path.relative_to(REPO).as_posix()])
     skeleton = apply_bibliographic_frontmatter(
         skeleton_path.read_text(encoding="utf-8"), state.get("bibliographic_meta"))
-    skeleton_path.write_text(skeleton, encoding="utf-8")
+    skeleton_path.write_text(skeleton, encoding="utf-8", newline="\n")
     # agent handoff 的合并输出写入事务目录；resume 只消费该文件。
     errors = state.get("wiki_errors", []) if state.get("wiki_retry", 0) > 0 else None
     agent_output = extract_dir / "agent-wiki-slots.txt"
@@ -4377,20 +4390,20 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
                 kind="ingest_paper_content",
                 transaction_id=state["transaction_id"],
                 inputs=[
-                    {"name": "paper_text", "path": str(paper_md.relative_to(REPO)),
+                    {"name": "paper_text", "path": paper_md.relative_to(REPO).as_posix(),
                      "role": "authoritative_extracted_source", "read": "full"},
-                    {"name": "wiki_skeleton", "path": str(skeleton_path.relative_to(REPO)),
+                    {"name": "wiki_skeleton", "path": skeleton_path.relative_to(REPO).as_posix(),
                      "role": "program_owned_structure"},
                 ],
                 outputs=[{
-                    "name": "wiki_and_semantics", "path": str(agent_output.relative_to(REPO)),
+                    "name": "wiki_and_semantics", "path": agent_output.relative_to(REPO).as_posix(),
                     "format": "paper-wiki-slots-v1",
                 }],
                 protocol={
                     "name": "paper-wiki-slots-v1",
                     "order": ["WIKI", "SLOTS"],
                     "delimiters": {"wiki": WIKI_DELIMITER, "semantics": SLOTS_DELIMITER},
-                    "wiki": {"base": str(skeleton_path.relative_to(REPO)),
+                    "wiki": {"base": skeleton_path.relative_to(REPO).as_posix(),
                              "required_sections": ["Navigation", "研究方向定位", "Content", "Sources"]},
                     "semantics": {"contract": PAPER_SEMANTIC_CONTRACT_VERSION,
                                   "sections": ["三元组", "概念说明"],
@@ -4419,7 +4432,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             state["pre_handoff_status"] = "write_wiki"
             state["agent_required"] = True
             state["agent_prompt"] = result.get("prompt", "")
-            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            state["agent_write_to"] = agent_output.relative_to(REPO).as_posix()
             return False, "API 自动恢复已耗尽，需宿主 Agent 受控修正 Wiki 暂存产物"
         if not result.get("ok"):
             return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
@@ -4448,7 +4461,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     wiki_content = re.sub(
         r'(sources:\s*\n\s*-\s*)(?:path:\s*)?"?[^\n]+"?',
         f'\\1"{correct_source}"', wiki_content, count=1)
-    (extract_dir / "wiki.md").write_text(wiki_content, encoding="utf-8")
+    (extract_dir / "wiki.md").write_text(wiki_content, encoding="utf-8", newline="\n")
     state["wiki_content"] = wiki_content
     # agent 模式：合并任务已同时产出语义槽，提前存入 state 供第二阶段跳过
     if is_agent:
@@ -4498,11 +4511,11 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
                 transaction_id=state["transaction_id"],
                 inputs=[{
                     "name": "validated_wiki",
-                    "path": str((REPO / state["extract_dir"] / "wiki.md").relative_to(REPO)),
+                    "path": (REPO / state["extract_dir"] / "wiki.md").relative_to(REPO).as_posix(),
                     "role": "semantic_source",
                 }],
                 outputs=[{
-                    "name": "semantic_slots", "path": str(agent_output.relative_to(REPO)),
+                    "name": "semantic_slots", "path": agent_output.relative_to(REPO).as_posix(),
                     "format": "paper-semantic-slots-v2",
                 }],
                 protocol={
@@ -4538,7 +4551,7 @@ def step_write_slots(state: dict) -> tuple[bool, str]:
             state["pre_handoff_status"] = "write_slots"
             state["agent_required"] = True
             state["agent_prompt"] = result.get("prompt", "")
-            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            state["agent_write_to"] = agent_output.relative_to(REPO).as_posix()
             return False, "API 自动恢复已耗尽，需宿主 Agent 受控修正语义槽暂存产物"
         if not result.get("ok"):
             return False, f"LLM 调用失败: {result.get('error', 'unknown')}"
@@ -4572,8 +4585,8 @@ def step_validate_wiki(state: dict) -> list[str]:
     extract_dir = REPO / state["extract_dir"]
     wiki_path = extract_dir / "wiki.md"
     result = subprocess.run([sys.executable, str(REPO / ".scripts/ingest_check.py"),
-                             str(wiki_path.relative_to(REPO))],
-                            cwd=REPO, text=True, capture_output=True)
+                             wiki_path.relative_to(REPO).as_posix()],
+                            cwd=REPO, text=True, encoding="utf-8", errors="replace", capture_output=True)
     errors = [] if result.returncode == 0 else parse_check_errors(result.stdout + result.stderr)
     final_raw = f"{state.get('raw_dir', '')}/paper.md"
     raw_overrides = {final_raw: extract_dir / "paper.md"} if final_raw.strip("/") else {}
@@ -4706,7 +4719,7 @@ def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
     if _raw_abbr_map:
         _patched = ic.autofix_bare_abbreviations(sem_text, _raw_abbr_map)
         if _patched != sem_text:
-            semantic_path.write_text(_patched, encoding="utf-8")
+            semantic_path.write_text(_patched, encoding="utf-8", newline="\n")
             sem_text = _patched
             state["slots_content"] = _patched
     hard_errors = []
@@ -4875,6 +4888,15 @@ def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
                     })
     except Exception as exc:
         hard_errors.append(f"语义槽解析失败: {exc}")
+    finally:
+        # 关闭 lazy resolve 打开的 graph.db 连接。闭包 cell 会拖住引用计数，
+        # Windows 上残留句柄会锁住 graph.db，令后续删除/替换失败。
+        if resolve_ctx is not None:
+            try:
+                resolve_ctx[1].close()
+            except Exception:
+                pass
+            resolve_ctx = None
     state["predicate_candidates"] = candidates
     return hard_errors, slot_warnings
 
@@ -4917,7 +4939,7 @@ def _handle_sparse_slots(state: dict) -> str:
     action = "accepted"
     if selected["content"] != content:
         state["slots_content"] = selected["content"]
-        (REPO / state["semantic_path"]).write_text(selected["content"], encoding="utf-8")
+        (REPO / state["semantic_path"]).write_text(selected["content"], encoding="utf-8", newline="\n")
         state["semantic_triple_count"] = selected["count"]
         action = "restored"
     state["semantic_coverage"] = {
@@ -5517,7 +5539,7 @@ def run_prepare(state: dict) -> dict:
                 state["pre_handoff_status"] = "write_wiki"
                 state["agent_required"] = True
                 state["_awaiting_agent_wiki"] = True
-                state["agent_write_to"] = str(wiki_path.relative_to(REPO))
+                state["agent_write_to"] = wiki_path.relative_to(REPO).as_posix()
                 state["agent_prompt"] = (
                     "API wiki 已达格式重写上限。只修复 write_to 现有草稿：\n- "
                     + "\n- ".join(wiki_errors)
@@ -5790,7 +5812,7 @@ def run_inbox_batch(verbose: bool) -> int:
     prepared: list[dict | None] = [None] * len(pdf_paths)
     pending: list[tuple[int, dict]] = []
     for index, pdf_path in enumerate(pdf_paths):
-        source = str(pdf_path.relative_to(REPO))
+        source = pdf_path.relative_to(REPO).as_posix()
         existing = find_ready_txn(source)
         if existing:
             prepared[index] = existing
@@ -5972,8 +5994,8 @@ def check_agent_workspace(state: dict) -> dict:
         "transaction_id": transaction_id,
         "versions": _agent_versions(),
         "artifacts": {
-            "bibliography": str(_bibliographic_review_draft_path(working).relative_to(REPO)),
-            "wiki": str((REPO / working["extract_dir"] / "wiki.md").relative_to(REPO)),
+            "bibliography": _bibliographic_review_draft_path(working).relative_to(REPO).as_posix(),
+            "wiki": (REPO / working["extract_dir"] / "wiki.md").relative_to(REPO).as_posix(),
             "semantics": working.get("semantic_path", ""),
             "knowledge_ir": graph_preflight.get("knowledge_ir_path", ""),
             "graph_plan": graph_preflight.get("graph_plan_path", ""),
@@ -6130,7 +6152,7 @@ def _run_phase(state: dict, verbose: bool, fn) -> dict:
     if not verbose:
         (REPO / "temp" / "inbox-state").mkdir(parents=True, exist_ok=True)
         log_path = REPO / "temp" / "inbox-state" / f"{state['transaction_id']}.log"
-        set_progress_file(log_path.open("a", encoding="utf-8"))
+        set_progress_file(log_path.open("a", encoding="utf-8", newline="\n"))
         set_progress_log_path(log_path)
         progress(f"ingest_paper.py 日志: {log_path.relative_to(REPO)}")
     try:

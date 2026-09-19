@@ -91,8 +91,8 @@ def govern(queue: Path = QUEUE, state_path: Path = STATE, registry_path: Path = 
     registry = {"formal": sorted(predicate for predicate, entry in entries.items() if entry["status"] == "formal"),
                 "observation": sorted(predicate for predicate, entry in entries.items() if entry["status"] == "observation")}
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     return {"candidates": len(entries), "observation": len(registry["observation"]), "formal": len(registry["formal"])}
 
 

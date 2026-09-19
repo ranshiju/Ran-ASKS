@@ -38,6 +38,13 @@ cross-domain/.graph-state.json
 cross-domain/embeddings.db
 cross-domain/embeddings.db-wal
 cross-domain/embeddings.db-shm
+# 源指纹库是运行期产物（摄入去重用），与 embeddings.db 同类，不进 git
+cross-domain/source-fingerprints.db
+cross-domain/source-fingerprints.db-wal
+cross-domain/source-fingerprints.db-shm
+# 摄入报告与页面目录由运行期生成
+cross-domain/ingest-reports/
+cross-domain/page-catalog.md
 
 # embedding 缓存临时备份
 *.bak.*

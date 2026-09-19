@@ -343,7 +343,7 @@ def render_html(G, pos, deg, out_path, args):
     html = HTML_TEMPLATE.replace("/*__DATA__*/{}", json_str, 1)
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html, encoding="utf-8")
+    out.write_text(html, encoding="utf-8", newline="\n")
     print(f"✅ 已生成: {out} ({out.stat().st_size // 1024} KB)")
 
 
@@ -380,8 +380,8 @@ def main():
     conn.close()
 
     if args.open:
-        import subprocess
-        subprocess.run(["open", args.output], check=False)
+        import platform_compat
+        platform_compat.open_in_desktop(args.output)
 
 
 if __name__ == "__main__":

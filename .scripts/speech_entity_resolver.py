@@ -78,7 +78,7 @@ def load_people(force_refresh=False):
         "graph": graph,
     }
     temporary = INDEX.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     temporary.replace(INDEX)
     return people, aliases, graph, fingerprint, True
 
@@ -240,11 +240,11 @@ def main():
     result = resolve(text, candidate_paths, args.refresh_index)
     result["input"] = str(source)
     if args.apply:
-        Path(args.apply).write_text(apply_exact(text, result["resolved"]), encoding="utf-8")
+        Path(args.apply).write_text(apply_exact(text, result["resolved"]), encoding="utf-8", newline="\n")
         result["corrected_output"] = args.apply
     payload = json.dumps(result, ensure_ascii=False, indent=2)
     if args.output:
-        Path(args.output).write_text(payload + "\n", encoding="utf-8")
+        Path(args.output).write_text(payload + "\n", encoding="utf-8", newline="\n")
     else:
         print(payload)
 

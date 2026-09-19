@@ -19,6 +19,10 @@ import inbox_source_policy as policy
 import ingest_inbox as intake
 import ingest_pipeline as pipeline
 import wg
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / ".scripts"))
+import platform_compat as _pc
 
 
 class ChatIntakeTest(unittest.TestCase):
@@ -48,8 +52,8 @@ class ChatIntakeTest(unittest.TestCase):
         def trash(path):
             shutil.rmtree(path) if path.is_dir() else path.unlink()
         with patch.object(pipeline.trash_util, 'trash_path', side_effect=trash):
-            pipeline._cleanup_sources({'source': str(source.relative_to(self.repo)),
-                                       'extract_dir': str(extraction.relative_to(self.repo))})
+            pipeline._cleanup_sources({'source': source.relative_to(self.repo).as_posix(),
+                                       'extract_dir': extraction.relative_to(self.repo).as_posix()})
         self.assertFalse(extraction.exists())
 
     def test_external_original_survives_success_cleanup(self):
@@ -73,7 +77,7 @@ class ChatIntakeTest(unittest.TestCase):
         self.assertEqual(plan['retained_sources'], ['inbox/document.txt'])
         self.assertEqual(len(plan['items']), 1)
         self.cleanup(staged)
-        original.write_text('User edited the original after ingestion.', encoding='utf-8')
+        original.write_text('User edited the original after ingestion.', encoding='utf-8', newline="\n")
         self.assertEqual(intake.scan_inbox(), [])
         self.assertEqual(inbox_plan.build_plan(self.inbox)['items'], [])
         self.assertFalse(inbox_plan.build_plan(self.inbox)['routing']['batch_eligible'])
@@ -138,18 +142,22 @@ class ChatIntakeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '--keep-source'):
             intake._resolve_inbox_file(str(original))
 
+    @unittest.skipUnless(_pc.symlinks_available(), _pc.SYMLINK_SKIP_REASON)
+
     def test_retention_survives_original_path_becoming_a_symlink(self):
         original = self.original(in_inbox=True)
         policy.retain_original(self.repo, original)
         other = self.repo / 'other.txt'
-        other.write_text('Other user file.')
+        other.write_text('Other user file.', encoding="utf-8", newline="\n")
         original.unlink()
         original.symlink_to(other)
         self.assertTrue(policy.is_retained(self.repo, original))
         self.assertEqual(intake.scan_inbox(), [])
         self.cleanup(original)
         self.assertTrue(original.is_symlink())
-        self.assertEqual(other.read_text(), 'Other user file.')
+        self.assertEqual(other.read_text(encoding="utf-8"), 'Other user file.')
+
+    @unittest.skipUnless(_pc.symlinks_available(), _pc.SYMLINK_SKIP_REASON)
 
     def test_symlink_attachment_is_rejected_without_staging(self):
         original = self.original()
@@ -163,12 +171,14 @@ class ChatIntakeTest(unittest.TestCase):
     def test_corrupt_retention_policy_fails_closed(self):
         original = self.original(in_inbox=True)
         policy.retain_original(self.repo, original)
-        next((self.inbox / '.source-retention').glob('*.json')).write_text('{}')
+        next((self.inbox / '.source-retention').glob('*.json')).write_text('{}', encoding="utf-8", newline="\n")
         with self.assertRaises(ValueError):
             intake.scan_inbox()
         with self.assertRaises(ValueError):
             self.cleanup(original)
         self.assertTrue(original.exists())
+
+    @unittest.skipUnless(_pc.symlinks_available(), _pc.SYMLINK_SKIP_REASON)
 
     def test_retention_directory_symlink_rejected_before_copy(self):
         original = self.original(in_inbox=True)
@@ -181,7 +191,7 @@ class ChatIntakeTest(unittest.TestCase):
         self.assertTrue(original.exists())
 
     def test_classification_resume_binds_staged_text_not_stdin_or_full_inbox(self):
-        (self.inbox / 'unrelated.txt').write_text('Unrelated item.')
+        (self.inbox / 'unrelated.txt').write_text('Unrelated item.', encoding="utf-8", newline="\n")
         stdin = types.SimpleNamespace(buffer=io.BytesIO('会议安排\r\n'.encode('utf-8')))
         stdout = io.StringIO()
         with patch.object(sys, 'argv', ['ingest_inbox.py', '--stdin', '--run', '--subproject', 'admin']), \
@@ -248,7 +258,7 @@ class ChatIntakeTest(unittest.TestCase):
                 self.assertEqual(staged.read_bytes(), before)
                 self.assertEqual(original.read_bytes(), before)
                 command = run.call_args.args[0]
-                self.assertIn(str(staged.relative_to(self.repo)), command)
+                self.assertIn(staged.relative_to(self.repo).as_posix(), command)
                 self.assertNotIn(str(original), command)
 
     def test_wrapper_preserves_inbox_attachment(self):

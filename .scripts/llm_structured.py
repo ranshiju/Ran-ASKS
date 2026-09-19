@@ -72,7 +72,7 @@ def _log_event(operation: str, result: dict, prompt: str, output_text: str = "",
         }
         EVENTS_DIR.mkdir(parents=True, exist_ok=True)
         day = time.strftime("%Y-%m-%d")
-        with (EVENTS_DIR / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
+        with (EVENTS_DIR / f"{day}.jsonl").open("a", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
         return event
     except Exception:
@@ -226,6 +226,7 @@ def load_env() -> dict[str, str]:
                 values[key.strip()] = value.strip()
     known = {
         "QUERY_BACKEND", "INGEST_BACKEND", "LLM_API_BASE", "LLM_API_KEY", "LLM_MODEL",
+        "LLM_API_PATH",
         "INGEST_KEYWORD_API_BASE", "INGEST_KEYWORD_API_KEY", "INGEST_KEYWORD_MODEL",
         "INGEST_REPAIR_API_BASE", "INGEST_REPAIR_API_KEY", "INGEST_REPAIR_MODEL",
         "INGEST_GENERATION_API_BASE", "INGEST_GENERATION_API_KEY", "INGEST_GENERATION_MODEL",
@@ -260,6 +261,20 @@ def _provider_reasoning_effort(config: dict[str, str], options: dict[str, str]) 
 def configured_model(config: dict[str, str] | None = None) -> str:
     config = config or load_env()
     return config.get("LLM_MODEL", "").strip() or "current-agent"
+
+
+DEFAULT_CHAT_PATH = "/v1/chat/completions"
+
+
+def chat_completions_path(config: dict[str, str]) -> str:
+    """Chat Completions 的路径后缀。
+
+    默认 /v1/chat/completions（OpenAI 风格）。部分供应商的路径不同——例如智谱
+    的端点是 https://open.bigmodel.cn/api/paas/v4/chat/completions——此时用
+    LLM_API_PATH 覆盖，而不必让 base 去迁就一个写死的后缀。
+    """
+    path = (config.get("LLM_API_PATH", "") or "").strip() or DEFAULT_CHAT_PATH
+    return path if path.startswith("/") else "/" + path
 
 
 def api_profiles(config: dict[str, str], operation: str) -> list[dict[str, str]]:
@@ -452,7 +467,7 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
             }
             payload_data.update(attempt_reasoning)
             payload = json.dumps(payload_data).encode()
-            request = urllib.request.Request(profile["base"].rstrip("/") + "/v1/chat/completions", data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
+            request = urllib.request.Request(profile["base"].rstrip("/") + chat_completions_path(config), data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
             started = time.time()
             fast_fail = False
             try:
@@ -594,7 +609,7 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
             }
             payload_data.update(attempt_reasoning)
             payload = json.dumps(payload_data).encode()
-            request = urllib.request.Request(profile["base"].rstrip("/") + "/v1/chat/completions", data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
+            request = urllib.request.Request(profile["base"].rstrip("/") + chat_completions_path(config), data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
             started = time.time()
             fast_fail = False
             try:

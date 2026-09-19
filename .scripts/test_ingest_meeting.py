@@ -29,7 +29,7 @@ def _workspace() -> Path:
 
 def _state(work: Path) -> dict:
     source = work / "20260903-test-meeting.txt"
-    source.write_text("任老师讨论知事库。", encoding="utf-8")
+    source.write_text("任老师讨论知事库。", encoding="utf-8", newline="\n")
     candidates = work / "entity-candidates.json"
     candidates.write_text(json.dumps({
         "resolved": [{
@@ -37,16 +37,16 @@ def _state(work: Path) -> dict:
             "entity": "cnu-ren-shengquan", "method": "alias_exact",
         }],
         "review": [],
-    }, ensure_ascii=False), encoding="utf-8")
+    }, ensure_ascii=False), encoding="utf-8", newline="\n")
     return {
         "transaction_id": work.name,
         "status": "write_wiki",
-        "source": str(source.relative_to(REPO)),
+        "source": source.relative_to(REPO).as_posix(),
         "source_filename": source.name,
         "date_str": "20260903",
         "subproject": "academic",
-        "extract_dir": str(work.relative_to(REPO)),
-        "entity_candidates": str(candidates.relative_to(REPO)),
+        "extract_dir": work.relative_to(REPO).as_posix(),
+        "entity_candidates": candidates.relative_to(REPO).as_posix(),
         "errors": [],
     }
 
@@ -128,7 +128,7 @@ def test_preprocess_only_builds_candidates():
         def fake_run(command):
             commands.append(command)
             output = REPO / command[command.index("--output") + 1]
-            output.write_text('{"resolved":[],"review":[]}\n', encoding="utf-8")
+            output.write_text('{"resolved":[],"review":[]}\n', encoding="utf-8", newline="\n")
             return ""
 
         meeting.run = fake_run
@@ -315,7 +315,7 @@ def test_agent_task_roundtrip_consumes_same_protocol():
         assert state["status"] == "prepared"
         assert "agent_prompt" not in state
         output = REPO / state["agent_task"]["outputs"][0]["path"]
-        output.write_text(_output(), encoding="utf-8")
+        output.write_text(_output(), encoding="utf-8", newline="\n")
         ok, error = meeting.step_write_wiki(state)
         assert ok, error
         assert state["semantic_worker"] == "meeting-compiler-agent"
@@ -504,7 +504,7 @@ def test_api_retry_injects_latest_persisted_response_and_diagnostic():
                 ok, error = meeting.step_write_wiki(state)
                 assert not ok and "invalid preprocess JSON" in error
                 latest = state["meeting_compiler_attempts"][-1]
-                payload = json.loads((REPO / latest["output_artifact"]).read_text())
+                payload = json.loads((REPO / latest["output_artifact"]).read_text(encoding="utf-8"))
                 assert payload["response_text"] == failed
                 assert payload["attempt"] == index + 1
                 assert payload["transaction_id"] == state["transaction_id"]
@@ -513,7 +513,7 @@ def test_api_retry_injects_latest_persisted_response_and_diagnostic():
                 else:
                     messages = calls[-1]["messages"]
                     assert messages[2]["content"] == failed_outputs[index - 1]
-                    previous = json.loads((work / f"compiler-attempt-{index}.json").read_text())
+                    previous = json.loads((work / f"compiler-attempt-{index}.json").read_text(encoding="utf-8"))
                     details = json.loads(messages[-1]["content"].split("[当前校验错误与上轮解析诊断]\n")[1])
                     assert details["diagnostic"] == previous["diagnostic"]
                 state = json.loads(json.dumps(state))
@@ -521,7 +521,7 @@ def test_api_retry_injects_latest_persisted_response_and_diagnostic():
             assert not (work / "corrected.txt").exists() and not (work / "wiki.md").exists()
             assert meeting._compiler_retry_context(state, "changed-input") == {}
             artifact = REPO / state["meeting_compiler_attempts"][-1]["output_artifact"]
-            artifact.write_text("tampered", encoding="utf-8")
+            artifact.write_text("tampered", encoding="utf-8", newline="\n")
             ok, error = meeting.step_write_wiki(state)
             assert not ok and "hash mismatch" in error and len(calls) == 3
             state["meeting_compiler_attempts"].append({"status": "escalated"})
@@ -606,7 +606,7 @@ def test_agent_parse_diagnostic_does_not_enter_api_retry():
             ok, _error = meeting.step_write_wiki(state)
             assert not ok
             output = REPO / state["agent_task"]["outputs"][0]["path"]
-            output.write_text(_output().replace("<<<WIKI>>>", "<<</PREPROCESS>>>\n<<<WIKI>>>"))
+            output.write_text(_output().replace("<<<WIKI>>>", "<<</PREPROCESS>>>\n<<<WIKI>>>"), encoding="utf-8", newline="\n")
             ok, error = meeting.step_write_wiki(state)
             assert not ok and error == "invalid preprocess JSON"
             assert state["agent_task"]["status"] == "prepared"
@@ -651,7 +651,7 @@ def test_source_binding_rebases_all_yaml_styles_in_both_backends():
                         ok, _ = meeting.step_write_wiki(state)
                         assert not ok and state["_awaiting_agent_wiki_slots"]
                         output = _output().replace(old, form)
-                        (work / "agent-meeting-compiler.txt").write_text(output, encoding="utf-8")
+                        (work / "agent-meeting-compiler.txt").write_text(output, encoding="utf-8", newline="\n")
                         parsed, parse_error, _ = meeting.parse_proposal_detailed(output)
                         assert parsed, parse_error
                         body = parsed["wiki_markdown"].split("\n---", 1)[1]
@@ -664,7 +664,7 @@ def test_source_binding_rebases_all_yaml_styles_in_both_backends():
                 assert fm["sources"] == [expected], (backend, form, fm)
                 assert state["wiki_content"].split("\n---", 1)[1] == body
                 assert meeting.step_validate_wiki(state) == []
-                assert (work / "wiki.md").read_text() == state["wiki_content"]
+                assert (work / "wiki.md").read_text(encoding="utf-8") == state["wiki_content"]
             finally:
                 shutil.rmtree(work)
 

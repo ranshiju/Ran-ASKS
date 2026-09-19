@@ -20,8 +20,8 @@ from dsh.harness import ToolDefinition, ToolExecutionResult
 
 def _wg_call(action: str, args: list[str]) -> str:
     """调用 wg.py，返回解析后的 content 或 error 文本。"""
-    cmd = ["python3", str(SCRIPTS / "wg.py"), action, *args]
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    cmd = [sys.executable, str(SCRIPTS / "wg.py"), action, *args]
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
     if p.returncode != 0:
         return f"[ERROR wg.py 返回码 {p.returncode}: {p.stderr[:200]}]"
     try:

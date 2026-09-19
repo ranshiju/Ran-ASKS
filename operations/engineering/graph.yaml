@@ -205,6 +205,10 @@ nodes:
     path: .scripts/graph_lib.py
     kind: implementation
     role: graph-schema-stable-node-id-canonical-description-source-local-node-gloss-hub-scope-history-multi-alias-node-origin-lineage-and-shared-operations
+  platform_compat:
+    path: .scripts/platform_compat.py
+    kind: implementation
+    role: cross-platform-seam-for-file-locking-subprocess-utf8-word-document-text-desktop-open-and-libreoffice-discovery
   graph_ingest:
     path: .scripts/graph_ingest.py
     kind: implementation
@@ -1835,6 +1839,24 @@ edges:
 - - wg
   - tested_by
   - chat_intake_test
+- - graph_lib
+  - uses
+  - platform_compat
+- - graph_visualize
+  - uses
+  - platform_compat
+- - ingest_document
+  - uses
+  - platform_compat
+- - ingest_inbox
+  - uses
+  - platform_compat
+- - visual_qa
+  - uses
+  - platform_compat
+- - visual_to_editable_ppt
+  - uses
+  - platform_compat
 capabilities:
   ingest:
     entry: route
@@ -3528,6 +3550,7 @@ script_contracts:
     - python3 dsh/test_visual_reconstruction_tools.py
     - python3 .scripts/engineering_graph.py validate
 untracked:
+- read_section
 - baseline_bm25
 - baseline_hierarchical
 - baseline_krwiki

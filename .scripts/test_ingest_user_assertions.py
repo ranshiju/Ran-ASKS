@@ -33,6 +33,7 @@ GRAPH_SCRIPT_FILES = {
     "inbox_state.py",
     "knowledge_ir.py",
     "node_semantics.py",
+    "platform_compat.py",
     "predicate_tiers.yaml",
     "source_locator.py",
     "sync_keyword_aliases.py",
@@ -48,10 +49,10 @@ def _setup_repo(root: Path) -> tuple[Path, Path, Path, Path]:
     pending.parent.mkdir(parents=True)
     raw.parent.mkdir(parents=True)
     wiki.parent.mkdir(parents=True)
-    pending.write_text(f"# Pending\n\n{FACT_LINE}\n", encoding="utf-8")
-    raw.write_text("# Assertions\n", encoding="utf-8")
+    pending.write_text(f"# Pending\n\n{FACT_LINE}\n", encoding="utf-8", newline="\n")
+    raw.write_text("# Assertions\n", encoding="utf-8", newline="\n")
     graph.write_bytes(b"graph-before")
-    wiki.write_text("old wiki\n", encoding="utf-8")
+    wiki.write_text("old wiki\n", encoding="utf-8", newline="\n")
     return pending, raw, graph, wiki
 
 
@@ -94,7 +95,7 @@ def _write_proposal(root: Path, prepared: dict, wiki: Path, *, valid_wiki: bool 
     }
     (root / prepared["write_to"]).write_text(
         json.dumps(proposal, ensure_ascii=False), encoding="utf-8",
-    )
+    newline="\n")
 
 
 def _install_graph_runtime(root: Path) -> None:
@@ -109,7 +110,7 @@ def _initialize_graph(root: Path, graph: Path) -> None:
     graph.write_bytes(b"")
     initialized = subprocess.run(
         [sys.executable, ".scripts/graph_ingest.py", "--db", str(graph), "init"],
-        cwd=root, text=True, capture_output=True,
+        cwd=root, text=True, encoding="utf-8", errors="replace", capture_output=True,
     )
     assert initialized.returncode == 0, initialized.stdout + initialized.stderr
 

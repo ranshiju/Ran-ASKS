@@ -14,7 +14,7 @@ import research_memory as memory
 def _project(root: Path) -> None:
     project = root / "projects" / "demo"
     project.mkdir(parents=True)
-    (project / "notes.md").write_text("研究量子采样并验证复杂度。\n", encoding="utf-8")
+    (project / "notes.md").write_text("研究量子采样并验证复杂度。\n", encoding="utf-8", newline="\n")
 
 
 def test_agent_refresh_prepares_bounded_task_and_apply_validates():
@@ -36,7 +36,7 @@ def test_agent_refresh_prepares_bounded_task_and_apply_validates():
                 "keywords": ["量子采样", "复杂度"],
                 "stage": "experiment",
                 "active_questions": ["优势是否稳健？"],
-            }, ensure_ascii=False), encoding="utf-8")
+            }, ensure_ascii=False), encoding="utf-8", newline="\n")
             applied = memory.apply_profile("demo", output)
             assert applied["status"] == "completed"
             assert memory.load_profile("demo")["stage"] == "experiment"

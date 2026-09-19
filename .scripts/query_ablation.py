@@ -49,7 +49,7 @@ def all_pages() -> list[str]:
     for sub in ["academic/wiki", "admin/wiki", "business/wiki", "cross-domain"]:
         base = _REPO / sub
         for p in base.rglob("*.md"):
-            rel = str(p.relative_to(_REPO))
+            rel = p.relative_to(_REPO).as_posix()
             if p.name in ("index.md", "log.md", "page-catalog.md"):
                 continue
             pages.append(rel)
@@ -465,7 +465,7 @@ def retrieve_t5(q: str, spec: dict) -> dict:
             tf = _REPO / "cross-domain" / f"triples-{tn}.md"
             if tf.exists():
                 txt = tf.read_text(encoding="utf-8")
-                secs.append((str(tf.relative_to(_REPO)), "triples", _tok(txt))); tok += _tok(txt)
+                secs.append((tf.relative_to(_REPO).as_posix(), "triples", _tok(txt))); tok += _tok(txt)
                 break
     stop = "no_candidates" if not cands else ("sufficient" if not spec.get("failure") else "no_actionable_candidate")
     return _result(secs, tok, candidates=cands, version_followed=version_followed,
@@ -628,7 +628,7 @@ def main():
         agg = aggregate(results)
         out = {"per_query": results, "aggregate": agg}
         (_REPO / "projects/kr-wiki-paper/testbed/ablation-results.json").write_text(
-            json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+            json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
         # 打印汇总表
         print("档  | coverage | correct | honest | version | conflict | traceab | avg_tok | med_tok")
         print("-" * 86)

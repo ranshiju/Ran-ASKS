@@ -574,7 +574,7 @@ def _agent_semantic_task(kind: str, packet: dict, *, transaction_id: str = "",
     output_path = directory / f"{safe_id}-{kind}.json"
     packet_path.write_text(
         json.dumps(packet, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-    )
+    newline="\n")
     fields = (
         sorted({
             "canonical_question", "kb_state", "kb_summary", "residual_gaps",
@@ -591,11 +591,11 @@ def _agent_semantic_task(kind: str, packet: dict, *, transaction_id: str = "",
         kind=f"frontier_{kind}",
         transaction_id=transaction_id,
         inputs=[{
-            "name": "kb_packet", "path": str(packet_path.relative_to(REPO)),
+            "name": "kb_packet", "path": packet_path.relative_to(REPO).as_posix(),
             "role": "bounded_wikigraph_evidence", "read": "full",
         }],
         outputs=[{
-            "name": kind, "path": str(output_path.relative_to(REPO)),
+            "name": kind, "path": output_path.relative_to(REPO).as_posix(),
             "format": f"frontier-{kind}-v1",
         }],
         protocol={

@@ -55,8 +55,8 @@ def test_agent_wiki_handoff_resumes_from_declared_output():
         root = Path(directory)
         extract_dir = root / "temp" / "inbox-extract" / "agent-wiki"
         extract_dir.mkdir(parents=True)
-        (extract_dir / "paper.md").write_text("# Test Paper\n\n张鹏\n", encoding="utf-8")
-        (extract_dir / "skeleton.md").write_text("---\ntitle: Test Paper\n---\n", encoding="utf-8")
+        (extract_dir / "paper.md").write_text("# Test Paper\n\n张鹏\n", encoding="utf-8", newline="\n")
+        (extract_dir / "skeleton.md").write_text("---\ntitle: Test Paper\n---\n", encoding="utf-8", newline="\n")
         agent_output = extract_dir / "agent-wiki-slots.txt"
         agent_output.write_text(
             "<<<WIKI>>>\n---\ntitle: Test Paper\ntype: paper-summary\n"
@@ -64,15 +64,15 @@ def test_agent_wiki_handoff_resumes_from_declared_output():
             "## Navigation\n\n## Content\n\n正文。\n"
             "<<<SLOTS>>>\n三元组:\n本论文 | 核心方法 | 测试主题\n",
             encoding="utf-8",
-        )
+        newline="\n")
         state = {
             "transaction_id": "agent-wiki",
             "status": "agent_required",
             "pre_handoff_status": "write_wiki",
             "_awaiting_agent_wiki_slots": True,
             "agent_required": True,
-            "agent_write_to": str(agent_output.relative_to(root)),
-            "extract_dir": str(extract_dir.relative_to(root)),
+            "agent_write_to": agent_output.relative_to(root).as_posix(),
+            "extract_dir": extract_dir.relative_to(root).as_posix(),
             "paper_id": "张鹏-2023-test-paper",
             "raw_dir": "academic/raw/references/张鹏-2023-test-paper",
             "wiki_path": "academic/wiki/papers/张鹏-2023-test-paper",
@@ -211,14 +211,14 @@ def test_agent_workspace_hash_gate_detects_changed_output():
         extract_dir.mkdir(parents=True)
         paper = extract_dir / "paper.md"
         output = extract_dir / "agent-workspace.txt"
-        paper.write_text("paper", encoding="utf-8")
-        output.write_text("first", encoding="utf-8")
+        paper.write_text("paper", encoding="utf-8", newline="\n")
+        output.write_text("first", encoding="utf-8", newline="\n")
         state = {
-            "extract_dir": str(extract_dir.relative_to(root)),
+            "extract_dir": extract_dir.relative_to(root).as_posix(),
             "agent_workspace": {
                 "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
                 "paper_md_sha256": module._file_sha256(paper),
-                "output_path": str(output.relative_to(root)),
+                "output_path": output.relative_to(root).as_posix(),
                 "output_sha256": module._file_sha256(output),
             },
         }
@@ -226,7 +226,7 @@ def test_agent_workspace_hash_gate_detects_changed_output():
         try:
             module.REPO = root
             assert module.agent_workspace_hash_errors(state) == []
-            output.write_text("changed", encoding="utf-8")
+            output.write_text("changed", encoding="utf-8", newline="\n")
             errors = module.agent_workspace_hash_errors(state)
         finally:
             module.REPO = original_repo
@@ -267,7 +267,7 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
         extract_dir = root / "temp" / "inbox-extract" / "txn"
         extract_dir.mkdir(parents=True)
         paper = extract_dir / "paper.md"
-        paper.write_text("# Test Paper\n\nAlice Example\n\n2026\n", encoding="utf-8")
+        paper.write_text("# Test Paper\n\nAlice Example\n\n2026\n", encoding="utf-8", newline="\n")
         candidates = {
             "title": ["Test Paper"], "authors": ["Alice Example"], "year": ["2026"],
             "venue": ["npj Quantum Information"], "doi": [], "arxiv_id": [],
@@ -301,20 +301,20 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
             f"{module.WIKI_DELIMITER}\n---\ntitle: Test Paper\n---\n## Navigation\n"
             f"{module.SLOTS_DELIMITER}\n三元组:\n本论文 | 核心方法 | 测试\n",
             encoding="utf-8",
-        )
+        newline="\n")
         state = {
             "transaction_id": "txn", "status": "agent_required", "agent_required": True,
-            "extract_dir": str(extract_dir.relative_to(root)),
+            "extract_dir": extract_dir.relative_to(root).as_posix(),
             "bibliographic_meta": {"venue": "npj Quantum Information"},
             "bibliographic_review": {
                 "status": "agent_required", "candidates": candidates, "catalog": catalog,
                 "input_hash": "input", "worker": {},
-                "draft_path": str((extract_dir / "bibliographic-review.json").relative_to(root)),
+                "draft_path": (extract_dir / "bibliographic-review.json").relative_to(root).as_posix(),
             },
             "agent_workspace": {
                 "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
                 "paper_md_sha256": module._file_sha256(paper),
-                "output_path": str(output.relative_to(root)),
+                "output_path": output.relative_to(root).as_posix(),
             },
         }
         original_repo = module.REPO
@@ -414,12 +414,12 @@ def test_refresh_agent_workspace_handoff_rebuilds_stale_candidate_catalog():
             "Alice Example. 2021. Knowledge Graphs. ACM Comput. Surv. 54.\n\n"
             "## 1 INTRODUCTION\n",
             encoding="utf-8",
-        )
+        newline="\n")
         (extract_dir / "paper.pdf").write_bytes(b"test-pdf")
         state = {
             "transaction_id": "txn",
             "status": "agent_required",
-            "extract_dir": str(extract_dir.relative_to(root)),
+            "extract_dir": extract_dir.relative_to(root).as_posix(),
             "bibliographic_meta": {"year": "2021"},
             "agent_workspace": {
                 "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
@@ -437,7 +437,7 @@ def test_refresh_agent_workspace_handoff_rebuilds_stale_candidate_catalog():
                 "---\ntitle: \"__agent_locked_paper_id__\"\ndate: 2021\nvenue: \"\"\n---\n"
                 "# __agent_locked_paper_id__\n",
                 encoding="utf-8",
-            )
+            newline="\n")
             refreshed = module.refresh_agent_workspace_handoff(state)
         finally:
             module.REPO = original_repo
@@ -458,14 +458,14 @@ def test_explicit_workspace_refresh_archives_existing_unsubmitted_output():
             "ACM Reference format:\n\n"
             "Alice Example. 2021. Knowledge Graphs. ACM Comput. Surv. 54.\n",
             encoding="utf-8",
-        )
+        newline="\n")
         (extract_dir / "paper.pdf").write_bytes(b"test-pdf")
         output = extract_dir / "agent-workspace.txt"
-        output.write_text("old reviewed output\n", encoding="utf-8")
+        output.write_text("old reviewed output\n", encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "txn",
             "status": "agent_required",
-            "extract_dir": str(extract_dir.relative_to(root)),
+            "extract_dir": extract_dir.relative_to(root).as_posix(),
             "bibliographic_meta": {"year": "2021"},
             "agent_workspace": {
                 "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
@@ -484,7 +484,7 @@ def test_explicit_workspace_refresh_archives_existing_unsubmitted_output():
                 "---\ntitle: \"__agent_locked_paper_id__\"\ndate: 2021\nvenue: \"\"\n---\n"
                 "# __agent_locked_paper_id__\n",
                 encoding="utf-8",
-            )
+            newline="\n")
             module.inbox_state.save = lambda *_args, **_kwargs: None
             payload = module.explicit_agent_workspace_refresh(state)
         finally:
@@ -511,12 +511,12 @@ def test_explicit_workspace_refresh_without_output_has_no_archive_receipt():
             "ACM Reference format:\n\n"
             "Alice Example. 2021. Knowledge Graphs. ACM Comput. Surv. 54.\n",
             encoding="utf-8",
-        )
+        newline="\n")
         (extract_dir / "paper.pdf").write_bytes(b"test-pdf")
         state = {
             "transaction_id": "txn",
             "status": "agent_required",
-            "extract_dir": str(extract_dir.relative_to(root)),
+            "extract_dir": extract_dir.relative_to(root).as_posix(),
             "bibliographic_meta": {"year": "2021"},
             "agent_workspace": {
                 "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
@@ -535,7 +535,7 @@ def test_explicit_workspace_refresh_without_output_has_no_archive_receipt():
                 "---\ntitle: \"__agent_locked_paper_id__\"\ndate: 2021\nvenue: \"\"\n---\n"
                 "# __agent_locked_paper_id__\n",
                 encoding="utf-8",
-            )
+            newline="\n")
             module.inbox_state.save = lambda *_args, **_kwargs: None
             payload = module.explicit_agent_workspace_refresh(state)
         finally:
@@ -556,10 +556,10 @@ def test_agent_workspace_read_exposes_only_public_state_and_versions():
         extract_dir = root / "temp" / "inbox-extract" / "txn"
         extract_dir.mkdir(parents=True)
         paper = extract_dir / "paper.md"
-        paper.write_text("# Test\n", encoding="utf-8")
+        paper.write_text("# Test\n", encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "txn", "status": "agent_required",
-            "extract_dir": str(extract_dir.relative_to(root)),
+            "extract_dir": extract_dir.relative_to(root).as_posix(),
             "agent_workspace": {
                 "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
                 "status": "awaiting_output",
@@ -625,7 +625,10 @@ def test_agent_workspace_check_aggregates_independent_diagnostics():
 
 
 def test_extract_pdf_bibliography_reads_metadata_and_first_page_footer():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "thorne-2018-fever.pdf"
         doc = fitz.open()
@@ -651,7 +654,10 @@ def test_extract_pdf_bibliography_reads_metadata_and_first_page_footer():
 
 
 def test_extract_pdf_bibliography_prefers_published_year_and_aps_doi_venue():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -668,7 +674,10 @@ def test_extract_pdf_bibliography_prefers_published_year_and_aps_doi_venue():
 
 
 def test_extract_pdf_bibliography_reads_aps_venue_from_metadata_subject():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -683,7 +692,10 @@ def test_extract_pdf_bibliography_reads_aps_venue_from_metadata_subject():
 
 
 def test_extract_pdf_bibliography_reads_npj_venue_from_metadata_subject():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -724,7 +736,10 @@ def test_bibliographic_review_blocks_empty_venue_when_candidate_exists():
 
 
 def test_extract_pdf_bibliography_reads_published_conference_venue():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -739,7 +754,10 @@ def test_extract_pdf_bibliography_reads_published_conference_venue():
 
 
 def test_extract_pdf_bibliography_reads_iop_citation_venue():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -924,7 +942,10 @@ Discussion of the results.
 
 
 def test_extract_pdf_bibliography_reads_iop_wrapper_second_page_header():
-    import fitz
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = Path(directory) / "paper.pdf"
         doc = fitz.open()
@@ -1678,7 +1699,7 @@ def test_resume_candidate_id_decision_compiles_and_caches_without_worker():
         extract_dir = root / "temp/inbox-extract/txn-id"
         extract_dir.mkdir(parents=True)
         md_text = "# Paper\n\nAlice Example\n\nDOI: 10.1234/paper\n"
-        (extract_dir / "paper.md").write_text(md_text, encoding="utf-8")
+        (extract_dir / "paper.md").write_text(md_text, encoding="utf-8", newline="\n")
         bibliography = {
             "title": "Paper", "authors": ["Alice Example"], "year": "2025",
             "doi": "10.1234/paper", "evidence": {"year": "pdf_first_page.published"},
@@ -1693,7 +1714,7 @@ def test_resume_candidate_id_decision_compiles_and_caches_without_worker():
         decision = _candidate_id_decision(catalog)
         (extract_dir / "bibliographic-review.json").write_text(
             module.json.dumps(decision), encoding="utf-8",
-        )
+        newline="\n")
         state = {
             "transaction_id": "txn-id",
             "status": "agent_required",
@@ -1776,8 +1797,10 @@ Published in Navigation Journal
 
 
 def test_agent_workspace_exposes_first_two_pdf_pages_for_bibliography():
-    import fitz
-
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+    except ImportError:  # 旧版 PyMuPDF 只有 fitz
+        import fitz
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         extract_dir = root / "temp/inbox-extract/txn-pages"
@@ -1999,7 +2022,7 @@ def test_inbox_pdf_paths_are_sorted_and_pdf_only():
         inbox.mkdir()
         (inbox / "zeta.PDF").write_bytes(b"pdf")
         (inbox / "Alpha.pdf").write_bytes(b"pdf")
-        (inbox / "notes.txt").write_text("ignore", encoding="utf-8")
+        (inbox / "notes.txt").write_text("ignore", encoding="utf-8", newline="\n")
         original_repo = module.REPO
         try:
             module.REPO = root
@@ -2046,7 +2069,7 @@ def test_ensure_unique_disambiguates():
         module.REPO = Path(directory)
         page = module.REPO / "academic" / "wiki" / "papers" / f"{existing}.md"
         page.parent.mkdir(parents=True)
-        page.write_text("# Existing\n", encoding="utf-8")
+        page.write_text("# Existing\n", encoding="utf-8", newline="\n")
         try:
             unique = module.ensure_unique_paper_id(existing)
         finally:
@@ -2386,12 +2409,12 @@ def test_api_wiki_handoff_message_does_not_claim_agent_backend():
         root = Path(directory)
         extract_dir = root / "temp" / "api-wiki-handoff"
         extract_dir.mkdir(parents=True)
-        (extract_dir / "paper.md").write_text("# Test Paper\n\nAlice Example\n", encoding="utf-8")
+        (extract_dir / "paper.md").write_text("# Test Paper\n\nAlice Example\n", encoding="utf-8", newline="\n")
         (extract_dir / "skeleton.md").write_text(
             "---\ntitle: Test Paper\ntype: paper-summary\nsources:\n"
             "  - academic/raw/references/test/paper.md\nstatus: final\n---\n",
             encoding="utf-8",
-        )
+        newline="\n")
         original_repo, original_call, original_mode = module.REPO, module.call_text, module.ingest_mode
         module.REPO = root
         module.call_text = fake_call
@@ -2458,8 +2481,8 @@ def test_api_initial_paper_workspace_uses_one_combined_model_call():
         root = Path(directory)
         extract_dir = root / "temp" / "combined-api"
         extract_dir.mkdir(parents=True)
-        (extract_dir / "paper.md").write_text(md_text, encoding="utf-8")
-        (extract_dir / "skeleton.md").write_text(wiki, encoding="utf-8")
+        (extract_dir / "paper.md").write_text(md_text, encoding="utf-8", newline="\n")
+        (extract_dir / "skeleton.md").write_text(wiki, encoding="utf-8", newline="\n")
         original_repo, original_call, original_mode = module.REPO, module.call_text, module.ingest_mode
         module.REPO = root
         module.call_text = fake_call
@@ -2604,7 +2627,7 @@ def test_semantic_coverage_count_excludes_deterministic_metadata_edges():
             "本论文 | 核心方法 | 张量网络\n"
             "本论文 | 研究基础 | 量子多体系统\n",
             encoding="utf-8",
-        )
+        newline="\n")
         page = "academic/wiki/papers/demo"
         parsed = [
             {"subject": page, "predicate": "核心方法", "object": "张量网络"},
@@ -2647,7 +2670,7 @@ def test_semantic_validator_rejects_paper_level_predicates_retired_by_graph():
             "本论文 | 核心方法 | 数值优化\n"
             "量子社区检测 | 应用于 | 光捕获复合体\n",
             encoding="utf-8",
-        )
+        newline="\n")
         original_repo = module.REPO
         module.REPO = root
         try:
@@ -2673,7 +2696,7 @@ def test_proposition_abbreviation_is_not_a_keyword_format_warning():
         semantic.write_text(
             "三元组:\n本论文 | 核心创新点 | ALCE提供端到端可复现实验设置\n",
             encoding="utf-8",
-        )
+        newline="\n")
         original_repo = module.REPO
         original_connect = graph_ingest.gl.connect
         module.REPO = root
@@ -2800,7 +2823,7 @@ def test_validate_and_patch_paper_keyword_triples_repairs_bare_abbreviations():
             conn.close()
             with tempfile.TemporaryDirectory() as directory:
                 semantic_path = Path(directory) / "semantic.txt"
-                semantic_path.write_text(sem, encoding="utf-8")
+                semantic_path.write_text(sem, encoding="utf-8", newline="\n")
                 state = {"semantic_path": str(semantic_path), "wiki_path": "academic/wiki/papers/test"}
                 errors, warnings = module.step_validate_semantics(state)
                 assert not errors
@@ -2837,7 +2860,7 @@ def test_slot_validation_skips_warning_when_abbr_resolves_to_keyword():
             sem = "三元组:\n本论文 | 核心方法 | TPA\n"
             with tempfile.TemporaryDirectory() as directory:
                 sp = Path(directory) / "semantic.txt"
-                sp.write_text(sem, encoding="utf-8")
+                sp.write_text(sem, encoding="utf-8", newline="\n")
                 state = {"semantic_path": str(sp), "wiki_path": "academic/wiki/papers/t"}
                 errors, warnings = module.step_validate_semantics(state)
             assert not errors
@@ -2861,7 +2884,7 @@ def test_slot_validation_warns_for_unregistered_abbr():
             sem = "三元组:\n本论文 | 核心方法 | ZZQT\n"
             with tempfile.TemporaryDirectory() as directory:
                 sp = Path(directory) / "semantic.txt"
-                sp.write_text(sem, encoding="utf-8")
+                sp.write_text(sem, encoding="utf-8", newline="\n")
                 state = {"semantic_path": str(sp), "wiki_path": "academic/wiki/papers/t"}
                 errors, warnings = module.step_validate_semantics(state)
             assert not errors
@@ -2981,7 +3004,7 @@ def test_detect_raw_relationship_does_not_match_transport():
 def test_resume_after_semantic_fix_loads_disk_content():
     with tempfile.TemporaryDirectory() as directory:
         semantic_path = Path(directory) / "semantic.txt"
-        semantic_path.write_text("三元组:\n本论文 | 研究关键词 | 修正概念\n", encoding="utf-8")
+        semantic_path.write_text("三元组:\n本论文 | 研究关键词 | 修正概念\n", encoding="utf-8", newline="\n")
         original_repo = module.REPO
         try:
             module.REPO = Path(directory)
@@ -3007,10 +3030,10 @@ def test_handoff_to_agent_records_pre_handoff_status():
     sem = "期刊:\nPRX Quantum\n三元组:\n本论文 | 核心创新点 | 首次将DMRG方法系统性应用于基态能量计算\n"
     with tempfile.TemporaryDirectory(dir=module.REPO / "temp") as directory:
         sp = Path(directory) / "semantic.txt"
-        sp.write_text(sem, encoding="utf-8")
+        sp.write_text(sem, encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "txn-p",
-            "semantic_path": str(sp.relative_to(module.REPO)),
+            "semantic_path": sp.relative_to(module.REPO).as_posix(),
             "wiki_path": "academic/wiki/papers/p",
             "status": "graph_ready",
         }
@@ -3032,7 +3055,7 @@ def test_resume_after_semantic_fix_restores_pre_handoff_status():
     """落位后 handoff 的论文，resume 应恢复到 graph_ready 而非 finalize，避免重跑落位。"""
     with tempfile.TemporaryDirectory() as directory:
         semantic_path = Path(directory) / "semantic.txt"
-        semantic_path.write_text("三元组:\n本论文 | 研究关键词 | 修正概念\n", encoding="utf-8")
+        semantic_path.write_text("三元组:\n本论文 | 研究关键词 | 修正概念\n", encoding="utf-8", newline="\n")
         original_repo = module.REPO
         try:
             module.REPO = Path(directory)
@@ -3244,7 +3267,7 @@ def test_relationship_worker_single_call_then_cache_hit():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         paper_md = root / "paper.md"
-        paper_md.write_text("# Study\n", encoding="utf-8")
+        paper_md.write_text("# Study\n", encoding="utf-8", newline="\n")
         old_repo, old_builder, old_call = (
             module.REPO, module.build_relationship_candidate_catalog, module.call_json,
         )
@@ -3275,7 +3298,7 @@ def test_relationship_handoff_is_not_consumed_as_semantic_fix():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         semantic = root / "semantic.txt"
-        semantic.write_text("三元组:\nA | 涉及 | B\n", encoding="utf-8")
+        semantic.write_text("三元组:\nA | 涉及 | B\n", encoding="utf-8", newline="\n")
         state = {
             "status": "agent_required",
             "semantic_path": "semantic.txt",
@@ -3296,7 +3319,7 @@ def test_uncertain_title_match_defers_until_post_extract():
         (root / "inbox" / "test-paper.pdf").write_bytes(b"not-a-real-pdf")
         raw_dir = root / "academic" / "raw" / "references" / "test-paper"
         raw_dir.mkdir(parents=True)
-        (raw_dir / "paper.md").write_text("# Test Paper\n\nAda Lovelace\n", encoding="utf-8")
+        (raw_dir / "paper.md").write_text("# Test Paper\n\nAda Lovelace\n", encoding="utf-8", newline="\n")
         old_repo = module.REPO
         old_ensure, old_lookup = module.sf.ensure_index, module.sf.lookup_exact
         old_extract = module.extract_pdf_bibliography
@@ -3323,7 +3346,7 @@ def test_semantic_duplicate_cleanup_skips_worker():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         semantic = root / "semantic.txt"
-        semantic.write_text("三元组:\nA | 涉及 | B\nA | 涉及 | B\n", encoding="utf-8")
+        semantic.write_text("三元组:\nA | 涉及 | B\nA | 涉及 | B\n", encoding="utf-8", newline="\n")
         state = {"transaction_id": "dedup", "semantic_path": "semantic.txt"}
         warning = {
             "section": "三元组", "line": "A | 涉及 | B",
@@ -3354,7 +3377,7 @@ def test_semantic_patch_worker_single_call_and_cache():
         root = Path(directory)
         semantic = root / "semantic.txt"
         original_text = "三元组:\nA | 涉及 | bad\n"
-        semantic.write_text(original_text, encoding="utf-8")
+        semantic.write_text(original_text, encoding="utf-8", newline="\n")
         warning = {
             "section": "三元组", "line": "A | 涉及 | bad", "issue": "bad_object",
             "field": "object", "reason": "测试问题", "is_triple": True,
@@ -3389,7 +3412,7 @@ def test_semantic_patch_worker_single_call_and_cache():
             assert calls[0]["retries"] == 0
             assert first["semantic_repair_worker"]["api_called"] is True
 
-            semantic.write_text(original_text, encoding="utf-8")
+            semantic.write_text(original_text, encoding="utf-8", newline="\n")
             second = {"transaction_id": "patch", "semantic_path": "semantic.txt"}
             ok, message = ic.repair_slots(second, root, [warning], validate)
             assert ok, message
@@ -3410,7 +3433,7 @@ def test_dedup_low_title_ratio_not_duplicate():
         pdf.write_bytes(b"pdf")
         raw_refs = repo / "academic" / "raw" / "references" / "existing-2017-paper"
         raw_refs.mkdir(parents=True)
-        (raw_refs / "paper.md").write_text("# Existing Paper Title\\n", encoding="utf-8")
+        (raw_refs / "paper.md").write_text("# Existing Paper Title\\n", encoding="utf-8", newline="\n")
         old_repo, old_extract = module.REPO, module.extract_title_from_pdf
         module.REPO = repo
         module.extract_title_from_pdf = lambda _p: "Completely Different Topic"
@@ -3459,7 +3482,7 @@ def test_exact_fingerprint_stops_before_pdf_metadata_and_mineru():
 def test_post_extract_text_candidate_requires_locked_bibliography():
     with tempfile.TemporaryDirectory() as directory:
         paper_md = Path(directory) / "paper.md"
-        paper_md.write_text("Normalized paper text", encoding="utf-8")
+        paper_md.write_text("Normalized paper text", encoding="utf-8", newline="\n")
         candidate = {
             "raw_path": "academic/raw/references/existing/paper.pdf",
             "match": "normalized_text_sha256",
@@ -3574,7 +3597,7 @@ def test_validate_flags_duplicate_line():
     )
     with tempfile.TemporaryDirectory() as directory:
         semantic_path = Path(directory) / "semantic.txt"
-        semantic_path.write_text(sem, encoding="utf-8")
+        semantic_path.write_text(sem, encoding="utf-8", newline="\n")
         state = {"semantic_path": str(semantic_path), "wiki_path": "academic/wiki/papers/test"}
         errors, warnings = module.step_validate_semantics(state)
     assert not errors
@@ -3599,10 +3622,10 @@ def test_handoff_to_agent_includes_full_warnings():
         try:
             with tempfile.TemporaryDirectory(dir=module.REPO / "temp") as directory:
                 sp = Path(directory) / "semantic.txt"
-                sp.write_text(sem, encoding="utf-8")
+                sp.write_text(sem, encoding="utf-8", newline="\n")
                 state = {
                     "transaction_id": "txn-h",
-                    "semantic_path": str(sp.relative_to(module.REPO)),
+                    "semantic_path": sp.relative_to(module.REPO).as_posix(),
                     "wiki_path": "academic/wiki/papers/h",
                     "status": "agent_required",
                 }
@@ -3636,7 +3659,7 @@ def test_validate_transaction_reports_warnings():
     )
     with tempfile.TemporaryDirectory() as directory:
         sp = Path(directory) / "semantic.txt"
-        sp.write_text(sem, encoding="utf-8")
+        sp.write_text(sem, encoding="utf-8", newline="\n")
         graph_path = Path(directory) / "graph.db"
         conn = sqlite3.connect(graph_path)
         gl.init_schema(conn)
@@ -3667,9 +3690,9 @@ def test_find_ready_txn_matches_graph_ready_only():
             module.REPO = Path(directory)
             sd = Path(directory) / "temp" / "inbox-state"
             sd.mkdir(parents=True)
-            (sd / "a.json").write_text(_json.dumps({"source": "inbox/a.pdf", "status": "graph_ready"}))
-            (sd / "b.json").write_text(_json.dumps({"source": "inbox/b.pdf", "status": "agent_required"}))
-            (sd / "c.json").write_text(_json.dumps({"source": "inbox/c.pdf", "status": "completed"}))
+            (sd / "a.json").write_text(_json.dumps({"source": "inbox/a.pdf", "status": "graph_ready"}), encoding="utf-8")
+            (sd / "b.json").write_text(_json.dumps({"source": "inbox/b.pdf", "status": "agent_required"}), encoding="utf-8")
+            (sd / "c.json").write_text(_json.dumps({"source": "inbox/c.pdf", "status": "completed"}), encoding="utf-8")
             r = module.find_ready_txn("inbox/a.pdf")
             assert r and r["source"] == "inbox/a.pdf"
             assert module.find_ready_txn("inbox/b.pdf") is None
@@ -3689,7 +3712,7 @@ def test_validate_before_commit_proposition_object_is_nonblocking():
     sem = "期刊:\n物理学期刊\n三元组:\n本论文 | 核心创新点 | 首次将密度矩阵重整化群方法系统性应用于基态能量计算\n"
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
-        (root / "semantic.txt").write_text(sem, encoding="utf-8")
+        (root / "semantic.txt").write_text(sem, encoding="utf-8", newline="\n")
         original_repo = module.REPO
         try:
             module.REPO = root
@@ -3746,7 +3769,7 @@ def test_step_extract_propositions_skips_when_no_propositions():
     try:
         with tempfile.TemporaryDirectory() as d:
             sp = Path(d) / "semantic.txt"
-            sp.write_text(sem, encoding="utf-8")
+            sp.write_text(sem, encoding="utf-8", newline="\n")
             orig_repo = module.REPO
             try:
                 module.REPO = Path(d)
@@ -3775,7 +3798,7 @@ def test_step_extract_propositions_is_zero_llm_and_preserves_semantic():
     try:
         with tempfile.TemporaryDirectory() as d:
             sp = Path(d) / "semantic.txt"
-            sp.write_text(sem, encoding="utf-8")
+            sp.write_text(sem, encoding="utf-8", newline="\n")
             orig_repo = module.REPO
             try:
                 module.REPO = Path(d)
@@ -3809,7 +3832,7 @@ def test_run_prepare_passes_through_terminal_status():
     """resume 已完成/已就绪事务应原样返回（不重跑、不返回 None），由 run_one 决定是否写图。"""
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
-        (root / "semantic.txt").write_text("三元组:\n本论文 | 核心方法 | 测试\n", encoding="utf-8")
+        (root / "semantic.txt").write_text("三元组:\n本论文 | 核心方法 | 测试\n", encoding="utf-8", newline="\n")
         original_repo = module.REPO
         original_save = module.inbox_state.save
         try:
@@ -3970,7 +3993,7 @@ def test_new_state_for_raw_sets_from_raw_flag():
         root = Path(directory)
         raw_dir = root / "academic" / "raw" / "references" / "smith-2020-test-paper"
         raw_dir.mkdir(parents=True)
-        (raw_dir / "paper.md").write_text("# Test", encoding="utf-8")
+        (raw_dir / "paper.md").write_text("# Test", encoding="utf-8", newline="\n")
         original_repo = module.REPO
         try:
             module.REPO = root
@@ -4061,7 +4084,7 @@ def test_sparse_slots_retry_is_bounded_and_keeps_higher_coverage():
         with tempfile.TemporaryDirectory() as tmp:
             module.REPO = Path(tmp)
             semantic_path = module.REPO / "slots.txt"
-            semantic_path.write_text("first", encoding="utf-8")
+            semantic_path.write_text("first", encoding="utf-8", newline="\n")
             state = {
                 "semantic_path": "slots.txt",
                 "slots_content": "first",
@@ -4075,7 +4098,7 @@ def test_sparse_slots_retry_is_bounded_and_keeps_higher_coverage():
             assert "成功解析 2 条 Worker 三元组" in state["slots_errors"][0]
             assert state["_sparse_slots_best"]["content"] == "first"
 
-            semantic_path.write_text("worse", encoding="utf-8")
+            semantic_path.write_text("worse", encoding="utf-8", newline="\n")
             state["slots_content"] = "worse"
             state["semantic_triple_count"] = 1
             assert module._handle_sparse_slots(state) == "restored"
@@ -4201,7 +4224,7 @@ def test_reingest_state_has_reingest_flag():
         root = Path(directory)
         raw_dir = root / "academic" / "raw" / "references" / "doe-2019-example"
         raw_dir.mkdir(parents=True)
-        (raw_dir / "paper.md").write_text("# Example", encoding="utf-8")
+        (raw_dir / "paper.md").write_text("# Example", encoding="utf-8", newline="\n")
         original_repo, original_ri_repo = module.REPO, ri.REPO
         original_temp = ri.TEMP_REINGEST
         try:
@@ -4225,7 +4248,7 @@ def test_reingest_state_copies_archived_pdf_for_agent_workspace():
         root = Path(directory)
         raw_dir = root / "academic" / "raw" / "references" / "doe-2019-example"
         raw_dir.mkdir(parents=True)
-        (raw_dir / "paper.md").write_text("# Example", encoding="utf-8")
+        (raw_dir / "paper.md").write_text("# Example", encoding="utf-8", newline="\n")
         (raw_dir / "paper.pdf").write_bytes(b"archived-pdf")
         original_repo, original_ri_repo = module.REPO, ri.REPO
         original_temp = ri.TEMP_REINGEST
@@ -4257,7 +4280,7 @@ def test_reingest_repairs_archived_bibliography_without_mutating_raw():
             "# The roadmap\n\nwrapper\n\n# The roadmap\n"
             "Antonio Acín, Immanuel Bloch, Harry Buhrman\n",
             encoding="utf-8",
-        )
+        newline="\n")
         source_yaml = raw_dir / "source.yaml"
         original_source = (
             "bibliographic:\n"
@@ -4265,7 +4288,7 @@ def test_reingest_repairs_archived_bibliography_without_mutating_raw():
             "  authors:\n"
             "  - Antonio Acín\n"
         )
-        source_yaml.write_text(original_source, encoding="utf-8")
+        source_yaml.write_text(original_source, encoding="utf-8", newline="\n")
         original_repo, original_ri_repo = module.REPO, ri.REPO
         original_temp = ri.TEMP_REINGEST
         try:
@@ -4324,7 +4347,7 @@ def test_reingest_runs_evidence_bound_bibliographic_review():
             "# Modeling sequences with quantum states\n\n"
             "Tai-Danae Bradley, E M Stoudenmire and John Terilla\n",
             encoding="utf-8",
-        )
+        newline="\n")
         source_yaml = raw_dir / "source.yaml"
         original_source = (
             "bibliographic:\n"
@@ -4332,7 +4355,7 @@ def test_reingest_runs_evidence_bound_bibliographic_review():
             "  authors:\n"
             "  - Tai-Danae Bradley ,E M Stoudenmire ,John Terilla\n"
         )
-        source_yaml.write_text(original_source, encoding="utf-8")
+        source_yaml.write_text(original_source, encoding="utf-8", newline="\n")
         corrected = {
             "title": "Modeling sequences with quantum states",
             "authors": ["Tai-Danae Bradley", "E M Stoudenmire", "John Terilla"],
@@ -4387,7 +4410,7 @@ def test_reingest_api_defers_bibliography_to_combined_workspace():
         root = Path(directory)
         extract_dir = root / "temp" / "reingest-extract" / "txn-api-combined"
         extract_dir.mkdir(parents=True)
-        (extract_dir / "paper.md").write_text("# Paper\n\nAlice Example\n", encoding="utf-8")
+        (extract_dir / "paper.md").write_text("# Paper\n\nAlice Example\n", encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "txn-api-combined", "status": "write_wiki",
             "extract_dir": "temp/reingest-extract/txn-api-combined",
@@ -4498,7 +4521,7 @@ def test_reingest_agent_backend_returns_current_agent_task():
                     current,
                     kind="ingest_paper",
                     transaction_id=current["transaction_id"],
-                    inputs=[{"name": "paper", "path": str(source.relative_to(root))}],
+                    inputs=[{"name": "paper", "path": source.relative_to(root).as_posix()}],
                     outputs=[{
                         "name": "workspace",
                         "path": "temp/reingest-extract/txn-agent/agent-workspace.txt",
@@ -4677,10 +4700,10 @@ def test_reingest_restores_wiki_when_graph_update_fails():
         root = Path(directory)
         wiki_path = root / "academic" / "wiki" / "papers" / "demo.md"
         wiki_path.parent.mkdir(parents=True)
-        wiki_path.write_text("old wiki\n", encoding="utf-8")
+        wiki_path.write_text("old wiki\n", encoding="utf-8", newline="\n")
         extract_dir = root / "temp" / "reingest-extract" / "txn"
         extract_dir.mkdir(parents=True)
-        (extract_dir / "wiki.md").write_text("new wiki\n", encoding="utf-8")
+        (extract_dir / "wiki.md").write_text("new wiki\n", encoding="utf-8", newline="\n")
         state = {
             "transaction_id": "txn", "paper_id": "demo",
             "wiki_path": "academic/wiki/papers/demo",
@@ -4713,14 +4736,14 @@ def test_reingest_current_raw_skips_generation_without_force():
         root = Path(directory)
         raw_path = root / "academic" / "raw" / "references" / "demo" / "paper.md"
         raw_path.parent.mkdir(parents=True)
-        raw_path.write_text("# Demo\n", encoding="utf-8")
+        raw_path.write_text("# Demo\n", encoding="utf-8", newline="\n")
         original_repo = ri.REPO
         original_version = ri.page_ingest_version
         original_argv = sys.argv
         try:
             ri.REPO = root
             ri.page_ingest_version = lambda _paper_id: 999
-            sys.argv = ["re_ingest.py", "--raw", str(raw_path.relative_to(root))]
+            sys.argv = ["re_ingest.py", "--raw", raw_path.relative_to(root).as_posix()]
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 result = ri.main()

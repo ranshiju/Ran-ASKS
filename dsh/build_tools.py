@@ -22,7 +22,7 @@ SCRIPTS = REPO / ".scripts"
 def _run_json(cmd: list[str], timeout: int = 90) -> str:
     """执行只读 CLI 并返回 JSON 结构化结果，不让裸 stdout 直接进入执行管道。"""
     try:
-        proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         return json.dumps({"ok": False, "error": "工具调用超时"}, ensure_ascii=False)
     except Exception as exc:

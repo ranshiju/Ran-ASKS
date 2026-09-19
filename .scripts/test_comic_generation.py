@@ -17,6 +17,10 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import comic_generation as cg
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / ".scripts"))
+import platform_compat as _pc
 
 
 PNG_1X1 = base64.b64decode(
@@ -31,7 +35,7 @@ class ComicGenerationTest(unittest.TestCase):
         self.project = self.repo / "projects" / "demo"
         (self.project / "outputs").mkdir(parents=True)
         (self.project / "notes").mkdir()
-        (self.project / "schema.yaml").write_text("project: {}\n", encoding="utf-8")
+        (self.project / "schema.yaml").write_text("project: {}\n", encoding="utf-8", newline="\n")
         (self.repo / "teaching" / "outputs").mkdir(parents=True)
         self.catalog = self.repo / "llm-models.yaml"
         self.catalog.write_text(
@@ -49,7 +53,7 @@ class ComicGenerationTest(unittest.TestCase):
             "COMIC_IMAGE_API_BASE=${LLM_API_BASE}\n"
             "COMIC_IMAGE_API_KEY=${LLM_API_KEY}\n",
             encoding="utf-8",
-        )
+        newline="\n")
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -101,6 +105,8 @@ class ComicGenerationTest(unittest.TestCase):
         with self.assertRaises(cg.ComicGenerationError):
             cg.allowed_output_root(forbidden, self.repo)
 
+    @unittest.skipUnless(_pc.symlinks_available(), _pc.SYMLINK_SKIP_REASON)
+
     def test_project_output_symlink_may_not_escape_repository(self):
         outside = self.repo.parent / f"outside-{self.repo.name}"
         outside.mkdir()
@@ -133,11 +139,11 @@ class ComicGenerationTest(unittest.TestCase):
         storyboard.write_text(
             "article_id: article-01\nassets:\n  - id: cover\n    prompt: Explain one idea\n",
             encoding="utf-8",
-        )
+        newline="\n")
         value = cg.load_storyboard("demo", storyboard, self.repo)
         self.assertEqual(value["assets"][0]["id"], "cover")
         generated = self.project / "outputs" / "storyboard.yaml"
-        generated.write_text("article_id: x\nassets: []\n", encoding="utf-8")
+        generated.write_text("article_id: x\nassets: []\n", encoding="utf-8", newline="\n")
         with self.assertRaises(cg.ComicGenerationError):
             cg.load_storyboard("demo", generated, self.repo)
 

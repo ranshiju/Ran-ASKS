@@ -152,7 +152,7 @@ def test_clean_page_edges_uses_lineage_for_shared_indirect_edge():
             page_file.write_text(
                 f"---\ntitle: {raw}\ntype: paper-summary\nsources: [academic/raw/{raw}.md]\n---\n",
                 encoding="utf-8",
-            )
+            newline="\n")
         old_repo = gl.REPO
         gl.REPO = repo
         try:
@@ -308,7 +308,7 @@ def test_cmd_ingest_writes_temporal_fact_end_to_end():
             "effective_from: 2026-07-01\n"
             "---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
             encoding="utf-8",
-        )
+        newline="\n")
         db_path = repo / "graph.db"
         old_repo, old_db = gl.REPO, gl.GRAPH_DB
         gl.REPO, gl.GRAPH_DB = repo, db_path

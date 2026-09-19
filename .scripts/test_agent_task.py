@@ -53,7 +53,7 @@ def test_backends_preserve_dotenv_configuration_with_environment_precedence():
             (agent_task.REPO / ".env").write_text(
                 "INGEST_BACKEND=api\nQUERY_BACKEND=api\nRESEARCH_BACKEND=api\n",
                 encoding="utf-8",
-            )
+            newline="\n")
             for name in original:
                 os.environ.pop(name, None)
             assert agent_task.ingest_backend() == "api"
@@ -74,7 +74,7 @@ def test_task_lifecycle_and_required_outputs():
     with tempfile.TemporaryDirectory() as directory:
         repo = Path(directory)
         source = repo / "input.txt"
-        source.write_text("evidence", encoding="utf-8")
+        source.write_text("evidence", encoding="utf-8", newline="\n")
         output = repo / "temp" / "demo" / "result.json"
         state = {}
         task = agent_task.prepare(
@@ -90,7 +90,7 @@ def test_task_lifecycle_and_required_outputs():
         assert agent_task.is_prepared(state)
         assert agent_task.missing_outputs(state, repo) == ["temp/demo/result.json"]
         output.parent.mkdir(parents=True)
-        output.write_text("{}\n", encoding="utf-8")
+        output.write_text("{}\n", encoding="utf-8", newline="\n")
         assert agent_task.missing_outputs(state, repo) == []
         agent_task.reopen(state, ["schema mismatch"])
         assert state["agent_task"]["issues"] == ["schema mismatch"]
@@ -113,7 +113,7 @@ def test_task_rejects_non_temp_output_and_escaping_artifact():
         repo = Path(directory)
         outside = repo / "temp" / "other" / "result.json"
         outside.parent.mkdir(parents=True)
-        outside.write_text("{}", encoding="utf-8")
+        outside.write_text("{}", encoding="utf-8", newline="\n")
         try:
             agent_task.resolve_temp_artifact(repo, outside, "owned")
             raise AssertionError("cross-namespace artifact must fail")

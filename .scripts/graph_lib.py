@@ -13,8 +13,13 @@ import hashlib
 import os
 import re
 import sqlite3
+import sys
 from contextlib import contextmanager
 from pathlib import Path
+
+# 保证同目录的 platform_compat 可被导入(被 dsh/ 等外部目录引用时仍成立)
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 try:
     import yaml
@@ -188,19 +193,16 @@ def _ensure_aliases_many_to_many(conn):
 @contextmanager
 def graph_writer_lock(db_path=None):
     """Serialize live graph simulations and commits across Agent processes."""
-    import fcntl
+    from platform_compat import exclusive_lock
 
     target = Path(db_path or GRAPH_DB).resolve()
     digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:16]
     lock_dir = REPO / "temp" / "graph-writer"
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / f"{target.name}-{digest}.lock"
-    with lock_path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
+    with lock_path.open("a+", encoding="utf-8", newline="\n") as handle:
+        with exclusive_lock(handle):
             yield target
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def connect(db_path=None):
@@ -671,7 +673,7 @@ def collect_pages(domains=None):
         for p in sub_root.rglob("*.md"):
             if is_manage_file(p):
                 continue
-            s = str(p.relative_to(REPO))[:-3].replace(os.sep, "/")
+            s = p.relative_to(REPO).as_posix()[:-3].replace(os.sep, "/")
             pages.append(s)
     return pages
 
@@ -686,7 +688,7 @@ def collect_hubs():
             continue
         fm = read_frontmatter(p)
         if fm.get("type") == "topic-hub":
-            s = str(p.relative_to(REPO))[:-3].replace(os.sep, "/")
+            s = p.relative_to(REPO).as_posix()[:-3].replace(os.sep, "/")
             hubs.append((s, p, fm))
     return hubs
 
@@ -702,7 +704,7 @@ def collect_timeline_summaries(domains=None):
                 continue
             fm = read_frontmatter(p)
             if fm.get("type") == "timeline-summary":
-                s = str(p.relative_to(REPO))[:-3].replace(os.sep, "/")
+                s = p.relative_to(REPO).as_posix()[:-3].replace(os.sep, "/")
                 results.append((s, p, fm))
     return results
 

@@ -129,7 +129,7 @@ def build_pending_people(conn=None, repo=REPO) -> dict:
         raws = [_raw_for_paper(conn, p) or (p + ".md") for p in papers]
         page_text = _render_page(name, papers, raws, today)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(page_text, encoding="utf-8")
+        file_path.write_text(page_text, encoding="utf-8", newline="\n")
         gl.ensure_node(conn, wiki_path, name, "people", date=today, status="current")
         merge_nodes(conn, name, wiki_path)
         conn.commit()
@@ -142,7 +142,7 @@ def build_pending_people(conn=None, repo=REPO) -> dict:
     PENDING_PATH.write_text(
         "".join(json.dumps(c, ensure_ascii=False) + "\n" for c in remaining),
         encoding="utf-8",
-    )
+    newline="\n")
     return {"created": created, "skipped_existing": skipped_existing,
             "skipped_conflict": skipped_conflict, "remaining": len(remaining),
             "details": details}

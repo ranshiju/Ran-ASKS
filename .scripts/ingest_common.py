@@ -548,8 +548,8 @@ def _prepare_semantic_agent_task(state: dict, repo: Path, issues: list, *,
             if source_semantic and source_semantic.is_file()
             else str(state.get("slots_content") or "")
         )
-        semantic_file.write_text(semantic_text, encoding="utf-8")
-        semantic_value = str(semantic_file.relative_to(repo))
+        semantic_file.write_text(semantic_text, encoding="utf-8", newline="\n")
+        semantic_value = semantic_file.relative_to(repo).as_posix()
         state["semantic_path"] = semantic_value
     inputs = [{
         "name": "semantic_slots", "path": semantic_value,
@@ -669,14 +669,14 @@ def try_semantic_recovery(state: dict, repo: Path, hard_errors: list,
         trace["reason"] = "proposal_not_safely_applicable"
         return False, "semantic recovery proposal 无法安全应用"
 
-    semantic_path.write_text(candidate, encoding="utf-8")
+    semantic_path.write_text(candidate, encoding="utf-8", newline="\n")
     state["slots_content"] = candidate
     try:
         residual_hard, residual_warnings = validate_fn(state)
         residual_blocking = [warning for warning in residual_warnings
                              if is_blocking_warning(warning, non_blocking_issues)]
     except Exception:
-        semantic_path.write_text(original, encoding="utf-8")
+        semantic_path.write_text(original, encoding="utf-8", newline="\n")
         state["slots_content"] = original
         trace["status"] = "rejected"
         trace["reason"] = "validator_exception"
@@ -684,7 +684,7 @@ def try_semantic_recovery(state: dict, repo: Path, hard_errors: list,
     trace["final_issue_count"] = len(residual_hard) + len(residual_blocking)
     trace["issue_delta"] = len(issues) - trace["final_issue_count"]
     if residual_hard or residual_blocking:
-        semantic_path.write_text(original, encoding="utf-8")
+        semantic_path.write_text(original, encoding="utf-8", newline="\n")
         state["slots_content"] = original
         trace["status"] = "rejected"
         trace["reason"] = "validator_rejected"
@@ -742,7 +742,7 @@ def _save_semantic_patch_cache(
     temp_path = path.with_suffix(path.suffix + ".tmp")
     temp_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-    )
+    newline="\n")
     temp_path.replace(path)
 
 
@@ -828,7 +828,7 @@ def validate_semantics(state: dict, REPO: Path, allowed_predicates: set[str],
     if _raw_abbr_map:
         _patched = autofix_bare_abbreviations(sem_text, _raw_abbr_map)
         if _patched != sem_text:
-            semantic_path.write_text(_patched, encoding="utf-8")
+            semantic_path.write_text(_patched, encoding="utf-8", newline="\n")
             sem_text = _patched
             state["slots_content"] = _patched
     hard_errors: list[str] = []
@@ -985,7 +985,7 @@ def repair_slots(
     if any(warning.get("issue") == "duplicate_line" for warning in blocking):
         cleaned = _deduplicate_semantic_triples(semantic_text)
         if cleaned != semantic_text:
-            semantic_path.write_text(cleaned, encoding="utf-8")
+            semantic_path.write_text(cleaned, encoding="utf-8", newline="\n")
             state["slots_content"] = cleaned
         _hard, residual = validate_fn(state)
         blocking = [
@@ -1066,7 +1066,7 @@ def repair_slots(
             + f"请直接修正 `{state['semantic_path']}` 后 resume。"
         )
         return False, "semantic patch 无法安全应用"
-    semantic_path.write_text(new_semantic, encoding="utf-8")
+    semantic_path.write_text(new_semantic, encoding="utf-8", newline="\n")
     state["slots_content"] = new_semantic
     hard_errors, residual = validate_fn(state)
     blocking = [
@@ -1221,7 +1221,7 @@ def run_tracked(command: list[str], REPO: Path, state: dict | None = None,
     P0 遥测：传入 state+label 时记录 returncode/duration，便于事后定位
     「子进程退出码被静默吞掉」的问题。"""
     start = time.monotonic()
-    result = subprocess.run(command, cwd=REPO, text=True, capture_output=True)
+    result = subprocess.run(command, cwd=REPO, text=True, encoding="utf-8", errors="replace", capture_output=True)
     duration_ms = int((time.monotonic() - start) * 1000)
     if result.stdout:
         print(result.stdout, end="")
@@ -1353,8 +1353,8 @@ def step_fill_semantics(state: dict, REPO: Path, normalize_fn) -> tuple[bool, st
     normalized = remove_no_info_slot_values(normalized)
     semantic_path = REPO / "temp" / "inbox-state" / f"{state['transaction_id']}-semantic.txt"
     semantic_path.parent.mkdir(parents=True, exist_ok=True)
-    semantic_path.write_text(normalized, encoding="utf-8")
-    state["semantic_path"] = str(semantic_path.relative_to(REPO))
+    semantic_path.write_text(normalized, encoding="utf-8", newline="\n")
+    state["semantic_path"] = semantic_path.relative_to(REPO).as_posix()
     return True, ""
 
 
@@ -1475,7 +1475,7 @@ def _write_abbreviation_todo(path: Path, entries: list[dict]) -> None:
     temp_path.write_text(
         "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in unique.values()),
         encoding="utf-8",
-    )
+    newline="\n")
     temp_path.replace(path)
 
 
@@ -1557,7 +1557,7 @@ def append_source_to_page(REPO: Path, page_path: str, new_source: str) -> bool:
         new_fm = fm_body.rstrip('\n') + '\nsources:\n' + source_line + '\n'
     target_file.write_text(
         t_text[:fm_match.start(2)] + new_fm + t_text[fm_match.end(2):],
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     return True
 
 
@@ -1816,14 +1816,14 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
                     "actions": [],
                     "errors": [],
                     "components": {},
-                    "report_path": str(report_path.relative_to(repo)),
+                    "report_path": report_path.relative_to(repo).as_posix(),
                 }
             existing = report.get("maintenance") or {}
             if (existing.get("publication", {}).get("status") in {"pending", "error"}
                     or existing.get("status") not in {"skipped", "deferred", "error", ""}):
                 publish_maintenance_report(report_path, report)
                 compact = compact_maintenance(report["maintenance"])
-                compact["report_path"] = str(report_path.relative_to(repo))
+                compact["report_path"] = report_path.relative_to(repo).as_posix()
                 return compact
             envelope = run_post_ingest_maintenance(
                 report["files"], str(report.get("session_id") or "resume-batch")
@@ -1834,7 +1834,7 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
             )
             publish_maintenance_report(report_path, report)
             compact = compact_maintenance(report["maintenance"])
-            compact["report_path"] = str(report_path.relative_to(repo))
+            compact["report_path"] = report_path.relative_to(repo).as_posix()
             return compact
         transaction_id = str(state.get("transaction_id", "resume"))
         result = [_resume_result_item(state)]
@@ -1861,7 +1861,7 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
         }
         publish_maintenance_report(report_path, report)
         compact = compact_maintenance(report["maintenance"])
-        compact["report_path"] = str(report_path.relative_to(repo))
+        compact["report_path"] = report_path.relative_to(repo).as_posix()
         return compact
     except Exception as exc:
         return {
@@ -1985,7 +1985,7 @@ def _write_people_pending(REPO: Path, candidates: list) -> int:
     """写入 people-pending.jsonl（全量覆盖，幂等）。"""
     pending_path = REPO / "cross-domain" / "people-pending.jsonl"
     pending_path.parent.mkdir(parents=True, exist_ok=True)
-    with pending_path.open("w", encoding="utf-8") as handle:
+    with pending_path.open("w", encoding="utf-8", newline="\n") as handle:
         for entry in candidates:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
     return len(candidates)
@@ -1995,9 +1995,9 @@ def step_validate_graph(state: dict, REPO: Path) -> list[str]:
     """运行 ingest_check.py --graph，返回 ERROR 列表。"""
     wiki_path = REPO / (state["wiki_path"] + ".md")
     cmd = [sys.executable, str(REPO / ".scripts/ingest_check.py"),
-           "--graph", str(wiki_path.relative_to(REPO))]
+           "--graph", wiki_path.relative_to(REPO).as_posix()]
     start = time.monotonic()
-    result = subprocess.run(cmd, cwd=REPO, text=True, capture_output=True)
+    result = subprocess.run(cmd, cwd=REPO, text=True, encoding="utf-8", errors="replace", capture_output=True)
     record_subprocess(state, "ingest_check", cmd, result.returncode,
                        int((time.monotonic() - start) * 1000))
     if result.returncode == 0:
@@ -2032,12 +2032,12 @@ def step_finalize(state: dict, REPO: Path, config: dict) -> tuple[bool, str]:
             return False, "extract_dir 无可归档的 raw 文件"
         manifest = {"raw_files": raw_files, "wiki_file": "wiki.md"}
         (extract_dir / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False) + "\n", encoding="utf-8")
+            json.dumps(manifest, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     cmd = [sys.executable, str(REPO / ".scripts/inbox_finalize.py"),
            "--paper-id", state[config["doc_id_key"]],
-           "--raw-dir", str(raw_dir.relative_to(REPO)),
-           "--wiki-path", str(wiki_path.relative_to(REPO)),
-           "--extract-dir", str(extract_dir.relative_to(REPO))]
+           "--raw-dir", raw_dir.relative_to(REPO).as_posix(),
+           "--wiki-path", wiki_path.relative_to(REPO).as_posix(),
+           "--extract-dir", extract_dir.relative_to(REPO).as_posix()]
     if config.get("allow_existing_raw_dir"):
         cmd.append("--allow-existing-raw-dir")
     output = run(cmd, REPO)
@@ -2085,7 +2085,7 @@ def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str
         log_path = config["get_log_path"](state, REPO)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_entry = config["build_log_entry"](ctx)
-        with open(log_path, "a", encoding="utf-8") as f:
+        with open(log_path, "a", encoding="utf-8", newline="\n") as f:
             f.write(log_entry)
     except Exception as exc:
         return False, "log.md 追加失败: " + str(exc)
@@ -2112,9 +2112,9 @@ def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str
                         index_text += "\n" + section + "\n" + entry
                 else:
                     index_text += entry
-                index_path.write_text(index_text, encoding="utf-8")
+                index_path.write_text(index_text, encoding="utf-8", newline="\n")
             else:
-                index_path.write_text(f"# 索引\n\n{entry}", encoding="utf-8")
+                index_path.write_text(f"# 索引\n\n{entry}", encoding="utf-8", newline="\n")
         except Exception as exc:
             return False, "index.md 追加失败: " + str(exc)
     # 3. ingest_build
@@ -2130,7 +2130,7 @@ def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str
         if not config.get("frontier_answer", True):
             cmd.append("--no-answer")
         started = time.monotonic()
-        result = subprocess.run(cmd, cwd=REPO, text=True, capture_output=True)
+        result = subprocess.run(cmd, cwd=REPO, text=True, encoding="utf-8", errors="replace", capture_output=True)
         record_subprocess(state, "frontier_capture", cmd, result.returncode,
                           int((time.monotonic() - started) * 1000))
         if result.returncode == 0:

@@ -176,7 +176,7 @@ def read_wiki_locator(value: str, section: str = "") -> dict:
     if item is None:
         available = [entry.slug for entry in parse_wiki_page(target)[0]]
         raise KeyError(f"section '{wanted}' 不存在；可用: {', '.join(available)}")
-    rel = str(target.resolve().relative_to(REPO.resolve()))
+    rel = target.resolve().relative_to(REPO.resolve()).as_posix()
     return {
         "page": rel,
         "section": item.slug,
@@ -279,7 +279,7 @@ def graph_wiki_source(path: Path | str, *terms: str) -> tuple[str, list[str]] | 
     item = best_cited_section(target, *terms)
     if item is None:
         return "", []
-    rel = str(target.resolve().relative_to(REPO.resolve())).removesuffix(".md")
+    rel = target.resolve().relative_to(REPO.resolve()).as_posix().removesuffix(".md")
     return f"{rel}#{item.slug}", list(item.raw_citations)
 
 

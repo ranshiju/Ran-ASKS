@@ -32,7 +32,7 @@ def test_alias_normalizes_to_registered_predicate():
 def test_load_config_overrides_thresholds():
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "config.yaml"
-        path.write_text("formal_min_pages: 4\n", encoding="utf-8")
+        path.write_text("formal_min_pages: 4\n", encoding="utf-8", newline="\n")
         assert module.load_config(path)["formal_min_pages"] == 4
 
 
@@ -58,7 +58,7 @@ def test_govern_writes_auditable_state_and_registry():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         queue, state, registry = root / "queue.jsonl", root / "state.json", root / "registry.json"
-        queue.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in records("表示", 10)) + "\n", encoding="utf-8")
+        queue.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in records("表示", 10)) + "\n", encoding="utf-8", newline="\n")
         summary = module.govern(queue, state, registry)
         assert summary == {"candidates": 1, "observation": 0, "formal": 1}
         assert json.loads(state.read_text(encoding="utf-8"))["predicates"]["表示"]["status"] == "formal"

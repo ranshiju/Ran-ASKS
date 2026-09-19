@@ -193,8 +193,8 @@ def prepare(source: Path, directory: Path) -> dict:
             raise PPTXError("PPTX 原件在准备后变化，请新建事务")
     else:
         text, manifest = extract(source)
-        (directory / "pptx-native.md").write_text(text, encoding="utf-8")
-        path.write_text(_json(manifest) + "\n", encoding="utf-8")
+        (directory / "pptx-native.md").write_text(text, encoding="utf-8", newline="\n")
+        path.write_text(_json(manifest) + "\n", encoding="utf-8", newline="\n")
     if manifest.get("schema") != SCHEMA or file_hash(directory / "pptx-native.md") != manifest["native_sha256"]:
         raise PPTXError("PPTX 原生提取产物发生变化")
     render_dir = directory / "pptx-renders"
@@ -220,7 +220,7 @@ def prepare(source: Path, directory: Path) -> dict:
     if manifest.get("render_sha256") and manifest["render_sha256"] != render_hash:
         raise PPTXError("PPTX 渲染 PDF 在准备后变化")
     manifest["render_sha256"] = render_hash
-    path.write_text(_json(manifest) + "\n", encoding="utf-8")
+    path.write_text(_json(manifest) + "\n", encoding="utf-8", newline="\n")
     return manifest
 
 

@@ -236,7 +236,7 @@ def save_receipt(path: Path, receipt: dict, source: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=".ocr-", dir=path.parent)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
             json.dump(receipt, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
         os.replace(temporary, path)

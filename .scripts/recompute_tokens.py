@@ -18,8 +18,9 @@ enc = tiktoken.get_encoding(encoding_name)
 SCRIPTS = os.path.join(os.path.dirname(__file__))
 
 def read_section(file, section):
-    r = subprocess.run(["bash", os.path.join(SCRIPTS,"read_section.sh"), file, section],
-                       capture_output=True, text=True)
+    # 用 Python 实现而非 read_section.sh：Windows 上没有 bash。两者行为一致。
+    r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "read_section.py"), file, section],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.stdout if r.returncode == 0 else ""
 
 def get_text(step, trace_query):
@@ -58,8 +59,10 @@ def get_text(step, trace_query):
         for fn in files:
             p = os.path.join("cross-domain", fn)
             if os.path.exists(p):
-                r = subprocess.run(["grep","^## ", p], capture_output=True, text=True)
-                if r.stdout: out.append(f"# {fn}\n{r.stdout}")
+                # 跨平台：Windows 没有 grep，直接在 Python 里筛 '^## ' 行
+                with open(p, encoding="utf-8") as handle:
+                    hits = [line for line in handle if line.startswith("## ")]
+                if hits: out.append(f"# {fn}\n" + "".join(hits))
         return "\n".join(out) if out else None
     return None  # completeness_check / answer 推理类
 
@@ -86,7 +89,7 @@ def main():
             reason_steps += 1
         total_est += est
     if write:
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             for s in lines:
                 f.write(json.dumps(s, ensure_ascii=False) + "\n")
     print(f"{os.path.basename(path)}: 读取类{read_steps}步+推理类{reason_steps}步")

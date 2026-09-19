@@ -94,7 +94,7 @@ def test_parse_semantic_text_admin_triples():
         "date: 2026-07-01\n"
         "---\n## Navigation\n\n测试。\n## Content\n\n内容。\n",
         encoding="utf-8",
-    )
+    newline="\n")
     try:
         sem_text = (
             "三元组:\n"

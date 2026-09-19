@@ -293,21 +293,21 @@ def prepare_agent_batch(candidates: list[dict], batch_size: int = DEFAULT_BATCH_
     }
     input_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-    )
+    newline="\n")
     commit = (
         "INGEST_BACKEND=agent python3 .scripts/backfill_keyword_descriptions.py --apply "
-        f"--agent-input {shlex.quote(str(input_path.relative_to(gl.REPO)))} "
-        f"--agent-result {shlex.quote(str(output_path.relative_to(gl.REPO)))}"
+        f"--agent-input {shlex.quote(input_path.relative_to(gl.REPO).as_posix())} "
+        f"--agent-result {shlex.quote(output_path.relative_to(gl.REPO).as_posix())}"
     )
     return agent_task.make_task(
         kind="keyword_description_backfill",
         transaction_id=f"keyword-description-backfill-{digest}",
         inputs=[{
-            "name": "evidence_batch", "path": str(input_path.relative_to(gl.REPO)),
+            "name": "evidence_batch", "path": input_path.relative_to(gl.REPO).as_posix(),
             "role": "source_bound_candidates", "read": "full",
         }],
         outputs=[{
-            "name": "descriptions", "path": str(output_path.relative_to(gl.REPO)),
+            "name": "descriptions", "path": output_path.relative_to(gl.REPO).as_posix(),
             "format": "keyword-description-result-v1",
         }],
         protocol={

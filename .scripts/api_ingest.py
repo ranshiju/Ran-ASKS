@@ -132,7 +132,7 @@ def validate_selected_keywords(selected: list[dict], cards: list[dict]) -> tuple
 
 def append_pending(record: dict, pending_path: Path) -> None:
     pending_path.parent.mkdir(parents=True, exist_ok=True)
-    with pending_path.open("a", encoding="utf-8") as handle:
+    with pending_path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
@@ -140,7 +140,7 @@ def resolve_pending(raw_path: Path, pending_path: Path, resolution: str) -> int:
     """Append an auditable resolution record for earlier pending drafts of one raw file."""
     if not pending_path.exists():
         return 0
-    raw = str(raw_path.relative_to(REPO))
+    raw = raw_path.relative_to(REPO).as_posix()
     records = []
     for line in pending_path.read_text(encoding="utf-8").splitlines():
         try:
@@ -151,7 +151,7 @@ def resolve_pending(raw_path: Path, pending_path: Path, resolution: str) -> int:
             records.append(record)
     if not records:
         return 0
-    with pending_path.open("a", encoding="utf-8") as handle:
+    with pending_path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps({
             "state": "resolved", "raw": raw,
             "resolved_at": datetime.now(timezone.utc).isoformat(),
@@ -224,7 +224,7 @@ def run_agent_fallback(raw_path: Path, candidates: list[str], agent_draft: dict)
         raise ValueError("Agent 草稿未通过证据绑定或缺少可验证声明")
     return {
         "version": 1,
-        "raw": str(raw_path.relative_to(REPO)),
+        "raw": raw_path.relative_to(REPO).as_posix(),
         "model": "current-agent",
         "provenance": provenance(raw_path, schema_version=SCHEMA_VERSION,
                                   rule_version=RULE_VERSION, prompt_version=PROMPT_VERSION,
@@ -274,10 +274,10 @@ def compile_draft(page_path: Path, draft: dict, semantic_path: Path) -> None:
         "五、局限与展望": ("limitation", "outlook"),
     }.items():
         text = replace_section(text, heading, [claim for field in fields for claim in claims[field]])
-    page_path.write_text(text, encoding="utf-8")
+    page_path.write_text(text, encoding="utf-8", newline="\n")
     semantic = ["研究关键词:", *(item["term"] for item in draft.get("selected_keywords", [])), ""]
     semantic_path.parent.mkdir(parents=True, exist_ok=True)
-    semantic_path.write_text("\n".join(semantic), encoding="utf-8")
+    semantic_path.write_text("\n".join(semantic), encoding="utf-8", newline="\n")
 
 
 def build_claim_prompt(cards: list[dict]) -> str:
@@ -327,7 +327,7 @@ def run_draft(raw_path: Path, candidates: list[str], pending_path: Path) -> dict
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "model": claims_result.get("model", configured_model()),
-        "raw": str(raw_path.relative_to(REPO)),
+        "raw": raw_path.relative_to(REPO).as_posix(),
         "mode": ingest_mode(),
         "claims": {key: claims_result.get(key) for key in ("status", "attempt", "error", "latency_sec", "usage")},
         "keywords": None,
@@ -363,7 +363,7 @@ def run_draft(raw_path: Path, candidates: list[str], pending_path: Path) -> dict
     )
     result = {
         "version": 1,
-        "raw": str(raw_path.relative_to(REPO)),
+        "raw": raw_path.relative_to(REPO).as_posix(),
         "model": claims_result.get("model", configured_model()),
         "provenance": provenance(raw_path, schema_version=SCHEMA_VERSION,
                                   rule_version=RULE_VERSION,
@@ -419,7 +419,7 @@ def main() -> None:
         result = run_draft(raw_path, candidates, (REPO / args.pending).resolve())
     output = (REPO / args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     if args.apply_page or args.semantic_output:
         if not args.apply_page or not args.semantic_output:
             raise SystemExit("ERROR: --apply-page 和 --semantic-output 必须同时提供：两者是同一份校验草稿的 wiki 页面与 graph 语义槽双视图，单独提供会破坏 wiki↔graph 一致性")
@@ -432,7 +432,7 @@ def main() -> None:
     if args.resolve_pending and result.get("complete"):
         resolved = resolve_pending(raw_path, (REPO / args.pending).resolve(), "complete API/Agent draft")
     try:
-        output_name = str(output.relative_to(REPO))
+        output_name = output.relative_to(REPO).as_posix()
     except ValueError:
         output_name = str(output)
     print(json.dumps({"complete": result["complete"], "accepted_claims": len(result["accepted_claims"]), "selected_keywords": len(result["selected_keywords"]), "rejected": len(result["rejected"]), "warnings": result.get("warnings", []), "pending_resolved": resolved, "agent_fallback_required": bool(result.get("agent_fallback")), "agent_fallback_applied": bool(result.get("agent_fallback_applied")), "output": output_name}, ensure_ascii=False))

@@ -17,6 +17,10 @@ import image_ocr as ocr
 import inbox_plan
 import ingest_document as document
 import ingest_pipeline
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+import platform_compat as _pc
 
 
 class ImageOCRTests(unittest.TestCase):
@@ -124,7 +128,7 @@ class ImageOCRTests(unittest.TestCase):
         receipt = self.receipt()
         ocr.save_receipt(original, {key: value for key, value in receipt.items() if key != "review"}, self.source)
         before = original.read_bytes()
-        review_path.write_text(json.dumps(receipt["review"]), encoding="utf-8")
+        review_path.write_text(json.dumps(receipt["review"]), encoding="utf-8", newline="\n")
         with patch.object(ocr, "call_api") as api, patch("sys.stdout", io.StringIO()), patch("sys.argv", [
             "image_ocr.py", str(self.source), "--check", str(original), "--review-file", str(review_path),
             "--output", str(output),
@@ -141,7 +145,7 @@ class ImageOCRTests(unittest.TestCase):
             source = self.root / ("test" + suffix)
             source.write_bytes(self.source.read_bytes())
             companion = source.with_suffix(".md")
-            companion.write_text("OCR text", encoding="utf-8")
+            companion.write_text("OCR text", encoding="utf-8", newline="\n")
             self.assertFalse(source_locator.valid_locator("L1", source))
             self.assertTrue(source_fingerprints._is_source_artifact(source))
             self.assertFalse(source_fingerprints._is_source_artifact(companion))
@@ -165,6 +169,8 @@ class ImageOCRTests(unittest.TestCase):
         Image.new("RGB", (80, 40), "black").save(self.source)
         with self.assertRaisesRegex(ocr.ImageOCRError, "SHA-256"):
             ocr.load_receipt(output, self.source)
+
+    @unittest.skipUnless(_pc.symlinks_available(), _pc.SYMLINK_SKIP_REASON)
 
     def test_raw_wiki_source_and_symlink_outputs_rejected(self):
         targets = [self.root / "raw" / "ocr.json", self.root / "wiki" / "ocr.json", self.source]
@@ -284,7 +290,7 @@ class ImageOCRTests(unittest.TestCase):
             task = state["agent_task"]
             self.assertEqual(task["kind"], "image_ocr")
             output = self.root / task["outputs"][0]["path"]
-            output.write_text(self.receipt()["markdown"], encoding="utf-8")
+            output.write_text(self.receipt()["markdown"], encoding="utf-8", newline="\n")
             state["status"] = "preprocess"
             self.assertFalse(document.step_preprocess(state)[0])
             self.assertEqual(state["agent_task"]["kind"], "image_review")
@@ -292,7 +298,7 @@ class ImageOCRTests(unittest.TestCase):
             review_path.write_text(json.dumps({**self.receipt()["review"], "reviewer_kind": "human"}), encoding="utf-8")
             self.assertFalse(document.step_preprocess(state)[0])
             self.assertTrue(agent_task.is_prepared(state))
-            review_path.write_text(json.dumps(self.receipt()["review"]), encoding="utf-8")
+            review_path.write_text(json.dumps(self.receipt()["review"]), encoding="utf-8", newline="\n")
             self.assertTrue(document.step_preprocess(state)[0])
             self.assertEqual(state["raw_locator_kind"], "companion")
             self.assertIn("image.PNG", document._manifest_raw_files(state))
@@ -323,12 +329,12 @@ class ImageOCRTests(unittest.TestCase):
             state = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
             self.assertFalse(reached)
             output = self.root / state["agent_task"]["outputs"][0]["path"]
-            output.write_text(self.receipt()["markdown"], encoding="utf-8")
+            output.write_text(self.receipt()["markdown"], encoding="utf-8", newline="\n")
             state = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
             self.assertFalse(reached)
             self.assertEqual(state["agent_task"]["kind"], "image_review")
             review_path = self.root / state["agent_task"]["outputs"][0]["path"]
-            review_path.write_text(json.dumps(self.receipt()["review"]), encoding="utf-8")
+            review_path.write_text(json.dumps(self.receipt()["review"]), encoding="utf-8", newline="\n")
             state = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
             self.assertEqual(reached, ["write_wiki"])
             self.assertEqual(state["agent_task"]["kind"], "test_wiki")
@@ -406,12 +412,12 @@ class ImageOCRTests(unittest.TestCase):
         with patch.object(document, "REPO", self.root), \
                 patch.object(document.ic, "run", side_effect=isolated_finalizer):
             self.assertTrue(document.step_preprocess(state)[0])
-            (self.root / state["extract_dir"] / "wiki.md").write_text("# OCR test\n", encoding="utf-8")
+            (self.root / state["extract_dir"] / "wiki.md").write_text("# OCR test\n", encoding="utf-8", newline="\n")
             success, message = document.step_finalize(state)
             self.assertTrue(success, message)
         raw = self.root / state["raw_dir"]
         self.assertEqual((raw / self.source.name).read_bytes(), self.source.read_bytes())
-        self.assertEqual((raw / state["locator_source_filename"]).read_text(), self.receipt()["markdown"])
+        self.assertEqual((raw / state["locator_source_filename"]).read_text(encoding="utf-8"), self.receipt()["markdown"])
         self.assertFalse((raw / "image-ocr.json").exists())
         self.assertTrue(self.source.is_file())
         self.assertTrue(Path(state["receipt"]).is_file())
@@ -443,11 +449,11 @@ class ImageOCRTests(unittest.TestCase):
         with patch.object(document, "REPO", self.root):
             self.assertTrue(document.step_preprocess(state)[0])
         extract = self.root / state["extract_dir"]
-        context = json.loads((extract / state["source_context_filename"]).read_text())
+        context = json.loads((extract / state["source_context_filename"]).read_text(encoding="utf-8"))
         self.assertEqual(context["ocr"]["backend"], "api")
         self.assertEqual(context["ocr"]["model"], "GLM-5.3-Flash")
-        self.assertEqual((extract / "doc.md").read_text(), receipt["markdown"])
-        self.assertEqual((extract / state["locator_source_filename"]).read_text(), receipt["markdown"])
+        self.assertEqual((extract / "doc.md").read_text(encoding="utf-8"), receipt["markdown"])
+        self.assertEqual((extract / state["locator_source_filename"]).read_text(encoding="utf-8"), receipt["markdown"])
         self.assertEqual(state["ocr"]["created"], receipt["created"])
 
     def test_finalizer_rejects_missing_or_modified_provenance_and_pair_names(self):
@@ -457,15 +463,15 @@ class ImageOCRTests(unittest.TestCase):
         with patch.object(document, "REPO", self.root), patch.object(document.ic, "step_finalize") as finalize:
             self.assertTrue(document.step_preprocess(state)[0])
             context_path = self.root / state["extract_dir"] / state["source_context_filename"]
-            original = context_path.read_text()
+            original = context_path.read_text(encoding="utf-8")
             context_path.unlink()
             self.assertFalse(document.step_finalize(state)[0])
             for content in ("{", "{}", original.replace('"review_required": true', '"review_required": false'),
                             original.replace('"companion": "image.md"', '"companion": "other.md"')):
                 with self.subTest(content=content):
-                    context_path.write_text(content, encoding="utf-8")
+                    context_path.write_text(content, encoding="utf-8", newline="\n")
                     self.assertFalse(document.step_finalize(state)[0])
-            context_path.write_text(original, encoding="utf-8")
+            context_path.write_text(original, encoding="utf-8", newline="\n")
             for field in ("source_context_filename", "locator_source_filename", "source_filename"):
                 with self.subTest(field=field):
                     changed = {**state, field: "other.md"}
@@ -491,9 +497,9 @@ class ImageOCRTests(unittest.TestCase):
             companion = self.root / state["extract_dir"] / state["locator_source_filename"]
             companion.unlink()
             self.assertFalse(document.step_finalize(state)[0])
-            companion.write_text("changed", encoding="utf-8")
+            companion.write_text("changed", encoding="utf-8", newline="\n")
             self.assertFalse(document.step_finalize(state)[0])
-            companion.write_text(receipt["markdown"], encoding="utf-8")
+            companion.write_text(receipt["markdown"], encoding="utf-8", newline="\n")
             Image.new("RGB", (80, 40), "black").save(self.source)
             self.assertFalse(document.step_finalize(state)[0])
             finalize.assert_not_called()
@@ -516,11 +522,11 @@ class ImageOCRTests(unittest.TestCase):
         with patch.object(document, "REPO", self.root), patch.object(document, "ingest_mode", return_value="agent"):
             document.step_preprocess(state)
             output = self.root / state["agent_task"]["outputs"][0]["path"]
-            output.write_text("  ", encoding="utf-8")
+            output.write_text("  ", encoding="utf-8", newline="\n")
             state["status"] = "preprocess"
             self.assertFalse(document.step_preprocess(state)[0])
             self.assertTrue(agent_task.is_prepared(state))
-            output.write_text("old image", encoding="utf-8")
+            output.write_text("old image", encoding="utf-8", newline="\n")
             Image.new("RGB", (80, 40), "black").save(self.source)
             state["status"] = "preprocess"
             self.assertFalse(document.step_preprocess(state)[0])
@@ -604,7 +610,7 @@ class ImageOCRTests(unittest.TestCase):
         self.assertEqual(recognize.call_count, 1)
         self.assertEqual(review.call_count, 1)
         self.assertEqual(state["agent_task"]["kind"], "image_confirmation")
-        summary = json.loads((self.root / state["agent_task"]["inputs"][0]["path"]).read_text())
+        summary = json.loads((self.root / state["agent_task"]["inputs"][0]["path"]).read_text(encoding="utf-8"))
         self.assertEqual(summary["checks"][0]["field"], "金额")
         self.assertNotIn("markdown", summary)
         self.assertNotIn("ocr", state)

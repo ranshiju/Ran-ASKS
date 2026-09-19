@@ -166,7 +166,7 @@ def sync_file_nodes_and_source_edges(conn, apply):
             source_target = gl.REPO / qualified_source_file
             if source_target.parent.is_dir():
                 aliases.extend(
-                    str(candidate.relative_to(gl.REPO))
+                    candidate.relative_to(gl.REPO).as_posix()
                     for candidate in source_target.parent.glob(f"{source_target.stem}.*")
                     if candidate.is_file()
                 )
@@ -213,7 +213,7 @@ def sync_file_nodes_and_source_edges(conn, apply):
         )
     stats["raw_files"] = len(raw_files)
     for raw_file in raw_files:
-        alias = str(raw_file.relative_to(gl.REPO)).replace("\\", "/")
+        alias = raw_file.relative_to(gl.REPO).as_posix()
         raw_path = gl.raw_node_path(alias)
         if not raw_path:
             continue

@@ -36,7 +36,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-import fitz
+try:
+
+    import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+
+except ImportError:  # 旧版 PyMuPDF 只有 fitz
+
+    import fitz
 import numpy as np
 from PIL import Image, ImageColor, ImageDraw
 
@@ -47,6 +53,9 @@ except ImportError:  # pragma: no cover - exercised only in reduced environments
 
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / ".scripts"))
+import platform_compat  # noqa: E402
+
 DEFAULT_RECEIPT_ROOT = REPO / "temp" / "visual-to-ppt"
 DEFAULT_OUTPUT_ROOT = REPO / "projects" / "visual-reconstruction" / "outputs"
 SUPPORTED_IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -122,7 +131,7 @@ def _stable_hash(value: Any) -> str:
 def _write_json_atomic(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     os.replace(temp, path)
 
 
@@ -480,7 +489,7 @@ def _find_tesseract() -> str | None:
 def _tesseract_languages(binary: str) -> set[str]:
     try:
         process = subprocess.run(
-            [binary, "--list-langs"], capture_output=True, text=True, timeout=15, check=False
+            [binary, "--list-langs"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, check=False
         )
     except (OSError, subprocess.SubprocessError):
         return set()
@@ -503,7 +512,7 @@ def _ocr_lines(image_path: Path, requested_language: str) -> tuple[list[dict[str
     command = [binary, str(image_path), "stdout", "-l", language, "--psm", "11", "tsv"]
     try:
         process = subprocess.run(
-            command, capture_output=True, text=True, timeout=120, check=False
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, check=False
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return [], {"status": "error", "reason": f"{type(exc).__name__}: {exc}"}
@@ -1389,9 +1398,13 @@ def _find_soffice() -> str | None:
     configured = os.environ.get("SOFFICE_BIN", "").strip()
     if configured and Path(configured).is_file():
         return configured
-    candidate = shutil.which("soffice") or shutil.which("libreoffice")
-    if candidate:
-        return candidate
+    for name in platform_compat.soffice_names():
+        candidate = shutil.which(name)
+        if candidate:
+            return candidate
+    for candidate_path in platform_compat.soffice_candidates():
+        if candidate_path.is_file():
+            return str(candidate_path)
     bundled = Path.home() / ".cache" / "codex-runtimes"
     matches = sorted(bundled.glob("*/dependencies/bin/override/soffice"), reverse=True)
     return str(matches[0]) if matches else None
@@ -1404,7 +1417,7 @@ def _render_pptx_for_comparison(output: Path, target_dir: Path, dpi: int) -> lis
     target_dir.mkdir(parents=True, exist_ok=True)
     process = subprocess.run(
         [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(target_dir), str(output)],
-        capture_output=True, text=True, timeout=180, check=False,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180, check=False,
     )
     pdf = target_dir / f"{output.stem}.pdf"
     if process.returncode != 0 or not pdf.is_file():

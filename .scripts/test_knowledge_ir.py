@@ -197,13 +197,13 @@ def test_direct_ir_recompiles_and_commits_structural_relation_idempotently():
             "status: current\n---\n\n## Navigation\n\nUnified graph.\n\n"
             "## Content\n\nUnified graph compilation.\n",
             encoding="utf-8",
-        )
+        newline="\n")
         target_file.write_text(
             "---\ntitle: Old policy\ntype: policy\nsources:\n"
             "  - admin/raw/policies/old.md\nsource_type: official-doc\n"
             "status: current\n---\n\n## Navigation\n\nOld policy.\n",
             encoding="utf-8",
-        )
+        newline="\n")
         fm = {
             "type": "policy",
             "sources": ["admin/raw/policies/new.md"],
@@ -314,7 +314,7 @@ def test_invalid_direct_ir_fails_before_database_open():
         page_file.write_text(
             "---\ntitle: Example\ntype: policy\nsources: []\n---\n",
             encoding="utf-8",
-        )
+        newline="\n")
         invalid = kir.build_knowledge_ir(page, {"type": "policy"}, [{
             "subject": page, "predicate": "涉及", "object": "主题",
         }])
@@ -355,17 +355,17 @@ def test_staged_plan_only_uses_logical_page_and_rolls_back_live_graph():
         staged_raw = repo / "temp" / "source.md"
         semantic = repo / "temp" / "semantic.txt"
         staged_wiki.parent.mkdir(parents=True, exist_ok=True)
-        staged_raw.write_text("source text\n", encoding="utf-8")
+        staged_raw.write_text("source text\n", encoding="utf-8", newline="\n")
         staged_wiki.write_text(
             "---\ntitle: Staged policy\ntype: policy\nsources:\n"
             "  - admin/raw/policies/staged.md\nsource_type: official-doc\n"
             "status: current\n---\n\n## Navigation\n\nStaged navigation.\n",
             encoding="utf-8",
-        )
+        newline="\n")
         semantic.write_text(
             "三元组:\n本文件 | 涉及 | staged graph planning\n",
             encoding="utf-8",
-        )
+        newline="\n")
         logical_page = "admin/wiki/policies/staged"
         ir_path = repo / "temp" / "ir.json"
         plan_path = repo / "temp" / "plan.json"

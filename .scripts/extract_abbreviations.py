@@ -90,10 +90,9 @@ def find_raw(page_path):
         if isinstance(c, str): c = Path(c)
         if c.exists(): return str(c)
     slug = Path(page_path).stem
-    r = subprocess.run(['find', str(_REPO), '-name', 'paper.md', '-path', f'*{slug}*'],
-                       capture_output=True, text=True)
-    paths = [p for p in r.stdout.strip().split('\n') if p]
-    return paths[0] if paths else None
+    # 跨平台：用 pathlib 遍历替代 Unix find
+    paths = [str(p) for p in _REPO.rglob('paper.md') if slug in p.as_posix()]
+    return sorted(paths)[0] if paths else None
 
 
 def locate_key_sections(raw_text):
@@ -206,7 +205,7 @@ def apply_to_page(page_path, pairs):
     else:
         fm = fm.rstrip() + "\n" + new_field
     new_txt = m.group(1) + fm + m.group(3) + txt[m.end():]
-    Path(page_path).write_text(new_txt, encoding='utf-8')
+    Path(page_path).write_text(new_txt, encoding='utf-8', newline="\n")
     return True
 
 

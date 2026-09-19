@@ -35,6 +35,17 @@ class TimeoutPolicy:
         """around-dispatch wrapper：武装截止时间，委托，超时则替换。"""
         # 简化版：用 threading.Timer 或 SIGALRM
         # macOS/Unix 支持 SIGALRM（单线程）
+        if not hasattr(signal, "SIGALRM"):
+            # Windows 没有 SIGALRM/setitimer。POSIX 分支的 handler 同样不打断
+            # 正在执行的调用，故这里按耗时判定，行为与之对齐。
+            started = time.monotonic()
+            try:
+                result = next_fn(exec_ctx)
+            except TimeoutError:
+                return timeout_result(self.default_timeout_ms)
+            if (time.monotonic() - started) * 1000 >= self.default_timeout_ms:
+                return timeout_result(self.default_timeout_ms)
+            return result
         try:
             old_handler = signal.getsignal(signal.SIGALRM)
             signal.signal(signal.SIGALRM, lambda *_: None)

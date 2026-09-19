@@ -18,6 +18,9 @@ import diagnosis_preflight as diagnosis
 SKILL = Path(__file__).resolve().parents[1]
 REPO = SKILL.parents[2]
 
+sys.path.insert(0, str(REPO / ".scripts"))
+import platform_compat as _pc  # noqa: E402
+
 
 class DiagnosisPreflightTest(unittest.TestCase):
     def setUp(self):
@@ -29,8 +32,8 @@ class DiagnosisPreflightTest(unittest.TestCase):
         self.target.mkdir(parents=True)
         (self.target / "manuscript.pdf").write_bytes(b"local manuscript fixture")
         (self.root / "style-library").mkdir()
-        (self.root / "style-library" / "稿件诊断写作风格指南.md").write_text("style fixture")
-        (self.root / "STYLE.md").write_text("profile fixture")
+        (self.root / "style-library" / "稿件诊断写作风格指南.md").write_text("style fixture", encoding="utf-8", newline="\n")
+        (self.root / "STYLE.md").write_text("profile fixture", encoding="utf-8", newline="\n")
 
     def test_new_root_and_style_paths(self):
         result = diagnosis.preflight(str(self.target))
@@ -52,12 +55,12 @@ class DiagnosisPreflightTest(unittest.TestCase):
 
     def test_new_report_names_and_existing_english_samples(self):
         for name in ("Manuscript_Diagnosis_draft.md", "稿件诊断意见.txt", "notes.md"):
-            (self.target / name).write_text("report fixture")
+            (self.target / name).write_text("report fixture", encoding="utf-8", newline="\n")
         prior = self.root / "0801 PRA"
         prior.mkdir()
         for name in ("Reviewer_Report_revised_ran.docx", "Reviewer_Report_revised_ran.md",
                      "diagnosis_revised.txt", "report_draft.md", "paper.tex"):
-            (prior / name).write_text("historical fixture")
+            (prior / name).write_text("historical fixture", encoding="utf-8", newline="\n")
         result = diagnosis.preflight(str(self.target))
         self.assertEqual(set(result["existing_reports"]), {
             "0912 PRL/Manuscript_Diagnosis_draft.md", "0912 PRL/稿件诊断意见.txt"})
@@ -81,6 +84,8 @@ class DiagnosisPreflightTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "projects/稿件诊断"):
             diagnosis.preflight(str(outside))
 
+    @unittest.skipUnless(_pc.symlinks_available(), _pc.SYMLINK_SKIP_REASON)
+
     def test_symlink_cannot_escape_workspace(self):
         outside = self.base / "outside"
         outside.mkdir()
@@ -101,27 +106,27 @@ class DiagnosisPreflightTest(unittest.TestCase):
         self.assertEqual(result["warnings"], ["no PDF or TeX manuscript found"])
 
     def test_multiple_candidates_are_exposed_not_silently_chosen(self):
-        (self.target / "supplement.tex").write_text("supplement")
+        (self.target / "supplement.tex").write_text("supplement", encoding="utf-8", newline="\n")
         result = diagnosis.preflight(str(self.target))
         self.assertEqual(len(result["manuscripts"]), 2)
 
     def test_cli_json_and_error_exit(self):
         script = SKILL / "scripts" / "diagnosis_preflight.py"
         good = subprocess.run([sys.executable, str(script), str(self.target)],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(good.returncode, 0, good.stderr)
         self.assertTrue(json.loads(good.stdout)["ok"])
         bad = subprocess.run([sys.executable, str(script), str(self.base)],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(bad.returncode, 2)
         self.assertFalse(json.loads(bad.stdout)["ok"])
 
 
 class DiagnosisIntegrationTest(unittest.TestCase):
     def test_skill_identity_and_interface_match(self):
-        text = (SKILL / "SKILL.md").read_text()
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
         metadata = yaml.safe_load(text.split("---", 2)[1])
-        interface = yaml.safe_load((SKILL / "agents" / "openai.yaml").read_text())["interface"]
+        interface = yaml.safe_load((SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8"))["interface"]
         self.assertEqual(metadata["name"], "manuscript-diagnosis")
         self.assertEqual(SKILL.name, metadata["name"])
         self.assertEqual(interface["display_name"], "稿件诊断")
@@ -138,18 +143,18 @@ class DiagnosisIntegrationTest(unittest.TestCase):
         for path in files:
             with self.subTest(path=path):
                 self.assertNotIn(retired_label, path.as_posix())
-                self.assertNotIn(retired_label, path.read_text())
+                self.assertNotIn(retired_label, path.read_text(encoding="utf-8"))
         project = REPO / "projects" / "稿件诊断"
         for path in [project / "STYLE.md", project / "style-library/稿件诊断写作风格指南.md"]:
             if not path.exists():
                 continue  # Local profiles are deliberately absent from public releases.
-            for line in path.read_text().splitlines():
+            for line in path.read_text(encoding="utf-8").splitlines():
                 if retired_label in line:
                     # Original evidence addresses are immutable provenance, not feature labels.
                     self.assertTrue("academic/raw/" in line or "academic/wiki/" in line, line)
 
     def test_engineering_references_exist(self):
-        graph = yaml.safe_load((REPO / "operations/engineering/graph.yaml").read_text())
+        graph = yaml.safe_load((REPO / "operations/engineering/graph.yaml").read_text(encoding="utf-8"))
         for node in ("manuscript_diagnosis_skill", "manuscript_diagnosis_preflight",
                      "manuscript_diagnosis_test"):
             with self.subTest(node=node):
@@ -157,7 +162,7 @@ class DiagnosisIntegrationTest(unittest.TestCase):
         self.assertEqual(graph["script_contracts"]["manuscript_diagnosis_preflight"]["writes"], [])
 
     def test_skill_files_are_explicitly_allowlisted(self):
-        manifest = yaml.safe_load((REPO / "operations/engineering/open-source-manifest.yaml").read_text())
+        manifest = yaml.safe_load((REPO / "operations/engineering/open-source-manifest.yaml").read_text(encoding="utf-8"))
         files = ["SKILL.md", "agents/openai.yaml", "scripts/diagnosis_preflight.py",
                  "scripts/test_diagnosis_preflight.py"]
         for name in files:
@@ -170,7 +175,7 @@ class DiagnosisIntegrationTest(unittest.TestCase):
         if not (REPO / ".git").exists():
             self.skipTest("release tree has no Git metadata yet")
         result = subprocess.run(["git", "check-ignore", "--no-index", str(SKILL / "SKILL.md")],
-                                cwd=REPO, capture_output=True, text=True)
+                                cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
 

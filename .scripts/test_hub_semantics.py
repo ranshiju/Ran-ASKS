@@ -77,7 +77,7 @@ def test_empty_hub_index_feeds_unassigned_nodes_to_new_hub_discovery():
 def write_page(root: Path, rel: str, text: str):
     path = root / f"{rel}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
     return path
 
 
@@ -721,7 +721,7 @@ def test_route_correction_closes_matching_maintenance_handoff():
                 "transaction_id": "txn-route",
                 "wiki_path": "academic/wiki/papers/paper",
                 "decision": "agent_route_review_required",
-            }]), encoding="utf-8")
+            }]), encoding="utf-8", newline="\n")
             receipt = {
                 "status": "agent_required", "errors": [],
                 "actions": [{"component": "hubs", "route_review_file": route_rel}],
@@ -732,8 +732,8 @@ def test_route_correction_closes_matching_maintenance_handoff():
                     "next_action": "agent_review_hub_routes_and_maintenance",
                 }},
             }
-            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-            report_path.write_text(json.dumps({"maintenance": receipt}), encoding="utf-8")
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8", newline="\n")
+            report_path.write_text(json.dumps({"maintenance": receipt}), encoding="utf-8", newline="\n")
             inbox_state.save("txn-route", {
                 "transaction_id": "txn-route", "status": "completed",
                 "wiki_path": "academic/wiki/papers/paper", "graph_report": {},

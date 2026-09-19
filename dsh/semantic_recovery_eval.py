@@ -243,8 +243,8 @@ def main() -> None:
         stamp = time.strftime("%Y%m%d-%H%M%S")
         output = REPO / "temp" / "agent-evals" / f"{stamp}-semantic-recovery-{safe_model}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({**report, "report_path": str(output.relative_to(REPO))}, ensure_ascii=False, indent=2))
+    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    print(json.dumps({**report, "report_path": output.relative_to(REPO).as_posix()}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

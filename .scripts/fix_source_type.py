@@ -10,9 +10,10 @@
 
 只补缺失字段:source_type 必补;若 confidence 也缺则按 source_type 默认值补。
 不动已有字段,不改正文。frontmatter 行插入:source_type 紧跟 sources 块之后。
-用法: fix_source_type.py [file1 file2 ...]  (无参则读 /tmp/missing_source_type.txt)
+用法: fix_source_type.py [file1 file2 ...]
+      (无参则读系统临时目录下的 missing_source_type.txt)
 """
-import os, re, sys
+import os, re, sys, tempfile
 from pathlib import Path
 
 CONF_BY_ST = {"official-doc":"high","speech-recognition":"medium","ocr":"medium","web":"medium","discussion":"medium"}
@@ -101,14 +102,16 @@ def process(path):
     conf_needed = get_field(body,"confidence") is None
     new_body = insert_after_sources(body, st, conf_needed)
     new_text = "---\n"+new_body+"\n---\n"+rest
-    path.write_text(new_text, encoding="utf-8")
+    path.write_text(new_text, encoding="utf-8", newline="\n")
     return path.name, f"+{st}"+(f"/{conf}" if conf_needed else "")
 
 def main():
     if len(sys.argv) > 1:
         files = [Path(a) for a in sys.argv[1:]]
     else:
-        files = [Path(l.strip()) for l in open("/tmp/missing_source_type.txt") if l.strip()]
+        listing = Path(tempfile.gettempdir()) / "missing_source_type.txt"
+        files = [Path(l.strip()) for l in
+                 listing.read_text(encoding="utf-8").splitlines() if l.strip()]
     counts = {}
     for p in files:
         name, res = process(p)

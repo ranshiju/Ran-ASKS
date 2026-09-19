@@ -71,7 +71,7 @@ def staged_copy(source: Path, destination: Path) -> dict[str, str | int]:
 
 def run_ingest_check(project_root: Path, wiki_path: Path) -> None:
     command = [sys.executable, str(project_root / ".scripts" / "ingest_check.py"), str(wiki_path)]
-    result = subprocess.run(command, cwd=project_root, capture_output=True, text=True)
+    result = subprocess.run(command, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode:
         detail = (result.stdout + result.stderr).strip()
         raise ValueError(f"ingest_check failed; temporary extraction is retained: {detail}")
@@ -161,18 +161,18 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
         "status": "committed",
         "paper_id": paper_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "manifest": str(manifest_path.relative_to(project_root)),
-        "raw_dir": str(raw_dir.relative_to(project_root)),
-        "wiki_path": str(wiki_path.relative_to(project_root)),
+        "manifest": manifest_path.relative_to(project_root).as_posix(),
+        "raw_dir": raw_dir.relative_to(project_root).as_posix(),
+        "wiki_path": wiki_path.relative_to(project_root).as_posix(),
         "raw_files": raw_receipt,
         "wiki_file": wiki_receipt,
     }
-    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     if cleanup:
         run_ingest_check(project_root, wiki_path)
         shutil.rmtree(extract_dir)
         receipt["cleanup"] = "completed"
-        receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     return receipt_path
 
 

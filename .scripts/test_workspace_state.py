@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+from contextlib import closing
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -34,7 +35,7 @@ def test_init_imports_existing_status_and_rebuilds_projections():
     with isolated_repo() as root:
         project = root / "projects" / "demo"
         (project / "notes").mkdir(parents=True)
-        (project / "notes" / "status.md").write_text("# 旧状态\n\n关键历史。\n", encoding="utf-8")
+        (project / "notes" / "status.md").write_text("# 旧状态\n\n关键历史。\n", encoding="utf-8", newline="\n")
         result = state.init_workspace("demo", profile="role_work",
                                       domain="academic_administration")
         assert result["imported_status_memory"].startswith("MEM-")
@@ -43,7 +44,7 @@ def test_init_imports_existing_status_and_rebuilds_projections():
         assert state.STATUS_MARKER in (project / "notes" / "status.md").read_text(encoding="utf-8")
         memories = state.load_memories(project)
         assert len(memories) == 1 and "关键历史" in memories[0][1]
-        with sqlite3.connect(project / ".workspace" / "index.sqlite") as conn:
+        with closing(sqlite3.connect(project / ".workspace" / "index.sqlite")) as conn:
             assert conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 1
         assert state.doctor("demo")["ok"] is True
 
@@ -190,7 +191,7 @@ def test_rebuild_uses_markdown_and_doctor_reports_corrupt_events():
         rebuilt = state.rebuild("demo")
         assert rebuilt["items"] == 1
         assert "重建事项" in (project / "notes" / "status.md").read_text(encoding="utf-8")
-        with (project / ".workspace" / "events.jsonl").open("a", encoding="utf-8") as handle:
+        with (project / ".workspace" / "events.jsonl").open("a", encoding="utf-8", newline="\n") as handle:
             handle.write("{broken\n")
         report = state.doctor("demo")
         assert report["ok"] is False
@@ -201,7 +202,7 @@ def test_agent_and_api_profiles_share_schema_without_crossing_adapters():
     with isolated_repo() as root:
         state.init_workspace("demo")
         project = root / "projects" / "demo"
-        (project / "brief.md").write_text("推进一个通用工作项目。\n", encoding="utf-8")
+        (project / "brief.md").write_text("推进一个通用工作项目。\n", encoding="utf-8", newline="\n")
         original_backend = state.agent_task.backend
         old_module = sys.modules.get("llm_structured")
         calls = []
@@ -214,7 +215,7 @@ def test_agent_and_api_profiles_share_schema_without_crossing_adapters():
             output.write_text(json.dumps({
                 "summary": "通用项目", "keywords": ["项目"], "stage": "execution",
                 "active_questions": ["下一步是什么？"],
-            }, ensure_ascii=False), encoding="utf-8")
+            }, ensure_ascii=False), encoding="utf-8", newline="\n")
             applied = state.apply_profile("demo", output)
             assert applied["profile"]["stage"] == "execution"
 

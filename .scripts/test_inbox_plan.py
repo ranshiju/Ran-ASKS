@@ -52,7 +52,7 @@ def test_empty_facts_pending_is_not_a_fact_ingest():
         inbox = Path(directory) / "inbox"
         inbox.mkdir()
         facts = inbox / "facts-pending.md"
-        facts.write_text("# pending\n", encoding="utf-8")
+        facts.write_text("# pending\n", encoding="utf-8", newline="\n")
         old_repo = module.REPO
         module.REPO = Path(directory)
         try:

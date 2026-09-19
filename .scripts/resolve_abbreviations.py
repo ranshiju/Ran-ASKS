@@ -131,7 +131,7 @@ def _write_todo(path: Path, entries: list[dict]) -> None:
     temp_path.write_text(
         "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in unique.values()),
         encoding="utf-8",
-    )
+    newline="\n")
     temp_path.replace(path)
 
 
@@ -140,7 +140,7 @@ def _write_json_atomic(path: Path, value: dict) -> None:
     temp_path = path.with_name(path.name + ".tmp")
     temp_path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
-    )
+    newline="\n")
     temp_path.replace(path)
 
 
@@ -206,7 +206,7 @@ def _close_maintenance_receipt(receipt_path: Path, receipt: dict,
     _write_json_atomic(receipt_path, receipt)
     return {
         "status": receipt["status"],
-        "receipt_path": str(receipt_path.relative_to(REPO.resolve())),
+        "receipt_path": receipt_path.relative_to(REPO.resolve()).as_posix(),
         "remaining_tokens": len(remaining_tokens),
         "remaining_occurrences": len(remaining_review),
     }

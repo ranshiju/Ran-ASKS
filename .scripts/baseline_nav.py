@@ -131,9 +131,9 @@ def build_corpus():
                 if not sec: continue
                 if sec.startswith("## "): current = sec
                 elif current == "header":
-                    chunks.append({"page": str(f.relative_to(REPO)), "section": "frontmatter", "text": sec[:2000]})
+                    chunks.append({"page": f.relative_to(REPO).as_posix(), "section": "frontmatter", "text": sec[:2000]})
                 else:
-                    chunks.append({"page": str(f.relative_to(REPO)), "section": current, "text": sec[:2000]})
+                    chunks.append({"page": f.relative_to(REPO).as_posix(), "section": current, "text": sec[:2000]})
     return chunks
 
 def main():
@@ -276,7 +276,7 @@ def main():
     out = json.dumps(results, ensure_ascii=False, indent=2)
     if args.output == "-": print(out)
     else:
-        Path(args.output).write_text(out, encoding="utf-8")
+        Path(args.output).write_text(out, encoding="utf-8", newline="\n")
         print(f"B5-nav 结果写入 {args.output} ({len(results)} 题)", file=sys.stderr)
 
 if __name__ == "__main__":

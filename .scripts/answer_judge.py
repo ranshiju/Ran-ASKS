@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 api_base = api_key = ""
 env = REPO / ".env"
 if env.exists():
-    for line in env.read_text().splitlines():
+    for line in env.read_text(encoding="utf-8").splitlines():
         if line.startswith("LLM_API_BASE="): api_base = line.split("=",1)[1].strip()
         if line.startswith("LLM_API_KEY="): api_key = line.split("=",1)[1].strip()
 
@@ -313,7 +313,7 @@ def main():
         print(f"  {i+1}/{len(results)} {r['id']} c={scores.get('correctness',0)} p={scores.get('posture_correct',0)} t={scores.get('evidence_traceable',0)} txt={len(retrieved_text)}", file=sys.stderr)
         time.sleep(0.5)
 
-    Path(args.output).write_text(json.dumps(judged, ensure_ascii=False, indent=2), encoding="utf-8")
+    Path(args.output).write_text(json.dumps(judged, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     n = len(judged)
     correct = sum(j["scores"].get("correctness",0) for j in judged)
     posture = sum(j["scores"].get("posture_correct",0) for j in judged)

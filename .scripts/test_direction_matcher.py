@@ -236,7 +236,7 @@ def test_collect_all_hub_keywords_returns_list():
         (hubs / "fixture.md").write_text(
             "# fixture\n\n## 关键词\n\n- tensor network\n- 量子计算\n",
             encoding="utf-8",
-        )
+        newline="\n")
         original_repo = module.REPO
         original_hub_split_repo = hub_split.REPO
         try:

@@ -81,6 +81,7 @@ import ingest_common as ic
 import agent_task
 import inbox_state
 import inbox_plan
+import platform_compat
 import ingest_user_assertions
 import source_fingerprints as sf
 import trash_util
@@ -100,7 +101,10 @@ def read_pdf_text(path: Path, max_pages: int = 2) -> str:
     短篇 PDF（≤6 页）自动读全部页，避免末页参考文献漏读导致误分类。
     """
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(path))
         total = len(doc)
         pages = total if total <= 6 else min(max_pages, total)
@@ -127,7 +131,10 @@ def _is_academic_by_metadata(path: Path) -> bool:
     dvips/TeX/LaTeX 等生成器是强学术信号（几乎只用于论文/书籍排版）。
     """
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
         doc = fitz.open(str(path))
         creator = (doc.metadata.get("creator") or "").lower()
         producer = (doc.metadata.get("producer") or "").lower()
@@ -149,15 +156,11 @@ def read_document_preview(path: Path, max_chars: int = 8000) -> str:
         if suffix in {".txt", ".md"}:
             return path.read_text(encoding="utf-8")[:max_chars]
         if suffix in {".docx", ".doc"}:
-            result = subprocess.run(
-                ["textutil", "-convert", "txt", "-stdout", str(path)],
-                capture_output=True, text=True, timeout=30,
-            )
-            return result.stdout[:max_chars] if result.returncode == 0 else ""
+            return platform_compat.word_document_text(path)[:max_chars]
         if suffix == ".pptx":
             result = subprocess.run(
                 ["pandoc", "-t", "plain", str(path)],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
             return result.stdout[:max_chars] if result.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError, UnicodeError):
@@ -358,26 +361,26 @@ def _classification_task(pending: list[dict], args, issues: list | None = None) 
         "schema": "inbox-classification-input-v1",
         "items": pending,
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    rerun = ["python3", ".scripts/ingest_inbox.py", "--run", "--subproject", args.subproject]
+    rerun = [sys.executable, ".scripts/ingest_inbox.py", "--run", "--subproject", args.subproject]
     if args.file:
         rerun.extend(["--file", args.file])
     if getattr(args, "ocr_result", None):
         rerun.extend(["--ocr-result", args.ocr_result])
     if getattr(args, "allow_remote_ocr", False):
         rerun.append("--allow-remote-ocr")
-    rerun.extend(["--classification-file", str(output_path.relative_to(REPO))])
+    rerun.extend(["--classification-file", output_path.relative_to(REPO).as_posix()])
     return agent_task.make_task(
         kind="inbox_classification",
         transaction_id=f"inbox-classification-{digest}",
         inputs=[{
             "name": "classification_candidates",
-            "path": str(input_path.relative_to(REPO)),
+            "path": input_path.relative_to(REPO).as_posix(),
             "role": "program_scored_bounded_source_text",
             "read": "full",
         }],
         outputs=[{
             "name": "classification_decisions",
-            "path": str(output_path.relative_to(REPO)),
+            "path": output_path.relative_to(REPO).as_posix(),
             "format": "inbox-classification-result-v1",
         }],
         protocol={
@@ -543,16 +546,21 @@ def download_pdfs(urls: list[str], verbose: bool = True) -> list[Path]:
             continue
         if verbose:
             print(f"  下载 {url} → inbox/{name}...", flush=True)
-        result = subprocess.run(
-            ["curl", "-sL", "-o", str(dest), url],
-            capture_output=True, text=True,
-        )
-        if result.returncode == 0 and dest.stat().st_size > 1000:
+        # 跨平台：用标准库下载，不依赖系统是否装了 curl
+        error = ""
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "Ran-ASKS"})
+            with urllib.request.urlopen(request, timeout=120) as response, \
+                    dest.open("wb") as handle:
+                shutil.copyfileobj(response, handle)
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            error = str(exc)
+        if not error and dest.is_file() and dest.stat().st_size > 1000:
             downloaded.append(dest)
             if verbose:
                 print(f"  ✓ {dest.stat().st_size} bytes")
         elif verbose:
-            print(f"  ✗ 下载失败: {result.stderr[:200]}", file=sys.stderr)
+            print(f"  ✗ 下载失败: {error[:200]}", file=sys.stderr)
     return downloaded
 
 
@@ -826,7 +834,7 @@ def _write_json_atomic(path: Path, value: dict | list) -> None:
     temp_path = path.with_name(path.name + ".tmp")
     temp_path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    , newline="\n")
     temp_path.replace(path)
 
 
@@ -890,7 +898,7 @@ def stage_external_file(value: str, import_name: str = "") -> tuple[Path, dict]:
         "created_at": datetime.now().astimezone().isoformat(),
         "source_path": str(source),
         "source_name": source.name,
-        "staged_path": str(target.relative_to(REPO)),
+        "staged_path": target.relative_to(REPO).as_posix(),
         "binary_sha256": digest,
         "action": action,
     }
@@ -899,7 +907,7 @@ def stage_external_file(value: str, import_name: str = "") -> tuple[Path, dict]:
         / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-{digest[:12]}.json"
     )
     _write_json_atomic(receipt_path, receipt)
-    receipt["receipt_path"] = str(receipt_path.relative_to(REPO))
+    receipt["receipt_path"] = receipt_path.relative_to(REPO).as_posix()
     return target, receipt
 
 
@@ -959,7 +967,7 @@ def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
         "origin": "chat_attachment" if original is not None else "chat_text",
         "source_path": str(original) if original else None,
         "source_name": original.name if original else name,
-        "staged_path": str(target.relative_to(REPO)),
+        "staged_path": target.relative_to(REPO).as_posix(),
         "binary_sha256": digest,
         "action": "copied" if original is not None else "saved_verbatim",
         "source_policy": "retain_original" if original is not None else "no_external_file",
@@ -971,7 +979,7 @@ def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
     except OSError:
         target.unlink(missing_ok=True)
         raise
-    receipt["receipt_path"] = str(receipt_path.relative_to(REPO))
+    receipt["receipt_path"] = receipt_path.relative_to(REPO).as_posix()
     return target, receipt
 
 
@@ -1009,7 +1017,7 @@ def resume_transaction(transaction_id: str, backend: str, *,
         log_dir.mkdir(parents=True, exist_ok=True)
         (log_dir / f"{loop.session_log.session_id}.jsonl").write_text(
             loop.session_log.to_jsonl() + "\n", encoding="utf-8"
-        )
+        , newline="\n")
     else:
         command = [sys.executable, str(REPO / ".scripts" / pipeline),
                    "--resume", transaction_id]
@@ -1018,7 +1026,7 @@ def resume_transaction(transaction_id: str, backend: str, *,
         if allow_remote_ocr:
             command.append("--allow-remote-ocr")
         completed = subprocess.run(
-            command, cwd=REPO, text=True, capture_output=True, check=False,
+            command, cwd=REPO, text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
         )
         parsed = _extract_last_json(completed.stdout)
     if not isinstance(parsed, dict):
@@ -1079,7 +1087,7 @@ def cleanup_exact_duplicate(source: Path, match: dict) -> dict:
         "schema": "exact-duplicate-cleanup-v1",
         "status": "verified",
         "source": str(source_relative),
-        "raw_path": str(raw_path.relative_to(repo_root)),
+        "raw_path": raw_path.relative_to(repo_root).as_posix(),
         "binary_sha256": expected_hash,
         "verified_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -1098,7 +1106,7 @@ def cleanup_exact_duplicate(source: Path, match: dict) -> dict:
     _write_json_atomic(receipt_path, receipt)
     return {
         "status": "trashed",
-        "receipt_path": str(receipt_path.relative_to(REPO)),
+        "receipt_path": receipt_path.relative_to(REPO).as_posix(),
     }
 
 
@@ -1170,7 +1178,7 @@ def _auto_resolve_abbreviations(session_id: str) -> dict:
     ]
     try:
         result = subprocess.run(
-            command, cwd=REPO, capture_output=True, text=True, timeout=120,
+            command, cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
         )
         try:
             parsed = json.loads(result.stdout)
@@ -1210,7 +1218,7 @@ def _auto_resolve_abbreviations(session_id: str) -> dict:
                 ),
                 "candidates": candidates,
             })
-            review_file = str(review_path.relative_to(REPO))
+            review_file = review_path.relative_to(REPO).as_posix()
         except Exception as exc:
             errors.append(f"abbreviation review write failed: {exc}")
 
@@ -1310,7 +1318,7 @@ def _auto_create_hubs(session_id: str, results: list[dict] | None = None) -> dic
         try:
             result = subprocess.run(
                 command,
-                cwd=REPO, capture_output=True, text=True, timeout=120)
+                cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
             if result.returncode != 0:
                 return {"status": "error", "error": result.stderr[:300]}
             check = json.loads(result.stdout)
@@ -1354,14 +1362,14 @@ def _auto_create_hubs(session_id: str, results: list[dict] | None = None) -> dic
         route_dir.mkdir(parents=True, exist_ok=True)
         route_file = route_dir / f"{session_id}.json"
         _write_json_atomic(route_file, route_reviews)
-        summary["route_review_file"] = str(route_file.relative_to(REPO))
+        summary["route_review_file"] = route_file.relative_to(REPO).as_posix()
     if eligible:
         hub_dir = REPO / "temp" / "hub-auto-create"
         hub_dir.mkdir(parents=True, exist_ok=True)
         candidates_file = hub_dir / f"{session_id}.json"
         candidates_file.write_text(
-            json.dumps(eligible, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        summary["candidates_file"] = str(candidates_file.relative_to(REPO))
+            json.dumps(eligible, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+        summary["candidates_file"] = candidates_file.relative_to(REPO).as_posix()
     if split_candidates:
         split_dir = REPO / "temp" / "hub-auto-split"
         split_dir.mkdir(parents=True, exist_ok=True)
@@ -1369,8 +1377,8 @@ def _auto_create_hubs(session_id: str, results: list[dict] | None = None) -> dic
         split_file.write_text(
             json.dumps(split_candidates, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
-        )
-        summary["split_candidates_file"] = str(split_file.relative_to(REPO))
+        newline="\n")
+        summary["split_candidates_file"] = split_file.relative_to(REPO).as_posix()
     if redistribution_candidates:
         redistribute_dir = REPO / "temp" / "hub-auto-redistribute"
         redistribute_dir.mkdir(parents=True, exist_ok=True)
@@ -1378,9 +1386,9 @@ def _auto_create_hubs(session_id: str, results: list[dict] | None = None) -> dic
         redistribute_file.write_text(
             json.dumps(redistribution_candidates, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
-        )
-        summary["redistribution_candidates_file"] = str(
-            redistribute_file.relative_to(REPO))
+        newline="\n")
+        summary["redistribution_candidates_file"] = (
+            redistribute_file.relative_to(REPO).as_posix())
     return summary
 
 
@@ -1423,7 +1431,7 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
         skipped = {"status": "skipped", "reason": "no_successful_files"}
         envelope = {
             "status": "skipped", "session_id": session_id, "actions": [], "errors": [],
-            "receipt_path": str(receipt_path.relative_to(REPO)),
+            "receipt_path": receipt_path.relative_to(REPO).as_posix(),
             "components": {
                 "abbreviations": skipped, "people": skipped.copy(), "hubs": skipped.copy(),
             },
@@ -1461,7 +1469,7 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
                 "completed maintenance trigger is missing the full graph_report envelope"
             ],
             "invalid_results": invalid_results,
-            "receipt_path": str(receipt_path.relative_to(REPO)),
+            "receipt_path": receipt_path.relative_to(REPO).as_posix(),
             "components": {
                 "abbreviations": skipped,
                 "people": skipped.copy(),
@@ -1537,7 +1545,7 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
         ],
         "actions": actions,
         "errors": errors,
-        "receipt_path": str(receipt_path.relative_to(REPO)),
+        "receipt_path": receipt_path.relative_to(REPO).as_posix(),
         "components": {
             "abbreviations": abbr_summary,
             "people": people_summary,
@@ -1562,7 +1570,7 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
     report_path.relative_to((repo / "cross-domain/ingest-reports").resolve())
     maintenance = report.get("maintenance") or {}
     updates = []
-    report_rel = str(report_path.relative_to(repo))
+    report_rel = report_path.relative_to(repo).as_posix()
     checkpoint_written = False
     try:
         if maintenance.get("receipt_path"):
@@ -1571,7 +1579,7 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             if not isinstance(receipt, dict):
                 raise ValueError("maintenance receipt must be an object")
-            maintenance = {**receipt, "receipt_path": str(receipt_path.relative_to(repo))}
+            maintenance = {**receipt, "receipt_path": receipt_path.relative_to(repo).as_posix()}
             linked = compact_maintenance({**maintenance, "publication": {"status": "completed"}})
             linked["report_path"] = report_rel
             for item in report.get("files", []):
@@ -1703,7 +1711,7 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
         "degraded": report["degraded"],
         "failed": report["failed"],
         "skipped": report["skipped"],
-        "report_path": str(report_path.relative_to(REPO)),
+        "report_path": report_path.relative_to(REPO).as_posix(),
         "files": files,
     }
     if report.get("maintenance"):
@@ -1827,7 +1835,7 @@ def main():
                              ensure_ascii=False))
             raise SystemExit(1)
         files = [staged]
-        args.file = str(staged.relative_to(REPO))  # Classification resumes only this staged input.
+        args.file = staged.relative_to(REPO).as_posix()  # Classification resumes only this staged input.
     elif args.file:
         try:
             files = [_resolve_inbox_file(args.file)]
@@ -1860,7 +1868,7 @@ def main():
     except Exception as exc:
         fingerprint_index_error = str(exc)
     for f in files:
-        rel = str(f.relative_to(REPO))
+        rel = f.relative_to(REPO).as_posix()
         if f.name == "facts-pending.md":
             decision = inbox_plan.classify(f)
             classification_details[rel] = {
@@ -2133,7 +2141,7 @@ def main():
                     **ocr_options,
                 )
                 completed = subprocess.run(
-                    command, cwd=REPO, text=True, capture_output=True, check=False,
+                    command, cwd=REPO, text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
                 )
                 content = completed.stdout
                 parsed = _extract_last_json(content)
@@ -2155,14 +2163,14 @@ def main():
         dsh_dir = REPO / "temp" / "inbox-dsh"
         dsh_dir.mkdir(parents=True, exist_ok=True)
         dsh_log = dsh_dir / f"{session_id}.jsonl"
-        dsh_log.write_text(loop.session_log.to_jsonl() + "\n", encoding="utf-8")
+        dsh_log.write_text(loop.session_log.to_jsonl() + "\n", encoding="utf-8", newline="\n")
     else:
         agent_dir = REPO / "temp" / "inbox-agent"
         agent_dir.mkdir(parents=True, exist_ok=True)
         agent_log = agent_dir / f"{session_id}.jsonl"
         agent_log.write_text("\n".join(
             json.dumps(item, ensure_ascii=False) for item in agent_events
-        ) + ("\n" if agent_events else ""), encoding="utf-8")
+        ) + ("\n" if agent_events else ""), encoding="utf-8", newline="\n")
 
     # 只有本次真正摄入成功才扫描全局 backlog。分类闸门/全失败必须快速返回。
     maintenance = run_post_ingest_maintenance(results, session_id)
@@ -2179,8 +2187,8 @@ def main():
         "entrypoint": "inbox",
         "backend": backend,
         "semantic_backend": backend,
-        "dsh_log": str(dsh_log.relative_to(REPO)) if dsh_log else "",
-        "agent_log": str(agent_log.relative_to(REPO)) if agent_log else "",
+        "dsh_log": dsh_log.relative_to(REPO).as_posix() if dsh_log else "",
+        "agent_log": agent_log.relative_to(REPO).as_posix() if agent_log else "",
         "total": len(results),
         **counts,
         "files": results,

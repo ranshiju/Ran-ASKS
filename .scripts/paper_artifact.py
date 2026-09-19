@@ -64,7 +64,7 @@ def write_json(path: Path, value) -> None:
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
-    )
+    newline="\n")
 
 
 def sha256_file(path: Path) -> str:
@@ -217,7 +217,7 @@ def build_wiki(run: Path, output: Path) -> dict[str, int]:
                     artifact_id=source.stem if kind == "papers" else None,
                 ),
                 encoding="utf-8",
-            )
+            newline="\n")
         counts[kind] = len(sources)
     return counts
 
@@ -227,7 +227,7 @@ def build_graph(run: Path, canonical_titles: dict[str, str], output: Path) -> di
     target = output / "graph/final-graph.jsonl"
     target.parent.mkdir(parents=True, exist_ok=True)
     tables: dict[str, list[dict]] = {table: [] for table in GRAPH_FIELDS}
-    with source.open(encoding="utf-8") as source_handle, target.open("w", encoding="utf-8") as target_handle:
+    with source.open(encoding="utf-8") as source_handle, target.open("w", encoding="utf-8", newline="\n") as target_handle:
         for line in source_handle:
             record = sanitize_graph_record(json.loads(line))
             if record.get("_table") == "nodes" and (
@@ -513,7 +513,7 @@ def build_run_metadata(experiment: Path, run: Path, manuscript_metrics: Path, ou
             "",
         ]
     )
-    (output / "CODE_PROVENANCE.md").write_text("\n".join(lines), encoding="utf-8")
+    (output / "CODE_PROVENANCE.md").write_text("\n".join(lines), encoding="utf-8", newline="\n")
     return metadata
 
 
@@ -523,7 +523,7 @@ def write_checksums(output: Path) -> int:
         if path.is_file() and path.name != "CHECKSUMS.sha256"
     )
     lines = [f"{sha256_file(path)}  {path.relative_to(output).as_posix()}" for path in files]
-    (output / "CHECKSUMS.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (output / "CHECKSUMS.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return len(files)
 
 

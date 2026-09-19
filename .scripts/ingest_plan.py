@@ -63,7 +63,7 @@ def main() -> None:
     plan = make_plan(raw_root, wiki_root, load_state(state_path))
     if args.write_state:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps({"version": 1, "raw": plan["raw"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        state_path.write_text(json.dumps({"version": 1, "raw": plan["raw"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({key: value for key, value in plan.items() if key != "raw"}, ensure_ascii=False, indent=2))
 
 

@@ -30,5 +30,5 @@ def main():
   response=call_json(case["prompt"],schema(case),max_tokens=500,retries=1); assessment=assess(case,response)
   result["cases"].append({"case_id":case["id"],"task":case["task"],"response":response,"assessment":assessment})
   print(model,case["id"],assessment["score"],flush=True)
- Path(args.output).write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+ Path(args.output).write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8", newline="\n")
 if __name__ == "__main__": main()

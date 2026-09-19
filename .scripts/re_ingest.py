@@ -59,7 +59,7 @@ def build_manifest() -> list[dict]:
             wiki_file = REPO / (wiki_path + ".md")
             items.append({
                 "paper_id": paper_id,
-                "raw_md": str(paper_md.relative_to(REPO)),
+                "raw_md": paper_md.relative_to(REPO).as_posix(),
                 "wiki_path": wiki_path,
                 "wiki_exists": wiki_file.exists(),
             })
@@ -96,7 +96,7 @@ def outdated_items() -> list[dict]:
             continue
         items.append({
             "paper_id": paper_id,
-            "raw_md": str(paper_md.relative_to(REPO)),
+            "raw_md": paper_md.relative_to(REPO).as_posix(),
             "wiki_path": page_path,
             "wiki_exists": (REPO / (page_path + ".md")).exists(),
         })
@@ -129,7 +129,7 @@ def new_state_for_reingest(paper_id: str, raw_md_rel: str) -> dict:
     if raw_pdf_path.is_file():
         shutil.copy2(raw_pdf_path, extract_dir / "paper.pdf")
     # raw_dir 取 raw paper.md 的真实父目录（works/references 均可，不再硬编码 references）
-    raw_dir = str((REPO / raw_md_rel).parent.relative_to(REPO))
+    raw_dir = (REPO / raw_md_rel).parent.relative_to(REPO).as_posix()
     md_text = raw_md_path.read_text(encoding="utf-8")
     bibliography, corrections = ip.repair_archived_bibliography(
         ip.load_bibliographic_metadata(raw_md_path.parent), md_text)
@@ -137,7 +137,7 @@ def new_state_for_reingest(paper_id: str, raw_md_rel: str) -> dict:
         "transaction_id": txn,
         "status": "write_wiki",
         "source": raw_md_rel,
-        "extract_dir": str(extract_dir.relative_to(REPO)),
+        "extract_dir": extract_dir.relative_to(REPO).as_posix(),
         "raw_dir": raw_dir,
         "wiki_path": f"academic/wiki/papers/{paper_id}",
         "paper_id": paper_id,
@@ -222,7 +222,7 @@ def review_reingest_bibliography(state: dict) -> bool:
             (extract_dir / "bibliographic-review.json").write_text(
                 json.dumps(result["review"], ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
-            )
+            newline="\n")
         state["status"] = "bibliographic_review_required"
         state["bibliographic_review_required"] = True
         state["bibliographic_review"] = {
@@ -291,7 +291,7 @@ def commit_wiki_and_graph(state: dict) -> dict:
         backup_path = REPO / "temp" / "inbox-state" / f"{state['transaction_id']}-wiki-old.md"
         backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(wiki_path, backup_path)
-        state["wiki_backup"] = str(backup_path.relative_to(REPO))
+        state["wiki_backup"] = backup_path.relative_to(REPO).as_posix()
     os.replace(new_wiki, wiki_path)
     progress("完成", flush=True)
 
@@ -353,7 +353,7 @@ def run_one(paper_id: str, raw_md_rel: str, verbose: bool) -> dict:
     set_progress_log_path(None)
     if not verbose:
         log_path = REPO / "temp" / "inbox-state" / f"{state['transaction_id']}.log"
-        set_progress_file(log_path.open("a", encoding="utf-8"))
+        set_progress_file(log_path.open("a", encoding="utf-8", newline="\n"))
         set_progress_log_path(log_path)
     try:
         progress(f"\n{'='*60}")
@@ -464,7 +464,7 @@ def resume_reingest(txn_id: str, verbose: bool) -> int:
     set_progress_log_path(None)
     if not verbose:
         log_path = REPO / "temp" / "inbox-state" / f"{txn_id}.log"
-        set_progress_file(log_path.open("a", encoding="utf-8"))
+        set_progress_file(log_path.open("a", encoding="utf-8", newline="\n"))
         set_progress_log_path(log_path)
     try:
         progress(f"\n{'='*60}")
@@ -540,7 +540,7 @@ def main() -> int:
             return 0
         items = [{
             "paper_id": paper_id,
-            "raw_md": str(raw_path.relative_to(REPO)),
+            "raw_md": raw_path.relative_to(REPO).as_posix(),
             "wiki_path": f"academic/wiki/papers/{paper_id}",
             "wiki_exists": (REPO / f"academic/wiki/papers/{paper_id}.md").exists(),
         }]

@@ -43,7 +43,7 @@ def build_navigation_corpus():
                     nav_text = sections[i+1].strip() if i+1 < len(sections) else ""
                     if nav_text:
                         # 同时带上 frontmatter 的关键字段（title/type/status）
-                        chunks.append({"page": str(f.relative_to(REPO)), "section": "## Navigation", "text": nav_text[:2000]})
+                        chunks.append({"page": f.relative_to(REPO).as_posix(), "section": "## Navigation", "text": nav_text[:2000]})
                     break
     return chunks
 
@@ -85,7 +85,7 @@ def main():
     out = json.dumps(results, ensure_ascii=False, indent=2)
     if args.output == "-": print(out)
     else:
-        Path(args.output).write_text(out, encoding="utf-8")
+        Path(args.output).write_text(out, encoding="utf-8", newline="\n")
         print(f"结果写入 {args.output} ({len(results)} 题)", file=sys.stderr)
 
 if __name__ == "__main__":

@@ -67,7 +67,7 @@ def migrate(page_path: str) -> str:
     new_body = preamble + nav_block + migrated_sections
     new_content = c[:fm_end] + new_body
 
-    p.write_text(new_content, encoding="utf-8")
+    p.write_text(new_content, encoding="utf-8", newline="\n")
     return f"✅ 迁移: {page_path} (插入 Navigation/Core Triples 占位 + ## Content 包裹 + 旧 ## 降 ###)"
 
 if __name__ == "__main__":

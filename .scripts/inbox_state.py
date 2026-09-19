@@ -261,7 +261,7 @@ def save(transaction_id: str, state: dict) -> Path:
     payload = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
@@ -314,7 +314,7 @@ def supersede_transaction(transaction_id: str, completed_by: str) -> dict:
         "status": "superseded",
         "transaction_id": transaction_id,
         "superseded_by": completed_by,
-        "state_path": str(path.relative_to(REPO)),
+        "state_path": path.relative_to(REPO).as_posix(),
     }
 
 

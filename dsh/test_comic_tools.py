@@ -60,7 +60,7 @@ def test_batch_uses_explicit_output_root() -> None:
     tool = build_comic_tools()[2]
     with tempfile.TemporaryDirectory() as directory:
         storyboard = Path(directory) / "storyboard.yaml"
-        storyboard.write_text("article_id: a\nassets: []\n", encoding="utf-8")
+        storyboard.write_text("article_id: a\nassets: []\n", encoding="utf-8", newline="\n")
         expected = {"status": "dry_run", "assets": []}
         with mock.patch("dsh.comic_tools.generate_batch", return_value=expected) as generate:
             content = tool.execute_fn({

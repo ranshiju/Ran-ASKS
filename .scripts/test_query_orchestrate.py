@@ -197,7 +197,7 @@ def test_read_raw_repeat_denied():
 def test_read_raw_recorded_in_read_sources():
     """read_raw 成功执行后 locator 记入 session.read_sources（citation contract 基础）。"""
     import tempfile, os
-    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False, dir=str(REPO / 'temp'))
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False, dir=str(REPO / 'temp'), newline="\n")
     tmp.write('# Title\n\ntest content for read_raw')
     tmp.close()
     try:

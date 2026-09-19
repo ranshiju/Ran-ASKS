@@ -108,7 +108,7 @@ def build_catalog():
         lines.append("")
         total += len(pages)
     lines.insert(8, f"\n> 全库内容页合计:{total} 页(academic/admin/teaching/business)。")
-    CATALOG_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    CATALOG_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return total
 
 

@@ -72,7 +72,7 @@ def normalized_text_sha256(path: Path) -> str:
 
 def _stored_path(path: Path, repo: Path) -> str:
     try:
-        return str(path.resolve().relative_to(repo.resolve()))
+        return path.resolve().relative_to(repo.resolve()).as_posix()
     except ValueError:
         return str(path.resolve())
 

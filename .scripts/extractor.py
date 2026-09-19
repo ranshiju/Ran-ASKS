@@ -97,7 +97,7 @@ def save_parse_meta(paper_dir: Path, meta: dict):
         if ext_md:
             meta.setdefault("source", {})["external_md_path"] = ext_md
     meta_path = paper_dir / "parse_meta.yaml"
-    with open(meta_path, "w", encoding="utf-8") as f:
+    with open(meta_path, "w", encoding="utf-8", newline="\n") as f:
         yaml.dump(meta, f, allow_unicode=True, default_flow_style=False)
 
 
@@ -187,7 +187,7 @@ def load_source_yaml(paper_dir: Path) -> dict:
 
 def save_source_yaml(paper_dir: Path, src: dict) -> None:
     """保存 source.yaml。"""
-    with open(paper_dir / "source.yaml", "w", encoding="utf-8") as f:
+    with open(paper_dir / "source.yaml", "w", encoding="utf-8", newline="\n") as f:
         yaml.dump(src, f, allow_unicode=True, default_flow_style=False)
 
 
@@ -223,7 +223,7 @@ def link_external_pdf(paper_dir: Path, external_pdf_uri: str) -> Optional[Path]:
     else:
         ep = resolve_synology_path(external_pdf_uri)
         try:
-            sdata["external_path"] = str(ep.relative_to(PROJECT_ROOT))
+            sdata["external_path"] = ep.relative_to(PROJECT_ROOT).as_posix()
         except ValueError:
             sdata["external_path"] = str(ep)  # 不在知识库根下,存绝对路径
     sdata["acquired_date"] = datetime.now().strftime("%Y-%m-%d")
@@ -239,7 +239,7 @@ def record_external_md_path(paper_dir: Path, external_md_uri: str) -> None:
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = yaml.safe_load(f) or {}
     meta.setdefault("source", {})["external_md_path"] = external_md_uri
-    with open(meta_path, "w", encoding="utf-8") as f:
+    with open(meta_path, "w", encoding="utf-8", newline="\n") as f:
         yaml.dump(meta, f, allow_unicode=True, default_flow_style=False)
     meta = load_meta_yaml(paper_dir)
     ext_pdf = (meta.get("source") or {}).get("external_path")
@@ -349,7 +349,10 @@ def _blsc_ocr_config() -> dict:
 def _render_pdf_pages(pdf_path: Path, dpi: int) -> Optional[list]:
     """将 PDF 每页渲染为 PNG 字节列表；PyMuPDF 不可用时返回 None。"""
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
     except ImportError:
         logger.warning("  ⚠️ BLSC OCR: PyMuPDF 未安装，无法渲染 PDF 页面")
         return None
@@ -506,7 +509,7 @@ print(result.document.export_to_markdown())
         result = subprocess.run(
             [str(docling_python), "-c", script],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=300,
             cwd=str(PROJECT_ROOT),
         )
@@ -538,7 +541,10 @@ def extract_pymupdf(paper_dir: Path, paper_id: str) -> Optional[str]:
         return None
     
     try:
-        import fitz
+        try:
+            import pymupdf as fitz  # PyMuPDF >= 1.24 的模块名
+        except ImportError:  # 旧版 PyMuPDF 只有 fitz
+            import fitz
     except ImportError:
         logger.warning("  ⚠️ PyMuPDF 未安装，跳过")
         return None
@@ -737,7 +743,7 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
         logger.info(f"   💾 备份: {backup_path.name}")
     
     # 写入新文件
-    md_path.write_text(best_content, encoding="utf-8")
+    md_path.write_text(best_content, encoding="utf-8", newline="\n")
     
     # 更新元数据
     meta["preferred"] = best_engine

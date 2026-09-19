@@ -191,7 +191,7 @@ def main():
         }
         for old, new in replacements.items():
             yaml = yaml.replace(old, new)
-        CONFIG_PATH.write_text(yaml, encoding="utf-8")
+        CONFIG_PATH.write_text(yaml, encoding="utf-8", newline="\n")
         print(f"\n✅ 已写入 {CONFIG_PATH}")
     else:
         print(f"\n(dry-run) 加 --write 写入 config")

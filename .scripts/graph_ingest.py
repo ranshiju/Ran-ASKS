@@ -1298,7 +1298,7 @@ def ensure_research_hub(conn, direction_name, page_path):
             f"status: active\ncreated: {today}\nupdated: {today}\n---\n\n"
             f"# {direction_name}\n\n## Scope\n\n{scope}\n"
         )
-        hub_file.write_text(content, encoding="utf-8")
+        hub_file.write_text(content, encoding="utf-8", newline="\n")
         is_new = True
     gl.ensure_node(
         conn, hub_path, direction_name, "hub", "", "", "current", 0,
@@ -1342,7 +1342,7 @@ def sync_hub_keywords_to_hub(hub_path, keywords):
         return 0
     insert_at = (last_item + 1) if last_item is not None else end
     new_lines = lines[:insert_at] + [f"- {kw}" for kw in added] + lines[insert_at:]
-    hub_file.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+    hub_file.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8", newline="\n")
     return len(added)
 
 
@@ -1661,7 +1661,7 @@ def ensure_raw_support_edge(conn, page_path, fm=None):
         source_target = gl.REPO / qualified_source_file
         if source_target.parent.is_dir():
             aliases.extend(
-                str(candidate.relative_to(gl.REPO))
+                candidate.relative_to(gl.REPO).as_posix()
                 for candidate in source_target.parent.glob(f"{source_target.stem}.*")
                 if candidate.is_file()
             )
