@@ -8,8 +8,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+import sys
 
 from dsh.harness import ToolExecution, ToolExecutionResult
+
+SCRIPTS = Path(__file__).resolve().parents[2] / ".scripts"
+sys.path.insert(0, str(SCRIPTS))
+import query_actions
 
 
 @dataclass
@@ -32,11 +38,12 @@ class CitationGuard:
 
     def on_post_execute(self, exec_ctx: ToolExecution,
                         result: ToolExecutionResult):
-        """read_raw 成功时记录 locator。"""
+        """read_raw 成功时记录已读 locator 及其可引用原件。"""
         if exec_ctx.name == "read_raw" and not result.is_error:
             locator = exec_ctx.arguments.get("locator", "")
-            if locator and locator not in self.read_sources:
-                self.read_sources.append(locator)
+            for source in query_actions.raw_citation_sources(locator):
+                if source and source not in self.read_sources:
+                    self.read_sources.append(source)
         return None
 
     def check(self, citations: list[str]) -> CitationCheck:

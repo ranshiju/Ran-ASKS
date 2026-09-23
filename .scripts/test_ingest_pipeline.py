@@ -209,6 +209,32 @@ def test_semantic_ingest_contract():
     }
 
 
+def test_semantic_ingest_resolves_paper_subject_aliases():
+    page = "academic/wiki/papers/test"
+    semantic = """三元组:
+__agent_locked_paper_id__ | 核心方法 | 张量网络
+test | 研究基础 | 量子多体系统
+"""
+    triples, _keywords, _main, _corresponding, _cross, _predicates = graph_ingest.parse_semantic_text(
+        semantic, page
+    )
+    assert [triple["subject"] for triple in triples] == [page, page]
+    subject_report = graph_ingest.semantic_subject_report(triples, page)
+    assert subject_report == {
+        "resolved_subjects": 2,
+        "placeholder_subjects": 0,
+        "other_subjects": 0,
+    }
+    candidates = graph_ingest.navigation_connectivity_candidates(triples, page, set())
+    assert graph_ingest.PAPER_SUBJECT_PLACEHOLDER not in candidates
+
+
+def test_bare_abbreviation_detection_ignores_mixed_case_word_interior():
+    assert not graph_ingest.is_bare_abbreviation("张量LoRA")
+    assert graph_ingest.is_bare_abbreviation("张量MLP")
+    assert graph_ingest.is_bare_abbreviation("MLP")
+
+
 def test_paper_metadata_edges_come_from_frontmatter_not_weak_llm_slots():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -308,6 +334,57 @@ def test_duplicate_edge_keeps_one_optional_locator_and_page_origins():
         assert conn.execute("SELECT source FROM edges").fetchone()[0] == "academic/raw/a.txt#topic"
         assert conn.execute("SELECT COUNT(*) FROM edge_origins").fetchone()[0] == 2
         assert conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 1
+        conn.close()
+
+
+def test_automatic_hub_route_records_protected_authorization_origin():
+    with tempfile.TemporaryDirectory() as directory:
+        db_path = Path(directory) / "graph.db"
+        conn = graph_ingest.gl.connect(db_path)
+        graph_ingest.gl.init_schema(conn)
+        page = "academic/wiki/papers/p"
+        hub = "academic/wiki/hubs/h"
+        graph_ingest.gl.ensure_node(conn, page, "Paper", "page")
+        graph_ingest.gl.ensure_node(conn, hub, "Hub", "hub")
+        graph_ingest.add_knowledge_edges(conn, page, [{
+            "subject": page,
+            "predicate": "主要研究",
+            "object": hub,
+            "source": f"{page}#研究方向定位",
+            "subject_is_canonical": True,
+            "object_is_canonical": True,
+            "protected_edge_authorization": f"automatic-route:{page}#研究方向定位",
+        }])
+        edge_id = conn.execute(
+            "SELECT id FROM edges WHERE subject=? AND predicate='主要研究' AND object=?",
+            (page, hub),
+        ).fetchone()[0]
+        origins = {
+            row[0] for row in conn.execute(
+                "SELECT source FROM edge_origins WHERE edge_id=?", (edge_id,)
+            )
+        }
+        conn.close()
+    assert f"automatic-route:{page}#研究方向定位" in origins
+
+
+def test_graph_writer_rejects_unmanaged_protected_route():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = graph_ingest.gl.connect(Path(directory) / "graph.db")
+        graph_ingest.gl.init_schema(conn)
+        page = "academic/wiki/papers/p"
+        graph_ingest.gl.ensure_node(conn, page, "Paper", "page")
+        try:
+            graph_ingest.add_knowledge_edges(conn, page, [{
+                "subject": page,
+                "predicate": "主要研究",
+                "object": "academic/wiki/hubs/h",
+            }])
+        except ValueError as exc:
+            assert "automatic-route authorization" in str(exc)
+        else:
+            raise AssertionError("unmanaged protected route must fail before graph writes")
+        assert conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 0
         conn.close()
 
 

@@ -19,7 +19,9 @@ LLM 判断指令类型后,调本脚本截取对应规范 section,拼成 prompt�
   route.py --task research # 研究:输出 RESEARCH 规范
   route.py --task frontier # 研究前沿:输出 FRONTIER 规范
   route.py --capability write --capability-profile academic # research 状态内按需加载论文落笔能力
-  route.py --list           # 分类列出 task/state 与 capability
+  route.py --capability cv --capability-profile general # workspace 状态内加载简历制作与维护契约
+  route.py --capability presentation --capability-profile create # PPT 创作契约与当前可执行入口
+  route.py --list           # 分类列出持续状态、路由任务与按需能力
 
 ingest 参数说明:
   --mode   create(默认)/update/batch
@@ -42,6 +44,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / ".scripts"))
 import agent_task
 import engineering_locator as engineering_loc
+import function_registry as fr
 from engineering_graph import capability as engineering_capability
 from engineering_graph import load as load_engineering_graph
 from engineering_graph import validate as validate_engineering_graph
@@ -221,9 +224,22 @@ ROUTES = {
     },
 }
 
-# 能力是工作状态内按需加载的规范包；它不改变当前 task/state。
+# 能力是工作状态内按需加载的规范包；它不创建或切换持续状态。
 # 顶层 --task write 继续作为 general profile 的兼容入口。
 CAPABILITY_ROUTES = {
+    "cv": {
+        "general": [
+            ("operations/CV.md", ["功能边界", "工作主记录", "用户入口", "更新流程", "DOCX 与版本", "校验与交付"]),
+        ],
+    },
+    "presentation": {
+        "create": [
+            ("operations/PRESENTATION.md", ["入口与成熟度", "当前可执行动作", "创作边界"]),
+        ],
+        "form-check": [("operations/PRESENTATION.md", ["PPT形式检查入口"])],
+        "evidence-check": [("operations/PRESENTATION.md", ["PPT证据核查入口"])],
+        "citation-redact": [("operations/PRESENTATION.md", ["PPT引用脱敏入口"])],
+    },
     "write": {
         "general": [
             (ROUTES["write"]["file"], ROUTES["write"]["sections"]),
@@ -400,7 +416,7 @@ def resolve_ingest(route, args):
 
 
 def emit_capability(name: str, profile: str) -> None:
-    """输出可在当前工作状态内组合的能力规范，不改变 task/state。"""
+    """输出可在当前工作状态内组合的能力规范，不创建或切换状态。"""
     profiles = CAPABILITY_ROUTES.get(name)
     if profiles is None or profile not in profiles:
         available = sorted(profiles or {})
@@ -441,16 +457,16 @@ def main():
     ap = argparse.ArgumentParser(description="按 task 分发规范 prompt")
     ap.add_argument("--task", help="任务类型(ingest/query/lint/sync/write/scan/inbox/hub/build/research/frontier)")
     ap.add_argument("--capability", choices=sorted(CAPABILITY_ROUTES),
-                    help="在当前 task/state 内按需加载的能力")
+                    help="在当前持续状态内按需加载的能力")
     ap.add_argument("--capability-profile", default="general",
-                    help="能力 profile（write: general/academic）")
+                    help="能力 profile（write: general/academic；presentation: create/form-check/evidence-check/citation-redact）")
     ap.add_argument("--subproject", help="子项目(admin/teaching/business/private;cross-domain 跨域),ingest 时用（论文 PDF 走 ingest_paper.py playbook,不走 route.py；非inbox academic 论文走 ingest_paper.py --raw；private 物理隔离独立 graph.db）")
     ap.add_argument("--mode", help="ingest 模式: create(默认)/update/batch")
     ap.add_argument("--content", help="ingest 内容类型: paper(默认)/other")
     ap.add_argument("--source-kind", choices=["ordinary", "meeting"], default="ordinary",
                     help="ingest 来源类型: ordinary(默认)/meeting")
     ap.add_argument("--stage", type=int, help="ingest create 模式的 stage: 1/2/3")
-    ap.add_argument("--list", action="store_true", help="分类列出 task/state 与 capability")
+    ap.add_argument("--list", action="store_true", help="从统一功能注册表分类列出状态、任务与按需能力")
     ap.add_argument("--query", default="", help="query 任务的用户问题")
     ap.add_argument("--profile", choices=["auto", *QUERY_PROFILE_SECTIONS], default="auto")
     ap.add_argument("--query-stage", choices=QUERY_STAGE_SECTIONS, default="start",
@@ -460,19 +476,13 @@ def main():
     args = ap.parse_args()
 
     if args.list:
-        print("可用 task/state（write 为兼容别名）:")
-        for k, v in ROUTES.items():
-            suffix = " [compat -> capability write/general]" if k == "write" else ""
-            print(f"  {k}: {v['file']}{suffix}")
-        print("可用 capability:")
-        for name, profiles in CAPABILITY_ROUTES.items():
-            print(f"  {name}: profiles={','.join(sorted(profiles))}")
+        print(fr.render_route_listing())
         return
 
 
     if args.capability:
         if args.task:
-            print("ERROR: --task 与 --capability 分别表示状态路由和按需能力，请分两次调用。", file=sys.stderr)
+            print("ERROR: --task 与 --capability 是两类独立入口，请分两次调用。", file=sys.stderr)
             sys.exit(1)
         emit_capability(args.capability, args.capability_profile)
         return

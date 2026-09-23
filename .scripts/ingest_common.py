@@ -1497,6 +1497,7 @@ def _record_abbreviation_warnings(state: dict, REPO: Path) -> None:
         state["abbreviation_warnings_recorded"] = True
         return
     todo_path = REPO / "cross-domain" / "abbreviation-todo.jsonl"
+    from graph_ingest import BARE_ABBREVIATION_TOKEN_RE
     existing, _errors = _read_abbreviation_todo(todo_path)
     txn = state.get("transaction_id", "")
     page = state.get("wiki_path", "")
@@ -1512,7 +1513,7 @@ def _record_abbreviation_warnings(state: dict, REPO: Path) -> None:
         if _is_page_identity_abbreviation(warning_entry):
             continue
         context = str(w.get("value") or w.get("object") or w.get("subject") or "")
-        tokens = re.findall(r"[A-Z]{2,}[A-Za-z0-9]*", context)
+        tokens = BARE_ABBREVIATION_TOKEN_RE.findall(context)
         for token in tokens:
             additions.append({
                 "schema_version": "abbreviation-todo-v2",

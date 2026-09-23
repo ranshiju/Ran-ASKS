@@ -84,6 +84,19 @@ def test_real_playbook_dispatches_class_meeting_proposal_to_workspace_items():
     assert "不触发会议纪要摄入" in result
 
 
+def test_real_playbook_dispatches_department_report_aliases():
+    for query in ("系会", "系会汇报", "系会：新增科研宣传汇报", "系会汇报：标记已汇报"):
+        result = module.dispatch(query)
+        assert result is not None
+        assert result.startswith("## 系会汇报\n")
+        assert "projects/科研副主任工作区/系会汇报" in result
+        assert "待汇报" in result and "已汇报" in result
+        assert "workspace_state.py item" in result
+        assert "不使用班子会 `proposal` 状态" in result
+        assert "不触发会议纪要摄入" in result
+        assert "## 班子会提案" not in result
+
+
 def test_dispatch_short_query():
     with playbook_fixture():
         result = module.dispatch("x")
@@ -108,6 +121,7 @@ def main():
     test_dispatch_hit_update_docs()
     test_dispatch_no_match()
     test_real_playbook_dispatches_class_meeting_proposal_to_workspace_items()
+    test_real_playbook_dispatches_department_report_aliases()
     test_dispatch_short_query()
     test_list_entries()
     print("playbook dispatch regression: PASS")

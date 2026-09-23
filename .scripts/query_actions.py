@@ -440,7 +440,7 @@ RAW_PREVIEW_CHARS = 8000
 
 def read_raw(locator: str = "") -> tuple[str, int]:
     """按精确 locator 读 raw 片段；拒绝裸路径和 #全篇。
-    复用 source_locator 解析路径+定位器，返回文本+token。"""
+    复用 source_locator 解析路径+定位器；companion 可承载读取，引用保留原件。"""
     if not locator.strip():
         return "[ERROR 缺 locator]", 0
     path_part, loc = sl.split_locator(locator)
@@ -449,23 +449,32 @@ def read_raw(locator: str = "") -> tuple[str, int]:
     target = sl.resolve_path(path_part)
     if target is None:
         return f"[ERROR raw 路径未解析: {path_part}]", 0
-    rel = str(target.resolve().relative_to(_REPO)) if target.is_absolute() else str(target)
     if not loc or loc == "全篇":
         return "[ERROR read_raw 需要精确 locator（标题、Lx-Ly 或 page-x-y）；不向 LLM 返回全文]", 0
-    status = sl.locator_status(loc, target) if loc else "present"
+    source_target, read_target = sl.evidence_targets(target, loc)
+    source_rel = str(source_target.resolve().relative_to(_REPO))
+    read_rel = str(read_target.resolve().relative_to(_REPO))
+    status = sl.locator_status(loc, read_target)
     if status == "missing":
-        return f"[ERROR locator '{loc}' 在 {rel} 中未找到]", 0
-    is_binary = target.suffix.lower() in sl.BINARY_SUFFIXES
-    seg = sl.read_locator_text(target, loc)
-    if seg is None and is_binary:
-        msg = f"[OK locator '{loc}' 已验证存在于 {rel}，但原文件无可返回文本；读取同目录 Markdown companion]"
-        return msg, _tok(msg)
+        return f"[ERROR locator '{loc}' 在 {read_rel} 中未找到]", 0
+    seg = sl.read_locator_text(read_target, loc)
     if seg is None:
         return f"[ERROR locator '{loc}' 已验证但无法精确截取；未返回全文]", 0
     if len(seg) > RAW_PREVIEW_CHARS:
         return f"[ERROR locator '{loc}' 命中 {len(seg)} 字符，范围过大；请细化 locator，未返回半截内容]", 0
-    header = f"[raw {rel}#{loc or '全篇'}]\n"
+    header = f"[raw source={source_rel}; evidence={read_rel}#{loc}]\n"
     return header + seg, _tok(header + seg)
+
+
+def raw_citation_sources(locator: str) -> list[str]:
+    """Return verified citation aliases after a successful ``read_raw`` call."""
+    path_part, loc = sl.split_locator(locator)
+    target = sl.resolve_path(path_part or locator)
+    if target is None or not loc:
+        return [locator] if locator else []
+    source_target, _ = sl.evidence_targets(target, loc)
+    source_rel = str(source_target.resolve().relative_to(_REPO))
+    return list(dict.fromkeys([locator, source_rel]))
 
 
 DISPATCH = {

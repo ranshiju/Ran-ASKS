@@ -942,7 +942,7 @@ def test_extract_pdf_bibliography_reads_iop_wrapper_second_page_header():
     assert result["venue"] == "EPL"
     assert result["doi"] == "10.1209/0295-5075/104/57009"
     assert result["evidence"]["venue"] == "pdf_front_matter"
-    assert result["evidence"]["year"] == "pdf_front_matter.published"
+    assert result["evidence"]["year"] == "pdf_front_matter.published_online"
 
 
 def test_bibliographic_review_schema_accepts_example():
@@ -3873,6 +3873,11 @@ def test_run_inbox_batch_barrier_holds_when_not_ready():
     assert calls["commit"] == [], "barrier must hold: no commit when a paper is not ready"
     assert '"phase": "prepare"' in out and '"status": "partial"' in out
     payload = json.loads(out)
+    assert payload["schema"] == "ingest-result-v1"
+    assert payload["workflow_status"] == "awaiting_agent"
+    assert payload["terminal"] is False
+    assert payload["counts"]["total"] == 2
+    assert sum(payload["counts"][key] for key in module.inbox_state.PUBLIC_WORKFLOW_STATUSES) == 2
     failed_item = next(item for item in payload["items"] if item["status"] == "agent_required")
     assert failed_item["failure_disposition"]["category"] == "semantic_decision"
     assert failed_item["failure_disposition"]["owner"] == "host_agent"
@@ -3887,6 +3892,41 @@ def test_run_inbox_batch_commits_when_all_ready():
     assert sorted(calls["prepare"]) == ["a.pdf", "b.pdf"]
     assert calls["commit"] == ["a.pdf", "b.pdf"], "phase 2 must commit all ready papers"
     assert '"phase": "commit"' in out and '"status": "completed"' in out
+    payload = json.loads(out)
+    assert payload["workflow_status"] == "completed"
+    assert payload["terminal"] is True
+    assert payload["counts"]["completed"] == 2
+
+
+def test_ingest_result_distinguishes_invocation_from_commit():
+    state = {
+        "status": "prepared", "transaction_id": "txn-await",
+        "agent_task": {"schema": "agent-task-v1", "commands": {"check": "check-it"}},
+    }
+    payload = module.inbox_state.output_payload(state, {
+        "status": "prepared", "agent_task": state["agent_task"],
+    })
+    assert payload["schema"] == "ingest-result-v1"
+    assert payload["invocation_status"] == "ok"
+    assert payload["workflow_status"] == "awaiting_agent"
+    assert payload["terminal"] is False
+    assert payload["committed"] is False
+    assert payload["state_ref"].endswith("txn-await.json")
+    assert payload["next_actions"] == {"check": "check-it"}
+
+
+def test_generic_graph_input_cannot_create_protected_hub_route():
+    import graph_ingest
+    try:
+        graph_ingest.reject_protected_edge_proposals([{
+            "subject": "academic/wiki/papers/a",
+            "predicate": "主要研究",
+            "object": "academic/wiki/hubs/h",
+        }], "academic/wiki/papers/a")
+    except ValueError as exc:
+        assert "受保护边" in str(exc)
+    else:
+        raise AssertionError("generic graph input must not create protected route")
 
 
 def test_run_inbox_batch_prepare_uses_bounded_parallelism_and_serial_commit():
@@ -4733,6 +4773,248 @@ def test_reingest_current_raw_skips_generation_without_force():
     assert payload["status"] == "completed"
     assert payload["items"][0]["status"] == "up_to_date"
     assert payload["items"][0]["api_called"] is False
+
+
+def test_pdf_layout_candidates_separate_authors_affiliations_and_date_kinds():
+    blocks = [
+        {
+            "page": 1, "block": 1, "relative_bbox": [0.1, 0.1, 0.9, 0.2],
+            "text": "Stable Layout Paper",
+            "evidence": "pdf_layout_front_matter.page1.block1",
+        },
+        {
+            "page": 1, "block": 2, "relative_bbox": [0.1, 0.22, 0.9, 0.3],
+            "text": "Alice Example\nBob Builder",
+            "evidence": "pdf_layout_front_matter.page1.block2",
+        },
+        {
+            "page": 1, "block": 3, "relative_bbox": [0.1, 0.31, 0.9, 0.4],
+            "text": "Department of Physics, Example University",
+            "evidence": "pdf_layout_front_matter.page1.block3",
+        },
+        {
+            "page": 1, "block": 4, "relative_bbox": [0.1, 0.65, 0.9, 0.72],
+            "text": "Received 12 May 2022; revised 3 June 2023; published online 4 July 2024",
+            "evidence": "pdf_layout_front_matter.page1.block4",
+        },
+    ]
+    layout = module._layout_bibliographic_candidates(blocks, "Stable Layout Paper")
+    assert [item["value"] for item in layout["authors"]] == [
+        "Alice Example", "Bob Builder",
+    ]
+    assert [item["value"] for item in layout["affiliations"]] == [
+        "Department of Physics, Example University",
+    ]
+    assert [(item["value"], item["kind"]) for item in layout["dates"]] == [
+        ("2024", "published_online"),
+        ("2022", "received"),
+        ("2023", "revised"),
+    ]
+
+
+def test_pdf_layout_catalog_keeps_typed_candidate_only_evidence():
+    bibliography = {
+        "title": "Stable Layout Paper",
+        "evidence": {"title": "pdf_metadata.title"},
+        "layout_candidates": {
+            "authors": [{
+                "value": "Alice Example",
+                "evidence": "pdf_layout_front_matter.page1.block2",
+            }],
+            "affiliations": [{
+                "value": "Example University",
+                "evidence": "pdf_layout_front_matter.page1.block3",
+            }],
+            "dates": [{
+                "value": "2024", "kind": "published_online",
+                "evidence": "pdf_layout_front_matter.page1.block4",
+            }],
+            "venues": [{
+                "value": "Journal of Stable Results",
+                "evidence": "pdf_layout_front_matter.page1.block5",
+            }],
+        },
+    }
+    md_text = "# Stable Layout Paper\n\nAlice Example\n"
+    candidates = module.build_bibliographic_candidates(bibliography, md_text)
+    catalog = module.build_bibliographic_candidate_catalog(
+        candidates, bibliography, md_text,
+    )
+    assert catalog["fields"]["authors"][0]["provider"] == "pdf_layout_front_matter"
+    assert catalog["fields"]["venue"][0]["evidence"].endswith("block5")
+    assert catalog["fields"]["year"][0]["kind"] == "published_online"
+    assert catalog["excluded_affiliations"][0]["authority"] == "excluded_candidate"
+    decision = _candidate_id_decision(catalog)
+    decision["selections"]["year"]["kind"] = "published"
+    try:
+        module.compile_bibliographic_decision(decision, catalog, md_text)
+    except ValueError as exc:
+        assert "year.kind" in str(exc)
+    else:
+        raise AssertionError("typed PDF date evidence must reject a mismatched year kind")
+
+
+def test_extract_pdf_bibliography_preserves_front_matter_block_geometry():
+    import fitz
+    with tempfile.TemporaryDirectory() as directory:
+        pdf_path = Path(directory) / "layout.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 90), "Stable Layout Paper")
+        page.insert_text((72, 125), "Alice Example, Bob Builder")
+        page.insert_text((72, 155), "Department of Physics, Example University")
+        page.insert_text((72, 700), "Published online 4 July 2024")
+        doc.set_metadata({"title": "Stable Layout Paper"})
+        doc.save(pdf_path)
+        doc.close()
+        result = module.extract_pdf_bibliography(pdf_path)
+    assert result["front_matter_blocks"]
+    assert all(len(block["bbox"]) == 4 for block in result["front_matter_blocks"])
+    assert all(len(block["relative_bbox"]) == 4 for block in result["front_matter_blocks"])
+    assert "Alice Example" in [
+        item["value"] for item in result["layout_candidates"]["authors"]
+    ]
+    assert "Example University" not in result["authors"]
+
+
+def test_artifact_manifest_hash_covers_nested_bundle_and_workspace_detects_drift():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract_dir = root / "temp/inbox-extract/txn"
+        (extract_dir / "images").mkdir(parents=True)
+        (extract_dir / "mineru").mkdir()
+        (extract_dir / "paper.pdf").write_bytes(b"pdf")
+        (extract_dir / "paper.md").write_text("# Demo\n![](images/a.png)\n", encoding="utf-8")
+        (extract_dir / "images/a.png").write_bytes(b"image-v1")
+        (extract_dir / "mineru/layout.json").write_text("{}", encoding="utf-8")
+        state = {"extract_dir": "temp/inbox-extract/txn"}
+        digest = module._write_paper_artifact_manifest(state, extract_dir)
+        manifest = json.loads((extract_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["schema"] == "inbox-artifact-manifest-v2"
+        assert {item["path"] for item in manifest["raw_artifacts"]} == {
+            "paper.pdf", "paper.md", "images/a.png", "mineru/layout.json",
+        }
+        state.update({
+            "status": "prepared",
+            "agent_workspace": {
+                "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                "paper_md_sha256": module._file_sha256(extract_dir / "paper.md"),
+                "artifact_bundle_sha256": digest,
+                "output_path": "temp/inbox-extract/txn/agent-workspace.txt",
+            },
+        })
+        original_repo = module.REPO
+        module.REPO = root
+        try:
+            (extract_dir / "images/a.png").write_bytes(b"image-v2")
+            assert not module.resume_agent_workspace(state)
+        finally:
+            module.REPO = original_repo
+        assert state["errors"] == ["Agent workspace 输入论文文档包在交接后发生变化"]
+
+
+def test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "inbox/paper.pdf"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"pdf")
+        extract_dir = root / "temp/inbox-extract/txn"
+        (extract_dir / "images").mkdir(parents=True)
+        (extract_dir / "paper.pdf").write_bytes(b"pdf")
+        (extract_dir / "paper.md").write_text("# Stable Paper\n", encoding="utf-8")
+        (extract_dir / "images/a.png").write_bytes(b"image")
+        digest = module._file_sha256(source)
+        (extract_dir / "parse_meta.yaml").write_text(
+            "preferred: mineru\nengines:\n  mineru:\n    input_sha256: " + digest + "\n",
+            encoding="utf-8",
+        )
+        state = {
+            "transaction_id": "txn", "source": "inbox/paper.pdf",
+            "bibliographic_meta": {}, "errors": [],
+        }
+        originals = (
+            module.REPO, module.TEMP_EXTRACT, module.run,
+            module.review_bibliographic_metadata, module.prepare_agent_workspace_handoff,
+            module.ingest_mode,
+        )
+        try:
+            module.REPO = root
+            module.TEMP_EXTRACT = root / "temp/inbox-extract"
+            module.run = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("complete MinerU extraction must be reused"))
+            module.ingest_mode = lambda: "agent"
+            module.review_bibliographic_metadata = lambda *_args, **_kwargs: {
+                "status": "prepared", "catalog": {}, "candidates": {},
+                "input_hash": "hash", "worker": {},
+            }
+            module.prepare_agent_workspace_handoff = lambda current, *_args: current.update({
+                "agent_workspace": {"status": "awaiting_output"},
+            })
+            ok, message = module.step_extract(state)
+        finally:
+            (
+                module.REPO, module.TEMP_EXTRACT, module.run,
+                module.review_bibliographic_metadata, module.prepare_agent_workspace_handoff,
+                module.ingest_mode,
+            ) = originals
+        assert not ok and message == "Agent task prepared"
+        assert (extract_dir / "images/a.png").read_bytes() == b"image"
+        manifest = json.loads((extract_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert "images/a.png" in [item["path"] for item in manifest["raw_artifacts"]]
+        assert state["artifact_bundle_sha256"]
+
+
+def test_step_extract_preserves_only_mineru_checkpoint_before_retry():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "inbox/paper.pdf"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"pdf")
+        extract_dir = root / "temp/inbox-extract/txn"
+        (extract_dir / ".mineru").mkdir(parents=True)
+        (extract_dir / ".mineru/mineru-job-v1.json").write_text("{}", encoding="utf-8")
+        (extract_dir / "stale.txt").write_text("stale", encoding="utf-8")
+        state = {
+            "transaction_id": "txn", "source": "inbox/paper.pdf",
+            "bibliographic_meta": {}, "errors": [],
+        }
+        originals = (
+            module.REPO, module.TEMP_EXTRACT, module.run,
+            module.review_bibliographic_metadata, module.prepare_agent_workspace_handoff,
+            module.ingest_mode,
+        )
+        try:
+            module.REPO = root
+            module.TEMP_EXTRACT = root / "temp/inbox-extract"
+
+            def fake_run(_command):
+                assert (extract_dir / ".mineru/mineru-job-v1.json").is_file()
+                assert not (extract_dir / "stale.txt").exists()
+                (extract_dir / "paper.pdf").write_bytes(b"pdf")
+                (extract_dir / "paper.md").write_text("# Stable Paper\n", encoding="utf-8")
+                (extract_dir / "parse_meta.yaml").write_text(
+                    "preferred: mineru\n", encoding="utf-8",
+                )
+
+            module.run = fake_run
+            module.ingest_mode = lambda: "agent"
+            module.review_bibliographic_metadata = lambda *_args, **_kwargs: {
+                "status": "prepared", "catalog": {}, "candidates": {},
+                "input_hash": "hash", "worker": {},
+            }
+            module.prepare_agent_workspace_handoff = lambda current, *_args: current.update({
+                "agent_workspace": {"status": "awaiting_output"},
+            })
+            ok, message = module.step_extract(state)
+        finally:
+            (
+                module.REPO, module.TEMP_EXTRACT, module.run,
+                module.review_bibliographic_metadata, module.prepare_agent_workspace_handoff,
+                module.ingest_mode,
+            ) = originals
+        assert not ok and message == "Agent task prepared"
+        assert (extract_dir / ".mineru/mineru-job-v1.json").is_file()
 
 
 def main():

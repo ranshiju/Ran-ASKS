@@ -15,6 +15,22 @@ The public release is an engineering template, never a copy of the personal know
 - **Private**: all raw sources, personal or production compiled Wiki pages, graph databases, caches, outputs, inbox items, local memory, active project materials, personal state, and personal Codex skills declared private by the manifest. A sanitized paper-specific Wiki/Graph export is public only when it is versioned under `paper-artifacts/`, explicitly allowlisted, independently licensed, and verified.
 - **Review required**: a document that mixes public engineering rules with personal data must be split before publication. Put stable rules in public engineering documents and private context in `*.private.md` or a private project/status file.
 
+### Unconditional private exclusion
+
+`private/` is denied independently of the manifest: include rules, renamed asset sources,
+asset destinations, and template directories cannot authorize it. Release paths must be
+repository-relative, confined, and free of traversal or symlink indirection. Preflight
+checks run before clearing an existing destination; the destination cannot overlap the
+source repository. Verification rejects private paths (including empty directories)
+and symlinks in the generated tree. Run `.scripts/test_open_source_release.py` to check
+these boundaries using synthetic data only.
+
+This is a path/export boundary, not automatic content declassification: never copy private
+text into an allowlisted public asset. Source `.gitignore` does not untrack existing files
+or erase Git history; do not publish the source repository. History cleanup requires a
+separately reviewed migration. Private maintenance receipts and backups stay under
+`private/outputs/`, never in a release or shared temporary directory.
+
 ## Release version
 
 - The canonical public release version is the root `VERSION` file, formatted as `MAJOR.MINOR.PATCH`; documentation must not duplicate a current-version constant.

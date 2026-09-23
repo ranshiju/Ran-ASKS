@@ -1,0 +1,56 @@
+schema: cv-template-v1
+id: academic-full
+renderer: native-docx-v1
+description: Anonymized full academic CV structure.
+modules:
+  - id: profile
+    kind: profile
+    fields: [name, headline, research_interests]
+  - id: experience
+    kind: records
+    label: {zh: 教育与研究经历, en: Education and Research Experience}
+    categories: [education, research_experience, fellowship, employment]
+    required_categories: [education, research_experience, employment]
+    sort: date_asc
+  - id: books
+    kind: records
+    label: {zh: 学术专著, en: Academic Monographs}
+    categories: [book]
+    required_categories: [book]
+    sort: date_desc
+  - id: publications
+    kind: records
+    label: {zh: 学术论文, en: Academic Publications}
+    categories: [publication, conference_paper]
+    required_categories: [publication, conference_paper]
+    sort: date_desc
+  - id: patents
+    kind: records
+    label: {zh: 发明专利, en: Patents}
+    categories: [patent]
+    required_categories: [patent]
+    sort: date_desc
+  - id: academic_service
+    kind: records
+    label: {zh: 主办学术会议, en: Academic Service}
+    categories: [academic_service]
+    required_categories: [academic_service]
+    sort: date_desc
+  - id: invited_talks
+    kind: records
+    label: {zh: 邀请报告, en: Invited Talks}
+    categories: [invited_talk]
+    required_categories: []
+    sort: date_desc
+  - id: funding
+    kind: records
+    label: {zh: 基金项目, en: Research Funding}
+    categories: [funding]
+    required_categories: [funding]
+    sort: date_desc
+  - id: student_supervision
+    kind: records
+    label: {zh: 人才培养, en: Student Supervision}
+    categories: [student_supervision, student_award, student_roster]
+    required_categories: []
+    sort: source

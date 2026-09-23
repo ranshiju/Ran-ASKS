@@ -955,6 +955,10 @@ def test_compact_summary_excludes_graph_diagnostics_and_returns_report_path():
     report_path = module.REPO / "cross-domain" / "ingest-reports" / "test.json"
     compact = module._compact_summary(report, report_path)
     assert compact["status"] == "completed"
+    assert compact["schema"] == "ingest-result-v1"
+    assert compact["workflow_status"] == "completed"
+    assert compact["terminal"] is True
+    assert compact["counts"]["total"] == 1
     assert compact["report_path"] == "cross-domain/ingest-reports/test.json"
     assert "graph_report" not in compact["files"][0]
     assert compact["backend"] == "api"

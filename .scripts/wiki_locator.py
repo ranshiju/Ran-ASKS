@@ -28,6 +28,11 @@ RAW_PLACEHOLDER_RE = re.compile(
     re.M,
 )
 MAX_RAW_CITATION_CHARS = 8000
+PLACEHOLDER_CLAIM_RE = re.compile(
+    r"(?:结论|内容|信息|证据|详情)?(?:仍)?待(?:巩固|补充)"
+    r"|暂无(?:结论|内容|信息|证据)",
+)
+PLACEHOLDER_TOKEN_RE = re.compile(r"(?:tbd|todo|unknown)", re.I)
 
 
 def semantic_overlap_tokens(value: str) -> set[str]:
@@ -176,7 +181,7 @@ def read_wiki_locator(value: str, section: str = "") -> dict:
     if item is None:
         available = [entry.slug for entry in parse_wiki_page(target)[0]]
         raise KeyError(f"section '{wanted}' 不存在；可用: {', '.join(available)}")
-    rel = str(target.resolve().relative_to(REPO.resolve()))
+    rel = target.resolve().relative_to(REPO.resolve()).as_posix()
     return {
         "page": rel,
         "section": item.slug,
@@ -247,6 +252,41 @@ def validate_wiki_page(path: Path | str, *, require_citations: bool = False,
     return errors
 
 
+def validate_claim_sections(path: Path | str, section_names: tuple[str, ...]) -> list[str]:
+    """Reject mechanically empty or explicit placeholder claims.
+
+    This is deliberately not an entailment check. It only prevents a citation or
+    known placeholder token from masquerading as substantive Wiki prose.
+    """
+    target = Path(path)
+    sections, _definitions = parse_wiki_page(target)
+    by_slug = {item.slug: item for item in sections}
+    errors: list[str] = []
+    for name in section_names:
+        section = by_slug.get(heading_slug(name))
+        if section is None:
+            continue
+        body_lines = []
+        for line in section.text.splitlines()[1:]:
+            stripped = line.strip()
+            if not stripped or HEADING_RE.fullmatch(stripped) or FOOTNOTE_DEF_RE.fullmatch(stripped):
+                continue
+            body_lines.append(stripped)
+        body = "\n".join(body_lines)
+        without_citations = FOOTNOTE_REF_RE.sub("", body)
+        visible = re.sub(r"[\s`*_>#\[\](){}:;,.!?，。；：！？、\-]+", "", without_citations)
+        if not re.search(r"[A-Za-z0-9\u3400-\u9fff]", visible):
+            errors.append(f"{section.title} 只有脚注或格式标记，没有实质陈述")
+        token_lines = [
+            re.sub(r"[\s`*_>#\[\](){}:;,.!?，。；：！？、\-]+", "", line)
+            for line in without_citations.splitlines()
+        ]
+        if (PLACEHOLDER_CLAIM_RE.search(without_citations)
+                or any(PLACEHOLDER_TOKEN_RE.fullmatch(line) for line in token_lines)):
+            errors.append(f"{section.title} 含明确占位陈述")
+    return errors
+
+
 def best_cited_section(path: Path | str, *terms: str) -> WikiSection | None:
     """Choose a cited section for Graph navigation using deterministic text overlap."""
     sections, _definitions = parse_wiki_page(path)
@@ -279,7 +319,7 @@ def graph_wiki_source(path: Path | str, *terms: str) -> tuple[str, list[str]] | 
     item = best_cited_section(target, *terms)
     if item is None:
         return "", []
-    rel = str(target.resolve().relative_to(REPO.resolve())).removesuffix(".md")
+    rel = target.resolve().relative_to(REPO.resolve()).as_posix().removesuffix(".md")
     return f"{rel}#{item.slug}", list(item.raw_citations)
 
 

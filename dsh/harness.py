@@ -75,6 +75,11 @@ class ToolDefinition:
     input_schema: dict
     execute_fn: Callable[[dict], str]
     timeout_ms: int | None = None
+    function_id: str = ""
+    audience: tuple[str, ...] = ()
+    allowed_callers: tuple[str, ...] = ()
+    effects: tuple[str, ...] = ()
+    maturity: str = ""
 
 
 @dataclass
@@ -175,9 +180,12 @@ class ToolRegistry:
         5. tools/post-execute 瀑布（accept/block/replace/add context）
         6. tool/result 事件记入 session log
         """
-        session_log.append("tool/call", {"name": exec_ctx.name,
-                                          "arguments": exec_ctx.arguments})
         tool = self._tools.get(exec_ctx.name)
+        session_log.append("tool/call", {
+            "name": exec_ctx.name,
+            "function_id": tool.function_id if tool else "",
+            "arguments": exec_ctx.arguments,
+        })
         if tool is None:
             result = ToolExecutionResult(content=f"[ERROR 未知工具: {exec_ctx.name}]",
                                          is_error=True, error_code="UNKNOWN_TOOL")

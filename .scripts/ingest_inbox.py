@@ -1677,7 +1677,8 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
             "next_action", "resume_from", "failure_signature", "bibliographic_worker",
             "relationship_worker", "semantic_repair_worker", "failure_disposition",
             "fact_entries", "write_to", "manifest_path", "apply_command", "cleanup",
-            "agent_task", "workflow_status", "internal_status",
+            "agent_task", "workflow_status", "internal_status", "raw_dir", "wiki_path",
+            "receipt_path",
         ):
             if item.get(key) is not None:
                 compact[key] = item[key]
@@ -1689,8 +1690,14 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
                 if isinstance(warning, dict) else {"detail": str(warning)[:240]}
                 for warning in warnings[:5]
             ]
-        files.append(compact)
+        files.append(inbox_state.output_payload(item, compact))
+    batch = inbox_state.batch_output_payload(
+        items=files,
+        status=status,
+        phase="commit" if status in {"completed", "duplicate_found", "failed"} else "prepare",
+    )
     compact = {
+        **batch,
         "status": status,
         "file_status": status,
         "backend": report.get("backend"),
@@ -1706,6 +1713,7 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
         "report_path": str(report_path.relative_to(REPO)),
         "files": files,
     }
+    compact["artifact_refs"] = {"report": compact["report_path"]}
     if report.get("maintenance"):
         compact["maintenance"] = compact_maintenance(report["maintenance"])
     return compact
@@ -1754,6 +1762,11 @@ def main():
             result = {"status": "validation_error", "errors": [str(exc)],
                       "transaction_id": args.resume, "entrypoint": "inbox",
                       "backend": backend}
+        state = inbox_state.load(args.resume) or {
+            "status": result.get("status", "validation_error"),
+            "transaction_id": args.resume,
+        }
+        result = inbox_state.output_payload(state, result)
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         if result.get("status") in {"failed", "validation_error", "backend_mismatch"}:
             raise SystemExit(1)
@@ -1839,7 +1852,12 @@ def main():
         files = scan_inbox()
 
     if not files:
-        print("inbox/ 无待摄入文件")
+        if args.run:
+            print(json.dumps(inbox_state.batch_output_payload(
+                items=[], status="completed", phase="commit",
+            ), ensure_ascii=False, separators=(",", ":")))
+        else:
+            print("inbox/ 无待摄入文件")
         return
 
     # 分类；--run 的 stdout 留给最终紧凑摘要。
@@ -1951,12 +1969,14 @@ def main():
         }, ensure_ascii=False, indent=2))
         raise SystemExit(1)
     if args.run and classification_pending:
-        print(json.dumps({
+        task = _classification_task(classification_pending, args)
+        result = inbox_state.output_payload({"status": "prepared"}, {
             "status": "prepared",
-            "agent_task": _classification_task(classification_pending, args),
+            "agent_task": task,
             "intake": intake_receipt,
             "total": len(files),
-        }, ensure_ascii=False, indent=2))
+        })
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
     if not args.run:

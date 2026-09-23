@@ -21,6 +21,7 @@ _CONTROL_FLOW_STATUSES = frozenset({
 sys.path.insert(0, str(SCRIPTS))
 
 from dsh.harness import ToolDefinition
+from dsh.function_catalog import bind_tools
 import inbox_state
 
 
@@ -158,7 +159,7 @@ def _ingest_call(args: list[str], timeout: int = 1800) -> str:
 
 def build_ingest_tools() -> list[ToolDefinition]:
     """构建 DSH 摄入工具。"""
-    return [
+    tools = [
         ToolDefinition(
             name="ingest_inbox_dry_run",
             description="扫描 inbox 并返回自动分类表（不执行摄入、不落库）",
@@ -315,3 +316,4 @@ def build_ingest_tools() -> list[ToolDefinition]:
             execute_fn=lambda args: _ingest_call(["re_ingest.py", "--raw", args.get("raw", "")]),
         ),
     ]
+    return bind_tools(tools)

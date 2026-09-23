@@ -1,0 +1,426 @@
+schema: function-registry-v1
+version: 1
+purpose: >-
+  WikiGraph 运行时功能目录。统一管理用户功能、Agent 工具、固定管线、状态操作与 API worker；
+  不保存工作状态，不替代工程元图，也不把固定管线改造成动态 DSH 工作流。
+
+adapters:
+  dsh:
+    providers:
+      - module: dsh.tools
+        factory: build_tools
+      - module: dsh.ingest_tools
+        factory: build_ingest_tools
+      - module: dsh.visual_tools
+        factory: build_visual_tools
+      - module: dsh.visual_reconstruction_tools
+        factory: build_visual_reconstruction_tools
+      - module: dsh.comic_tools
+        factory: build_comic_tools
+      - module: dsh.build_tools
+        factory: build_build_tools
+
+states:
+  workspace:
+    title: 持续工作区
+    summary: 项目事项、提案、记忆和可重建投影的持续工作状态。
+    authority: projects/<path>/workspace.yaml + .workspace/items + .workspace/memories
+    route_tasks: []
+  research:
+    title: 研究工作
+    summary: 研究项目中的持续判断、实验、笔记和论文推进状态。
+    authority: projects/<path>/workspace.yaml + research profile
+    route_tasks: [research]
+  frontier:
+    title: 研究前沿
+    summary: 开放问题、部分答案、残余缺口、思路和验证轨迹的持续状态。
+    authority: academic/frontier/questions + academic/frontier/trajectories
+    route_tasks: [frontier]
+
+functions:
+  system.function_catalog:
+    title: 功能目录
+    summary: 列出、查看和按调用者、后端、状态解析 canonical 功能。
+    kind: tool
+    audience: [user, agent]
+    control_owners: [code]
+    allowed_callers: [main_agent, sub_agent, api_controller, pipeline]
+    backends: [agent, api]
+    effects: [read]
+    maturity: stable
+    bindings:
+      wg: [functions]
+      cli: [.scripts/function_registry.py]
+
+  knowledge.ingest:
+    title: 内容摄入
+    summary: 受管摄入附件、正文、Inbox、论文、会议和普通文档，并提交 Raw、Wiki、Graph 与回执。
+    kind: pipeline
+    audience: [user, agent]
+    control_owners: [host_agent, api_controller, code]
+    allowed_callers: [main_agent, api_controller, pipeline]
+    backends: [agent, api]
+    effects: [temp, raw, wiki, graph]
+    maturity: stable
+    bindings:
+      route_tasks: [ingest, inbox]
+      wg: [ingest]
+      dsh:
+        - ingest_inbox_dry_run
+        - ingest_inbox_run
+        - ingest_inbox_run_file
+        - ingest_user_assertions_apply
+        - ingest_paper_inbox
+        - ingest_paper_pdf
+        - ingest_paper_resume
+        - paper_workspace_read
+        - paper_workspace_refresh
+        - paper_workspace_check
+        - paper_workspace_commit
+        - ingest_meeting_txt
+        - ingest_meeting_resume
+        - ingest_document_file
+        - ingest_document_resume
+        - re_ingest_raw
+      cli:
+        - .scripts/ingest_inbox.py
+        - .scripts/ingest_paper.py
+        - .scripts/ingest_meeting.py
+        - .scripts/ingest_document.py
+      pipelines: [.scripts/ingest_pipeline.py]
+    protocols: [agent-task-v1, ingest-result-v1, knowledge-ir-v1, graph-plan-v1]
+
+  knowledge.query:
+    title: 知识查询与溯源
+    summary: 结构化召回、图导航、Wiki section 读取和 Raw locator 核验。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, api_controller]
+    allowed_callers: [main_agent, sub_agent, api_controller, pipeline]
+    backends: [agent, api]
+    effects: [read]
+    maturity: stable
+    bindings:
+      route_tasks: [query]
+      wg: [lookup, neighbors, relations, hub-of, abbr, read-section, hybrid-recall, read-raw]
+      dsh:
+        - graph_search
+        - graph_neighbors
+        - graph_relations
+        - graph_hub_of
+        - node_resolve
+        - semantic_search
+        - read_section
+        - read_raw
+        - admin_recall
+        - wiki_recall
+      cli: [.scripts/query_graph.py, .scripts/query_actions.py]
+
+  knowledge.lint:
+    title: 知识库健康检查
+    summary: 发现并报告结构、冲突、版本、来源、提示词和图质量问题，不自动扩面修复。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent, sub_agent, pipeline]
+    backends: [agent]
+    effects: [read, temp]
+    maturity: stable
+    bindings:
+      route_tasks: [lint]
+      cli: [.scripts/lint_specs.py, .scripts/graph_metrics.py, .scripts/ingest_check.py, .scripts/graph_validate.py]
+
+  knowledge.sync:
+    title: 跨域同步与对账
+    summary: 按增量、补漏和一致性核对跨域内容，并报告或提交受管变更。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, wiki, graph]
+    maturity: stable
+    bindings:
+      route_tasks: [sync]
+      executor: host_agent
+
+  knowledge.scan:
+    title: 存量扫描
+    summary: 发现新文件、更新版本、Inbox 项和待巩固候选；未授权时只报告。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, temp]
+    maturity: stable
+    bindings:
+      route_tasks: [scan]
+      executor: host_agent
+
+  knowledge.hub:
+    title: Hub 查询与生命周期
+    summary: 检查 Scope 和成员动力学，并在 Agent 确认后执行创建、分裂、合并或重分配。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, api_controller, code]
+    allowed_callers: [main_agent, sub_agent, api_controller, pipeline]
+    backends: [agent, api]
+    effects: [read, wiki, graph]
+    maturity: stable
+    bindings:
+      route_tasks: [hub]
+      dsh: [hub_route, hub_inspect]
+      cli: [.scripts/hub_semantics.py]
+
+  artifact.write:
+    title: 文稿写作与修改
+    summary: 基于可回溯材料生成或修改 Markdown、Word、PDF 和专业文稿。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent]
+    allowed_callers: [main_agent, sub_agent]
+    backends: [agent]
+    effects: [read, project]
+    maturity: stable
+    states: [workspace, research]
+    bindings:
+      route_task_aliases:
+        write: write/general
+      route_capabilities:
+        write: [general, academic]
+      executor: host_agent
+
+  artifact.cv:
+    title: 简历制作与维护
+    summary: 在持续工作区中使用匿名模板包组织模块，校验证据化双语履历，生成日期 DOCX 版本并比较版本差异。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, project]
+    maturity: preview
+    states: [workspace]
+    bindings:
+      route_capabilities:
+        cv: [general]
+      wg: [cv]
+      cli: [.scripts/cv.py]
+    protocols: [cv-template-v1, cv-version-v1]
+
+  artifact.presentation:
+    title: 演示文稿制作与辅助检查
+    summary: 制作、预览和导出原生 PPTX/PDF，并按需进行形式检查、证据核查和引用脱敏。
+    kind: pipeline
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, temp, project]
+    maturity: preview
+    states: [workspace, research]
+    bindings:
+      route_capabilities:
+        presentation: [create, form-check, evidence-check, citation-redact]
+      cli:
+        - .scripts/presentation_runtime.py
+        - .scripts/presentation_state.py
+        - .scripts/presentation_delivery.py
+      pipelines: [.scripts/presentation_state.py, .scripts/presentation_delivery.py]
+    protocols: [agent-task-v1, presentation-v1, presentation-assistance-v1]
+
+  artifact.image_ocr:
+    title: 图片 OCR
+    summary: 对图片执行源绑定转写、复核和回执生成；远程调用需要显式授权。
+    kind: tool
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent, sub_agent, pipeline]
+    backends: [agent, api]
+    effects: [read, temp, remote]
+    maturity: stable
+    bindings:
+      cli: [.scripts/image_ocr.py]
+    protocols: [image-ocr-v1]
+
+  artifact.visual_qa:
+    title: 视觉产物 QA
+    summary: 检查图片、PDF 和 PPT 页面中的可见缺陷，不修改输入产物。
+    kind: tool
+    audience: [user, agent]
+    control_owners: [host_agent, api_controller, code]
+    allowed_callers: [main_agent, sub_agent, api_controller, pipeline]
+    backends: [agent, api]
+    effects: [read, temp, remote]
+    maturity: stable
+    bindings:
+      dsh: [visual_check]
+      cli: [.scripts/visual_qa.py]
+
+  artifact.visual_reconstruction:
+    title: 图片或 PDF 转可编辑 PPT
+    summary: 将视觉输入重建为可编辑 PPTX，并报告 fallback 和视觉差异。
+    kind: pipeline
+    audience: [user, agent]
+    control_owners: [host_agent, api_controller, code]
+    allowed_callers: [main_agent, api_controller]
+    backends: [agent, api]
+    effects: [read, temp, project, remote]
+    maturity: stable
+    bindings:
+      dsh: [visual_to_editable_ppt]
+      cli: [.scripts/visual_to_editable_ppt.py]
+
+  artifact.comic:
+    title: 漫画与配图生成
+    summary: 查询模型并生成单图或 storyboard 批量图片；真实远程调用需要显式授权。
+    kind: tool
+    audience: [user, agent]
+    control_owners: [host_agent, api_controller]
+    allowed_callers: [main_agent, sub_agent, api_controller]
+    backends: [agent, api]
+    effects: [project, remote]
+    maturity: stable
+    bindings:
+      dsh: [comic_models, comic_generate, comic_batch]
+      cli: [.scripts/comic_generation.py]
+
+  state.workspace.manage:
+    title: 工作区状态管理
+    summary: 初始化、接续和管理事项、提案、记忆与可重建投影。
+    kind: state_operation
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent, sub_agent, pipeline]
+    backends: [agent, api]
+    effects: [read, project, state]
+    maturity: stable
+    states: [workspace, research]
+    bindings:
+      wg: [workspace]
+      cli: [.scripts/workspace_state.py]
+
+  state.research.manage:
+    title: 研究项目与记忆管理
+    summary: 初始化或校验研究项目，恢复上下文并记录稳定研究判断。
+    kind: state_operation
+    audience: [user, agent]
+    control_owners: [host_agent, api_controller, code]
+    allowed_callers: [main_agent, sub_agent, api_controller, pipeline]
+    backends: [agent, api]
+    effects: [read, project, state]
+    maturity: stable
+    states: [research]
+    bindings:
+      wg: [recall, remember]
+      dsh: [recall, remember]
+      cli: [.scripts/research_project.py, .scripts/research_memory.py]
+
+  state.frontier.manage:
+    title: Frontier 问题与轨迹管理
+    summary: 提问、回答、检索、审查和追加开放问题、思路与验证记录。
+    kind: state_operation
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent, sub_agent, pipeline]
+    backends: [agent, api]
+    effects: [read, state]
+    maturity: stable
+    states: [frontier, research]
+    bindings:
+      wg: [frontier]
+      cli: [.scripts/frontier.py]
+
+  engineering.build:
+    title: 系统建设
+    summary: 分析工程影响面、精确读取工程 locator、修改、验证和同步工程文档。
+    kind: function
+    audience: [agent]
+    control_owners: [host_agent, api_controller]
+    allowed_callers: [main_agent, api_controller]
+    backends: [agent, api]
+    effects: [read, project]
+    maturity: stable
+    bindings:
+      route_tasks: [build]
+      dsh: [build_engineering_impact, build_locator_read, build_locator_list]
+      cli: [.scripts/engineering_graph.py, .scripts/engineering_locator.py]
+
+  worker.ingest.paper_workspace:
+    title: 论文 workspace 语义 Worker
+    summary: API 模式下生成受候选、证据包和 schema 约束的论文 workspace 产物。
+    kind: worker
+    audience: [agent]
+    control_owners: [api_controller]
+    allowed_callers: [api_controller, pipeline]
+    backends: [api]
+    effects: [temp]
+    maturity: internal
+    bindings:
+      implementations: [.scripts/ingest_paper.py, .scripts/llm_structured.py]
+
+  worker.ingest.meeting_compiler:
+    title: 会议编译 Worker
+    summary: API 模式下按单一受限协议完成会议纠错、Wiki 和语义槽候选。
+    kind: worker
+    audience: [agent]
+    control_owners: [api_controller]
+    allowed_callers: [api_controller, pipeline]
+    backends: [api]
+    effects: [temp]
+    maturity: internal
+    bindings:
+      implementations: [.scripts/ingest_meeting.py, dsh/meeting_compiler_agent.py]
+
+  worker.ingest.document_semantic:
+    title: 通用文档语义 Worker
+    summary: API 模式下生成受 schema 约束的 Wiki 与语义槽候选。
+    kind: worker
+    audience: [agent]
+    control_owners: [api_controller]
+    allowed_callers: [api_controller, pipeline]
+    backends: [api]
+    effects: [temp]
+    maturity: internal
+    bindings:
+      implementations: [.scripts/ingest_document.py, .scripts/llm_structured.py]
+
+  worker.semantic_recovery:
+    title: 语义修复 Worker
+    summary: API 模式下对既有受限候选进行一次结构化局部修复，不持有事务控制循环。
+    kind: worker
+    audience: [agent]
+    control_owners: [api_controller]
+    allowed_callers: [api_controller, pipeline]
+    backends: [api]
+    effects: [temp]
+    maturity: internal
+    bindings:
+      implementations: [dsh/semantic_recovery_agent.py, .scripts/recovery_policy.py]
+
+  worker.frontier.answer:
+    title: Frontier 回答 Worker
+    summary: API 模式下只消费有界 Graph-Wiki-Raw 证据包并返回 schema 化候选答案。
+    kind: worker
+    audience: [agent]
+    control_owners: [api_controller]
+    allowed_callers: [api_controller, pipeline]
+    backends: [api]
+    effects: [temp]
+    maturity: internal
+    bindings:
+      implementations: [.scripts/frontier.py, .scripts/llm_structured.py]
+
+  worker.workspace.profile:
+    title: 工作区画像 Worker
+    summary: API 模式下从有界工作区快照生成画像候选，由共享 schema 校验后提交。
+    kind: worker
+    audience: [agent]
+    control_owners: [api_controller]
+    allowed_callers: [api_controller, pipeline]
+    backends: [api]
+    effects: [temp]
+    maturity: internal
+    bindings:
+      implementations: [.scripts/workspace_state.py, .scripts/llm_structured.py]

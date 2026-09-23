@@ -11,6 +11,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from visual_qa import run_visual_qa
 from dsh.harness import ToolDefinition
+from dsh.function_catalog import bind_tools
 
 
 def _visual_check(arguments: dict) -> str:
@@ -31,7 +32,7 @@ def _visual_check(arguments: dict) -> str:
 
 def build_visual_tools() -> list[ToolDefinition]:
     """Return the isolated visual tool set (not part of query_actions)."""
-    return [
+    tools = [
         ToolDefinition(
             name="visual_check",
             description=(
@@ -95,3 +96,4 @@ def build_visual_tools() -> list[ToolDefinition]:
             timeout_ms=None,
         )
     ]
+    return bind_tools(tools)

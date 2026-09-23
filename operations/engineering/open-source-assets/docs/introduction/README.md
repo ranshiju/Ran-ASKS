@@ -37,6 +37,16 @@ configuration. These are compatible ingestion extensions and fixes, not a new
 paper experiment or artifact. Both the Markdown and appended PDF pages contain
 the same addendum; previously reviewed PDF pages are retained.
 
+The 2026-09-23 `v0.7.0` addendum covers the canonical runtime function
+registry, explicit separation of persistent states from one-shot functions,
+native presentation authoring, and template-driven CV generation whose facts
+remain governed by Raw evidence. The public release includes an anonymous CV
+template package but no personal records or generated CV editions. It also
+records compatible extraction, ingestion-recovery, graph-validation, and
+engineering-analysis hardening. This update does not change a frozen paper
+artifact; the PDF retains its reviewed earlier pages and appends the same
+engineering update.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -74,6 +84,12 @@ Markdown 增加带日期的工程补充；PDF 保留之前已审阅的版式，�
 提取与宿主逐页复核、基于证据的来源日期、会议最终来源绑定和独立视觉服务配置。
 这些是兼容的摄入扩展与修复，不是新的论文实验或数据产物。Markdown 与 PDF 新增页
 使用同一补充内容，PDF 先前已审阅的页面予以保留。
+
+2026年9月23日的 `v0.7.0` 补充说明规范运行时功能注册表、持久状态与一次性功能的
+明确区分、原生演示文稿制作，以及以 Raw 证据为事实权威的模板驱动简历。公开版本
+包含匿名简历模板包，不包含个人记录或生成的实际简历版本；同时记录 PDF 提取、
+摄入恢复、图校验和工程影响分析的兼容性强化。本次更新不改变冻结论文产物，PDF
+保留此前已审阅页面，并附加同一工程更新内容。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

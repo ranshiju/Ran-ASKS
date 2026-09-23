@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = REPO / "operations" / "config" / "graph-schema.yaml"
 
 DEFAULTS = {
-    "version": 1,
+    "version": 5,
     "node_types": ["page", "people", "entity", "hub", "raw", "timeline-summary"],
     "entity_subtypes": [
         "keyword", "person", "proposition", "institution",
@@ -60,6 +60,13 @@ DEFAULTS = {
         "wiki_section_requires_raw_citation": True,
         "legacy_invalid_severity": "warn",
     },
+    "protected_edges": [{
+        "predicate": "主要研究",
+        "subject_type": "page",
+        "object_type": "hub",
+        "authorization_origin_prefixes": ["automatic-route:", "agent-confirmed:"],
+        "legacy_missing_severity": "warn",
+    }],
 }
 
 CHECKS = {
@@ -80,6 +87,7 @@ CHECKS = {
     "missing_semantic_description": "warn",
     "invalid_wiki_semantic_address": "warn",
     "uncited_wiki_semantic_address": "warn",
+    "missing_protected_edge_authorization": "warn",
 }
 
 
@@ -88,11 +96,15 @@ def _merged(config: dict) -> dict:
     merged = json.loads(json.dumps(DEFAULTS, ensure_ascii=False))
     if not config:
         return merged
+    merged["version"] = config.get("version", merged["version"])
     merged["node_types"] = config.get("node_types", merged["node_types"])
     merged["entity_subtypes"] = config.get("entity_subtypes", merged["entity_subtypes"])
     edge_conf = merged["edge_confidence"]
     edge_conf.update(config.get("edge_confidence") or {})
-    for key in ("semantic_descriptions", "semantic_address", "predicate_families", "traversal_profiles"):
+    for key in (
+        "semantic_descriptions", "semantic_address", "protected_edges",
+        "predicate_families", "traversal_profiles",
+    ):
         if key in config:
             merged[key] = config[key]
     return merged
@@ -179,6 +191,42 @@ def validate_graph(conn, config: dict) -> dict:
                 type_counts["unknown_edge_confidence"] += 1
                 if len(findings["warnings"]) < sample_limit:
                     _add(findings, "warn", "unknown_edge_confidence", f"未知置信度: {conf!r}", row)
+
+    for rule in config.get("protected_edges") or []:
+        predicate = str(rule.get("predicate") or "").strip()
+        prefixes = [
+            str(value) for value in rule.get("authorization_origin_prefixes") or []
+            if str(value)
+        ]
+        if not predicate or not prefixes:
+            continue
+        rows = conn.execute(
+            "SELECT e.id,e.subject,e.predicate,e.object "
+            "FROM edges e JOIN nodes s ON s.path=e.subject "
+            "JOIN nodes o ON o.path=e.object "
+            "WHERE e.predicate=? AND s.type=? AND o.type=?",
+            (
+                predicate,
+                str(rule.get("subject_type") or ""),
+                str(rule.get("object_type") or ""),
+            ),
+        ).fetchall()
+        missing = []
+        for row in rows:
+            origins = [
+                str(item[0] or "") for item in conn.execute(
+                    "SELECT source FROM edge_origins WHERE edge_id=?", (row["id"],)
+                )
+            ]
+            if not any(source.startswith(tuple(prefixes)) for source in origins):
+                missing.append(dict(row))
+        if missing:
+            type_counts["missing_protected_edge_authorization"] += len(missing)
+            _add(
+                findings, "warn", "missing_protected_edge_authorization",
+                f"{len(missing)} 条受保护边缺少受管写入 authorization origin（存量迁移项）",
+                {"examples": missing[:sample_limit]},
+            )
 
     address_contract = config.get("semantic_address") or {}
     if address_contract.get("wiki_locator_must_resolve_when_present", True):

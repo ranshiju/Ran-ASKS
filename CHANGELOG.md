@@ -7,6 +7,27 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-23
+
+### Version decision
+
+- MINOR: Add compatible registered artifact workflows for template-driven CVs and native presentations, strengthen ingestion and engineering validation, and preserve existing evidence and frozen-artifact contracts.
+
+### Highlights
+
+- Added a template-driven, evidence-gated bilingual CV workspace function with
+  dated immutable DOCX versions, version manifests, comparisons, and a fully
+  anonymized public academic-CV template package.
+- Added a canonical runtime function registry that keeps persistent states,
+  user-facing functions, route capabilities, unified CLI bindings, and backend
+  ownership aligned and mechanically validated.
+- Added local native presentation authoring with persistent revisions,
+  approval/locking boundaries, constrained layouts, deterministic delivery,
+  and source-sensitivity inheritance.
+- Hardened PDF extraction, ingestion recovery, graph validation, engineering
+  impact analysis, and isolated private-knowledge maintenance while preserving
+  the Raw evidence boundary and existing frozen paper artifacts.
+
 ## [0.6.0] - 2026-09-12
 
 ### Version decision

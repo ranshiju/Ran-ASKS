@@ -180,7 +180,7 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
 11. **即时校验(确定性壳)**：对本次摄入/修改的每个 wiki 文件运行 `.scripts/ingest_check.py <file1> [file2 ...]`(只读,不修改文件)。只校验**确定性结构**(frontmatter 必填+枚举、路径/type 一致、标准 section、wikilink 悬空、来源存在/配对/locator、日期、status/superseded_by 一致),不查语义(语义正确性仍由 LLM 把关)
     - **ERROR 阻断提交**：有 ERROR 须按报告定向修复后复检,全过才继续步骤 12。典型 ERROR:缺 `source_type`(Q9 教训)、枚举非法、`status:deprecated` 无 `superseded_by`、`##` section 重名、新页(created ≥ 2026-07-19)缺 `## Navigation`/`## Content`、正文残留 `RAW#Lx`、形如 `[^r13]6>` 的残缺 Raw 脚注或已用脚注无法精确回读 Raw。图校验为绿色不能替代 Wiki→Raw 完整性校验
     - **WARN 不阻断**：旧页缺标准 section(渐进迁移)、语义槽缺失(可能延迟巩固)、悬空 wikilink、sources 路径不存在、覆盖度锚点缺失(v6,见下)、提取引擎非 mineru(v8,见下)——建议修,不卡流程
-    - **提取引擎检查(v8,2026-07-30)**：ingest_check 对 paper-summary 类 source 的 `parse_meta.yaml` 检查 `preferred` 字段,非 `mineru`(extractor 默认引擎，MinerU 失败重试3次后不回落低优先级引擎)报 WARN,建议用 mineru 重提取。无 `parse_meta.yaml` 的 source(会议纪要/docx/web 等非 PDF 提取场景)不触发
+    - **提取引擎检查(v8,2026-07-30)**：ingest_check 对 paper-summary 类 source 的 `parse_meta.yaml` 检查 `preferred` 字段,非 `mineru`（extractor 默认引擎；MinerU 仅按类型重试 transient 故障，失败后不回落低优先级引擎）报 WARN,建议用 mineru 重提取。无 `parse_meta.yaml` 的 source(会议纪要/docx/web 等非 PDF 提取场景)不触发
     - **覆盖度锚点检查(v6,2026-07-27)**：ingest_check 对 paper-summary 类自动检查 raw 锚点(标题共同词/作者集合),缺失报 WARN。标题和作者优先使用相邻 source.yaml 中 `review.locked=true` 的 bibliographic.title/authors；锁定项不可用时才回退 paper.md 首个 H1/机械作者提取，避免把出版社包装 H1 或 affiliation 碎片算作论文书目。此检查是脚本检查(零 LLM token),非全读;语义级覆盖判断由 LLM 在上下文内复用 raw 完成(见 step 8 上下文复用),不二次读 raw
     - **来源/图联动检查**：默认检查来源实体、PDF/Markdown 配对、符号链接和已填写 locator；追加 `--graph` 后，检查 `sources` 对应的 Raw 文档包节点及 `Wiki → 来源 → Raw` 直连边，并继续检查论文作者集合/venue/方向 Hub 冲突与占位符元数据节点。知识边 locator 不要求填写；方向边必须指向唯一且自洽的 Hub path。
     - **附带发现上报**：执行任一指令时附带发现的 WARN(含本次校验及顺路看到的结构缺陷)，指令末向用户提示修复建议(只提示,不自动扩面修复)，不静默压到 LINT 周期。趁文件在上下文内修复成本最低；LINT 仍负责未被附带发现的全库积压
@@ -237,7 +237,7 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
 
 **用脚本截取**:`.scripts/read_paper.py <paper.md路径> [sections...]`
 - 默认截 6 段(abstract/introduction/method/results/discussion/conclusions),模糊匹配标题写法(罗马数字/编号/中英文)
-- 一次调用替代多次 grep+sed,省工具调用;报告命中/未命中(防漏读);Abstract 无 ## 时从 preamble 回退提取
+- 一次调用替代多次 grep+sed,省工具调用;报告命中/未命中(防漏读)。`A B S T R A C T`、`C O N C L U S I O N S` 等全大写单字母间隔标题仅在折叠后命中已知 section 名时参与匹配，输出仍保留原始标题和行位置。Abstract 无 `##` 时只接受可机械识别的 preamble 摘要边界；没有边界即报告 missing，不得把标题、作者或机构地址冒充摘要
 - stderr 输出诊断(命中哪些/未命中哪些/合计 token),stdout 只输出 section 正文
 - **禁止 `sed -n '1,Np'` 头部切片冒充定向读取**——头部切片靠"论文核心前装"运气,长综述(如 RMP/AIP 综述,正文数百节)会漏掉方法/结果段,产生无 raw 证据的论断(违反可追溯原则)
 
@@ -623,6 +623,12 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 - **raw 路径**：sources 写完整路径 `private/raw/{health,metaphysics}/<file>`（与主库「完整域前缀路径」一致）。
 - **校验**：`ingest_check.py` 按 `private/` 前缀选 private 库做图一致性校验；private 页 type 用 `private/SCHEMA.md` 枚举（`health-record`/`health-knowledge`/`metaphysics-profile`/`metaphysics-knowledge` 等）。
 - **resolve 不跨库**：裸名解析仅在 `private/graph.db` 内匹配，主库实体不会污染 private resolve，反之亦然。
+- **共享内核硬边界（2026-09-14）**：显式 `--db` 不能覆盖 private/public 隔离；页面与 Raw 来源的域、物理路径必须一致。暂存 Wiki、Raw override、semantic/IR/triples 输入和 IR/Graph plan 输出也必须留在 private，禁止借用共享 `temp/`；路径穿越或符号链接跨域直接拒绝。
+- **衍生状态隔离**：`graph_ingest` 的图作用域及 `node_semantics`/`hub_semantics` 的连接作用域决定 embedding 缓存；private 使用所选 private 图同目录下的 `embeddings.db`，缩写消解只处理该目录的 `abbreviation-todo.jsonl`。不得回落到公共缓存或公共队列。
+- **历史缓存不是安全起点**：若旧公共缓存已包含 private 文本，先用 `private_maintenance.py --quarantine-public-cache` 的 hash-gated 维护流程完整备份至 private 并清空公共衍生缓存；不要只改未来路由而保留历史泄漏项。两个域后续分别重建。
+- **不是物理论文模板**：private 按自身页面类型与内容组织，不套 arXiv 物理方向、`research-direction` 或 catch-all 研究 Hub。旧 research Hub 创建器仅允许 academic；当前自动 membership refresh 只对 academic 启用，private 的领域 Hub 仍需按本域契约显式建设。
+- **不发布**：private 的 Raw、Wiki、图、缓存、暂存、备份与日志均不进入 clean/GitHub；发布入口对 private 路径执行独立于 manifest 的硬拒绝。不要把 private 暂存物复制到已允许发布的工程资产中。
+
 
 ## 学术 raw 目录路径(own/others 分离)
 
@@ -636,7 +642,7 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 - `raw/works/papers/2024-luying-entanglement-prl.md`
 - `raw/references/pink-2025-episodic-memory.md`
 
-**PDF 提取**:调用**内置** `.scripts/extractor.py`(不跳过、不在别处另写兜底——extractor 内部 MinerU 为默认引擎（失败重试3次，退避0/5/15s；认证错误不重试），MinerU 耗尽后不静默回落 docling/pymupdf（论文质量要求），需低优先级引擎须显式 `--engine docling`/`--engine pymupdf`;档位与覆盖规则见 `academic/SCHEMA.md`)。提取后产出的 `paper.md` 存于对应论文目录(`<paper-id>/paper.md`):自己论文 `academic/raw/works/papers/<paper-id>/`(默认),他人论文 `academic/raw/references/<paper-id>/`(传 `--papers-dir`)。sources 字段用相对路径引用。**职责分离**:inbox 来的 PDF 按 `INBOX.md` 新流程,先用 `extractor --external-pdf <inbox路径> --paper <tmp-id> --papers-dir temp/inbox-extract` 在临时区提取为 `paper.md`,单遍阅读撰写 wiki 后由 `inbox_finalize.py` 实体复制落位到最终 `*/raw/<id>/`(不再"先归档再提取")。`--external-pdf` 用于 inbox 摄入的临时区提取;仅 synology:// 远程源等特殊场景另议。
+**PDF 提取**:调用**内置** `.scripts/extractor.py`。MinerU 为默认引擎，客户端按错误类型分阶段重试，terminal 的认证/配额/输入错误不重试；中断后用绑定输入与请求哈希的 checkpoint 复用原 batch，不重复提交。MinerU 失败不静默回落 docling/pymupdf，需低优先级引擎须显式指定。提取产物是完整文档包：`paper.md`、Markdown 实际引用的 `images/`、allowlist sidecar 与 `parse_meta.yaml`；未引用图片不归档。inbox 流程用 `inbox-artifact-manifest-v2` 记录嵌套 POSIX 路径、role、bytes、SHA-256，`inbox_finalize.py` 在 source/staging/receipt 三处复验后原子落位。`--external-pdf` 用于 inbox 摄入的临时区提取；仅 synology:// 远程源等特殊场景另议。
 
 > **分工边界**:`.scripts/extractor.py` 专处理**学术论文 PDF**(MinerU 默认+重试,产出 `<papers-dir>/<paper-id>/`);会议纪要 `.txt` 由 `ingest_meeting.py` 代码驱动摄入;学术非论文及行政/教学/商业文档(`.docx`/`.doc`/`.pptx`/`.txt`/`.pdf`)由 `ingest_document.py` 代码驱动摄入(`--subproject academic|admin|teaching|business`),内部用 textutil/pandoc 提取文本。academic 必须带 `--document-type editorial|academic-reference|conference-summary`，缺失时在事务与预处理前停止。
 
@@ -741,13 +747,13 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 
 **Frontier 后置触发（2026-08-26）**：论文 ingest 完成事实写入、图校验与常规收尾后，`finalize_tail` 非阻断调用 `frontier.py capture-paper`。程序只从 Raw 捕获作者明示的 open question/future work/未解决问题，先按句子与枚举项确定性拆为独立问题，单篇最多 3 条；每条幂等新建或精确复用 `academic/frontier/questions/` Question Page，再以紧凑 Graph→Wiki→Raw 证据包尝试一次本库回答，不让 LLM 发散问题。支持性结论必须引用包内 Raw locator；模型不可用或回答失败只保留 `answer_status: pending`，不得回滚、阻断事实摄入或额外产生摄入 warning。`scientific_state` 不随库内回答自动更新。
 
-**PDF 确定性书目预提取（2026-09-05）**：3.1 在调用 MinerU/LLM 前用 PyMuPDF 一次读取 PDF metadata 与第一页文本。title/authors 来自 metadata；year 优先取首页 published 证据，其次 subject/文件名/creationDate；venue 接受首页发表证据、`metadata.subject` 中可识别的完整期刊引文/期刊名及旧式可映射 APS DOI。MinerU `paper.md` 中近端 `ACM Reference format:` 引用还会成对提取本篇 title 与 ACM/Proceedings venue，并绑定同一引用行 locator；关键词式 subject 不猜 venue。结果只作为后续书目裁决候选，不以确定性提取器取代 Agent 对异构版式的证据复核。
+**PDF 确定性书目预提取**：3.1 在调用 MinerU/LLM 前用 PyMuPDF 一次读取 PDF metadata、前两页文本与 layout blocks。每个布局块保留 page、bbox、相对位置和原文；title 下、Abstract 上的姓名块产生作者候选，机构/邮箱块单列排除，不能混入作者。日期候选区分 `published`、`published_online`、`accepted`、`received`、`revised`、`preprint`，正式发表证据优先但冲突不自动裁决；venue 接受近端页眉/页脚、`metadata.subject` 可识别完整期刊引文、DOI 形态与 ACM Reference format。结果全部是 candidate-only，不以布局启发式取代 Agent 对异构版式的证据复核。
 
-**论文书目预审门（candidate-id-v2 / paper-agent-workspace-v1，2026-09-06）**：3.2 在 `paper.md` 已生成、`persist_bibliographic_metadata()` 之前，由程序把 PDF metadata、标题邻域与发表证据行编成稳定候选目录；各确定性提取器只以 `bibliographic-candidate-provider-v5 / candidate_only` 提供候选，不直接锁定事实。v5 在作者行已识别姓名后遇到全大写机构缩写即截断，并删除可由干净姓名覆盖的“姓名 + 机构”重复候选；原始提取行仍保留在 `paper.md` 作为证据，不改写 Raw。Agent 与 API 共用严格的 `<<<BIBLIOGRAPHIC>>>`、`<<<WIKI>>>`、`<<<SLOTS>>>` 产物协议：Agent 直接填写一次 workspace，API adapter 发一次有界模型调用；程序依次生成 `bibliographic-review.json`、`wiki.md`、`semantic.txt` 并分别运行版本化 validator。两端均只允许 authors 在候选不完整时用 Raw locator 提交逐人 proposed；其余字段不得生成候选外值，可靠 venue 候选非空而裁决或 Wiki 留空时硬阻断。确定性快路径只在 PDF 与 `paper.md` 对 title、完整有序 authors、year、venue、self DOI/arXiv 均有一致近端证据、标题不是刊头且标识不在引用区时锁定；“单候选+强标识”本身不再充分。书目失败阻断下游，Wiki 失败保留已验证书目，slots 失败保留已验证书目与 Wiki；API 定向修复只重做受影响产物，Agent 在原 workspace 内只改对应 segment。Agent 的 read/refresh/check/commit、哈希回执与 Graph preflight 规则保持不变。completed 事务的 `--resume` 只重算书目与图派生质量告警，变化时保存状态，不重开摄入或改写 Raw/Wiki/Graph。
+**论文书目预审门（candidate-id-v2 / paper-agent-workspace-v1）**：3.2 在 `paper.md` 已生成、`persist_bibliographic_metadata()` 之前，由程序把 PDF metadata、前两页布局候选、标题邻域与发表证据行编成稳定候选目录；各确定性提取器只以 `bibliographic-candidate-provider-v6 / candidate_only` 提供候选，不直接锁定事实。v6 分离作者与 affiliation，给日期候选绑定 kind，并保留近端 venue evidence；原始 PDF/`paper.md` 不改写。Agent 与 API 共用严格的 `<<<BIBLIOGRAPHIC>>>`、`<<<WIKI>>>`、`<<<SLOTS>>>` 产物协议；两端只允许 authors 在候选不完整时用 Raw locator 提交逐人 proposed，其余字段不得生成候选外值。workspace 同时绑定 paper.md、PDF、前两页文本与完整提取文档包哈希；图片或 sidecar 改变同样阻断 resume/commit。确定性快路径只在 PDF 与 `paper.md` 对 title、完整有序 authors、year、venue、self DOI/arXiv 均有一致近端证据时锁定；冲突仍进入同一 workspace 裁决。书目失败阻断下游，Wiki 失败保留已验证书目，slots 失败保留已验证书目与 Wiki。completed 事务的 `--resume` 只重算书目与图派生质量告警，不重开摄入或改写 Raw/Wiki/Graph。
 
 **中文命题证据定位（pipeline v14）**：`wiki_locator` 不再把连续中文整句视为一个必须逐字命中的 token，而是用确定性 CJK bigram 覆盖率比较已引用的小节，并在该节的 Raw citations 中复用同一评分。这样轻微改写的 proposition 会落到实际陈述它的正文小节；完全相同短语仍保持最高权重，平分时继续按既有层级与行序稳定决胜。
 
-**Agent 首页书目证据与 Graph 单写者（2026-09-06）**：Agent workspace 把暂存 `paper.pdf` 的 `pages:1-2` 作为第一个有界输入，要求 Agent 直接核对完整作者、标题和 venue；程序另生成带页码的 `first-two-pages.txt`，只在读取工具不支持 PDF 页时备用。PDF、备用文本和 `paper.md` 均绑定哈希，最终仍以候选 ID 裁决；作者候选确有缺失时，proposed 列表须由 `paper.md` locator 逐字验证。并发只用于提取、Wiki、语义和 IR 等暂存工作；所有 `graph_ingest ingest`（含 `--plan-only`）在打开 live graph 前取得按数据库隔离的跨进程 writer lock，逐篇串行 preflight/commit 并保持各自原子性，不把独立论文捆成一个全有全无事务。
+**Agent 首页书目证据与 Graph 单写者（2026-09-06）**：Agent workspace 把暂存 `paper.pdf` 的 `pages:1-2` 作为第一个有界输入，要求 Agent 直接核对完整作者、标题和 venue；程序另生成带页码的 `first-two-pages.txt`，只在读取工具不支持 PDF 页时备用。PDF、备用文本、`paper.md` 与完整 artifact bundle 均绑定哈希，最终仍以候选 ID 裁决；作者候选确有缺失时，proposed 列表须由 `paper.md` locator 逐字验证。并发只用于提取、Wiki、语义和 IR 等暂存工作；所有 `graph_ingest ingest`（含 `--plan-only`）在打开 live graph 前取得按数据库隔离的跨进程 writer lock，逐篇串行 preflight/commit 并保持各自原子性，不把独立论文捆成一个全有全无事务。
 
 **近标题关系复核（relation-id-v1，2026-09-02）**：标题高度相似但没有 DOI/arXiv 时只标候选，不得在 3.1 直接判重复。管线先完成 MinerU、normalized-text 与 locked bibliography 去重；仍未决时，title/authors/year 完全一致可由程序零调用判为 `version`，其余至多调用一次 Worker。Worker 只能从程序目录选择目标 ID 与 `version|unrelated|ambiguous`，不能返回 `duplicate`、自由路径或 locator，也不能删除 Raw、写 Wiki 或建边。裁决以输入哈希缓存到 `temp/inbox-state/<txn>-relationship-decision.json`；只有程序在后续事务阶段有提交权。
 
@@ -756,6 +762,8 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 **Typed RecoveryPolicy**：恢复动作按 `infrastructure`、`output_transport`、`wiki_revision`、`semantic_revision`、`deterministic_repair`、`subagent` 独立计数，限额表示首轮之后允许的恢复次数。`llm_structured` 只负责前两类；pipeline 不会因 API 失败再原样调用 write step，DSH 也不重跑整个摄入子进程。validator、commit 前复验、resume 复验、写图后校验和 LINT 仍完整执行，不计入恢复预算。旧事务的 `wiki_retry/slots_retry` 仅一次性迁移为阶段恢复次数，不能用来推算模型调用数。
 
 **事务状态与失败处置**：`temp/inbox-state/<txn>.json` 采用同目录临时文件、文件 `fsync`、原子替换和目录同步持久化；未知状态拒绝写入。普通前向阶段仍由 pipeline 驱动，Agent 的 `prepared`、API 兼容的 `agent_required`、`failed` 与书目复核等非线性 resume 必须通过 guarded transition，禁止直接跳过校验或提交阶段。终态单篇、论文 batch item 与统一 inbox 报告共用 `failure_disposition`（category/domain/disposition/retryable/owner/next_action/fingerprints）；API DSH 优先消费该结构化对象，只有旧输出缺失时才做兼容文本分类。`python3 .scripts/inbox_state.py --summary` 只读汇总有效事务的状态、降级、恢复次数及其关联的 canonical ExecutionEvent，不写事务，不把 SessionLog 当调用计数。
+
+**单次调用结果（ingest-result-v1）**：共享摄入入口、单篇结果与 batch item 都返回 `schema/invocation_status/workflow_status/terminal/committed/state_ref/artifact_refs/next_actions`。`invocation_status=ok` 或进程退出码 0 只表示本次调用正常产生协议产物；只有 `workflow_status=completed` 且 `committed=true` 表示本事务完成了新知识提交，`duplicate_found` 是已闭合但未产生新提交的终态。`awaiting_agent` 的产物是 `agent-task-v1`，`ready_to_commit` 的产物是已验证 workspace/receipt。batch 顶层四态与 counts 只能从 item envelope 确定性派生并验证总数守恒，不能用图节点、边数或独立手工计数推断成功数。
 
 **模型目录**：provider 当前可选模型记录在 `operations/config/llm-models.yaml`，仅用于选择与审计，不是运行时白名单；模型上下线不得阻断未使用该模型的摄入。
 
@@ -790,6 +798,7 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 - **多文档摄入计划**：`ingest_inbox.py --run` 对多个文件先调 `_plan_ingest_order`，含版本/补充关键词（盖章/扫描/补充/v2/版本/修订/签字/正式版）的文件排后，主文档优先。API 记入 DSH session log，Agent 记入 `temp/inbox-agent/`。
 - **全 PDF 批量捷径**（2026-08-24）：仅 API backend 在多个文件全部为论文 PDF 时，经 `dsh/ingest_tools.py:ingest_paper_inbox` 调用 `ingest_paper.py --inbox` 两阶段批量入口；Agent backend 逐项推进确定性准备并接收显式 task。两端完成后都运行统一维护与摄入报告。
 - **紧凑 stdout + 完整报告**：`ingest_inbox.py --run` 不回显底层完整 stdout/Hub candidates，只输出单个紧凑 JSON（状态、计数、逐文件终态、`report_path`）。`cross-domain/ingest-reports/YYYYMMDD-HHMMSS.json` 保存时间戳、session ID、程序分类/API 边界复核、摄入计划、完整底层输出、逐文件状态/引擎/graph_report，并分别记录 completed/duplicates/awaiting_agent/pending/failed/skipped，供复盘，不替代 raw/wiki/graph.db 事实源。
+- **占位内容硬门**：论文 `## 研究方向定位` 与 `## Content` 不得只有脚注或格式标记，也不得包含“待巩固/待补充/TBD/unknown”等明确占位陈述。该门只检查可机械确认的空产物和占位符，不声称判断引文是否语义支持陈述；证据一致性仍由语义执行主体负责，并继续经过原 locator validator。
 
 **阶段依赖与成本边界**：阶段 1 的摘要、Navigation 和 Content 需要语义生成；阶段 2 的关系抽取、别名判断和 hub 归属需要语义生成，但只读取阶段 1 产物及增量相关页；阶段 3 的日志、索引、`ingest_check.py` 和图状态检查优先使用确定性脚本，不重复调用 LLM。`route.py` 会在每次 ingest 派发时显示当前后端；非默认 `api` 模式必须看到提示后才继续。普通 `api` 论文路径的目标是正常摄入 `Agent token=0`；不完整草稿降级进入 pending 队列，不阻塞已验证的确定性产物。两后端的语义产物均须通过 schema、证据和确定性检查才可进入 wiki/graph。
 

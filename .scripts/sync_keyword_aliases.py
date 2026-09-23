@@ -101,7 +101,11 @@ def resolve_abbreviation_todo(conn, repo=None):
 
     if repo is None:
         repo = gl.REPO
-    todo_path = repo / "cross-domain" / "abbreviation-todo.jsonl"
+    state_dir = gl.graph_state_dir(conn, repo=repo)
+    todo_path = state_dir / "abbreviation-todo.jsonl"
+    if (not todo_path.resolve().is_relative_to(state_dir.resolve())
+            or gl.private_graph_path(todo_path) != gl.private_graph_path(gl.graph_connection_path(conn) or gl.scoped_graph_path())):
+        raise ValueError("abbreviation queue escapes graph storage")
     if not todo_path.exists():
         return 0, 0
 

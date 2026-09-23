@@ -22,6 +22,10 @@ DSH 适配层 `dsh/tools.py` 另有独立注册表 `build_tools()`，使用不�
 - **DSH 真实运行时接入**（TypeScript/Cordis）：Python 适配层已覆盖核心概念（ToolRegistry/Hook 瀑布/Session log/Guard），接入真实 DSH 的桥接成本在当前工具生态复杂度下不划算。
 - **两套 API 模式合并**（query_orchestrate._api_query_loop + dsh.AgentLoop）：两套 guard 互补不冲突，合并需将 STAGE_ACTIONS/预算/回环改写为 pre-execute hook，属中长期工作。
 
+## 后续澄清（2026-09-21）
+
+ADR-007 引入的是跨 Route、`wg.py`、DSH、CLI、固定管线和 Worker 的运行时管理元数据，不是本 ADR 拒绝的查询工具装饰器。`query_actions.DISPATCH`、`_ACTION_SIGS` 与各 factory 仍定义实际 handler、参数签名和局部执行关系；统一功能注册表只提供 canonical function ID、调用策略、provider/入口绑定和漂移校验，不生成 handler，也不替代查询编排。
+
 ## 验证
 
 - 10 套回归测试全 PASS（9 套 ingest/query + DSH 35 项）

@@ -35,6 +35,27 @@ SECTION_ALIASES = {
 
 # 默认截取的关键段(按 INGEST 编码阶段最小读取)
 DEFAULT_SECTIONS = ["abstract", "introduction", "method", "results", "discussion", "conclusions"]
+SPACED_SECTION_NAMES = {
+    "abstract", "introduction", "method", "methods", "methodology",
+    "results", "discussion", "conclusion", "conclusions", "summary",
+}
+
+
+def normalize_heading_for_match(title):
+    """Collapse all-caps spaced letters only when they form a known section name."""
+    text = str(title or "").strip()
+    for pattern in (
+        r"(?P<letters>[A-Za-z](?:\s+[A-Za-z]){3,})",
+        r"(?P<prefix>(?:(?:\d+(?:\.\d+)*)|(?:[IVX]+))[.:-]\s*)"
+        r"(?P<letters>[A-Za-z](?:\s+[A-Za-z]){3,})",
+    ):
+        match = re.fullmatch(pattern, text, re.I)
+        if not match:
+            continue
+        collapsed = re.sub(r"\s+", "", match.group("letters"))
+        if collapsed.casefold() in SPACED_SECTION_NAMES:
+            return f"{match.groupdict().get('prefix') or ''}{collapsed}"
+    return text
 
 
 def parse_sections(paper_path):
@@ -67,7 +88,7 @@ def parse_sections(paper_path):
 def section_match_score(requested, title):
     """返回 requested 与 title 的匹配权重；0 表示不匹配。"""
     req = requested.lower().strip()
-    title_lower = title.lower()
+    title_lower = normalize_heading_for_match(title).lower()
     scores = []
     for alias_key, patterns in SECTION_ALIASES.items():
         if alias_key != req:
@@ -150,7 +171,7 @@ def match_section(requested, title):
 def _narrow_abstract_from_preamble(lines):
     """从 preamble(无 ## Abstract)中收窄提取摘要。
     边界:received/published 行之后 → DOI 行或正文开头。
-    找不到边界标记则返回 None(保持 preamble 全量)。"""
+    找不到边界标记则返回 None；调用方不得把 preamble 全量冒充摘要。"""
     abs_start = None
     abs_end = None
     for i, line in enumerate(lines):
@@ -222,7 +243,7 @@ def extract_sections(paper_path, requested_sections):
             hits.append((req, title, content))
             used_indices.add(idx)
             found = True
-        # abstract 未命中 ## → 从 preamble 提取(标题+作者+摘要常在 ## 之前)
+        # abstract 未命中 ## 时只接受可机械定位的 preamble 摘要边界。
         if not found and req.lower() == "abstract":
             for idx, (title, start, end) in enumerate(sections):
                 if idx in used_indices:
@@ -233,12 +254,9 @@ def extract_sections(paper_path, requested_sections):
                     narrowed = _narrow_abstract_from_preamble(preamble_lines)
                     if narrowed:
                         hits.append((req, "(narrowed: abstract after received line)", narrowed))
-                    else:
-                        content = '\n'.join(preamble_lines)
-                        hits.append((req, "(preamble: title/authors/abstract)", content))
-                    used_indices.add(idx)
-                    found = True
-                    break
+                        used_indices.add(idx)
+                        found = True
+                        break
         if not found:
             # References fallback: 无 ## References 段时,按编号式 [N] 提取
             if req.lower() in ("references", "reference", "bibliography", "引文", "参考文献"):

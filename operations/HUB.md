@@ -182,6 +182,8 @@ python3 .scripts/hub_semantics.py route-apply --page <paper> --hub <canonical-hu
 
 主 Agent 复核后，`route-apply` 仅接受当前候选榜中的 active canonical research-direction Hub，并替换该论文既有同谓词 Hub 路由边；新边同时记录 `研究方向定位` evidence、普通 origin 与 `agent-confirmed:<locator>` origin，重摄入清理时保留。传入 `--transaction-id` 时，原事务同时写入 `route_corrections`、当前路由快照和派生 `quality_status`，并消费匹配的 route-review handoff、同步 maintenance 回执与摄入报告；没有其他待审动作时 maintenance 转为 `completed`。后续 route 查询返回 `agent_confirmed_override`，但仍保留自动门禁结果供审计。它不降低自动 floor/margin。
 
+`page → 主要研究 → Hub` 是 graph schema 的受保护边。自动 route 只有同时通过 canonical floor、margin 和子方向特异性门后，才由 `graph_ingest` 写入并记录 `automatic-route:<locator>` authorization origin；Agent 复核路径只由 `route-apply` 写入 `agent-confirmed:<locator>`。普通 semantic IR、兼容 triples 和外部包装器不得创建该边。存量缺 authorization origin 由 `graph_validate` 聚合为迁移 WARN；新写入失败关闭。embedding 不可用或没有 canonical candidates 时保持未归类，不创建 manual route，也不把论文摄入降为失败。
+
 摄入报告发布时即关联各已完成事务的共享维护回执。方向裁决同时更新报告对应文件的当前路由与质量摘要，避免后续维护使用旧路由重复生成待审项；其他图导航歧义不会因方向已确认而消失。缺失关联的历史回执按 `INBOX.md` 的 `--reconcile-maintenance-report` 定向修复。
 
 方向裁决先写入原事务，再通过共享发布入口同步同批全部事务的维护快照；最后一项完成后，较早事务也须显示相同终态。发布中断保留检查点和已记录裁决，恢复只重放既有裁决并重新同步快照，不重新裁决或重复写方向边。发布错误作为独立 maintenance 摘要返回，不推翻已成功的方向应用。

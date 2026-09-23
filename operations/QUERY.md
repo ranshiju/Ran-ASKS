@@ -87,7 +87,9 @@
 3. 需核验 → 沿 frontmatter `sources` 下钻 raw
 4. 核验证据状态时,需 `[[page#slug]]` 锚点的 → 读对应 section 或 raw
 
-**Raw Locator（2026-08-25）**：统一使用 `python3 .scripts/wg.py read-raw '<path>#<locator>'` 做局部读取。Markdown/TXT 支持标题、`#L12`、`#L12-L18`；非论文且有文本层的 PDF 支持 `#page-3`、`#page-3-5`。工具可以机械扫描文件，但只把 locator 命中的片段送入 LLM；裸路径与 `#全篇` 均拒绝执行，Graph 中的 `#全篇` 仅是文件级 provenance，读取前必须细化 locator。命中片段超过单次上限时也拒绝返回半截内容，调用方须缩小章节、行范围或页码。原文件没有稳定可读 locator 时，沿 wiki `sources` 读取同目录 Markdown companion；不得因此把整份二进制文档送入模型。学术论文始终读取 MinerU `paper.md`，不得因 PDF 有文本层而绕过它。
+**Raw Locator（2026-08-25）**：统一使用 `python3 .scripts/wg.py read-raw '<path>#<locator>'` 做局部读取。Markdown/TXT 支持标题、`#L12`、`#L12-L18`；非论文且有文本层的 PDF 支持 `#page-3`、`#page-3-5`。工具可以机械扫描文件，但只把 locator 命中的片段送入 LLM；裸路径与 `#全篇` 均拒绝执行，Graph 中的 `#全篇` 仅是文件级 provenance，读取前必须细化 locator。命中片段超过单次上限时也拒绝返回半截内容，调用方须缩小章节、行范围或页码。检索回溯到 Raw 指的是确认事实来源身份，不要求把二进制原件本身送入模型：原件没有稳定可读 locator 时，工具可自动读取同 stem 的受管 Markdown companion，并在返回中区分 `source_path`（可引用原件）、`read_path`/`evidence_locator`（实际读取片段）；读取投影不取代原件的事实来源身份。若无可精确读取的原生 locator 且无 companion，则不得标记为已核验。学术论文始终读取 MinerU `paper.md`，不得因 PDF 有文本层而绕过它；回答可以引用程序返回的原始 PDF 路径。
+
+**图片 Raw 停止规则**：文字型图片、表单、截图和可忠实转写的表格在摄入后以“原图 + 源绑定 Markdown companion + sidecar”构成同一个 Raw 来源。普通事实检索命中图片时，默认只用 `read-raw` 读取 companion 的精确 locator；一旦该片段覆盖当前答案槽位即停止，不重新 OCR、不把原图送入视觉模型。只有当前问题依赖版式、空间关系、颜色、图形、印章、签名或手写等视觉语义，相关 OCR 未决项直接影响答案，证据发生冲突，或用户明确要求核对原图时，宿主才可另行进入视觉流程，并须在调用前说明具体缺口。纯照片、示意图或复杂图表没有可充分表达其视觉语义的 companion 时，不得用 OCR 文本假装已经核验。
 
 **Wiki Locator（2026-08-25）**：Wiki 是可重建的阅读导航层，使用稳定 heading slug，不使用 Wiki 行号。调用 `python3 .scripts/wg.py read-section '<wiki-page>.md#<heading-slug>'` 时，程序只返回目标 heading 到下一个同级/更高标题之间的正文，并解析该节实际使用的 `[^rN]` 脚注，返回 `raw_citations`。回答事实时再把这些 Raw locators 交给 `read-raw`；不得因读取 Wiki section 而自动读取整页或整份 Raw。
 
@@ -423,8 +425,8 @@ LLM 据此判:来源是否足够、权威是否适合、时间是否匹配、标
 3. **渐进分派**(双重审计控深度,见步骤 4):据步骤 2 探测结果渐进检索,每级证据够就停。**目标是组装相关文件集(非找单个文件)**,集大小由步骤 1 单/多源标志决定
 
    - **3a 三层筛**(见第二层「三层筛」):层1 谓词过滤 → 分支判断(≤cutoff 直接下钻 / >cutoff 采样+LLM 确认下钻指令)。route 字段记谓词过滤/采样/确认路径(审计防答案泄漏)
-   - **3b 下钻执行**(据 3a 路径分支):
-     - **小集合路径(候选 ≤ cutoff)**:程序机械读——按候选节点下钻,读 wiki 页 `Navigation` 判相关,相关读 `Content`,raw 源 grep 定位行号截取(禁头部切片);**只读 md 不读 pdf**(paper 页 sources 含 paper.md 和 pdf 时只读 md)
+    - **3b 下钻执行**(据 3a 路径分支):
+      - **小集合路径(候选 ≤ cutoff)**:程序机械读——按候选节点下钻,读 wiki 页 `Navigation` 判相关,相关读 `Content`,raw 源 grep 定位行号截取(禁头部切片);实际证据文本可来自原件的精确 locator 或同源 Markdown companion，引用仍可指向程序确认的原始 Raw 文件；**论文只读 MinerU md，不把 PDF 正文送入模型**
      - **大集合路径(候选 > cutoff)**:程序按 LLM 在层3 给的下钻指令(`[{node, read_raw, focus}]`)执行读 raw——LLM 已确认相关并指定读哪段,程序直接读指定 raw 的指定段
      - **降级 Raw 分级 grep**(Wiki 摘要不充分 / 无 Wiki 页时,事实必 Raw 回溯):优先从 Wiki `sources`/`raw_citations` 或 `来源` 边取得 Raw 文档包；可选边 locator 存在时直接使用。来源不足时才分级 grep 逐级扩大，禁默认全库（先已知子集 → 联想限定子集：子项目 raw 目录 / 时间范围 → 逐级扩大，每级命中即停）
    - **3c 联想层**(步骤 2 全 miss 时升级,capability experience + LLM + 网络合一):先运行 `experience_recall.py recall --capability query --event deadend` 获取最多 2-3 条泛化 pattern→参数化联想 3-5 词(+理由);参数化盲区且网络可用时,网络检索补强联想词→grep raw 定位→定向截取。**联想只定位不回答,事实必 raw 回溯**。**硬约束**:网络只帮想联想词,离事实隔两层,绝不可作事实来源。详见「第四层:联想层」
@@ -454,7 +456,7 @@ LLM 据此判:来源是否足够、权威是否适合、时间是否匹配、标
 
 ## 交付步骤
 
-5. **综合回答**,使用 `[[wikilinks]]` 引用来源
+5. **综合回答**,使用 `[[wikilinks]]` 引用来源；证据文本来自受管 Markdown companion 时，可引用 `read-raw` 返回的 `source_path` 原件，不必把 companion 冒充独立原始来源
    - 对关键声明,用锚点链接精确定位:`[[papers/论文X#mpe-definition]]`
    - **诚实标注未确认部分**:若证据状态不完整,回答须区分已确认结论与未确认部分,明确缺失的是信息/证据/权威来源/有效版本/冲突解释中的哪类,禁止将尚未验证内容表述为事实
    - **多源综合**:跨源一致性/冲突检测,显式标注冲突,禁静默合并

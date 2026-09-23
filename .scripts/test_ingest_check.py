@@ -17,6 +17,13 @@ def test_graph_flag_is_not_treated_as_path():
     assert "路径不存在,跳过: --graph" not in result.stderr
 
 
+def test_bare_abbreviation_check_ignores_mixed_case_word_interior():
+    warnings = ingest_check.check_bare_abbreviation({"核心方法": ["张量LoRA"]})
+    assert warnings == []
+    warnings = ingest_check.check_bare_abbreviation({"核心方法": ["MLP"]})
+    assert warnings
+
+
 def test_graph_checks_with_isolated_database():
     import sqlite3
     with tempfile.TemporaryDirectory() as directory:

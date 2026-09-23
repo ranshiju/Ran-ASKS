@@ -19,6 +19,7 @@
 
 | 项目名 | 类型 | 参考方式 | 使用位置 | 参考内容 | 首次引用 | 来源 URL | 备注 |
 |--------|------|----------|----------|----------|----------|----------|------|
+| Code Review Graph (CRG) | `architecture` | 架构借鉴 | `operations/engineering/graph.yaml`, `.scripts/engineering_graph.py`, ADR-001 | 持久工程结构、最小上下文、两跳影响半径，以及 v2.3.9 的有界结果、完整性元数据、诚实空结果/失败、merge-base 变更集和直接/间接测试分级 | 2026-07-25 | <https://github.com/tirth8205/code-review-graph> | MIT；独立人工责任图实现，未复制代码，不引入 Tree-sitter/SQLite/MCP/watch runtime |
 | DeepSeek Harness (DSH) | `architecture` | 架构借鉴 | `dsh/` | ToolRegistry + Hook 瀑布 + Session log + Guard chain 的 plugin 化设计；`Everything is a Plugin` 理念 | 2026-08-20 | <https://github.com/deepseek-ai/deepseek-harness> | MIT；纯 Python 适配，不依赖 Cordis 运行时 |
 | MinerU | `api` | API 服务 | `.scripts/extractor.py` | PDF 结构化提取（Markdown 输出），论文摄入首选引擎 | 2026-07 | <https://github.com/opendatalab/MinerU> | MinerU Open Source License；需 API token；失败不静默回落 |
 | BLSC OCR (GLM-4.6V) | `api` | API 服务 | `.scripts/extractor.py` | 视觉模型逐页 OCR，扫描版 PDF 回退引擎 | 2026-08-22 | 无公开仓库；内部 API 服务 | 复用 `.env` LLM endpoint；需 base64 图片 |
@@ -39,6 +40,7 @@
 
 | 项目名 | 参考方式 | 说明 | 来源 URL | 状态 |
 |--------|----------|------|----------|------|
+| Open Code Review | 工具候选 | 只评估 WikiGraph 自身工程代码的 delegation review；其确定性范围能力与工程元图重合，且默认排除测试文件，当前不形成第二个审查范围真理源 | <https://github.com/alibaba/open-code-review> | v1.12.7 已评估，暂不引入；仅在固定样本证明增量收益后试点 |
 | Leiden | 理念参考 | 图社区检测（community detection），用于知识结构涌现分析 | <https://github.com/vtraag/leidenalg> | 远期，`projects/知识结构涌现/notes.md` |
 | Cordis | 理念参考 | DSH 原版 TypeScript 运行时 | <https://github.com/cordiverse/cordis> | 已决策不接入（ADR-004），Python 适配层覆盖核心概念 |
 

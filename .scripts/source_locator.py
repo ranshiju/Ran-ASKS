@@ -117,6 +117,19 @@ def locator_companion_name(source_name):
     return f"{source.stem}.md"
 
 
+def original_for_companion(path):
+    """Return the unique same-stem binary original for a Markdown companion."""
+    target = Path(path)
+    if target.suffix.lower() != ".md":
+        return None
+    originals = [
+        target.with_suffix(suffix)
+        for suffix in sorted(BINARY_SUFFIXES)
+        if target.with_suffix(suffix).is_file()
+    ]
+    return originals[0] if len(originals) == 1 else None
+
+
 def explicit_anchor_block(text, locator):
     """Return the Markdown block bound to ``{: #locator}``, if present."""
     locator = str(locator or "").strip()
@@ -299,6 +312,28 @@ def read_locator_text(target, locator):
     next_heading = re.search(rf"^#{{1,{level}}}\s+", text[start:], re.M)
     end = start + (next_heading.start() if next_heading else len(text[start:]))
     return text[start:end]
+
+
+def evidence_targets(target, locator):
+    """Return ``(citation source, read target)`` for one Raw locator.
+
+    A managed Markdown companion is a reading projection, not a replacement
+    fact source. Native text/page locators stay on the original; otherwise an
+    exact same-stem companion may provide the excerpt while citations retain
+    the unique original path.
+    """
+    target = Path(target)
+    original = original_for_companion(target)
+    if original is not None:
+        return original, target
+    if target.suffix.lower() not in BINARY_SUFFIXES:
+        return target, target
+    if locator_status(locator, target) == "present" and read_locator_text(target, locator) is not None:
+        return target, target
+    companion = target.with_name(locator_companion_name(target.name))
+    if companion.is_file() and locator_status(locator, companion) == "present":
+        return target, companion
+    return target, target
 
 def classify_predicate(predicate):
     if predicate in FACT_PREDICATES:

@@ -81,6 +81,39 @@ def test_section_match_score_weighting():
            module.section_match_score("results", "4 EXPERIMENTS")
 
 
+def test_spaced_all_caps_sections_match_without_changing_original_heading():
+    paper = _paper(
+        "# Title\n\n## A B S T R A C T\n\nreal abstract\n\n"
+        "## 5. C O N C L U S I O N S\n\nreal conclusion\n"
+    )
+    try:
+        hits, misses, _ = module.extract_sections(paper, ["abstract", "conclusions"])
+    finally:
+        paper.unlink()
+    assert not misses, misses
+    assert hits[0][1] == "A B S T R A C T"
+    assert hits[1][1] == "5. C O N C L U S I O N S"
+
+
+def test_unknown_spaced_heading_does_not_match_conclusion():
+    assert module.normalize_heading_for_match("C A U S A L") == "C A U S A L"
+    assert module.section_match_score("conclusions", "C A U S A L") == 0
+    assert module.normalize_heading_for_match("I N T R O D U C T I O N") == "INTRODUCTION"
+
+
+def test_preamble_without_abstract_boundary_is_reported_missing():
+    paper = _paper(
+        "# Paper title\n\nAlice Example\nInstitute of Materials\nSomewhere\n\n"
+        "## 1 Introduction\n\nbody\n"
+    )
+    try:
+        hits, misses, _ = module.extract_sections(paper, ["abstract"])
+    finally:
+        paper.unlink()
+    assert hits == []
+    assert misses == ["abstract"]
+
+
 def main():
     test_method_prefers_main_section_over_appendix()
     test_method_absorbs_related_child_sections()

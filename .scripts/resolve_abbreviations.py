@@ -36,7 +36,7 @@ def _extract_abbr_tokens(text):
     if not text:
         return []
     no_paren = re.sub(r"[（(][^)）]*[)）]", "", text)
-    return re.findall(r"[A-Z]{2,}[A-Za-z0-9]*", no_paren)
+    return gi.BARE_ABBREVIATION_TOKEN_RE.findall(no_paren)
 
 
 def _occurrence_target(entry: dict) -> str:

@@ -307,8 +307,9 @@ def execute_plan(session: QuerySession, plan: list[dict], is_continuation: bool 
             collect_evidence_facts(session, inp.get("page", ""))
         if action == "read_raw" and r["ok"]:
             loc = inp.get("locator", "")
-            if loc and loc not in session.read_sources:
-                session.read_sources.append(loc)
+            for source in actions.raw_citation_sources(loc):
+                if source and source not in session.read_sources:
+                    session.read_sources.append(source)
         result_entry = {"action": action, "input": inp, "ok": r["ok"], "tokens": r["tokens"],
                         "text_preview": r["text"][:200], "error": r["error"]}
         # gap2: 预算感知降级提示(程序提示,LLM 自主决定——不强制降级,因"是否须全文"是语义判断)
@@ -551,7 +552,7 @@ def _build_api_prompt(session: QuerySession, last_results: list, round_num: int)
     parts.append("- 第一轮 discover/read 必须先提交轻量检索策略 strategy；无固定策略的弱结构题应 drafted，直达题可 skipped 并写明 reason")
     parts.append("- discover: 优先用 hybrid_recall 按 intent 融合 Wiki/Graph；明确实体可用 graph_search/node_resolve")
     parts.append("- read: 用 wiki_context/read_section 读语义地址，再用 read_raw 核验脚注 locator")
-    parts.append("- answer: 给出回答，citations 必须全部来自已读来源(raw locator)")
+    parts.append("- answer: citations 必须来自已读来源；读取 companion 时优先引用程序列出的原始 Raw 文件路径")
     parts.append("- citations 为空时标记为无引用；引用未在已读来源中时标记为未核验")
     return "\n".join(parts)
 

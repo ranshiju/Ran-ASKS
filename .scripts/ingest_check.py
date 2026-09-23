@@ -511,7 +511,7 @@ def check_bare_abbreviation(fm):
     kw_predicates = ("研究基础", "核心方法", "核心创新点", "局限性", "未来展望", "研究关键词")
     import re
     # 裸缩写判据:含≥2连续大写字母(或大写+数字的学术缩写如 TNR/HOTRG),且整体无括号释义
-    abbr_re = re.compile(r"[A-Z]{2,}[A-Za-z0-9]*")
+    abbr_re = re.compile(r"(?<![a-z])[A-Z]{2,}[A-Za-z0-9]*")
     paren_re = re.compile(r"[（(][^)）]*[)）]")
     for pred in kw_predicates:
         vals = fm.get(pred, [])

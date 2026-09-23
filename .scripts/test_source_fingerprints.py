@@ -41,9 +41,64 @@ def test_text_hash_is_candidate_only():
         candidate = root / "candidate.md"
         candidate.write_text(" title   body ", encoding="utf-8")
         sf.register_source(raw, text_path=text, db_path=db, repo=root)
-        match = sf.lookup_text_candidate(candidate, db_path=db)
+        match = sf.lookup_text_candidate(candidate, db_path=db, repo=root)
         assert match["match"] == "normalized_text_sha256"
         assert sf.lookup_exact(candidate, db_path=db, repo=root) is None
+
+
+def test_lookup_ignores_stale_raw_paths():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        db = root / "fingerprints.db"
+        stale = root / "academic/raw/old/a.pdf"
+        stale.parent.mkdir(parents=True)
+        stale.write_bytes(b"same-pdf")
+        sf.register_source(stale, db_path=db, repo=root)
+        stale.unlink()
+
+        incoming = root / "inbox/demo.pdf"
+        incoming.parent.mkdir()
+        incoming.write_bytes(b"same-pdf")
+        assert sf.lookup_exact(incoming, db_path=db, repo=root) is None
+
+
+def test_lookup_prefers_existing_raw_path_for_duplicate_hash():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        db = root / "fingerprints.db"
+        stale = root / "academic/raw/old/a.pdf"
+        stale.parent.mkdir(parents=True)
+        stale.write_bytes(b"same-pdf")
+        sf.register_source(stale, db_path=db, repo=root)
+        stale.unlink()
+
+        valid = root / "academic/raw/references/demo/paper.pdf"
+        valid.parent.mkdir(parents=True)
+        valid.write_bytes(b"same-pdf")
+        sf.register_source(valid, db_path=db, repo=root)
+        incoming = root / "inbox/demo.pdf"
+        incoming.parent.mkdir()
+        incoming.write_bytes(b"same-pdf")
+        match = sf.lookup_exact(incoming, db_path=db, repo=root)
+        assert match["raw_path"] == "academic/raw/references/demo/paper.pdf"
+
+
+def test_text_lookup_ignores_stale_raw_paths():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        db = root / "fingerprints.db"
+        stale_pdf = root / "academic/raw/old/a.pdf"
+        stale_md = root / "academic/raw/old/a.md"
+        stale_pdf.parent.mkdir(parents=True)
+        stale_pdf.write_bytes(b"pdf")
+        stale_md.write_text("Title\n\nBody", encoding="utf-8")
+        sf.register_source(stale_pdf, text_path=stale_md, db_path=db, repo=root)
+        stale_pdf.unlink()
+        stale_md.unlink()
+
+        candidate = root / "candidate.md"
+        candidate.write_text(" title   body ", encoding="utf-8")
+        assert sf.lookup_text_candidate(candidate, db_path=db, repo=root) is None
 
 
 def test_rebuild_does_not_modify_raw_and_skips_sidecars():

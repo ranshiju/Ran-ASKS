@@ -1,0 +1,42 @@
+schema_version: 1
+updated: '2026-09-23'
+authority:
+  working_state_only: true
+  factual_source: raw
+profile:
+  person_id: example-person
+  name:
+    zh: 示例用户
+    en: Example User
+  headline:
+    zh: 示例职称
+    en: Example Role
+  verification: needs_verification
+  research_interests:
+    zh: []
+    en: []
+  research_interests_verification: needs_verification
+editions:
+  academic-full-zh:
+    language: zh-CN
+    renderer: native-docx-v1
+    template: academic-full
+    filename_prefix: Example-CV-ZH
+    status: active
+  academic-full-en:
+    language: en
+    renderer: native-docx-v1
+    template: academic-full
+    filename_prefix: Example-CV-EN
+    status: active
+records:
+  - id: replace-with-stable-record-id
+    category: education
+    date: 'YYYY-MM'
+    title:
+      zh: 替换为已经核验的中文履历表述
+      en: Replace with a verified English record.
+    evidence:
+      - academic/raw/profile/example.md#education
+    verification: needs_verification
+    include_in: []

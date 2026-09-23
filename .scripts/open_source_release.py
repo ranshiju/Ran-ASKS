@@ -31,6 +31,7 @@ INTRODUCTION_PREFIX = "docs/introduction/ASKS-Chinese-Introduction-"
 NORMALIZED_PDF_PRODUCER = b"GPL Ghostscript"
 VERSION_PATTERN = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 PRIVATE_PREFIXES = (
+    "private/",
     "academic/raw/", "academic/wiki/", "academic/outputs/",
     "admin/raw/", "admin/wiki/", "admin/outputs/",
     "teaching/raw/", "teaching/wiki/", "teaching/outputs/",
@@ -123,10 +124,50 @@ def matches(path: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(path, pattern) or Path(path).match(pattern)
 
 
+def checked_release_path(relative: str) -> Path:
+    """Manifest entries are paths, not authority to export private or outside data."""
+    if (not relative or "\\" in relative or ":" in relative
+            or Path(relative).is_absolute() or ".." in Path(relative).parts):
+        raise ValueError(f"unsafe release path: {relative}")
+    path = Path(relative)
+    if "private" in [part.lower() for part in path.parts]:
+        raise ValueError(f"private content is never publishable: {relative}")
+    return path
+
+
+def checked_release_source(relative: str) -> Path:
+    path = REPO / checked_release_path(relative)
+    resolved = path.resolve()
+    if not resolved.is_relative_to(REPO.resolve()):
+        raise ValueError(f"release source escapes repository: {relative}")
+    if "private" in [part.lower() for part in resolved.relative_to(REPO.resolve()).parts]:
+        raise ValueError(f"release source resolves to private content: {relative}")
+    # Reject directory symlinks too; skipping only symlink leaf files is insufficient.
+    cursor = path
+    while cursor != REPO:
+        if cursor.is_symlink():
+            raise ValueError(f"release source contains symlink: {relative}")
+        cursor = cursor.parent
+    return path
+
+
+def release_preflight(manifest: dict) -> set[str]:
+    files = selected_files(manifest)
+    for relative, asset in manifest.get("public_assets", {}).items():
+        checked_release_path(relative)
+        source = checked_release_source(asset)
+        if not source.is_file():
+            raise ValueError(f"missing public asset: {asset}")
+    for directory in manifest.get("template_dirs", []):
+        checked_release_path(directory)
+    return files
+
+
 def selected_files(manifest: dict) -> set[str]:
     files: set[str] = set()
     excludes = manifest.get("exclude", [])
     for pattern in manifest["include"]:
+        checked_release_path(pattern)
         prefix = pattern.split("**", 1)[0].rstrip("/")
         root = REPO / prefix
         candidates = root.rglob("*") if "**" in pattern else (root,)
@@ -135,12 +176,13 @@ def selected_files(manifest: dict) -> set[str]:
                 continue
             relative = candidate.relative_to(REPO).as_posix()
             if matches(relative, pattern) and not any(matches(relative, excluded) for excluded in excludes):
+                checked_release_source(relative)
                 files.add(relative)
     return files
 
 
 def expected_files(manifest: dict) -> set[str]:
-    files = selected_files(manifest)
+    files = release_preflight(manifest)
     files.update(manifest.get("public_assets", {}).keys())
     files.update(f"{directory}/.gitkeep" for directory in manifest["template_dirs"])
     files.add(MARKER)
@@ -255,6 +297,8 @@ def projected_engineering_graph(destination: Path) -> dict:
         path = str(node.get("path", ""))
         if "<" in path:
             return True
+        if path == PUBLIC_GRAPH_PATH:
+            return True
         if path.startswith("projects/") or path.startswith(".project/"):
             return False
         return bool(node.get("optional", False)) or (destination / path).exists()
@@ -308,8 +352,13 @@ def clear_destination(destination: Path) -> None:
 def build(destination: Path, clean: bool, force: bool) -> None:
     manifest = load_manifest()
     destination = destination.resolve()
-    if destination == REPO:
-        raise ValueError("destination must not be the source repository")
+    if (destination == REPO.resolve() or destination.is_relative_to(REPO.resolve())
+            or REPO.resolve().is_relative_to(destination)):
+        raise ValueError("destination must not overlap the source repository")
+    selected = release_preflight(manifest)  # before clearing even an existing release
+    version = read_version()
+    if version is None:
+        raise ValueError(f"invalid or missing release version: {VERSION_PATH}")
     if destination.exists() and any(destination.iterdir()):
         if not clean:
             raise ValueError("destination is non-empty; use --clean --force")
@@ -317,19 +366,16 @@ def build(destination: Path, clean: bool, force: bool) -> None:
             raise ValueError("--clean requires --force")
         clear_destination(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    version = read_version()
-    if version is None:
-        raise ValueError(f"invalid or missing release version: {VERSION_PATH}")
-    for relative in sorted(selected_files(manifest)):
+    for relative in sorted(selected):
         if relative == PUBLIC_GRAPH_PATH:
             continue
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(REPO / relative, target)
+        shutil.copy2(checked_release_source(relative), target)
     for relative, asset in manifest.get("public_assets", {}).items():
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(REPO / asset, target)
+        shutil.copy2(checked_release_source(asset), target)
     for directory in manifest["template_dirs"]:
         target = destination / directory
         target.mkdir(parents=True, exist_ok=True)
@@ -370,7 +416,12 @@ def actual_files(destination: Path) -> set[str]:
     return {
         path.relative_to(destination).as_posix()
         for path in destination.rglob("*")
-        if path.is_file() and ".git" not in path.relative_to(destination).parts
+        if (
+            path.is_file()
+            and ".git" not in path.relative_to(destination).parts
+            and "__pycache__" not in path.relative_to(destination).parts
+            and path.suffix not in {".pyc", ".pyo"}
+        )
     }
 
 
@@ -417,8 +468,19 @@ def verify(destination: Path) -> int:
     failures: list[str] = []
     if not (destination / MARKER).is_file():
         failures.append(f"missing release marker: {MARKER}")
-    expected = expected_files(manifest)
+    try:
+        expected = expected_files(manifest)
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
     actual = actual_files(destination)
+    for entry in destination.rglob("*"):
+        if ".git" in entry.relative_to(destination).parts:
+            continue
+        if entry.is_symlink():
+            failures.append(f"release symlink is forbidden: {entry.relative_to(destination)}")
+        if "private" in [part.lower() for part in entry.relative_to(destination).parts]:
+            failures.append(f"private content path: {entry.relative_to(destination)}")
     failures.extend(documentation_omission_errors(destination, manifest, actual))
     version = read_version()
     if version is None:
@@ -492,6 +554,8 @@ def verify(destination: Path) -> int:
         if path.startswith(PRIVATE_PREFIXES) and not path.endswith("/.gitkeep"):
             failures.append(f"private content path: {path}")
         content_path = destination / path
+        if content_path.is_symlink():
+            continue
         if content_path.stat().st_size > 10_000_000:
             failures.append(f"oversized release file: {path}")
             continue

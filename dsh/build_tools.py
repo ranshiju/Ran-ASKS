@@ -14,6 +14,7 @@ from pathlib import Path
 
 from dsh.guards.build_locator_guard import BuildLocatorGuard, TOOL_BUILD_IMPACT, TOOL_BUILD_LIST, TOOL_BUILD_READ
 from dsh.harness import SessionLog, ToolDefinition, ToolExecution, ToolExecutionResult, ToolRegistry
+from dsh.function_catalog import bind_tools
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / ".scripts"
@@ -41,14 +42,41 @@ def _run_json(cmd: list[str], timeout: int = 90) -> str:
 def _impact_tool() -> ToolDefinition:
     def execute(args: dict) -> str:
         target = str(args.get("target") or "").strip()
-        cmd = [sys.executable, str(SCRIPTS / "engineering_graph.py"), "impact", target]
+        files = [str(item).strip() for item in (args.get("files") or []) if str(item).strip()]
+        base = str(args.get("base") or "").strip()
+        working_tree = bool(args.get("working_tree", False))
+        staged = bool(args.get("staged", False))
+        selected = sum(bool(value) for value in (target, files, base, working_tree, staged))
+        if selected != 1:
+            return json.dumps({
+                "ok": False,
+                "exit_code": 2,
+                "output": "",
+                "error": "必须且只能提供 target、files、working_tree、staged、base 之一",
+            }, ensure_ascii=False)
+
+        cmd = [sys.executable, str(SCRIPTS / "engineering_graph.py"), "impact"]
+        if target:
+            cmd.append(target)
+        elif files:
+            cmd += ["--files", *files]
+        elif working_tree:
+            cmd.append("--working-tree")
+        elif staged:
+            cmd.append("--staged")
+        else:
+            cmd += ["--base", base]
         if args.get("verify", False):
             cmd.append("--verify")
+        cmd += ["--format", "json"]
         return _run_json(cmd, timeout=120)
 
     return ToolDefinition(
         name=TOOL_BUILD_IMPACT,
-        description="建设任务影响面入口：impact <target> --verify。必须先调用本工具，记录 node/contract/capability、推荐 locator 与最小验证命令。",
+        description=(
+            "建设任务影响面入口：接收单目标或显式/Git 变更集，返回有界的 "
+            "engineering-impact-v1。必须先调用本工具，再按推荐 locator 精确读取。"
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -59,9 +87,32 @@ def _impact_tool() -> ToolDefinition:
                         "文件名、stem，如 ingest_paper 或 .scripts/ingest_paper.py"
                     ),
                 },
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "显式仓内变更路径；优先于自动 Git 发现",
+                },
+                "working_tree": {
+                    "type": "boolean",
+                    "description": "合并暂存、未暂存与未跟踪文件形成一次性变更集",
+                },
+                "staged": {
+                    "type": "boolean",
+                    "description": "只分析暂存区变更",
+                },
+                "base": {
+                    "type": "string",
+                    "description": "按 HEAD 与该 ref 的 merge-base 分析分支变更",
+                },
                 "verify": {"type": "boolean", "description": "是否输出最小验证命令，建设任务默认 true", "default": True},
             },
-            "required": ["target"],
+            "oneOf": [
+                {"required": ["target"]},
+                {"required": ["files"]},
+                {"required": ["working_tree"]},
+                {"required": ["staged"]},
+                {"required": ["base"]},
+            ],
         },
         execute_fn=execute,
     )
@@ -115,7 +166,7 @@ def _list_tool() -> ToolDefinition:
 
 
 def build_build_tools() -> list[ToolDefinition]:
-    return [_impact_tool(), _read_tool(), _list_tool()]
+    return bind_tools([_impact_tool(), _read_tool(), _list_tool()])
 
 
 class BuildLocatorCockpit:

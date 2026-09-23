@@ -112,6 +112,34 @@ PATCH／MINOR／MAJOR，不按文件数或行数排号；脚本记录依据、�
 不以摄入日代替。远程图片转写与复核使用独立 API 配置和显式上传许可
 （`IMAGE_OCR_ALLOW_REMOTE` 默认 false），不改变语义 backend，也不冒充人工复核。
 
+## 已注册的产物工作流
+
+规范运行时功能注册表统一任务路由、CLI 暴露、backend 归属和机械校验。注册表明确
+区分研究、前沿等持久状态与一次性创建或更新受管产物的用户功能，因此不需要把每项
+操作都建模为长期状态，也能保持能力契约可检查、可验证。
+
+模板驱动的简历功能以工作区记录控制措辞和版本选择，但事实权威仍是受管 Raw。
+DOCX 模板定义页面样式和模块书签，配套 YAML 定义模块顺序、双语标签、类别映射和
+排序。正式渲染只接受具有可用 Raw 定位符的已核验记录，生成带日期且不可覆盖的
+DOCX 版本，并保存版本清单供后续比较。公开的
+[`templates/cv/`](templates/cv/) 模板包已经匿名化，不包含个人简历事实。
+
+可以这样创建本地示例工作区：
+
+```bash
+mkdir -p projects/cv-demo/templates
+cp templates/cv/academic-full.* projects/cv-demo/templates/
+cp templates/cv/cv-records.example.yaml projects/cv-demo/cv-records.yaml
+python3 .scripts/wg.py cv status --workspace cv-demo
+```
+
+只有在对应事实已经进入受管 Raw 后，才用真实记录替换示例值。核验和渲染命令见
+[`operations/CV.md`](operations/CV.md)。
+
+原生演示文稿制作遵循同一受管产物原则：保留持久修订，分离草稿批准与锁定边界，
+使用受约束布局生成确定性交付副本，并继承来源敏感性规则。演示文稿摄入与演示文稿
+制作仍是契约明确、彼此独立的功能。
+
 ## 论文与代码版本
 
 `main` 分支持续开发，因此仓库可能比论文更新得更快。每个与论文对应的实现
@@ -199,7 +227,11 @@ python3 paper-artifacts/v0.2.1/verify.py
 - 用于研究结构、谱系和跨来源导航的持久化 Hub。
 - 子 Hub 路由必须具有超出父 Scope 的子方向特异性证据；Agent 人工覆盖会保存为持久、关联事务的来源记录。
 - 项目范围的研究记忆，以及管理开放问题和演化轨迹的 Frontier 覆盖层。
+- 规范运行时功能注册表，区分持久工作状态与一次性用户功能，并校验其 CLI 和
+  backend 绑定。
 - 按需调用的学术写作能力，在实际落笔时组合共享写作约定、项目语境和学科语境。
+- 模板驱动的双语简历生成，包含证据闸门、匿名可复用模板和带日期的不可覆盖 DOCX 版本。
+- 原生演示文稿制作，包含持久修订、显式批准与锁定边界、受约束布局和确定性交付。
 - 面向图片、PDF 页面和静态 PPT/PPTX 页面的只读视觉检查。
 - 将图片/PDF 重建为可编辑 PPT，优先生成 PowerPoint 原生对象，并记录任何位图回退。
 - 通过已登记远程模型生成项目范围漫画图片，包含 dry-run、远程调用授权、输出路径保护和审计回执。
@@ -246,6 +278,7 @@ python3 .scripts/route.py --task query --query-stage start
 | `operations/` | 摄入、查询、研究、写作、同步和工程契约 |
 | `.scripts/` | 经过验证的命令行工具和回归检查 |
 | `dsh/` | 可选的受约束智能体循环和工具注册表 |
+| `templates/` | 匿名、可复用的产物模板和示例工作区记录 |
 | `academic/`、`admin/`、`teaching/`、`business/` | 相互独立的领域模板 |
 | `cross-domain/` | 跨领域图、Hub 和导航界面 |
 | `paper-artifacts/` | 与论文版本绑定的冻结、清理后 Wiki/图数据及测量结果 |
@@ -284,6 +317,7 @@ Ran-ASKS 区分实际调用的软件与影响其架构的项目。下表说明�
 
 | 项目 | 关系 | 在 Ran-ASKS 中的范围 |
 | --- | --- | --- |
+| [Code Review Graph](https://github.com/tirth8205/code-review-graph) | 架构影响 | 人工治理工程图、最小上下文影响遍历、有界完整性和变更集验证契约；独立实现且不引入上游运行时 |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | 架构影响 | DSH ToolRegistry、hook、session log、guard chain 和插件概念，由本项目用 Python 重新实现 |
 | [Semantica](https://github.com/semantica-agi/semantica) | 模式改编 | Ran-ASKS 图边界内的声明式约束、来源关系和时间有效性 |
 | [MinerU](https://github.com/opendatalab/MinerU) | 首选外部后端 | 论文摄入中的结构化 PDF 提取 |

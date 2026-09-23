@@ -77,6 +77,13 @@ def _stored_path(path: Path, repo: Path) -> str:
         return str(path.resolve())
 
 
+def _stored_path_exists(raw_path: str, repo: Path) -> bool:
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = repo / path
+    return path.is_file()
+
+
 def register_source(
     source_path: Path,
     *,
@@ -139,25 +146,27 @@ def lookup_exact(
     digest = sha256_file(source_path)
     conn = _connect(target_db)
     try:
-        row = conn.execute(
+        rows = conn.execute(
             """SELECT * FROM source_fingerprints
                WHERE binary_sha256=? AND size_bytes=?
-               ORDER BY length(raw_path), raw_path LIMIT 1""",
+               ORDER BY length(raw_path), raw_path""",
             (digest, size),
-        ).fetchone()
+        ).fetchall()
     finally:
         conn.close()
-    if not row:
-        return None
-    result = dict(row)
-    result["match"] = "binary_sha256"
-    return result
+    for row in rows:
+        if _stored_path_exists(row["raw_path"], repo):
+            result = dict(row)
+            result["match"] = "binary_sha256"
+            return result
+    return None
 
 
 def lookup_text_candidate(
     text_path: Path,
     *,
     db_path: Path = CROSS_DOMAIN_DB,
+    repo: Path | None = None,
 ) -> dict | None:
     if not text_path.is_file() or not db_path.is_file():
         return None
@@ -166,18 +175,20 @@ def lookup_text_candidate(
         return None
     conn = _connect(db_path)
     try:
-        row = conn.execute(
+        rows = conn.execute(
             """SELECT * FROM source_fingerprints WHERE text_sha256=?
-               ORDER BY length(raw_path), raw_path LIMIT 1""",
+               ORDER BY length(raw_path), raw_path""",
             (digest,),
-        ).fetchone()
+        ).fetchall()
     finally:
         conn.close()
-    if not row:
-        return None
-    result = dict(row)
-    result["match"] = "normalized_text_sha256"
-    return result
+    repository = repo if repo is not None else db_path.parent.parent
+    for row in rows:
+        if _stored_path_exists(row["raw_path"], repository):
+            result = dict(row)
+            result["match"] = "normalized_text_sha256"
+            return result
+    return None
 
 
 def _is_source_artifact(path: Path) -> bool:

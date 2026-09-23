@@ -310,6 +310,25 @@ def test_citation_records_read_raw():
     assert "raw/demo.md" in guard.read_sources
 
 
+def test_citation_records_original_for_companion():
+    temp_root = REPO / "temp"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(temp_root)) as temporary:
+        folder = Path(temporary)
+        original = folder / "managed.docx"
+        companion = folder / "managed.md"
+        original.write_bytes(b"synthetic docx fixture")
+        companion.write_text("alpha\nverified evidence\n", encoding="utf-8")
+        locator = companion.relative_to(REPO).as_posix() + "#L2"
+        original_source = original.relative_to(REPO).as_posix()
+        guard = CitationGuard()
+        ctx = ToolExecution(name="read_raw", arguments={"locator": locator}, agent_id="a1")
+        guard.on_post_execute(ctx, ToolExecutionResult(content="some text"))
+        assert locator in guard.read_sources
+        assert original_source in guard.read_sources
+        assert guard.check([original_source]).ok is True
+
+
 def test_citation_ignores_failed_read_raw():
     guard = CitationGuard()
     ctx = ToolExecution(name="read_raw", arguments={"locator": "raw/missing.md"}, agent_id="a1")

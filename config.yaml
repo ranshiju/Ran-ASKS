@@ -13,6 +13,10 @@ extraction:
     api_base_url: https://mineru.net/api/v4
     token_env: MINERU_API_TOKEN
     model_version: vlm
+    is_ocr: false
+    enable_formula: true
+    enable_table: true
+    # language: en
     timeout_sec: 1800
     poll_interval_sec: 5
     request_timeout_sec: 60

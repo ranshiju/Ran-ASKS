@@ -113,6 +113,33 @@ def test_duplicate_edges_are_warned():
         assert report["warnings"]
 
 
+def test_protected_route_requires_managed_authorization_origin():
+    tmp, conn = isolated_db()
+    try:
+        insert(conn, "academic/wiki/papers/a", "page")
+        insert(conn, "academic/wiki/hubs/h", "hub")
+        cursor = conn.execute(
+            "INSERT INTO edges (subject,predicate,object,confidence,source) VALUES (?,?,?,?,?)",
+            (
+                "academic/wiki/papers/a", "主要研究", "academic/wiki/hubs/h",
+                "推断", "academic/wiki/papers/a#研究方向定位",
+            ),
+        )
+        conn.commit()
+        report = module.validate_graph(conn, module.DEFAULTS)
+        assert report["counts"]["missing_protected_edge_authorization"] == 1
+        gl.add_edge_origin(
+            conn, cursor.lastrowid, "academic/wiki/papers/a",
+            "automatic-route:academic/wiki/papers/a#研究方向定位",
+        )
+        conn.commit()
+        report = module.validate_graph(conn, module.DEFAULTS)
+    finally:
+        conn.close()
+        tmp.cleanup()
+    assert report["counts"]["missing_protected_edge_authorization"] == 0
+
+
 def test_temporal_fact_dangling_endpoint_is_error():
     with tempfile.TemporaryDirectory() as directory:
         conn = sqlite3.connect(Path(directory) / "graph.db")

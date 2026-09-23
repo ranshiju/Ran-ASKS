@@ -160,7 +160,52 @@ def check_documentation_omissions() -> None:
         assert not release.documentation_omission_errors(destination, manifest, {skill_path})
 
 
+def check_private_release_boundary() -> None:
+    # Synthetic inputs only: never copy real private content into test releases.
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary).resolve() / 'source'
+        root.mkdir()
+        (root / 'private').mkdir()
+        (root / 'private/synthetic.md').write_text('SYNTHETIC PRIVATE')
+        (root / 'assets').mkdir()
+        (root / 'assets/public.md').write_text('SYNTHETIC PUBLIC')
+        (root / 'assets/link.md').symlink_to(root / 'private/synthetic.md')
+        (root / 'linked').symlink_to(root / 'private', target_is_directory=True)
+        destination = root.parent / 'release'
+        destination.mkdir()
+        sentinel = destination / 'keep.txt'
+        sentinel.write_text('unchanged')
+        base = {'include': [], 'exclude': [], 'public_assets': {}, 'template_dirs': []}
+        invalid = [
+            {'include': ['private/**']},
+            {'include': ['**']},
+            {'include': ['linked/**']},
+            {'public_assets': {'docs/renamed.md': 'private/synthetic.md'}},
+            {'public_assets': {'private/renamed.md': 'assets/public.md'}},
+            {'public_assets': {'docs/renamed.md': 'assets/link.md'}},
+            {'public_assets': {'docs/renamed.md': 'linked/synthetic.md'}},
+            {'public_assets': {'../escape.md': 'assets/public.md'}},
+            {'public_assets': {'/absolute.md': 'assets/public.md'}},
+            {'public_assets': {'docs/renamed.md': '../outside.md'}},
+            {'template_dirs': ['Private/wiki']},
+            {'template_dirs': ['../escape']},
+        ]
+        with patch.object(release, 'REPO', root):
+            assert release.release_preflight(base | {'include': ['assets/public.md']}) == {'assets/public.md'}
+            for changes in invalid:
+                with patch.object(release, 'load_manifest', return_value=base | changes):
+                    try:
+                        release.build(destination, clean=True, force=True)
+                    except ValueError:
+                        pass
+                    else:
+                        raise AssertionError(f'private boundary accepted: {changes}')
+                assert sentinel.read_text() == 'unchanged', 'preflight must precede cleanup'
+                assert sorted(p.name for p in destination.iterdir()) == ['keep.txt']
+
+
 def main() -> None:
+    check_private_release_boundary()
     check_documentation_omissions()
     check_version_preparation()
     check_version_progression()
@@ -171,6 +216,10 @@ def main() -> None:
         subprocess.run(["git", "init", "-q"], cwd=destination, check=True)
         verified = run("verify", str(destination))
         assert "Public release verified" in verified.stdout
+        (destination / "private").mkdir()
+        blocked = run("verify", str(destination), expected=1)
+        assert "private content path" in blocked.stderr
+        (destination / "private").rmdir()
         skill = destination / ".codex/skills/manuscript-diagnosis"
         assert {p.relative_to(skill).as_posix() for p in skill.rglob("*") if p.is_file()} == {
             "SKILL.md", "agents/openai.yaml", "scripts/diagnosis_preflight.py",
@@ -272,6 +321,42 @@ def main() -> None:
             destination / "README.md"
         ).read_text(encoding="utf-8")
         assert (destination / ".scripts/route.py").is_file()
+        for registry_path in (
+            ".scripts/function_registry.py",
+            ".scripts/test_function_registry.py",
+            "dsh/function_catalog.py",
+            "operations/config/function-registry.yaml",
+            "operations/engineering/adr/007-runtime-function-registry.md",
+        ):
+            assert (destination / registry_path).is_file(), registry_path
+        registry_check = subprocess.run(
+            [sys.executable, "-B", ".scripts/function_registry.py", "validate", "--runtime"],
+            cwd=destination, text=True, capture_output=True,
+        )
+        assert registry_check.returncode == 0, registry_check.stdout + registry_check.stderr
+        for presentation_path in (
+            ".scripts/presentation_runtime.py", ".scripts/test_presentation_runtime.py",
+            ".scripts/presentation_state.py", ".scripts/presentation_render.py",
+            ".scripts/test_presentation_state.py", ".scripts/presentation_delivery.py",
+            ".scripts/test_presentation_delivery.py",
+            "operations/PRESENTATION.md", "operations/engineering/presentation-test-plan.md",
+        ):
+            assert (destination / presentation_path).is_file(), presentation_path
+        presentation_route = subprocess.run(
+            [sys.executable, "-B", ".scripts/route.py", "--capability", "presentation",
+             "--capability-profile", "create"],
+            cwd=destination, text=True, capture_output=True,
+        )
+        assert presentation_route.returncode == 0, presentation_route.stderr
+        assert "当前阶段：1B" in presentation_route.stdout
+        for profile, label in (("form-check", "PPT形式检查"), ("evidence-check", "PPT证据核查"),
+                               ("citation-redact", "PPT引用脱敏")):
+            optional_route = subprocess.run(
+                [sys.executable, "-B", ".scripts/route.py", "--capability", "presentation",
+                 "--capability-profile", profile], cwd=destination, text=True, capture_output=True)
+            assert optional_route.returncode == 0, optional_route.stderr
+            assert label in optional_route.stdout
+        assert not (destination / "temp/presentation-runtime").exists()
         assert not (destination / ".scripts/e1_experiment.py").exists()
         assert not (destination / ".scripts/e1_order_robustness.py").exists()
         assert not (destination / ".scripts/test_e1_experiment.py").exists()
@@ -319,6 +404,14 @@ def main() -> None:
         assert (destination / "operations/engineering/open-source-assets/README.md").is_file()
         graph_text = (destination / "operations/engineering/graph.yaml").read_text(encoding="utf-8")
         assert "frontier_store:" in graph_text
+        assert "presentation_delivery:" in graph_text
+        assert "presentation_delivery_test:" in graph_text
+        assert "presentation_state:" in graph_text
+        assert "presentation_render:" in graph_text
+        assert "presentation_state_test:" in graph_text
+        assert "presentation_runtime:" in graph_text
+        assert "presentation_ops:" in graph_text
+        assert "presentation_test_plan:" in graph_text
         assert "manuscript_diagnosis_skill:" in graph_text
         assert "manuscript_diagnosis_preflight:" in graph_text
         assert "manuscript_diagnosis_style:" not in graph_text

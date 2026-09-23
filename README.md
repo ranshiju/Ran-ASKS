@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.6.0
+> Current release: v0.7.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -106,6 +106,42 @@ from source evidence, preserving unknown dates rather than substituting the
 ingestion day. Remote image transcription/review has its own API settings and
 explicit upload permission (`IMAGE_OCR_ALLOW_REMOTE=false` by default); choosing
 that adapter does not switch the semantic backend or imply human review.
+
+## Registered artifact workflows
+
+The canonical runtime function registry keeps task routing, CLI exposure,
+backend ownership, and validation aligned. It distinguishes persistent states,
+such as research and frontier work, from one-shot user functions that create or
+update governed artifacts. This lets the same capability contract remain
+inspectable without treating every operation as a long-lived state.
+
+The template-driven CV function uses a workspace record for wording and edition
+selection, while managed Raw remains the factual authority. A DOCX template
+defines page styles and module bookmarks; its companion YAML defines module
+order, bilingual labels, category mappings, and sorting. Rendering accepts only
+verified records with usable Raw locators, creates dated immutable DOCX
+versions, and records a manifest for later comparison. The public
+[`templates/cv/`](templates/cv/) package is anonymous and contains no personal
+CV facts.
+
+Create a local example workspace with:
+
+```bash
+mkdir -p projects/cv-demo/templates
+cp templates/cv/academic-full.* projects/cv-demo/templates/
+cp templates/cv/cv-records.example.yaml projects/cv-demo/cv-records.yaml
+python3 .scripts/wg.py cv status --workspace cv-demo
+```
+
+Replace the example values only after the corresponding facts exist in managed
+Raw. See [`operations/CV.md`](operations/CV.md) for verification and rendering
+commands.
+
+Native presentation authoring follows the same governed-artifact principle. It
+maintains persistent revisions, separates draft approval from locking, applies
+constrained layouts, and produces deterministic delivery copies while carrying
+forward source-sensitivity rules. Presentation ingestion and presentation
+authoring remain distinct functions with explicit contracts.
 
 ## Image documents and reviewed ingestion
 
@@ -252,8 +288,14 @@ department and responsibility claims require explicit source wording.
   with Agent-confirmed overrides recorded as durable, transaction-linked origins.
 - Project-scoped research memory and a Frontier overlay for open questions and
   evolving trajectories.
+- A canonical runtime function registry that separates persistent working
+  states from one-shot user functions and validates their CLI/backend bindings.
 - On-demand academic writing capability that combines shared writing conventions
   with project and disciplinary context at the moment of composition.
+- Template-driven bilingual CV generation with evidence-gated records, anonymous
+  reusable templates, and dated immutable DOCX editions.
+- Native presentation authoring with persistent revisions, explicit approval
+  and locking boundaries, constrained layouts, and deterministic delivery.
 - Read-only visual QA for images, PDF pages, and static PPT/PPTX pages.
 - Image/PDF-to-editable-PPT reconstruction that favors native PowerPoint objects
   and records any raster fallback.
@@ -308,6 +350,7 @@ ingested Raw record in place. The main task specifications live under
 | `operations/` | Ingestion, query, research, writing, synchronization, and engineering contracts |
 | `.scripts/` | Validated command-line tools and regression checks |
 | `dsh/` | Optional guarded agent loop and tool registry |
+| `templates/` | Anonymous reusable artifact templates and example workspace records |
 | `academic/`, `admin/`, `teaching/`, `business/` | Independent domain templates |
 | `cross-domain/` | Cross-domain graph, Hubs, and navigation surfaces |
 | `paper-artifacts/` | Frozen, sanitized Wiki/Graph data and measurements tied to a paper release |
@@ -353,6 +396,7 @@ is bundled here.
 
 | Project | Relationship | Scope in Ran-ASKS |
 | --- | --- | --- |
+| [Code Review Graph](https://github.com/tirth8205/code-review-graph) | Architectural influence | Manually governed engineering graph, minimal-context impact traversal, bounded completeness, and change-set verification contracts, independently implemented without the upstream runtime |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | Architectural influence | DSH ToolRegistry, hooks, session log, guard-chain, and plugin concepts, reimplemented in Python |
 | [Semantica](https://github.com/semantica-agi/semantica) | Adapted patterns | Declarative constraints, provenance, and temporal validity within the Ran-ASKS graph boundary |
 | [MinerU](https://github.com/opendatalab/MinerU) | Preferred external backend | Structured PDF extraction for paper ingestion |

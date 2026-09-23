@@ -12,6 +12,8 @@
 - 学术简历、个人简介、项目申报辅助材料、合作交流材料、会议介绍等专业材料；
 - 用户明确指定的 Markdown、Word、PDF、PPT 文字内容或版式文档。
 
+明确要求逐页协作制作原生可编辑 PPT 时，在当前状态内另加载 `python3 .scripts/route.py --capability presentation --capability-profile create`，其成熟度与当前可执行动作以 `operations/PRESENTATION.md` 为准；当前阶段1B已提供单页状态、整套导出与三个独立按需辅助入口，真实用户验收尚待完成。仅写 PPT 文字提纲或讲稿仍用本规范，图片/PDF 重建沿用独立重建能力。
+
 研究论文仍以 `research` 作为持续工作状态。Agent 真正开始起草、改写或润色论文正文时，在该状态内调用 `write` 的 academic profile；讨论研究问题、核对数据和运行实验时继续保持 `research`，无需加载写作能力。
 
 先判定工作模式，而非机械依赖单个触发词：

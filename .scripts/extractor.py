@@ -23,13 +23,24 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from pathlib import PurePosixPath
 from datetime import datetime
 from typing import Optional
+from urllib.parse import unquote, urlsplit
 
 import yaml
 
-from mineru_api import MinerUAuthError, MinerUError, extract_pdf_with_mineru
+from mineru_api import (
+    MinerUAuthError,
+    MinerUError,
+    MinerUExtraction,
+    MinerUInputError,
+    MinerUQuotaError,
+    extract_pdf_bundle_with_mineru,
+)
 
 try:
     from dotenv import load_dotenv
@@ -57,6 +68,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / ".project" / "config.yaml"
 # 论文提取产物目录(学术域内,符合四域结构;原 CodexInspiration 用 raw/papers/)
 PAPERS_DIR = PROJECT_ROOT / "academic" / "raw" / "works" / "papers"
+MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\((?:<)?([^\s)>]+)")
+MAX_MINERU_SIDECAR_BYTES = 50 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class ExtractionContent:
+    content: str
+    metadata: dict
+    mineru_bundle: Optional[MinerUExtraction] = None
 
 if load_dotenv is not None:
     load_dotenv(PROJECT_ROOT / ".env")
@@ -97,8 +117,122 @@ def save_parse_meta(paper_dir: Path, meta: dict):
         if ext_md:
             meta.setdefault("source", {})["external_md_path"] = ext_md
     meta_path = paper_dir / "parse_meta.yaml"
-    with open(meta_path, "w", encoding="utf-8") as f:
+    temporary = meta_path.with_name(f".{meta_path.name}.partial-{os.getpid()}")
+    with open(temporary, "w", encoding="utf-8") as f:
         yaml.dump(meta, f, allow_unicode=True, default_flow_style=False)
+    os.replace(temporary, meta_path)
+
+
+def _referenced_mineru_images(content: str, artifact_root: Path) -> list[tuple[Path, Path]]:
+    """Return validated (source, relative-to-images) files referenced by Markdown."""
+    refs: list[tuple[Path, Path]] = []
+    seen = set()
+    root = artifact_root.resolve()
+    for match in MARKDOWN_IMAGE_RE.finditer(content):
+        raw_ref = unquote(match.group(1).strip())
+        parsed = urlsplit(raw_ref)
+        if parsed.scheme or parsed.netloc or not parsed.path:
+            continue
+        relative = PurePosixPath(parsed.path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise MinerUError(f"MinerU Markdown 包含非法图片路径: {raw_ref}")
+        if not relative.parts or relative.parts[0] != "images":
+            raise MinerUError(f"MinerU Markdown 本地图片必须位于 images/: {raw_ref}")
+        source = (artifact_root / Path(*relative.parts)).resolve(strict=False)
+        try:
+            source.relative_to(root)
+        except ValueError as exc:
+            raise MinerUError(f"MinerU 图片越过结果目录: {raw_ref}") from exc
+        if not source.is_file() or source.is_symlink():
+            raise MinerUError(f"MinerU Markdown 引用的图片缺失或非法: {raw_ref}")
+        destination = Path(*relative.parts[1:])
+        key = destination.as_posix()
+        if key not in seen:
+            seen.add(key)
+            refs.append((source, destination))
+    return refs
+
+
+def _commit_mineru_document_bundle(
+    paper_dir: Path,
+    md_path: Path,
+    output: ExtractionContent,
+) -> dict:
+    """Atomically install Markdown plus its referenced MinerU assets."""
+    token = uuid.uuid4().hex
+    temporary_md = paper_dir / f".paper.md.partial-{token}"
+    temporary_images = paper_dir / f".images.partial-{token}"
+    temporary_sidecars = paper_dir / f".mineru-artifacts.partial-{token}"
+    old_images = paper_dir / f".images.previous-{token}"
+    old_sidecars = paper_dir / f".mineru-artifacts.previous-{token}"
+    bundle = output.mineru_bundle
+    image_refs: list[tuple[Path, Path]] = []
+    sidecar_refs: list[tuple[Path, Path]] = []
+    temporary_md.write_text(output.content, encoding="utf-8")
+    try:
+        if bundle is not None:
+            image_refs = _referenced_mineru_images(output.content, bundle.artifact_root)
+            for source, relative in image_refs:
+                destination = temporary_images / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+            total_sidecar_bytes = 0
+            for source in bundle.sidecar_paths:
+                if source.is_symlink() or not source.is_file():
+                    raise MinerUError(f"MinerU sidecar 非普通文件: {source}")
+                size = source.stat().st_size
+                total_sidecar_bytes += size
+                if size > MAX_MINERU_SIDECAR_BYTES or total_sidecar_bytes > MAX_MINERU_SIDECAR_BYTES:
+                    raise MinerUError("MinerU sidecar 超过 50MB 受管预算")
+                relative = source.relative_to(bundle.artifact_root)
+                destination = temporary_sidecars / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+                sidecar_refs.append((source, relative))
+
+            current_images = paper_dir / "images"
+            current_sidecars = paper_dir / "mineru"
+            for current, label in (
+                (current_images, "images"), (current_sidecars, "mineru"),
+            ):
+                if current.is_symlink() or (current.exists() and not current.is_dir()):
+                    raise MinerUError(f"受管 MinerU 目标必须是普通目录: {label}/")
+            if current_images.exists():
+                os.replace(current_images, old_images)
+            if current_sidecars.exists():
+                os.replace(current_sidecars, old_sidecars)
+            try:
+                if temporary_images.exists():
+                    os.replace(temporary_images, current_images)
+                if temporary_sidecars.exists():
+                    os.replace(temporary_sidecars, current_sidecars)
+                os.replace(temporary_md, md_path)
+            except Exception:
+                if current_images.exists():
+                    shutil.rmtree(current_images)
+                if current_sidecars.exists():
+                    shutil.rmtree(current_sidecars)
+                if old_images.exists():
+                    os.replace(old_images, current_images)
+                if old_sidecars.exists():
+                    os.replace(old_sidecars, current_sidecars)
+                raise
+            shutil.rmtree(old_images, ignore_errors=True)
+            shutil.rmtree(old_sidecars, ignore_errors=True)
+        else:
+            os.replace(temporary_md, md_path)
+    finally:
+        if temporary_md.exists():
+            temporary_md.unlink()
+        shutil.rmtree(temporary_images, ignore_errors=True)
+        shutil.rmtree(temporary_sidecars, ignore_errors=True)
+        shutil.rmtree(old_images, ignore_errors=True)
+        shutil.rmtree(old_sidecars, ignore_errors=True)
+    return {
+        **output.metadata,
+        "referenced_image_count": len(image_refs),
+        "sidecar_count": len(sidecar_refs),
+    }
 
 
 def remove_lower_quality_backups(paper_dir: Path, preferred_engine: str) -> None:
@@ -266,7 +400,7 @@ def record_external_md_path(paper_dir: Path, external_md_uri: str) -> None:
 #  引擎 1: MinerU（本地结果或 API）
 # ═══════════════════════════════════════════════════════════
 
-def extract_mineru(paper_dir: Path, paper_id: str) -> Optional[str]:
+def extract_mineru(paper_dir: Path, paper_id: str) -> Optional[ExtractionContent]:
     """
     检查用户是否已手动放置 MinerU 解析结果。
     
@@ -278,7 +412,7 @@ def extract_mineru(paper_dir: Path, paper_id: str) -> Optional[str]:
         content = mineru_path.read_text(encoding="utf-8")
         if content.strip():
             logger.info(f"  📦 MinerU: 发现 {mineru_path.name} ({len(content):,} 字节)")
-            return content
+            return ExtractionContent(content=content, metadata={"source": "manual"})
 
     config = {}
     if CONFIG_PATH.exists():
@@ -299,41 +433,42 @@ def extract_mineru(paper_dir: Path, paper_id: str) -> Optional[str]:
     if not pdf_path.exists():
         return None
 
-    # 重试 3 次（初次 + 2 次），退避递增；MinerU 是外部 API，失败多为限流/网络抖动
-    backoff = [0, 5, 15]
-    for attempt, delay in enumerate(backoff):
-        if delay:
-            logger.info(f"  MinerU API: 等待 {delay}s 后重试（第 {attempt+1}/{len(backoff)} 次）...")
-            time.sleep(delay)
-        try:
-            return extract_pdf_with_mineru(
-                pdf_path,
-                token,
-                model_version=mineru_config.get("model_version", "vlm"),
-                base_url=mineru_config.get("api_base_url", "https://mineru.net/api/v4"),
-                timeout_sec=int(mineru_config.get("timeout_sec", 1800)),
-                interval_sec=int(mineru_config.get("poll_interval_sec", 5)),
-                request_timeout_sec=int(mineru_config.get("request_timeout_sec", 60)),
-                work_dir=paper_dir / ".mineru",
-                keep_archive=bool(mineru_config.get("keep_archive", False)),
-            )
-        except MinerUAuthError as exc:
-            # 认证错误不重试（token 问题重试无意义）
-            logger.warning(
-                "  ⚠️ MinerU API 认证失败：MINERU_API_TOKEN 可能已过期或无效，"
-                "请更新项目根目录 .env 后重试。详情: %s",
-                exc,
-            )
-            return None
-        except (MinerUError, OSError) as exc:
-            logger.warning(
-                "  ⚠️ MinerU API 调用失败（第 %d/%d 次）: %s",
-                attempt+1, len(backoff), exc,
-            )
-    logger.warning(
-        "  ⚠️ MinerU API 连续 %d 次失败，放弃；论文 PDF 不回落其他引擎（质量问题）",
-        len(backoff),
-    )
+    try:
+        result = extract_pdf_bundle_with_mineru(
+            pdf_path,
+            token,
+            model_version=mineru_config.get("model_version", "vlm"),
+            base_url=mineru_config.get("api_base_url", "https://mineru.net/api/v4"),
+            timeout_sec=int(mineru_config.get("timeout_sec", 1800)),
+            interval_sec=int(mineru_config.get("poll_interval_sec", 5)),
+            request_timeout_sec=int(mineru_config.get("request_timeout_sec", 60)),
+            work_dir=paper_dir / ".mineru",
+            keep_archive=bool(mineru_config.get("keep_archive", False)),
+            language=mineru_config.get("language") or None,
+            is_ocr=bool(mineru_config.get("is_ocr", False)),
+            enable_formula=bool(mineru_config.get("enable_formula", True)),
+            enable_table=bool(mineru_config.get("enable_table", True)),
+        )
+        return ExtractionContent(
+            content=result.markdown,
+            metadata=result.meta,
+            mineru_bundle=result,
+        )
+    except MinerUAuthError as exc:
+        logger.warning(
+            "  ⚠️ MinerU API 认证失败：%s 可能已过期或无效，请更新项目根目录 .env。详情: %s",
+            token_env,
+            exc,
+        )
+    except MinerUQuotaError as exc:
+        logger.warning("  ⚠️ MinerU API 配额不足，当前运行不重试: %s", exc)
+    except MinerUInputError as exc:
+        logger.warning("  ⚠️ MinerU 输入不符合服务限制，当前运行不重试: %s", exc)
+    except (MinerUError, OSError) as exc:
+        logger.warning(
+            "  ⚠️ MinerU API 调用失败；已保留远端任务 checkpoint，恢复时继续原任务: %s",
+            exc,
+        )
     return None
 
 
@@ -690,14 +825,22 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
     
     best_content = None
     best_engine = None
+    best_output: Optional[ExtractionContent] = None
     
     for eng in engines_to_try:
         extractor = extractors[eng]
-        content = extractor(paper_dir, paper_id)
+        extracted = extractor(paper_dir, paper_id)
+        if isinstance(extracted, ExtractionContent):
+            content = extracted.content
+            output = extracted
+        else:
+            content = extracted
+            output = ExtractionContent(content=content, metadata={}) if content else None
         
         if content:
             best_content = content
             best_engine = eng
+            best_output = output
             # 第一个成功的引擎就是最佳选择，停止尝试
             break
         # MinerU 失败仅允许回落 BLSC OCR；不静默回落到本地 docling/pymupdf。
@@ -736,8 +879,12 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
         shutil.copy2(md_path, backup_path)
         logger.info(f"   💾 备份: {backup_path.name}")
     
-    # 写入新文件
-    md_path.write_text(best_content, encoding="utf-8")
+    # 原子写入 Markdown；MinerU 同时安装其实际引用的图片和 allowlist sidecar。
+    extraction_meta = _commit_mineru_document_bundle(
+        paper_dir,
+        md_path,
+        best_output or ExtractionContent(content=best_content, metadata={}),
+    )
     
     # 更新元数据
     meta["preferred"] = best_engine
@@ -746,8 +893,12 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "size_bytes": len(best_content.encode("utf-8")),
         "line_count": best_content.count('\n') + 1,
+        **extraction_meta,
     }
     save_parse_meta(paper_dir, meta)
+    if best_engine == "mineru" and not bool(
+            ((load_config().get("extraction") or {}).get("mineru") or {}).get("keep_archive", False)):
+        shutil.rmtree(paper_dir / ".mineru", ignore_errors=True)
     remove_lower_quality_backups(paper_dir, best_engine)
     
     logger.info(f"   ✅ 写入 paper.md (引擎: {best_engine}, {len(best_content):,} 字节)")

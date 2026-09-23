@@ -6,6 +6,7 @@ include:
   - .env.example
   - .gitignore
   - preprocess.py
+  # Includes local-only presentation runtime/state/renderer/delivery and isolated regression fixtures.
   - .scripts/**
   - .codex/skills/manuscript-diagnosis/SKILL.md
   - .codex/skills/manuscript-diagnosis/agents/openai.yaml
@@ -13,6 +14,7 @@ include:
   - .codex/skills/manuscript-diagnosis/scripts/test_diagnosis_preflight.py
   - agents/**
   - dsh/**
+  # Includes PRESENTATION.md and presentation-test-plan.md; no active presentation assets.
   - operations/**
   - academic/SCHEMA.md
   - admin/SCHEMA.md
@@ -23,6 +25,7 @@ include:
   - operations/engineering/engineering-handbook.md
   - operations/engineering/code-guidance.md
 exclude:
+  - private/**
   - "**/.DS_Store"
   - .scripts/e1_experiment.py
   - .scripts/e1_order_robustness.py
@@ -55,6 +58,10 @@ public_assets:
   CONTRIBUTING.md: operations/engineering/open-source-assets/CONTRIBUTING.md
   SECURITY.md: operations/engineering/open-source-assets/SECURITY.md
   LICENSE: operations/engineering/open-source-assets/LICENSE
+  templates/cv/README.md: operations/engineering/open-source-assets/templates/cv/README.md
+  templates/cv/academic-full.docx: operations/engineering/open-source-assets/templates/cv/academic-full.docx
+  templates/cv/academic-full.template.yaml: operations/engineering/open-source-assets/templates/cv/academic-full.template.yaml
+  templates/cv/cv-records.example.yaml: operations/engineering/open-source-assets/templates/cv/cv-records.example.yaml
   operations/engineering/engineering-handbook.md: operations/engineering/open-source-assets/engineering-handbook.md
   operations/engineering/code-guidance.md: operations/engineering/open-source-assets/code-guidance.md
 template_dirs:

@@ -14,6 +14,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 STATE_PROTOCOL_VERSION = "ingest-state-v1"
 RUNTIME_SUMMARY_VERSION = "ingest-runtime-summary-v1"
+RESULT_PROTOCOL_VERSION = "ingest-result-v1"
+PUBLIC_WORKFLOW_STATUSES = frozenset({
+    "awaiting_agent", "ready_to_commit", "completed", "failed",
+})
 KNOWN_STATUSES = frozenset({
     "init", "dedup_check", "preprocess", "extract", "write_wiki", "write_slots",
     "bibliographic_review_required", "agent_required", "type_mismatch",
@@ -160,13 +164,142 @@ def classify_failure(state: dict) -> dict | None:
     }
 
 
+def public_workflow_status(state: dict, payload: dict | None = None) -> str:
+    """Project internal ingest stages onto the shared four-state result contract."""
+    payload = payload or {}
+    explicit = str(payload.get("workflow_status") or "")
+    if explicit in PUBLIC_WORKFLOW_STATUSES:
+        return explicit
+    status = str(payload.get("status") or state.get("status") or "")
+    if status in {"completed", "duplicate_found"}:
+        return "completed"
+    if status in {"graph_ready", "finalized", "ready_to_commit"}:
+        return "ready_to_commit"
+    if status in {"failed", "validation_error", "type_mismatch", "superseded"}:
+        return "failed"
+    return "awaiting_agent"
+
+
+def _artifact_refs(state: dict, payload: dict) -> dict:
+    refs: dict[str, object] = {}
+    supplied = payload.get("artifacts")
+    if isinstance(supplied, dict):
+        refs.update({str(key): value for key, value in supplied.items() if value})
+    for key in (
+        "raw_dir", "wiki_path", "report_path", "receipt_path", "review_path",
+        "write_to", "validation_receipt",
+    ):
+        value = payload.get(key) or state.get(key)
+        if value:
+            refs.setdefault(key, value)
+    task = payload.get("agent_task") or state.get("agent_task")
+    if isinstance(task, dict) and task.get("schema") == "agent-task-v1":
+        refs.setdefault("agent_task", {
+            "schema": task["schema"],
+            "outputs": [
+                item.get("path") for item in task.get("outputs") or []
+                if isinstance(item, dict) and item.get("path")
+            ],
+        })
+    return refs
+
+
 def output_payload(state: dict, payload: dict) -> dict:
-    """Attach the canonical failure disposition without mutating caller output."""
+    """Return one typed invocation result without mutating caller output.
+
+    A successful invocation may still leave the workflow awaiting semantic work.
+    Callers must inspect workflow_status/terminal/committed instead of inferring
+    knowledge commit from the process exit code.
+    """
     result = dict(payload)
+    workflow_status = public_workflow_status(state, result)
+    internal_status = str(
+        result.get("internal_status") or state.get("status") or result.get("status") or ""
+    )
+    transaction_id = str(result.get("transaction_id") or state.get("transaction_id") or "")
+    result.update({
+        "schema": RESULT_PROTOCOL_VERSION,
+        "invocation_status": "ok",
+        "workflow_status": workflow_status,
+        "terminal": workflow_status in {"completed", "failed"},
+        "committed": internal_status == "completed",
+        "internal_status": internal_status,
+        "artifact_refs": _artifact_refs(state, result),
+    })
+    if transaction_id:
+        result["transaction_id"] = transaction_id
+        result["transaction_ids"] = [transaction_id]
+        result["state_ref"] = f"temp/inbox-state/{transaction_id}.json"
+    next_actions = result.get("next_actions")
+    if not next_actions and result.get("next_action"):
+        next_actions = {"resume": result["next_action"]}
+    if not next_actions and isinstance(result.get("agent_task"), dict):
+        next_actions = result["agent_task"].get("commands")
+    if next_actions:
+        result["next_actions"] = next_actions
     failure = ((state.get("telemetry") or {}).get("current_failure")
                or classify_failure(state))
     if failure:
         result["failure_disposition"] = failure
+    return result
+
+
+def batch_output_payload(*, items: list[dict], status: str, phase: str,
+                         next_action: str = "") -> dict:
+    """Derive a batch result exclusively from canonical item envelopes."""
+    normalized = []
+    for item in items:
+        if item.get("schema") != RESULT_PROTOCOL_VERSION:
+            raise ValueError("batch item 缺少 ingest-result-v1")
+        workflow_status = str(item.get("workflow_status") or "")
+        if workflow_status not in PUBLIC_WORKFLOW_STATUSES:
+            raise ValueError(f"batch item workflow_status 非法: {workflow_status or '(empty)'}")
+        normalized.append(item)
+    statuses = Counter(item["workflow_status"] for item in normalized)
+    internal = Counter(str(item.get("internal_status") or "") for item in normalized)
+    if statuses.get("failed"):
+        workflow_status = "failed"
+    elif normalized and statuses.get("completed", 0) == len(normalized):
+        workflow_status = "completed"
+    elif normalized and (
+        statuses.get("ready_to_commit", 0) + statuses.get("completed", 0)
+        == len(normalized)
+    ):
+        workflow_status = "ready_to_commit"
+    elif normalized:
+        workflow_status = "awaiting_agent"
+    else:
+        workflow_status = "completed"
+    counts = {
+        "total": len(normalized),
+        **{key: statuses.get(key, 0) for key in sorted(PUBLIC_WORKFLOW_STATUSES)},
+        "duplicates": internal.get("duplicate_found", 0),
+        "committed": sum(bool(item.get("committed")) for item in normalized),
+    }
+    if sum(counts[key] for key in PUBLIC_WORKFLOW_STATUSES) != counts["total"]:
+        raise ValueError("batch workflow counts 不守恒")
+    transaction_ids = [
+        str(item.get("transaction_id")) for item in normalized
+        if item.get("transaction_id")
+    ]
+    result = {
+        "schema": RESULT_PROTOCOL_VERSION,
+        "invocation_status": "ok",
+        "status": status,
+        "phase": phase,
+        "workflow_status": workflow_status,
+        "terminal": workflow_status in {"completed", "failed"},
+        "committed": bool(normalized) and all(
+            item.get("committed") or item.get("internal_status") == "duplicate_found"
+            for item in normalized
+        ),
+        "transaction_ids": transaction_ids,
+        "artifact_refs": {},
+        "counts": counts,
+        "items": normalized,
+    }
+    if next_action:
+        result["next_actions"] = {"resume": next_action}
     return result
 
 

@@ -212,6 +212,30 @@ def test_read_raw_recorded_in_read_sources():
         os.unlink(tmp.name)
 
 
+def test_companion_read_allows_original_file_citation():
+    """API 读取 companion 后，把唯一同 stem 原件加入 citation 白名单。"""
+    temp_root = REPO / "temp"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(temp_root)) as temporary:
+        folder = Path(temporary)
+        original = folder / "managed.docx"
+        companion = folder / "managed.md"
+        original.write_bytes(b"synthetic docx fixture")
+        companion.write_text("alpha\nverified evidence\n", encoding="utf-8")
+        companion_locator = companion.relative_to(REPO).as_posix() + "#L2"
+        original_source = original.relative_to(REPO).as_posix()
+        session = QuerySession(query="q", query_type="t", stage="evidence", mode="api")
+        out = module.execute_plan(
+            session,
+            [{"action": "read_raw", "input": {"locator": companion_locator}}],
+            is_continuation=False,
+        )
+        assert out["results"][0]["ok"], out["results"]
+        assert companion_locator in session.read_sources
+        assert original_source in session.read_sources
+        assert module._check_citations([original_source], session.read_sources)["ok"] is True
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -109,17 +109,36 @@ def _get_domain_from_path(page_path):
     return None
 
 def _graph_db_path_for(args):
-    db = getattr(args, "db", None)
-    if db:
-        return Path(db)
     page = getattr(args, "page", None)
-    if page:
-        return gl.graph_db_for(page)
-    return gl.GRAPH_DB
+    db = getattr(args, "db", None)
+    if not db and page:
+        text = str(page)
+        if Path(text).is_absolute():
+            text = Path(text).relative_to(gl.REPO).as_posix()
+        db = gl.graph_db_for(text)
+    target = Path(db or gl.GRAPH_DB)
+    for value in (page, getattr(args, "src", None), getattr(args, "tgt", None)):
+        gl.validate_graph_target(value, target)
+    private = gl.private_graph_path(target)
+    for field in ("page_file", "raw_source_override", "knowledge_ir", "semantic", "citations", "triples"):
+        value = getattr(args, field, None)
+        if value:
+            source = Path(value)
+            if not source.is_absolute():
+                source = gl.REPO / source
+            if gl.private_graph_path(source) != private:
+                raise ValueError(f"{field} crosses private/public storage boundary")
+    if private:
+        # Audit outputs are sensitive too; do not leak proposals into shared temp/.
+        for field in ("knowledge_ir_out", "graph_plan_out"):
+            value = getattr(args, field, None)
+            if value and not Path(value).resolve().is_relative_to(target.resolve().parent):
+                raise ValueError(f"private {field} must remain beside the private database")
+    return target
 
 
 def _connect_for(args):
-    """按 args 选择 graph.db: --db 显式优先;否则按 page 所属域(private→private 库)。
+    """按 args 选择 graph.db，并验证显式 --db 不得跨越 private/public 边界。
     保持物理隔离:private 页只写 private/graph.db,主库页只写 cross-domain/graph.db。
     """
     return gl.connect(_graph_db_path_for(args))
@@ -129,8 +148,9 @@ def _graph_write_command(command):
     """Serialize a complete live-graph command before it opens SQLite."""
     @wraps(command)
     def locked(args):
-        with gl.graph_writer_lock(_graph_db_path_for(args)):
-            return command(args)
+        with gl.graph_scope(_graph_db_path_for(args)):
+            with gl.graph_writer_lock(_graph_db_path_for(args)):
+                return command(args)
 
     locked._graph_writer_locked = True
     return locked
@@ -251,6 +271,7 @@ def has_predicate_structure(text):
 KW_PREDICATES = {"研究基础", "核心方法", "核心创新点", "局限性", "未来展望", "研究关键词"}
 MEETING_KW_PREDICATES = {"讨论", "涉及", "汇报", "规划", "决策"}  # 会议 keyword 谓词
 ADMIN_KW_PREDICATES = {"涉及", "讨论", "形成决策", "推动", "申请事项", "适用对象"}  # 行政 keyword 谓词
+BARE_ABBREVIATION_TOKEN_RE = re.compile(r"(?<![a-z])[A-Z]{2,}[A-Za-z0-9]*")
 
 def is_bare_abbreviation(obj):
     """keyword 裸缩写规则:含英文缩写(≥2连续大写字母)且无括号释义 → 裸缩写。
@@ -260,7 +281,7 @@ def is_bare_abbreviation(obj):
     if not obj or re.search(r"[（(][^)）]*[)）]", obj):
         return False  # 有括号释义,合规
     no_paren = re.sub(r"[（(][^)）]*[)）]", "", obj)
-    tokens = re.findall(r"[A-Z]{2,}[A-Za-z0-9]*", no_paren)
+    tokens = BARE_ABBREVIATION_TOKEN_RE.findall(no_paren)
     if not tokens:
         return False
     # 翻译对照全称词: obj 含中文且 token 重复出现≥2次 → 全称词非缩写,放过
@@ -388,8 +409,15 @@ def clean_page_edges(conn, page: str, *, commit=True) -> dict:
         (page,),
     ):
         protected_route_ids.add(row[0])
+    # A direct endpoint does not imply ownership. Preserve incoming/shared edges
+    # whose lineage is explicitly owned by another page; only untracked direct
+    # edges remain eligible for the historical direct-edge cleanup path.
     direct_ids = {row[0] for row in conn.execute(
-        "SELECT id FROM edges WHERE subject=? OR object=?", (page, page)
+        "SELECT e.id FROM edges e "
+        "WHERE (e.subject=? OR e.object=?) "
+        "AND NOT EXISTS (SELECT 1 FROM edge_origins o "
+        "WHERE o.edge_id=e.id AND o.origin_page<>?)",
+        (page, page, page),
     )} - protected_route_ids
     origin_rows = list(conn.execute(
         "SELECT edge_id, source FROM edge_origins WHERE origin_page=?", (page,)
@@ -817,6 +845,7 @@ KW_PREDICATES = {"研究基础", "核心方法", "核心创新点", "局限性",
 
 # 命题谓词集(其 object 是论断/proposition,不进 hub 关键词,作为 proposition 节点入图)
 PROPOSITION_PREDICATES = {"核心创新点", "局限性", "未来展望"}
+PAPER_SUBJECT_PLACEHOLDER = "__agent_locked_paper_id__"
 # 概念谓词集(其 object 是概念名,进 hub 关键词)
 CONCEPT_KW_PREDICATES = KW_PREDICATES - PROPOSITION_PREDICATES
 # 结构性谓词集(程序发射的派生边,非 LLM 生成,不过谓词治理白名单)
@@ -829,6 +858,19 @@ SIMILAR_PREDICATE = "相似"  # ADR-003: embedding resolve 的相似边,对称�
 
 # 方向谓词集(论文→研究方向 hub 的谓词,用于提取 direction_predicates)
 DIRECTION_PREDICATES = {"主要研究", "基于", "紧密相关于", "应用于", "贡献于", "延伸至", "涉及", "探索", "属于"}
+PROTECTED_ROUTE_PREDICATE = "主要研究"
+
+
+def reject_protected_edge_proposals(triples, page: str) -> None:
+    """Keep generic semantic/compatibility inputs out of the Hub route writer."""
+    for triple in triples or []:
+        subject = str(triple.get("subject") or "").strip()
+        if subject == "本论文":
+            subject = page
+        if subject == page and triple.get("predicate") == PROTECTED_ROUTE_PREDICATE:
+            raise ValueError(
+                "page → 主要研究 → Hub 是受保护边；请使用 hub_semantics route-apply"
+            )
 
 # 语义槽已知的 section header 集合(论文/行政/会议类全覆盖)
 SEMANTIC_SECTION_HEADERS = {"期刊", "第一作者", "其他作者", "通讯作者", "三元组",
@@ -1074,7 +1116,10 @@ def parse_semantic_text(text, page_path, fm=None):
         if len(parts) != 3 or not all(parts):
             continue
         subj, pred, obj = parts
-        if subj == "本论文":
+        paper_subjects = {
+            "本论文", PAPER_SUBJECT_PLACEHOLDER, page_path, page_path.rsplit("/", 1)[-1],
+        }
+        if subj in paper_subjects:
             subj = page_path
         triples.append({"subject": subj, "predicate": pred, "object": obj})
         # 提取 keywords: 仅概念谓词的 object 是概念名(进 hub 关键词)；
@@ -1206,6 +1251,19 @@ def attach_wiki_section_sources(
     }
 
 
+def semantic_subject_report(triples, page_path):
+    """Report whether semantic-edge subjects resolve to the owning page."""
+    resolved = sum(triple.get("subject") == page_path for triple in triples)
+    placeholders = sum(
+        triple.get("subject") == PAPER_SUBJECT_PLACEHOLDER for triple in triples
+    )
+    return {
+        "resolved_subjects": resolved,
+        "placeholder_subjects": placeholders,
+        "other_subjects": len(triples) - resolved - placeholders,
+    }
+
+
 SEMANTIC_DIRECTION_HUB_THRESHOLD = 0.85
 
 
@@ -1279,6 +1337,8 @@ def ensure_research_hub(conn, direction_name, page_path):
     使 LLM 写的裸名方向(论文→属于(主/交叉)→方向名)经 title 解析命中 hub 节点。
     返回 is_new 标记本次是否新建(供调用者做 arXiv 合规校验)。
     """
+    if not page_path.startswith("academic/wiki/"):
+        raise ValueError("arXiv research Hubs are academic-only")
     if not direction_name:
         return None, False
     parts = page_path.split("/")
@@ -1407,6 +1467,8 @@ def assign_keyword_hubs(conn, keywords, direction_predicates, page_path):
     返回 (synced_count, unrecognized_directions, hub_fallback_kws)。
     hub_fallback_kws: direction 未命中、被主方向 hub 兜底接管的 keyword 列表。
     """
+    if page_path.startswith("private/"):
+        raise ValueError("private cannot use legacy arXiv/catch-all Hub assignment")
     if not keywords or not direction_predicates:
         return HubAssignResult(0, [], [])
     paper_dirs = [d for d, _ in direction_predicates]
@@ -1533,6 +1595,8 @@ def assign_keyword_hubs_meeting_admin(conn, keywords, page_path):
     """会议/行政 keyword 归属: 精确匹配 → embedding 匹配 hub seeds → catch-all。
     返回 HubAssignMeetingResult(synced_count, catch_all_added)。
     """
+    if page_path.startswith("private/"):
+        raise ValueError("private cannot use legacy arXiv/catch-all Hub assignment")
     synced = 0
     to_embed = []
     for kw in keywords:
@@ -1727,7 +1791,9 @@ def navigation_connectivity_candidates(triples, page_path, corresponding):
     for t in triples:
         for role in ("subject", "object"):
             name = t.get(role, "").strip()
-            if not name or name == page_path or name == "本论文":
+            if not name or name in {
+                page_path, "本论文", PAPER_SUBJECT_PLACEHOLDER, page_path.rsplit("/", 1)[-1],
+            }:
                 continue
             if name in seen:
                 continue
@@ -1868,7 +1934,7 @@ def bare_tokens_resolvable(text, conn, title_idx, alias_idx, suffix_idx) -> bool
     if not text:
         return False
     no_paren = re.sub(r"[（(][^)）]*[)）]", "", text)
-    tokens = re.findall(r"[A-Z]{2,}[A-Za-z0-9]*", no_paren)
+    tokens = BARE_ABBREVIATION_TOKEN_RE.findall(no_paren)
     if not tokens:
         return False
     for tok in tokens:
@@ -1972,6 +2038,15 @@ def add_knowledge_edges(
     """
     # ── 阶段一:子图构建（纯数据变换） ──
     normalized_triples, descriptive_warns = _build_subgraph(triples, page_path)
+    for triple in normalized_triples:
+        if (triple.get("subject") == page_path
+                and triple.get("predicate") == PROTECTED_ROUTE_PREDICATE
+                and not str(triple.get("protected_edge_authorization") or "").startswith(
+                    "automatic-route:"
+                )):
+            raise ValueError(
+                "page → 主要研究 → Hub 缺少 graph_ingest automatic-route authorization"
+            )
 
     # ── 阶段二:融合进主图 ──
     title_idx, alias_idx, suffix_idx = gl.build_name_index(conn)
@@ -2200,6 +2275,9 @@ def add_knowledge_edges(
                     (locator, exists["id"]),
                 )
             gl.add_edge_origin(conn, exists["id"], page_path, locator)
+            authorization = str(t.get("protected_edge_authorization") or "")
+            if authorization:
+                gl.add_edge_origin(conn, exists["id"], page_path, authorization)
             skipped_dup += 1
             continue
         conf = t.get("confidence") or gl.DEFAULT_CONFIDENCE
@@ -2211,6 +2289,9 @@ def add_knowledge_edges(
         )
         edge_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         gl.add_edge_origin(conn, edge_id, page_path, str(t.get("source") or ""))
+        authorization = str(t.get("protected_edge_authorization") or "")
+        if authorization:
+            gl.add_edge_origin(conn, edge_id, page_path, authorization)
         added += 1
     # 第二层传递包含（代码匹配）：本批新建 keyword 全名扫描 concept_map，
     # 若含其他概念全名（非自身）则建 concept | 包含 | subconcept 边。
@@ -2613,6 +2694,8 @@ def _cmd_ingest_locked(args):
     page = args.page.removesuffix(".md")
     page_file = _page_file_for(args, page)
     fm = gl.read_frontmatter(page_file)
+    for source in gl.parse_list_field(fm, "sources"):
+        gl.validate_graph_target(gl.raw_node_path(source, page), _graph_db_path_for(args))
     raw_overrides = _staged_raw_overrides(args, fm)
     direct_ir_path = getattr(args, "knowledge_ir", None)
     semantic_path = getattr(args, "semantic", None)
@@ -2742,12 +2825,16 @@ def _cmd_ingest_locked(args):
                 "sha256": kir.knowledge_ir_hash(direct_ir),
                 "role": "semantic_proposal",
             }
+            reject_protected_edge_proposals(sem_triples, page)
         else:
             sem_text = Path(semantic_path).read_text(encoding="utf-8")
             sem_triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = parse_semantic_text(
                 sem_text, page, fm
             )
             concept_glosses = parse_concept_glosses(sem_text)
+        report["semantic_subjects"] = semantic_subject_report(sem_triples, page)
+        if report["semantic_subjects"]["placeholder_subjects"]:
+            raise ValueError("semantic subject placeholder was not resolved")
         _is_paper = fm.get("type") == "paper-summary" or page.startswith("academic/wiki/papers/")
         if _is_paper:
             semantic_bibliography = [
@@ -2802,6 +2889,9 @@ def _cmd_ingest_locked(args):
                     "source": scope_route["profile"]["locator"],
                     "subject_is_canonical": True,
                     "object_is_canonical": True,
+                    "protected_edge_authorization": (
+                        f"automatic-route:{scope_route['profile']['locator']}"
+                    ),
                 })
         # 论文→方向边: 检查谓词 tier。Hub 关键词与 catch-all 已退休；
         # 下方的零值字段仅保留报告 Schema 兼容，不产生任何 Hub 正文写入。
@@ -2896,6 +2986,10 @@ def _cmd_ingest_locked(args):
             triples = json.loads(Path(args.triples).read_text(encoding="utf-8"))
         elif args.triples_json:
             triples = json.loads(args.triples_json)
+        reject_protected_edge_proposals(triples, page)
+        report["semantic_subjects"] = semantic_subject_report(triples, page)
+        if report["semantic_subjects"]["placeholder_subjects"]:
+            raise ValueError("semantic subject placeholder was not resolved")
         # 兼容模式也补默认值(修复 source 填空 bug:语义模式调了 fill_defaults,兼容模式漏调)
         report["edge_locators"] = attach_wiki_section_sources(
             triples, page, page_file=page_file, raw_overrides=raw_overrides,

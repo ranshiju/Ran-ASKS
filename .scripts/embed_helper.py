@@ -15,10 +15,21 @@ EMBED_DB = None  # embeddings 独立 db 路径(由 embed_init 设置)
 
 def _get_embed_db():
     """返回 embeddings.db 的路径(独立于 graph.db,graph 重建不丢缓存)"""
-    from pathlib import Path
+    import graph_lib as gl
+    scope = gl.scoped_graph_path()
+    if gl.private_graph_path(scope):
+        target = Path(EMBED_DB) if EMBED_DB is not None else scope.parent / "embeddings.db"
+        if not target.resolve().is_relative_to(scope.parent):
+            raise ValueError("private embedding cache escapes private storage")
+        return target
     if EMBED_DB is not None:
+        if gl.private_graph_path(EMBED_DB):
+            raise ValueError("public embedding operation cannot use private cache")
         return Path(EMBED_DB)
-    return Path(__file__).resolve().parent.parent / "cross-domain" / "embeddings.db"
+    target = gl.REPO / "cross-domain" / "embeddings.db"
+    if gl.private_graph_path(target):
+        raise ValueError("public embedding operation cannot use private cache")
+    return target
 
 
 def configure_cache(path=None):
@@ -121,7 +132,9 @@ def embed_cached_batch(texts, cache_type="keyword"):
     import sqlite3
     if not texts:
         return np.array([])
-    db = sqlite3.connect(_get_embed_db())
+    cache_path = _get_embed_db()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(cache_path)
     _ensure_cache_schema(db)
     uniq = list(dict.fromkeys(texts))
     cached = {}

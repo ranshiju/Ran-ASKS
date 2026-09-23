@@ -80,7 +80,7 @@ nodes:
   inbox_finalize:
     path: .scripts/inbox_finalize.py
     kind: implementation
-    role: manifest-guarded-inbox-finalizer
+    role: versioned-artifact-manifest-guarded-inbox-finalizer-with-nested-bundle-integrity
   relocate_own_ip:
     path: .scripts/relocate_own_ip.py
     kind: implementation
@@ -116,7 +116,7 @@ nodes:
   extractor:
     path: .scripts/extractor.py
     kind: implementation
-    role: raw-adjacent-pdf-extractor
+    role: raw-adjacent-pdf-document-bundle-extractor-with-atomic-markdown-and-referenced-assets
   llm_structured:
     path: .scripts/llm_structured.py
     kind: implementation
@@ -165,6 +165,54 @@ nodes:
     path: .scripts/test_comic_generation.py
     kind: test
     role: comic-model-catalog-path-guard-response-and-receipt-regression
+  cv_ops:
+    path: operations/CV.md
+    kind: spec
+    role: evidence-backed-bilingual-cv-workspace-validation-rendering-and-version-contract
+  cv:
+    path: .scripts/cv.py
+    kind: implementation
+    role: shared-deterministic-template-driven-cv-status-validation-docx-rendering-and-version-diff-kernel
+  cv_test:
+    path: .scripts/test_cv.py
+    kind: test
+    role: cv-schema-evidence-template-edition-render-version-and-path-boundary-regression
+  presentation_ops:
+    path: operations/PRESENTATION.md
+    kind: spec
+    role: agent-first-presentation-authoring-native-deck-delivery-and-explicit-scoped-assistance-contract
+  presentation_test_plan:
+    path: operations/engineering/presentation-test-plan.md
+    kind: spec
+    role: presentation-milestone-state-deck-opt-in-tests-and-pending-real-human-acceptance-matrix
+  presentation_runtime:
+    path: .scripts/presentation_runtime.py
+    kind: implementation
+    role: shared-local-only-presentation-runtime-doctor-and-fixed-synthetic-native-slide-render-probe
+  presentation_state:
+    path: .scripts/presentation_state.py
+    kind: implementation
+    role: shared-presentation-versioned-state-transactions-source-snapshots-approval-lock-and-agent-task-cli
+  presentation_render:
+    path: .scripts/presentation_render.py
+    kind: implementation
+    role: shared-local-three-layout-native-single-slide-and-deck-renderer-with-mechanical-artifact-verification
+  presentation_delivery:
+    path: .scripts/presentation_delivery.py
+    kind: implementation
+    role: shared-local-deck-export-and-explicit-scoped-agent-form-evidence-redaction-transactions
+  presentation_delivery_test:
+    path: .scripts/test_presentation_delivery.py
+    kind: test
+    role: deck-export-opt-in-isolation-snapshot-validation-and-real-native-render-regression
+  presentation_state_test:
+    path: .scripts/test_presentation_state.py
+    kind: test
+    role: presentation-state-schema-approval-invalidation-concurrency-crash-and-real-three-slide-regression
+  presentation_runtime_test:
+    path: .scripts/test_presentation_runtime.py
+    kind: test
+    role: presentation-runtime-capability-routing-isolation-failure-receipt-and-optional-real-render-regression
   visual_qa:
     path: .scripts/visual_qa.py
     kind: implementation
@@ -225,6 +273,26 @@ nodes:
     path: .scripts/test_graph_delta.py
     kind: test
     role: document-subgraph-query-utility-and-atomic-fusion-regression
+  embed_helper:
+    path: .scripts/embed_helper.py
+    kind: implementation
+    role: shared-graph-scoped-text-embedding-cache-with-private-physical-isolation
+  private_maintenance:
+    path: .scripts/private_maintenance.py
+    kind: implementation
+    role: shared-hash-gated-legacy-private-hub-retirement-and-mixed-cache-quarantine-with-private-backup
+  private_isolation_test:
+    path: .scripts/test_private_isolation.py
+    kind: test
+    role: synthetic-private-database-cache-maintenance-and-retirement-isolation-regression
+  private_reingest:
+    path: .scripts/private_reingest.py
+    kind: implementation
+    role: private-only-hash-bound-agent-reingest-transaction-with-private-workspace-validation-rollback-and-idempotence-check
+  private_reingest_test:
+    path: .scripts/test_private_reingest.py
+    kind: test
+    role: synthetic-private-reingest-transaction-isolation-rollback-and-idempotence-regression
   node_semantics:
     path: .scripts/node_semantics.py
     kind: implementation
@@ -477,6 +545,14 @@ nodes:
     path: operations/engineering/open-source-manifest.yaml
     kind: policy
     role: public-release-allowlist-and-reader-documentation-omissions
+  open_source_assets:
+    path: operations/engineering/open-source-assets/
+    kind: documentation-family
+    role: governed-public-release-documentation-and-static-assets
+  open_source_references:
+    path: operations/engineering/open-source-references.md
+    kind: documentation
+    role: upstream-dependency-architecture-influence-and-license-register
   open_source_release:
     path: .scripts/open_source_release.py
     kind: implementation
@@ -534,6 +610,10 @@ nodes:
     path: operations/engineering/code-guidance.md
     kind: documentation
     role: script-call-guidance
+  engineering_todo:
+    path: operations/engineering/TODO.md
+    kind: documentation
+    role: engineering-build-task-backlog
   adr_001:
     path: operations/engineering/adr/001-engineering-meta-graph-and-golden-pipeline.md
     kind: adr
@@ -558,6 +638,10 @@ nodes:
     path: operations/engineering/adr/006-frontier-overlay.md
     kind: adr
     role: fact-isolated-research-frontier-overlay-decision
+  adr_007:
+    path: operations/engineering/adr/007-runtime-function-registry.md
+    kind: adr
+    role: runtime-function-registry-caller-policy-and-multi-adapter-decision
   prompt_test:
     path: .scripts/test_prompt_audit.py
     kind: test
@@ -577,7 +661,11 @@ nodes:
   extractor_test:
     path: .scripts/test_extractor.py
     kind: test
-    role: pdf-input-and-engine-fallback-regression
+    role: pdf-input-engine-fallback-and-mineru-document-bundle-regression
+  mineru_api_test:
+    path: .scripts/test_mineru_api.py
+    kind: test
+    role: mineru-error-taxonomy-resume-streaming-and-archive-safety-regression
   inbox_finalize_test:
     path: .scripts/test_inbox_finalize.py
     kind: test
@@ -693,7 +781,31 @@ nodes:
   engineering_graph:
     path: .scripts/engineering_graph.py
     kind: implementation
-    role: engineering-meta-graph-validator-impact-planner-canonical-target-resolver-and-recommended-locator-emitter
+    role: engineering-meta-graph-validator-bounded-change-set-impact-planner-canonical-target-resolver-and-recommended-locator-emitter
+  engineering_manifest:
+    path: operations/engineering/graph.yaml
+    kind: manifest
+    role: authoritative-manually-governed-engineering-responsibility-graph
+  engineering_graph_test:
+    path: .scripts/test_engineering_graph.py
+    kind: test
+    role: engineering-change-set-completeness-bounds-git-discovery-and-verification-classification-regression
+  function_registry_spec:
+    path: operations/config/function-registry.yaml
+    kind: config
+    role: authoritative-runtime-function-state-caller-binding-and-effect-catalog
+  function_registry:
+    path: .scripts/function_registry.py
+    kind: implementation
+    role: runtime-function-catalog-validator-resolver-and-route-wg-discovery-source
+  function_registry_test:
+    path: .scripts/test_function_registry.py
+    kind: test
+    role: function-route-wg-dsh-coverage-caller-policy-and-resolution-regression
+  dsh_function_catalog:
+    path: dsh/function_catalog.py
+    kind: implementation
+    role: api-only-dsh-tool-to-canonical-function-metadata-binder
   speech_entity_resolver:
     path: .scripts/speech_entity_resolver.py
     kind: implementation
@@ -725,7 +837,7 @@ nodes:
   source_locator:
     path: .scripts/source_locator.py
     kind: implementation
-    role: raw-locator-parse-validate-excerpt-explicit-fact-anchor-and-companion-contract
+    role: raw-locator-parse-validate-excerpt-explicit-fact-anchor-and-source-read-citation-companion-contract
   ingest_user_assertions:
     path: .scripts/ingest_user_assertions.py
     kind: implementation
@@ -761,7 +873,7 @@ nodes:
   mineru_api:
     path: .scripts/mineru_api.py
     kind: implementation
-    role: mineru-pdf-extraction-api-client
+    role: resumable-stage-retrying-mineru-pdf-extraction-api-client-with-typed-errors-and-artifact-bundle
   scan_authors:
     path: .scripts/scan_authors.py
     kind: implementation
@@ -827,6 +939,111 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - graph_lib
+  - tested_by
+  - private_isolation_test
+- - graph_ingest
+  - tested_by
+  - private_isolation_test
+- - node_semantics
+  - uses
+  - embed_helper
+- - hub_semantics
+  - uses
+  - embed_helper
+- - private_maintenance
+  - uses
+  - graph_lib
+- - private_maintenance
+  - tested_by
+  - private_isolation_test
+- - private_reingest
+  - uses
+  - graph_lib
+- - private_reingest
+  - uses
+  - graph_ingest
+- - private_reingest
+  - uses
+  - ingest_check
+- - private_reingest
+  - tested_by
+  - private_reingest_test
+- - cv_ops
+  - specifies
+  - cv
+- - cv
+  - uses
+  - source_locator
+- - cv
+  - tested_by
+  - cv_test
+- - wg
+  - uses
+  - cv
+- - route
+  - references
+  - cv_ops
+- - presentation_ops
+  - specifies
+  - presentation_delivery
+- - presentation_delivery
+  - uses
+  - presentation_state
+- - presentation_delivery
+  - uses
+  - presentation_render
+- - presentation_delivery
+  - uses
+  - agent_task
+- - presentation_delivery
+  - tested_by
+  - presentation_delivery_test
+- - presentation_test_plan
+  - specifies
+  - presentation_delivery_test
+- - presentation_ops
+  - specifies
+  - presentation_state
+- - presentation_state
+  - uses
+  - presentation_render
+- - presentation_state
+  - uses
+  - agent_task
+- - presentation_render
+  - uses
+  - presentation_runtime
+- - presentation_render
+  - uses
+  - visual_qa
+- - presentation_state
+  - tested_by
+  - presentation_state_test
+- - presentation_render
+  - tested_by
+  - presentation_state_test
+- - presentation_test_plan
+  - specifies
+  - presentation_state_test
+- - presentation_ops
+  - specifies
+  - presentation_runtime
+- - presentation_test_plan
+  - specifies
+  - presentation_runtime_test
+- - presentation_runtime
+  - uses
+  - visual_qa
+- - presentation_runtime
+  - tested_by
+  - presentation_runtime_test
+- - route
+  - references
+  - presentation_ops
+- - write
+  - references
+  - presentation_ops
 - - ingest_document
   - uses
   - pptx_document
@@ -887,6 +1104,9 @@ edges:
 - - extractor
   - tested_by
   - extractor_test
+- - mineru_api
+  - tested_by
+  - mineru_api_test
 - - experience_recall
   - tested_by
   - experience_recall_test
@@ -1610,6 +1830,21 @@ edges:
 - - conventions
   - specifies
   - engineering_graph
+- - open_source_references
+  - records_influence_for
+  - engineering_graph
+- - engineering_graph
+  - reads
+  - engineering_manifest
+- - engineering_graph
+  - tested_by
+  - engineering_graph_test
+- - open_source_release
+  - publishes
+  - open_source_assets
+- - open_source_manifest
+  - governs
+  - open_source_assets
 - - ingest
   - specifies
   - speech_entity_resolver
@@ -1835,6 +2070,48 @@ edges:
 - - wg
   - tested_by
   - chat_intake_test
+- - function_registry_spec
+  - specifies
+  - function_registry
+- - function_registry
+  - tested_by
+  - function_registry_test
+- - route
+  - uses
+  - function_registry
+- - wg
+  - uses
+  - function_registry
+- - dsh_function_catalog
+  - uses
+  - function_registry
+- - dsh_tools
+  - uses
+  - dsh_function_catalog
+- - dsh_ingest_tools
+  - uses
+  - dsh_function_catalog
+- - dsh_visual_tools
+  - uses
+  - dsh_function_catalog
+- - dsh_comic_tools
+  - uses
+  - dsh_function_catalog
+- - build_locator_tools
+  - uses
+  - dsh_function_catalog
+- - engineering_graph
+  - validates
+  - function_registry
+- - adr_007
+  - documents
+  - function_registry_spec
+- - adr_007
+  - documents
+  - function_registry
+- - adr_007
+  - documents
+  - dsh_function_catalog
 capabilities:
   ingest:
     entry: route
@@ -1904,12 +2181,16 @@ capabilities:
     required:
     - agents
     - route
+    - function_registry_spec
+    - function_registry
     - engineering_graph
     - engineering_locator
     optional:
     - conventions
     - guidance
     - handbook
+    - engineering_todo
+    - adr_007
     - experiences
     - experience_recall
     - graph_lib
@@ -1971,6 +2252,44 @@ capabilities:
     guardrails:
     - 对外主张先取可追溯证据；不把未核验知识库内容写成事实。
     - write 是按需落笔能力；academic profile 在 research 状态内组合共享约定与学科 overlay，不切换研究上下文。
+  cv:
+    entry: route
+    required:
+    - agents
+    - cv_ops
+    - cv
+    optional:
+    - source_locator
+    - workspace_state
+    - write
+    forbidden: []
+    guardrails:
+    - 简历制作、更新检查、校验、导出和版本比较是 workspace 状态上的用户功能，不创建新的系统状态或事实源。
+    - 正式版本只选择 verified 且具有可定位 Raw 证据的记录；措辞和 edition 归属保留在工作主记录，事实更新先走受管 ingest。
+    - edition 只引用模板 ID；模板包中的 YAML 定义模块顺序、标签、类别映射和排序，配套 DOCX 定义版式、占位符和同序模块书签。
+    - DOCX、manifest 和预览是可重建派生产物，不反写 Raw/Wiki/graph.db，也不自动进入摄入流程。
+  presentation:
+    entry: route
+    required:
+    - agents
+    - presentation_ops
+    optional:
+    - presentation_runtime
+    - presentation_state
+    - presentation_render
+    - presentation_delivery
+    - presentation_test_plan
+    - agent_task
+    - workspace_state
+    - source_locator
+    - visual_qa
+    - pptx_document
+    forbidden: []
+    guardrails:
+    - presentation/create 是当前工作状态内按需加载的创作能力，不切换 research 等持续状态；阶段0提供运行时探测，阶段1A提供持久状态与三个受限版式的单页闭环；阶段1B提供整套原生组装和三个独立按需辅助入口；真实人机验收仍待完成。
+    - 宿主 Agent 负责语义规划、设计和用户交互；shared 程序只做机械工作，Agent 路径不导入 DSH 或隐式调用远程模型。
+    - 最终检查以用户为主；PPT形式检查、PPT引用脱敏仅用户明确指令触发，可提醒但不自动执行；PPT证据核查仅用户对具体内容有疑问时按范围执行。三项独立、默认不执行，不作为默认交付门禁；基本机械校验、来源记录与隐私边界保持。
+    - 创作记录是项目派生状态，科学事实回溯 Raw；源敏感性沿派生产物继承，不因输出路径改变而放开上传。
   research:
     entry: route
     required:
@@ -2042,12 +2361,20 @@ capabilities:
     - python3 .scripts/test_prompt_audit.py
     - python3 .scripts/engineering_graph.py validate
 contracts:
-- id: route-capability-coverage
+- id: runtime-function-registry
   nodes:
+  - function_registry_spec
+  - function_registry
   - route
-  invariant: route.py 的每个 task 都有同名 capability，能力包入口均为 route。
+  - wg
+  - dsh_tools
+  - dsh_ingest_tools
+  - dsh_visual_tools
+  - dsh_comic_tools
+  - build_locator_tools
+  invariant: 运行时功能、持续状态、Route、wg 与 DSH 工具共用 canonical function ID；注册表中的 Route task 与按需 capability 完整对应工程能力包；固定管线保留代码控制循环，不由注册表或 DSH 重写。
   checks:
-  - route_task_coverage
+  - function_registry_coverage
 - id: graph-write-boundary
   nodes:
   - graph_ingest
@@ -2085,6 +2412,61 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  mineru_api:
+  - python3 .scripts/test_mineru_api.py
+  - python3 .scripts/test_extractor.py
+  extractor:
+  - python3 .scripts/test_mineru_api.py
+  - python3 .scripts/test_extractor.py
+  inbox_finalize:
+  - python3 .scripts/test_inbox_finalize.py
+  - python3 .scripts/test_ingest_paper.py
+  function_registry:
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/function_registry.py validate --runtime
+  function_registry_spec:
+  - python3 .scripts/test_function_registry.py
+  cv:
+  - python3 .scripts/test_cv.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/engineering_graph.py validate
+  cv_ops:
+  - python3 .scripts/test_cv.py
+  - python3 .scripts/engineering_graph.py validate
+  dsh_function_catalog:
+  - python3 .scripts/test_function_registry.py
+  embed_helper:
+  - python3 .scripts/test_private_isolation.py
+  - python3 .scripts/test_node_semantics.py
+  private_maintenance:
+  - python3 .scripts/test_private_isolation.py
+  - python3 .scripts/engineering_graph.py validate
+  private_reingest:
+  - python3 .scripts/test_private_reingest.py
+  - python3 .scripts/test_private_isolation.py
+  - python3 .scripts/engineering_graph.py validate
+  presentation_delivery:
+  - python3 .scripts/test_presentation_delivery.py
+  - python3 .scripts/test_presentation_delivery.py --render
+  - python3 .scripts/test_presentation_state.py
+  - python3 .scripts/test_presentation_runtime.py
+  - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/engineering_graph.py validate
+  presentation_state:
+  - python3 .scripts/test_presentation_state.py
+  - python3 .scripts/test_presentation_state.py --render
+  presentation_render:
+  - python3 .scripts/test_presentation_state.py --render
+  presentation_ops:
+  - python3 .scripts/test_presentation_state.py
+  - python3 .scripts/test_presentation_runtime.py
+  - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/engineering_graph.py validate
+  presentation_runtime:
+  - python3 .scripts/test_presentation_runtime.py
+  - python3 .scripts/test_presentation_runtime.py --render
+  - python3 .scripts/test_visual_qa.py
+  - python3 .scripts/engineering_graph.py validate
   inbox_source_policy:
   - python3 .scripts/test_chat_intake.py
   - python3 .scripts/test_ingest_pipeline.py
@@ -2117,6 +2499,7 @@ verification:
   - python3 .scripts/test_wg.py
   - python3 .scripts/engineering_graph.py validate
   graph_ingest:
+  - python3 .scripts/test_private_isolation.py
   - python3 .scripts/test_ingest_pipeline.py
   - python3 .scripts/test_ingest_check.py
   - python3 .scripts/test_graph_ingest_temporal.py
@@ -2127,8 +2510,10 @@ verification:
   - python3 .scripts/test_ingest_check.py
   - python3 .scripts/test_ingest_pipeline.py
   graph_lib:
+  - python3 .scripts/test_private_isolation.py
   - python3 .scripts/test_ingest_pipeline.py
   node_semantics:
+  - python3 .scripts/test_private_isolation.py
   - python3 .scripts/test_node_semantics.py
   - python3 .scripts/test_graph_delta.py
   graph_validate:
@@ -2178,6 +2563,16 @@ verification:
   - python3 .scripts/test_prompt_audit.py
   - python3 .scripts/test_node_semantics.py
   - python3 .scripts/engineering_graph.py validate
+  engineering_graph:
+  - python3 .scripts/test_engineering_graph.py
+  - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/engineering_graph.py validate
+  engineering_manifest:
+  - python3 .scripts/test_engineering_graph.py
+  - python3 .scripts/engineering_graph.py validate
+  open_source_assets:
+  - python3 .scripts/test_open_source_release.py
+  - python3 .scripts/engineering_graph.py validate
   build_locator_tools:
   - python3 dsh/test_build_tools.py
   - python3 .scripts/test_engineering_locator.py
@@ -2216,6 +2611,116 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  cv:
+    preconditions:
+    - shared deterministic workspace function; the selected project must stay under projects/ and contain a cv-records.yaml working record
+    - every edition references a safe template ID whose templates/<id>.template.yaml and templates/<id>.docx are regular workspace files; YAML module order, category mappings and required categories must match ordered DOCX bookmarks and placeholders
+    - formal render requires a declared edition and only verified records with existing Raw evidence locators; every selected category must map to exactly one template module, and original-language fallback is limited to bibliographic categories and reported
+    - python-docx is loaded from the current environment or a trusted bundled workspace runtime; missing local dependencies fail without installation or remote fallback
+    writes:
+    - render creates a new dated DOCX plus an atomic JSON manifest under the workspace versions directory; same-day collisions receive an immutable revision suffix
+    - status, validate and diff are read-only; generated artifacts record source, template package hashes, selected record IDs, warnings and SHA-256 hashes
+    forbidden:
+    - writes to Raw/Wiki/graph.db, implicit ingest, remote model calls, overwriting an existing version, or treating generated documents as factual authority
+    - rendering draft, needs_verification or retired records into a formal edition; silently dropping selected records with unusable language text or evidence
+    verify:
+    - python3 .scripts/test_cv.py
+    - python3 .scripts/test_wg.py
+    - python3 .scripts/engineering_graph.py validate
+  private_maintenance:
+    preconditions:
+    - shared deterministic maintenance; dry-run is read-only and never migrates the database
+    - only an explicitly named orphan private legacy arXiv-template Hub may be retired; Wiki references, graph edges and provenance references block retirement
+    - explicit public-cache quarantine is dry-run/hash-gated; a confirmed mixed legacy cache is backed up into private storage before clearing all reconstructible embeddings
+    writes:
+    - apply keeps consistent graph, Hub and log backups plus a recovery receipt strictly under private/outputs before changing the target
+    - only the approved Hub file/node and the private operation log, plus managed additive graph schema migrations covered by the backup; Raw is immutable
+    - public-cache quarantine clears only cross-domain/embeddings.db with SQLite write serialization, secure deletion, WAL truncation and compaction; public graph and Raw stay unchanged
+    forbidden:
+    - automatic retirement of canonical or referenced Hubs, public paths, or unreviewed targets
+    - backups or reports outside private; Git history changes or publication
+    verify:
+    - python3 .scripts/test_private_isolation.py
+  private_reingest:
+    preconditions:
+    - private-only pilot transaction; page, Raw source, workspace and graph must all remain under the physical private domain
+    - prepare emits an agent-task-v1 with private workspace outputs; the host Agent writes candidate Wiki and semantic slots without provider or DSH fallback
+    - validate is deterministic and must pass structural Wiki checks, exact source preservation, private predicate limits and Raw locator checks before commit
+    writes:
+    - commit snapshots the current private Wiki, log and graph inside the same private workspace before replacing the Wiki and invoking graph_ingest clean semantics
+    - only the selected private Wiki page, its private graph contributions and private operation log change; Raw and public graph/cache/queue remain unchanged
+    - verify uses a private graph copy for idempotence and records receipts under private/outputs/reingest
+    forbidden:
+    - Raw rewrites, public-domain writes, shared temp outputs, arXiv/physics research Hub templates, Git operations or publication
+    - automatic batch expansion; every page requires an explicit transaction and validated agent output
+    verify:
+    - python3 .scripts/test_private_reingest.py
+  embed_helper:
+    preconditions:
+    - shared Agent/API graph scope is context-local and restored on exit; private cache selection precedes any provider call
+    writes:
+    - private graph operations use an embeddings database beside their private graph; public and isolated experiment caches remain separate
+    forbidden:
+    - private text reads or writes in the public embedding cache, including explicit cache override escape
+    verify:
+    - python3 .scripts/test_private_isolation.py
+  presentation_delivery:
+    preconditions:
+    - shared 只处理导出、路径/哈希/schema/事务；Agent 负责形式审阅、证据支持判断和引用替换建议，无 API adapter
+    - 导出要求全部页真实预览已批准锁定、expected revision 一致；三个辅助动作仅独立显式请求，证据核查必须有具体疑问
+    writes:
+    - 项目创作包 outputs/<id> 原子发布不可变本地成品/报告；requests/<id> 保留请求范围，temp 仅暂存候选结果
+    - 引用脱敏仅生成独立文字引用替换衍生版本，不改原件/锁页，不继承用户批准，仍为 local_only
+    forbidden:
+    - 默认导出自动执行三项辅助动作或将未执行标记为 passed；脚本模拟/评分 Agent 语义判断
+    - 写 Raw/Wiki/graph.db、隐式远程调用、以脱敏证明公开授权、以合成测试证明真实用户验收
+    verify:
+    - python3 .scripts/test_presentation_delivery.py
+    - python3 .scripts/test_presentation_delivery.py --render
+    - python3 .scripts/engineering_graph.py validate
+  presentation_state:
+    preconditions:
+    - shared 确定性内核；宿主 Agent 经 agent-task-v1 暂存内容/设计，check 与 commit 共享 schema，不导入 DSH 或隐式 API
+    - 当前仓库已有 projects/<workspace>；只在其 presentations/<id> 内受管写入，拒绝符号链接及外部路径
+    - 严格 expected revision 与快照批准；用户确认来源由宿主如实转录，hash 不证明人类身份
+    writes:
+    - 不可变 revisions 和哈希素材/预览快照；进程锁内 fsync 后原子切换 current.json，孤立 revision 不自动恢复为成功
+    - prepare 仅在 temp/presentation/<随机id> 暂存任务与待提交 JSON，不作为批准权威
+    forbidden:
+    - 写入 Raw/Wiki/graph.db、隐式远程传输、替用户批准或用机械检查冒充视觉审阅
+    - 接受手写 build-pass 回执锁页、覆盖已锁定页、旧 revision 并发覆盖、按 mtime 恢复
+    - 将三个版式单页闭环或测试确认记录宣称为整套成品或真实用户验收
+    verify:
+    - python3 .scripts/test_presentation_state.py
+    - python3 .scripts/test_presentation_state.py --render
+    - python3 .scripts/test_presentation_runtime.py
+    - python3 .scripts/test_prompt_audit.py
+    - python3 .scripts/engineering_graph.py validate
+  presentation_render:
+    preconditions:
+    - shared 本地确定性三版式 title/image_text/flow；输入为已批准内容/设计与哈希素材，不执行任意代码或XML
+    writes:
+    - 调用方拥有的新暂存目录内单页/整套 PPTX/PDF/PNG 与依赖指纹；调用方负责验证并纳入持久快照
+    forbidden:
+    - 任意模板无损编辑、拼接不受控单页二进制、远程模型、把字体替换视为等价或替用户视觉验收
+    verify:
+    - python3 .scripts/test_presentation_state.py --render
+    - python3 .scripts/test_visual_qa.py
+  presentation_runtime:
+    preconditions:
+    - shared 确定性本地探测；doctor 只检查依赖，smoke 只生成固定非事实性合成页，不接受材料路径、提示词或远程授权参数
+    - 使用当前 Python 的 PyMuPDF/Pillow 与已安装或显式/自动发现的 bundled python-pptx；缺依赖或本地渲染失败返回非零，不自动安装、不回落到 API
+    writes:
+    - smoke 仅新建 temp/presentation-runtime/<随机run-id>/ 中的固定测试PPTX、PDF、PNG和运行回执；拒绝缓存根及其父目录符号链接，不覆盖历史运行
+    forbidden:
+    - 修改 raw/wiki/graph.db、现有素材库或用户材料；加载 DSH、llm_structured 或调用远程视觉服务
+    - 将运行时检查通过表述为用户批准、视觉QA通过、字体完全一致或整套PPT创作能力已实现
+    - 将 API key、环境变量全集或凭据写入回执
+    verify:
+    - python3 .scripts/test_presentation_runtime.py
+    - python3 .scripts/test_presentation_runtime.py --render
+    - python3 .scripts/test_visual_qa.py
+    - python3 .scripts/engineering_graph.py validate
   inbox_source_policy:
     preconditions:
     - shared 确定性策略，无模型调用；对话原件与系统暂存副本物理分离
@@ -2261,6 +2766,7 @@ script_contracts:
     - 未授权远程上传、把截断或空 OCR 当成功、按文件扩展名判定会议来源、从手写签名猜测身份
     - 将 key、Authorization、data URL 或 provider 错误正文写入回执和日志
     - 把 OCR 回执或 temp 文本当作最终事实源，或绕过摄入事务直接写 Raw
+    - 把已受管摄入图片的普通文本事实检索重新发起为 OCR 或视觉复核；检索默认读取源绑定 companion，只有版式/颜色/图形/印章/签名/手写等视觉语义、相关未决复核项、证据冲突或用户显式要求核对原图时才进入独立视觉流程
     verify:
     - python3 .scripts/test_image_ocr.py
     - python3 .scripts/test_inbox_plan.py
@@ -2364,12 +2870,18 @@ script_contracts:
   engineering_graph:
     preconditions:
     - 建设目标可以是 capability/canonical node ID，也可以是唯一映射到已注册节点的精确 path、文件名或 stem
+    - 变更集影响分析优先接收显式文件列表；工作树、暂存区或分支基线发现必须有界，分支基线使用 merge-base 语义，发现失败不得降级成空变更
+    - 工程影响结果必须区分输入、已解析工程路径、未注册工程路径与工程审查范围外的知识/项目状态路径，并报告实际影响总量、返回量、遗漏量、截断状态及 graph manifest/Git 分析基线；未注册工程路径使结果为 partial
+    - verification 仅对 seed 节点声明 direct；由两跳影响节点带入的命令标记 related，不得冒充目标的直接测试覆盖
     writes: []
     forbidden:
     - 已知 graph.yaml node/contract/capability pointer 时仍要求 Agent 先枚举整个 YAML locator 列表
     - 根据工程节点名猜测具体 Python symbol；代码只提供 filtered-list 入口，由 Agent 按施工意图选择
     - 接受未注册路径、模糊匹配或有多个候选的文件名/stem；歧义必须列出 canonical node 候选并停止
+    - 静默丢弃未注册变更、把 Git 超时或失败解释为无变化、把有界输出解释为完整影响面
+    - 引入 code-review-graph 的 Tree-sitter/SQLite/MCP/watch runtime 取代本项目人工责任图，或让影响分析写入源码、Raw、Wiki、graph.db
     verify:
+    - python3 .scripts/test_engineering_graph.py
     - python3 .scripts/test_prompt_audit.py
     - python3 .scripts/engineering_graph.py validate
   lint_specs:
@@ -2401,13 +2913,13 @@ script_contracts:
     preconditions:
     - 通用文档编码及建图阶段按需派发 INGEST「表格型清单与台账」，由 Agent 判断适用性；论文和收尾阶段不加载
     - 已判定 task；ingest 必须提供 subproject 与单个 stage；会议纪要须传 source-kind=meeting；query 按当前阶段传 query-stage
-    - 持续工作上下文使用 --task；状态内按需规范使用 --capability；当前宿主 Agent 直接调用受管脚本或 wg.py，API backend 可经 DSH ToolRegistry
+    - --task 是一次路由标签；持续状态由 workspace/research/frontier 的权威文件承载；状态内按需规范使用 --capability；当前宿主 Agent 直接调用受管脚本或 wg.py，API backend 可经 DSH ToolRegistry
     - build 从 capability guardrails 渲染简洁的 WikiGraph 方法哲学与信息入口；工程细节由 impact 推荐 locator 按需加载
     - build 处理缺陷时须在首次编辑前明确说明，并以复现、代码路径或反事实建立和验证从症状到责任组件的因果链；默认修复责任组件并在该边界回归，局部补偿只用于明确的边界外根因、兼容性、迁移或历史数据修复
     writes: []
     forbidden:
     - 绕过路由凭记忆选规范
-    - 把 capability 调用当作 task/state 切换，或把提示规范能力伪装成已执行工具
+    - 把 Route task 或 capability 调用当作持续状态切换，或把提示规范能力伪装成已执行工具
     - build 路由重复展开 shared-conventions 或 code-guidance 正文，把总提示词变成工程手册副本
     - 用重复的禁止事项和流程细节挤占方法判断
     - 按当前 Agent/API backend 缩小 shared 修复范围，或只用 prompt 补丁掩盖确定性共享层缺陷
@@ -2435,7 +2947,8 @@ script_contracts:
     - 不进入 query_actions 或查询型 DSH 工具面
     - 工具面只暴露 impact、精确 read、filtered list，不暴露裸 cat/sed 或工程全文读取
     - engineering_locator read/list 仍由底层工具执行预算、路径和格式校验
-    - impact target 原样透传 engineering_graph，可用 capability/canonical node ID 或唯一已注册路径别名
+    - impact 单目标原样透传 engineering_graph，可用 capability/canonical node ID 或唯一已注册路径别名；变更集入口支持 files/working-tree/staged/base 且与单目标互斥
+    - impact 强制消费 engineering-impact-v1 JSON 并把 ok/partial 写入会话 audit；partial 可继续精确读取以解决未注册项，但不得记作完整覆盖
     writes:
     - 会话内 build locator guard 状态与 session log
     forbidden:
@@ -2450,6 +2963,7 @@ script_contracts:
   graph_validate:
     preconditions:
     - graph.db 已存在；operations/config/graph-schema.yaml 可解析
+    - operations/config/graph-schema.yaml 中声明的 protected_edges 是受管写入边界；page → 主要研究 → hub 必须具有页面 origin，并额外具有 automatic-route 或 agent-confirmed authorization origin；存量缺失聚合为迁移 WARN，新写入由 writer/preflight 失败关闭
     writes: []
     forbidden:
     - 修改 graph.db、页面或 raw
@@ -2504,6 +3018,8 @@ script_contracts:
     - python3 .scripts/graph_validate.py
   open_source_release:
     preconditions:
+    - private paths are an unconditional publication deny rule across includes, asset sources/targets and template directories; preflight completes before clearing or copying the destination
+    - source and destination paths must remain confined without symlink escape; verify rejects private paths even when the manifest approves them
     - 每次有实际公开变更的 GitHub 同步先由当前 Agent 评估 PATCH/MINOR/MAJOR 并说明功能与兼容性依据，不按文件数/行数推断；脚本 prepare-version 按显式级别与预期旧版本计算新版本，同次构建重试不重复排号
     - 根目录 VERSION 是当前 MAJOR.MINOR.PATCH 发布边界；verify 对比公开仓库的待提交或最新提交基线，拒绝同版本或版本倒退的公开更新；Git tag/Release 的创建与版本排号分别授权
     - 根目录 CHANGELOG.md 由公开资产生成，且最新版本标题与 VERSION 一致
@@ -2512,6 +3028,7 @@ script_contracts:
     - 中文说明 PDF 在进入公开资产前已经过 Ghostscript 标准化并完成逐页渲染对比；Word/Quartz 原始导出只作为生成输入
     - 中英文 README 公开资产均存在，包含双向语言入口与公开联系邮箱
     - 公开 capability 的 required 节点均存在于 allowlisted 目标树；active projects/.project 路径只保留在私有工程图
+    - 公开 graph.yaml 是发布器在复制后生成的受管自举产物；投影可用性检查必须把该目标路径视为预期存在，使首次 build 与随后 verify 得到同一节点闭包
     - Codex 技能仅发布 manifest 精确批准的功能文件；active projects、个人画像与样稿仍隔离；缺少本地风格资料不得阻止通用模式
     - manifest 的 documentation_omissions 约束公开说明 Markdown，不影响获准技能的运行指令；文档同步不得宣传被省略的功能
     - 已发布的冻结 paper-artifacts 版本全部保留，并分别通过其声明的版本化验证器
@@ -2602,6 +3119,9 @@ script_contracts:
     - python3 .scripts/test_long_document_plan.py
   source_locator:
     preconditions:
+    - 查询取证区分 citation source 与 read target；同 stem 唯一原件可作为引用来源，受管 Markdown companion 可作为实际读取载体，二者不得混为事实来源
+    - 二进制原件已有可精确截取的原生 locator 时直接读取；否则只在同 stem Markdown companion 中验证并读取同一 locator
+    - 图片 Raw 的文本查询只读取源绑定 Markdown companion 的精确 locator，并保留原图为 citation source；定位内核不解码图片、不调用 OCR 或视觉模型
     - shared Excel 忠实 Markdown 可用 table:<百分号编码工作表名>:<逗号分隔列字母>:R<起行>-R<止行> 投影原始值；严格验证工作表、列号和完整行范围，不计算汇总、不修改 Raw，继续遵守 Wiki/Raw 片段大小限制
     - .xls/.xlsx 原件不接受伪行号 locator，事实读取使用受管归档的忠实 Markdown companion
     - shared 图片格式集合 IMAGE_SUFFIXES 定义于 source_locator，由 OCR 与指纹索引复用；定位内核不反向依赖 OCR/API adapter，图片本体不接受伪行号 locator
@@ -2657,6 +3177,8 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   graph_ingest:
     preconditions:
+    - shared Agent/API writer rejects page/source and database domain mismatch before lock or connection; private derivatives and scratch receipts remain private
+    - arXiv Hub construction is academic-only; private never consumes the public catch-all or abbreviation queue
     - 正式提交时 wiki 页已落盘；--plan-only 可通过 --page-file 读取事务内暂存 Wiki，同时用 --page 保持最终逻辑页面 ID；类型语义输出必须先归一为经校验的 knowledge-ir-v1（历史 corrected.md 仅作兼容参考）
     - '`概念说明:` 每行以第一个 `|` 分隔概念名与局部说明；说明正文中的后续数学竖线保留为内容，三元组仍严格解析为三列'
     - graph_ingest 是所有文档类型的唯一核心 graph.db writer；调用方不得绕过 IR/plan 直接新增类型专用事实边
@@ -2777,6 +3299,7 @@ script_contracts:
     - 已有子 Hub 的超限父 Hub 必须进入 redistribution_candidates 交给主 Agent，不得因无需新建/分裂而返回 no_action
     - canonical Hub 路由因 margin 不足时写独立 route-review handoff；redistribution handoff 必须逐个标明子 Hub canonical Scope readiness 与 blockers，未就绪时不得自动重分配
     - route-apply 只接受 route 当前 canonical candidates 中的 active research-direction Hub，必须显式 agent-confirmed；替换该论文既有 `主要研究` 路由边，并以 `研究方向定位` locator 记录 evidence、普通 origin 与 agent-confirmed origin；传入 transaction-id 时同步写 route_corrections、当前路由快照与派生 quality_status，并消费对应 route-review handoff、同步 maintenance 回执与摄入报告；无其他待审动作时 maintenance 转为 completed
+    - page → 主要研究 → hub 是 graph schema 声明的 protected edge；route-apply 是唯一受管 writer，写入后必须满足 protected edge validator，embedding 不可用或当前 canonical candidates 为空时保持未归类而不创建 manual route
     - define-scope 只为既有 active Hub 写经 validate_scope 验证的 canonical Scope，可同步 Agent 确认的 title；legacy Hub 无 membership 时必须用 --evidence-node 显式传入 legacy-scope-plan 的代表节点；只更新 Hub Wiki frontmatter/Scope 与对应 nodes title/description/status
     - redistribute 只接受 canonical 父 Hub，且所有直接子 Hub 均为 active canonical；在单次 Agent 确认下做有界单调迭代，只重算当前 `普通节点 → 聚类于 → 父 Hub` 成员在父/直接子 family 内的 membership，保留无关 Hub membership；embedding 不可用时整次回滚，无子 Hub 达标的成员保留父 Hub
     - 仅显式 agent-confirmed lifecycle apply 写 Hub Wiki、nodes.description、parent/retired/alias 结构
@@ -2844,22 +3367,29 @@ script_contracts:
   extractor:
     preconditions:
     - PDF 已归档为 raw 实体副本
+    - MinerU 远端任务 checkpoint 只存在于事务暂存目录；input/request hash 不匹配时不得复用
     writes:
-    - 同目录 paper.md 及提取派生物
+    - 同目录 paper.md、被 Markdown 引用的 images/、parse_meta.yaml 及 allowlist MinerU 提取派生物
     forbidden:
     - 改写或删除来源 PDF 作为常规路径
     - 另写 PyMuPDF 兜底
+    - 因轮询或下载瞬时失败重新申请远端任务；把 auth/quota/input-limit 当 transient 重试
+    - 把未知 ZIP 成员、软链接、越界路径或未在 paper.md 引用的图片写入受管文档包
     verify:
+    - python3 .scripts/test_mineru_api.py
     - python3 .scripts/test_extractor.py
+    - python3 .scripts/test_inbox_finalize.py
     - 检查 paper.md 并继续骨架/摄入流程
   query_actions:
     preconditions:
     - hybrid_recall 的 intent 必须是 fact/relation/explanation/exploration/lineage；结果只是候选，不形成 identity 或事实断言
     - wiki_context 必须指定可解析的 page#section，Graph envelope 有 top-k 与 traversal profile 边界
+    - read_raw 通过 source_locator 读取原件的精确 locator 或受管 Markdown companion；返回中显式区分可引用原件与实际读取路径
     writes: []
     forbidden:
     - 把 section capsule、embedding 分数或 Graph neighbor 直接当作事实证据
     - 把动态 Graph context 回写为 Wiki related 或静态正文
+    - 图片 companion 已返回所需文本证据后继续请求原图、重新 OCR 或调用视觉能力；视觉语义例外必须由宿主在独立视觉流程中显式说明原因
     verify:
     - python3 .scripts/test_query_orchestrate.py
     - python3 .scripts/test_wg.py
@@ -2919,6 +3449,8 @@ script_contracts:
     - failure taxonomy 保留 API、事务与 DSH 的层级差异，但事务统一产出 category/domain/disposition/retryable/owner/next_action，外层适配器优先消费结构化结果
     - JSON/协议 section 解析失败属于 worker_output_invalid；具备同协议 host-agent handoff 的编排器必须保留原事务并进入 agent_required，不得降级为 unknown_failure
     - failure taxonomy 只解释 failed/validation_error 等终态或非空 errors；write_wiki 等活动阶段在无错误时不得生成 failure
+    - 所有摄入入口经 output_payload 返回 ingest-result-v1；invocation_status 只描述本次调用是否成功产生协议结果，workflow_status/terminal/committed 才描述知识事务，rc=0 不得被解释为已经落库
+    - batch 汇总状态与 counts 必须由 items 的公开 workflow_status 确定性派生并校验总数守恒；不得维护独立手工计数或用图节点/边增量推断摄入成功数
     writes:
     - temp/inbox-state/<transaction-id>.json，使用同目录临时文件、fsync 与 os.replace 原子替换
     - 只读 summary 仅聚合事务 telemetry 与 canonical LLM ExecutionEvent，不改摄入状态或事实层
@@ -3016,14 +3548,16 @@ script_contracts:
     - 3.1 在读取 PDF 标题前先查询源文件 SHA-256；精确命中直接 duplicate_found，不调用 MinerU/LLM；MinerU 与书目锁定后再以 normalized text/title+authors+year/DOI/arXiv 做二次去重屏障
     - agent workspace 返回明确 write_to；程序按 bibliography → wiki → semantics 顺序物化为独立暂存产物并逐层校验，resume 不重跑 MinerU 或已通过阶段
     - Agent 只经 paper_workspace_read/refresh/check/commit 四个类型化动作接管事务；公开 workflow_status 仅允许 awaiting_agent、ready_to_commit、completed、failed，内部细粒度 status 只作为 internal_status 返回
+    - 单篇与 batch item 均经 inbox_state 输出 ingest-result-v1；completed 必须同时报告 committed=true 与可定位的 Raw/Wiki 产物，awaiting_agent 的本次产物是 agent-task-v1，不以进程退出码冒充事务完成
+    - batch 顶层 workflow_status、terminal、committed 与 counts 只从 items 派生；prepared/partial 等旧顶层状态只保留为兼容 status，不得覆盖 item 四态或产生独立统计口径
     - 确定性 PDF metadata、首页规则与 MinerU 解析器只注册为带 provenance 的 candidate provider；候选是否锁定仍由 candidate-id-v2 裁决与 validator 决定
-    - bibliographic-candidate-provider-v5 从近端 ACM Reference format 引用提取标题与 venue 候选并绑定该引用的精确 paper.md locator；venue 边界覆盖 ACM、Proc. ACM、J. ACM 与 Proceedings 形态，首个 H2 仅保留为备选标题候选；作者行在已识别姓名后遇到全大写机构缩写即截断，并删除可由干净姓名覆盖的“姓名 + 机构”重复候选，原始 paper.md 证据不改写
+    - bibliographic-candidate-provider-v6 在 v5 的 MinerU 文本候选之上保留 PDF 前两页 layout block 的 page/bbox/相对位置；标题下至摘要前的姓名块只生成 candidate_only 作者，affiliation 单列排除；日期候选绑定 published/published_online/accepted/received/revised/preprint kind，近端页眉页脚与 DOI 形态补充 venue 候选，冲突仍交同一 candidate-id-v2 workspace 裁决
     - awaiting_output workspace 的 candidate provider 版本落后时，--resume 仅在 paper.md 哈希未变且 workspace 输出尚不存在时刷新同一事务；已有未提交输出必须经显式 --agent-refresh 归档旧输出及哈希后刷新，不得静默覆盖或新建事务
     - paper_workspace_check 在书目可物化后尽量同轮收集 Wiki 与 semantics 的全部独立 diagnostics；只有依赖项不可用时才跳过下游门，并明确 skipped_by
     - Agent check 在最终 Raw/Wiki 落位前调用 graph_ingest --plan-only，以暂存 Wiki、暂存 Raw locator companion 和最终逻辑 page ID 在 live graph 上生成并校验 graph-plan-v1
     - Agent workspace 把暂存 paper.pdf 的 pages:1-2 作为首个有界书目输入，并提供程序抽取、带页码的 first-two-pages.txt 作为读取工具不支持 PDF 时的备用；两者均绑定哈希，Agent 核对完整作者/标题/venue 后仍引用候选 ID 或受 validator 约束的 paper.md locator，最终书目锁定仍归共享内核
-    - workspace prompt、bibliography/semantic contract、各 validator 与 validation receipt 均写入显式版本；receipt 绑定 paper.md/workspace/wiki/semantic/IR/graph plan 哈希
-    - agent workspace 记录 paper.md input hash 与 workspace output hash；落位前重新核对，任一暂存输入在校验后改变都必须停止提交并回到原 workspace 修正
+    - workspace prompt、bibliography/semantic contract、各 validator 与 validation receipt 均写入显式版本；receipt 绑定 paper.md、完整 artifact bundle、workspace、wiki、semantic、IR 与 graph plan 哈希
+    - agent workspace 记录 paper.md、source PDF、前两页备用文本和完整 artifact bundle input hash 与 workspace output hash；落位前重新核对，任一暂存输入在校验后改变都必须停止提交并回到原 workspace 修正
     - paper.md 生成后、persist_bibliographic_metadata 前执行 ingest_bibliographic_review 轻量预审；输入仅 PDF metadata、标题邻域与发表证据行
     - 书目预审优先裁决 PDF metadata 与 paper.md 机械提取的程序候选；仅 authors 可在候选不完整时由 Worker 提交逐人 proposed value + paper.md 行 locator，其他字段仍只能选择候选 ID
     - 书目 Worker 使用 candidate-id-v2 协议，一次返回整篇 title/authors/year/venue/DOI/arXiv 的候选 ID 选择与可选 authors.proposed；程序根据 catalog 编译候选，并逐项验证 proposed 是 locator 窗口中的原文姓名、非 affiliation、非 et al 或多人合并值
@@ -3064,8 +3598,10 @@ script_contracts:
     - API Worker 新生成的 SLOTS 内容若仅在末尾残留 `<<</SLOTS>>>` 的严格非空前缀，可在 API 输出消费处机械删除并记录审计标记；Agent workspace/恢复产物不经该清理
     - API 兼容 handoff 必须报告 `execution_backend=api`、明确的 `write_to` 和 API recovery plan；成功恢复后清除过期 `next_action/retryable`。Agent 后端仍使用 `prepared + agent-task-v1` 及原 workspace plan
     - paper-id 的拉丁文本保持 ASCII slug；作者或标题只有中文等非 ASCII 文本时使用稳定 Unicode slug，禁止退化为 paper-YYYY-paper
+    - read_paper 只在可机械识别的摘要边界内从 preamble 收窄摘要；没有摘要边界时返回 missing，不得把标题、作者或机构地址冒充 abstract；全大写单字母间隔标题仅在折叠后命中已知 section 名时规范化匹配，locator 仍指向原始 paper.md
+    - Wiki validator 必须拒绝仅含脚注或“待巩固/待补充/TBD/unknown”等明确占位陈述；该机械门不判断引文是否语义蕴含陈述，证据一致性仍归 Agent/API semantic adapter
     writes:
-    - temp/inbox-extract/<txn>/ paper.md/manifest.json/语义槽与 wiki 草稿
+    - temp/inbox-extract/<txn>/ paper.pdf、paper.md、被 Markdown 引用的 images/、allowlist mineru/ sidecar、parse_meta.yaml、inbox-artifact-manifest-v2、语义槽与 wiki 草稿
     - temp/inbox-extract/<txn>/agent-workspace.txt（paper-agent-workspace-v1 共用语义输出；Agent 直接写入或 API adapter 单次生成）及独立物化的 bibliographic-review.json/wiki.md/semantic.txt；各自产物通过对应 validator 后才可进入提交
     - temp/inbox-extract/<txn>/workspace-history/*（显式 --agent-refresh 归档的未提交旧 workspace 输出）
     - temp/inbox-state/<txn>-bibliographic-decision.json（candidate-id-v2 Worker 的事务级幂等缓存，不是事实源；extract 目录重建后仍可复用）
@@ -3082,6 +3618,8 @@ script_contracts:
     - agent 全程监控正常摄入（默认 quiet，仅读最终 JSON）
     - 对非 inbox 来源或非学术 PDF 使用
     - bibliographic_review_required 或 type 非 paper 时继续 persist/finalize/graph 提交
+    - 只把 paper.md 写入 manifest 而丢弃其引用图片/允许的 sidecar，或在 source.yaml 锁定书目后不重算 artifact bytes/SHA-256 与 bundle hash
+    - workspace handoff 后只校验 paper.md 而忽略完整 artifact bundle 漂移；中断恢复时删除匹配输入/请求哈希的 .mineru checkpoint 或重新申请远端 batch
     - 绕过书目预审而让 skeleton/wiki/graph 各自从 paper.md 再次解析 authors
     - 书目预审为 authors 之外字段自由生成候选外值；authors.proposed 缺 paper.md locator、无法逐字核验、包含 affiliation/et al/多人合并值时继续落位
     - ACM 引用标题/venue 候选使用摘要或正文中的首次同词命中作为 evidence，或在 candidate provider 升级时静默覆盖已经存在的 Agent workspace 输出
@@ -3115,6 +3653,7 @@ script_contracts:
     - 从 proposition 句内碎片创建 concept 节点；完整命题始终保留，概念链接交 graph_ingest 的唯一精确 title/alias 稀疏匹配
     - 在任一 prompt backend 中恢复“叙述节点 + 两条拆分边 + 一条自由边”的旧式四边展开，或让 API/agent 使用不同 semantic policy
     - 允许本论文使用主要研究/涉及/应用于/探索/属于/研究关键词等会被 Graph 编译静默退役的方向或标签谓词
+    - 从普通 semantic IR、GraphDelta 或兼容包装器写入 page → 主要研究 → hub；该受保护边只允许 graph_ingest 在 automatic route 全部门禁通过后写入，或由 hub_semantics route-apply 在当前 canonical candidates 内经 agent-confirmed 写入
     verify:
     - python3 .scripts/test_ingest_paper.py
     - python3 .scripts/engineering_graph.py validate
@@ -3207,6 +3746,7 @@ script_contracts:
   query_orchestrate:
     preconditions:
     - 本脚本只为 API backend 保存受预算约束的 query session 与运行模型循环；当前宿主 Agent 直接按 query task card 调用 query_actions/query_graph/source locator
+    - read_sources 同时登记已验证 locator 与 source_locator 确定性映射出的原件引用路径；citation contract 只接受该白名单
     writes:
     - .scripts/query_sessions/<sid>.json（会话持久化,含 stage/mode/read_sources）
     forbidden:
@@ -3284,6 +3824,7 @@ script_contracts:
     preconditions:
     - ToolDefinition 注册表仅供 API backend 使用；当前宿主 Agent 直接调用确定性入口，不消费该工具 schema
     - 每个 ToolDefinition 的 name、description 与 input_schema 会由 ToolRegistry.schemas 注入 API 模型上下文，合并视为一个运行时提示面
+    - CitationGuard 对成功 read_raw 调用复用 query_actions 的原件引用映射，同时登记请求 locator 与唯一原件路径
     writes: []
     forbidden:
     - 将 API 工具描述或 input schema 漏出提示词位置地图，或把它们错误标为 Agent/shared mode

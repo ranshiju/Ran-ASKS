@@ -36,6 +36,24 @@ TOOL_BUILD_READ = "build_locator_read"
 TOOL_BUILD_LIST = "build_locator_list"
 
 
+def _impact_source(args: dict) -> str:
+    target = _clean(args.get("target"))
+    files = [str(item).strip() for item in (args.get("files") or []) if str(item).strip()]
+    base = _clean(args.get("base"))
+    working_tree = bool(args.get("working_tree", False))
+    staged = bool(args.get("staged", False))
+    selected = sum(bool(value) for value in (target, files, base, working_tree, staged))
+    if selected != 1:
+        return ""
+    if target:
+        return target
+    if files:
+        return f"files:{len(files)}"
+    if base:
+        return f"base:{base}"
+    return "working-tree" if working_tree else "staged"
+
+
 def _clean(value) -> str:
     return str(value or "").strip()
 
@@ -60,6 +78,7 @@ def _is_engineering_path(path: str) -> bool:
 class BuildLocatorAudit:
     impact_seen: bool = False
     impact_target: str = ""
+    impact_status: str = ""
     read_locators: list[str] = field(default_factory=list)
     listed_paths: list[str] = field(default_factory=list)
     denials: list[dict] = field(default_factory=list)
@@ -69,10 +88,15 @@ class BuildLocatorAudit:
         return {
             "impact_seen": self.impact_seen,
             "impact_target": self.impact_target,
+            "impact_status": self.impact_status,
             "read_locators": list(self.read_locators),
             "listed_paths": list(self.listed_paths),
             "denials": list(self.denials),
-            "compliant": self.impact_seen and bool(self.read_locators),
+            "compliant": (
+                self.impact_seen
+                and self.impact_status in {"ok", "legacy"}
+                and bool(self.read_locators)
+            ),
         }
 
 
@@ -87,9 +111,11 @@ class BuildLocatorGuard:
         args = exec_ctx.arguments or {}
 
         if name == TOOL_BUILD_IMPACT:
-            target = _clean(args.get("target"))
-            if not target:
-                return PreToolDecision(kind="deny", reason="target 不能为空")
+            if not _impact_source(args):
+                return PreToolDecision(
+                    kind="deny",
+                    reason="必须且只能提供 target、files、working_tree、staged、base 之一",
+                )
             return None
 
         if name == TOOL_BUILD_LIST:
@@ -130,8 +156,18 @@ class BuildLocatorGuard:
             return None
         if not payload.get("ok", False):
             return None
+        status = "legacy"
+        if payload.get("output"):
+            try:
+                impact_payload = json.loads(payload["output"])
+            except (json.JSONDecodeError, TypeError):
+                return None
+            status = _clean(impact_payload.get("status"))
+            if impact_payload.get("schema") != "engineering-impact-v1" or status == "error":
+                return None
         self.audit.impact_seen = True
-        self.audit.impact_target = _clean(exec_ctx.arguments.get("target"))
+        self.audit.impact_target = _impact_source(exec_ctx.arguments)
+        self.audit.impact_status = status
         return None
 
     def snapshot(self) -> dict:

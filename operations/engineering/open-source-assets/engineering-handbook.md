@@ -1,7 +1,7 @@
 # WikiRan 工程全景手册
 
 > **目标**：只读本手册后，能建立系统的全局心智模型、掌握真理源裁决顺序与数据模型；实际执行时仍须按任务调用 `.scripts/route.py` 读取最新规范，运行脚本时按任务定向读取同目录的 `code-guidance.md`。
-> **按需读取协议**：日常任务不应整读本手册。`route.py` 会从 `operations/engineering/graph.yaml` 派发短工程上下文包和不可跳过的任务卡；任务卡先于长规范执行。建设改动先用 `.scripts/engineering_graph.py impact <节点> --verify` 查询影响面和最小回归集；需要运行高风险脚本时再用 `contract <节点>` 获取短 I/O 契约。只有元图未覆盖的复杂问题才回到本手册或 `code-guidance.md`；未覆盖不等于无影响，必须显式补查。
+> **按需读取协议**：日常任务不应整读本手册。`route.py` 会从 `operations/engineering/graph.yaml` 派发短工程上下文包和不可跳过的任务卡；任务卡先于长规范执行。建设改动先用 `.scripts/engineering_graph.py impact <节点> --verify` 查询单目标影响；审查一组实际改动时改用 `impact --files/--working-tree/--staged/--base --verify`，并处理 `partial`、未注册路径、截断量和 direct/related 验证差异。需要运行高风险脚本时再用 `contract <节点>` 获取短 I/O 契约。只有元图未覆盖的复杂问题才回到本手册或 `code-guidance.md`；未覆盖不等于无影响，必须显式补查。
 > **本手册的定位**：本手册只承担其他文档无法替代的三件事——工程全景心智模型、文档矛盾时的真理源裁决、数据层 schema 与常见错误对照。流程细节（摄入/查询/Hub/Lint 的操作步骤）以 `operations/` 对应规范为准，脚本调用细节以 `code-guidance.md` 为准，机器可检查的工程结构以 `graph.yaml` 为准。本手册不重复这三者。
 
 ---
@@ -38,7 +38,9 @@ WikiRan 是一个**文件型、跨域、可回溯的知识库**。其主链路�
 
 建设 Agent 读取工程文件时采用独立的按需 locator，不混用 Raw/Wiki 证据语义：Markdown heading path、YAML JSON Pointer、Python qualified symbol 和显式行段均由代码精确截取。读取失败、歧义或超预算时直接拒绝，不回退全文；不为此维护索引或 companion。功能性任务只调用封装函数，工程 locator 不进入通用 query/DSH 工具面。具体调用见 `code-guidance.md` 的 `engineering_locator.py` 段。
 
-Agent 调用分成三层：`research`、`ingest` 等 task 是持续工作状态；`write` 是只在实际落笔时加载的能力；`wg.py` 与 DSH ToolRegistry 中的函数是带参数、结构化返回的执行工具。视觉能力沿用同一边界：`visual_check` 是只读检查，仅在用户明确要求，或修改指令依赖页面可见状态而需要先理解布局时调用；`visual_to_editable_ppt` 只响应明确的图片/PDF 对象化请求，并写入新的 PPTX。两者均不进入事实查询链，不把视觉判断升级为 Raw 证据，也不因常规编译或文字修改自动触发。
+运行时明确区分持续状态与一次性功能。`workspace`、`research`、`frontier` 是跨调用持续存在的用户工作状态；摄入、查询、写作、检查、同步、PPT 制作等是一次调用后产生结果、产物或一次受管状态更新的功能。Route task、按需 capability、`wg.py`、DSH、CLI、固定 pipeline 和 API worker 是这些功能面向不同调用者与后端的绑定，不是彼此独立的功能目录。`operations/config/function-registry.yaml` 统一管理 canonical function ID、调用策略和绑定；工程元图继续只管理组件责任、影响关系和验证。
+
+PPT 新创作采用 `presentation/create` 按需能力，保持当前项目状态；阶段0保留固定合成页的运行时探测；阶段1A已提供持久 session/revision、严格批准/锁定、三个受限版式的单页本地 renderer，阶段1B已增加 presentation_delivery 的整套原生组装与独立按需 task/check/commit；真实人机验收与 PowerPoint GUI 编辑检查待完成。最终检查以用户为主；PPT形式检查、PPT引用脱敏仅用户明确指令触发，可提醒；PPT证据核查仅用户对具体内容有疑问时按范围执行。三项独立、默认不执行，不作为默认交付门禁，基本机械校验与隐私边界保持。长期边界见 `operations/PRESENTATION.md`，分阶段验收见 `operations/engineering/presentation-test-plan.md`。创作记录通过进程锁内完整 revision 写入和 current.json 原子切换持久保存于所属项目，temp 仅作暂存；锁定只绑定实际哈希快照且不能由手写 QA-pass 回执冒充。同一包仅支持单设备写入，不将 POSIX 锁宣传为同步盘分布式锁。源敏感性沿派生产物继承；既有素材库与视觉重建不迁移。工程覆盖校验以功能注册表为管理入口，并与 Route 和工程能力包做精确对账。
 
 ## 1. 权威顺序与真理源
 

@@ -142,6 +142,42 @@ def test_clean_page_edges_removes_temporal_facts():
     assert not rows(conn, page)
 
 
+def test_clean_page_edges_preserves_incoming_edge_owned_by_other_page():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        pages = ["academic/wiki/papers/a", "academic/wiki/papers/b"]
+        for name, raw in zip(pages, ["a", "b"]):
+            page_file = repo / f"{name}.md"
+            page_file.parent.mkdir(parents=True, exist_ok=True)
+            page_file.write_text(
+                f"---\ntitle: {raw}\ntype: paper-summary\nsources: [academic/raw/{raw}.md]\n---\n",
+                encoding="utf-8",
+            )
+        old_repo = gl.REPO
+        gl.REPO = repo
+        try:
+            conn = make_db()
+            for page in pages:
+                add_node(conn, page, "page")
+            edge_id = conn.execute(
+                "INSERT INTO edges(subject,predicate,object,confidence,source) VALUES(?,?,?,?,?)",
+                (pages[0], "相关于", pages[1], "可追溯", "academic/raw/a.md#L3"),
+            ).lastrowid
+            gl.add_edge_evidence(conn, edge_id, "academic/raw/a.md#L3")
+            gl.add_edge_origin(conn, edge_id, pages[0], "academic/raw/a.md#L3")
+            conn.commit()
+
+            result = module.clean_page_edges(conn, pages[1])
+            assert result["edges_removed"] == 0
+            assert conn.execute("SELECT 1 FROM edges WHERE id=?", (edge_id,)).fetchone()
+            assert conn.execute(
+                "SELECT 1 FROM edge_origins WHERE edge_id=? AND origin_page=?",
+                (edge_id, pages[0]),
+            ).fetchone()
+        finally:
+            gl.REPO = old_repo
+
+
 def test_clean_page_edges_uses_lineage_for_shared_indirect_edge():
     with tempfile.TemporaryDirectory() as directory:
         repo = Path(directory)

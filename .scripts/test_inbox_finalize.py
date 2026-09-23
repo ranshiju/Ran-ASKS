@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import tempfile
 from pathlib import Path
@@ -20,6 +21,26 @@ def workspace():
 def manifest(extract, raw_files, wiki_file="wiki.md"):
     path = extract / "manifest.json"
     path.write_text(json.dumps({"raw_files": raw_files, "wiki_file": wiki_file}), encoding="utf-8")
+    return path
+
+
+def manifest_v2(extract, artifacts, wiki_file="wiki.md"):
+    entries = []
+    for relative, role in artifacts:
+        path = extract / relative
+        payload = path.read_bytes()
+        entries.append({
+            "path": relative,
+            "role": role,
+            "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        })
+    path = extract / "manifest.json"
+    path.write_text(json.dumps({
+        "schema": "inbox-artifact-manifest-v2",
+        "raw_artifacts": entries,
+        "wiki_file": wiki_file,
+    }), encoding="utf-8")
     return path
 
 
@@ -229,6 +250,115 @@ def test_rejects_paths_outside_inbox_raw_and_wiki_boundaries():
         directory.cleanup()
 
 
+def test_v2_manifest_preserves_nested_artifacts_and_hashes():
+    directory, root, extract = workspace()
+    try:
+        (extract / "paper.pdf").write_bytes(b"pdf")
+        (extract / "paper.md").write_text("# paper\n![](images/a.png)\n", encoding="utf-8")
+        (extract / "images").mkdir()
+        (extract / "images/a.png").write_bytes(b"image")
+        (extract / "mineru").mkdir()
+        (extract / "mineru/layout.json").write_text("{}", encoding="utf-8")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        manifest_v2(extract, [
+            ("paper.pdf", "source"),
+            ("paper.md", "locator-companion"),
+            ("images/a.png", "referenced-image"),
+            ("mineru/layout.json", "extraction-sidecar"),
+        ])
+        receipt = finalize(root, extract)
+        raw = root / "academic/raw/references/demo"
+        assert (raw / "images/a.png").read_bytes() == b"image"
+        assert (raw / "mineru/layout.json").is_file()
+        entries = json.loads(receipt.read_text(encoding="utf-8"))["raw_files"]
+        assert [item["path"] for item in entries] == [
+            "paper.pdf", "paper.md", "images/a.png", "mineru/layout.json",
+        ]
+        assert entries[2]["role"] == "referenced-image"
+    finally:
+        directory.cleanup()
+
+
+def test_v2_manifest_rejects_hash_drift_and_nested_symlink():
+    directory, root, extract = workspace()
+    try:
+        (extract / "paper.pdf").write_bytes(b"pdf")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        manifest_v2(extract, [("paper.pdf", "source")])
+        (extract / "paper.pdf").write_bytes(b"changed")
+        try:
+            finalize(root, extract)
+        except ValueError as exc:
+            assert "changed" in str(exc)
+        else:
+            raise AssertionError("manifest hash drift must fail")
+
+        (extract / "paper.pdf").write_bytes(b"pdf")
+        external = root / "external"
+        external.mkdir()
+        (external / "a.png").write_bytes(b"image")
+        (extract / "images").symlink_to(external, target_is_directory=True)
+        manifest_v2(extract, [("paper.pdf", "source")])
+        data = json.loads((extract / "manifest.json").read_text(encoding="utf-8"))
+        payload = (external / "a.png").read_bytes()
+        data["raw_artifacts"].append({
+            "path": "images/a.png", "role": "referenced-image",
+            "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest(),
+        })
+        (extract / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+        try:
+            finalize(root, extract)
+        except ValueError as exc:
+            assert "symlink" in str(exc)
+        else:
+            raise AssertionError("nested symlink must fail")
+    finally:
+        directory.cleanup()
+
+
+def test_existing_raw_container_rolls_back_partial_nested_landing():
+    directory, root, extract = workspace()
+    try:
+        (extract / "nested").mkdir()
+        (extract / "nested/a.txt").write_text("a", encoding="utf-8")
+        (extract / "nested/b.txt").write_text("b", encoding="utf-8")
+        (extract / "wiki.md").write_text("wiki", encoding="utf-8")
+        manifest_v2(extract, [
+            ("nested/a.txt", "source"),
+            ("nested/b.txt", "source"),
+        ])
+        container = root / "academic/raw/conferences/2026"
+        container.mkdir(parents=True)
+        (container / "existing.txt").write_text("keep", encoding="utf-8")
+        original_replace = module.os.replace
+
+        def fail_second_nested(source, destination):
+            if Path(source).name == "b.txt":
+                raise OSError("simulated second nested landing failure")
+            return original_replace(source, destination)
+
+        module.os.replace = fail_second_nested
+        try:
+            module.finalize(
+                root, "demo", container,
+                root / "academic/wiki/conferences/demo.md",
+                extract, extract / "manifest.json", False,
+                allow_existing_raw_dir=True,
+            )
+        except OSError as exc:
+            assert "second nested" in str(exc)
+        else:
+            raise AssertionError("partial nested landing must fail")
+        finally:
+            module.os.replace = original_replace
+        assert (container / "existing.txt").read_text(encoding="utf-8") == "keep"
+        assert not (container / "nested/a.txt").exists()
+        assert not (container / "nested").exists()
+        assert not (root / "academic/wiki/conferences/demo.md").exists()
+    finally:
+        directory.cleanup()
+
+
 if __name__ == "__main__":
     test_manifest_only_copies_declared_entity_files_and_writes_receipt()
     test_rejects_existing_destination_without_partial_write()
@@ -239,4 +369,7 @@ if __name__ == "__main__":
     test_cleanup_removes_hidden_extractor_directories()
     test_failed_ingest_check_retains_committed_files_and_extract_directory()
     test_rejects_paths_outside_inbox_raw_and_wiki_boundaries()
+    test_v2_manifest_preserves_nested_artifacts_and_hashes()
+    test_v2_manifest_rejects_hash_drift_and_nested_symlink()
+    test_existing_raw_container_rolls_back_partial_nested_landing()
     print("inbox finalize regression: PASS")

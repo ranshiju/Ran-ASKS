@@ -104,6 +104,28 @@ def test_collect_sources_skips_missing_source():
     assert module.collect_sources_from_edges(obj) == ["a#nav"]
 
 
+def test_wiki_claim_sections_reject_citation_only_and_placeholders():
+    import wiki_locator as wl
+    citation_only = setup_temp_file(
+        "citation-only-claim",
+        "## 研究方向定位\n\n[^r1]\n\n## Content\n\n结论待巩固。[^r1]\n",
+    )
+    errors = wl.validate_claim_sections(
+        citation_only, ("研究方向定位", "Content"))
+    assert any("只有脚注" in error for error in errors), errors
+    assert any("占位陈述" in error for error in errors), errors
+
+
+def test_wiki_claim_sections_accept_substantive_cited_prose():
+    import wiki_locator as wl
+    page = setup_temp_file(
+        "substantive-claim",
+        "## 研究方向定位\n\n论文研究离子选择性传输。[^r1]\n\n"
+        "## Content\n\n### 结论\n\n实验观察到稳定的渗透能输出。[^r1]\n",
+    )
+    assert wl.validate_claim_sections(page, ("研究方向定位", "Content")) == []
+
+
 # ============ build_parser ============
 
 def test_parser_has_all_subcommands():
@@ -115,8 +137,28 @@ def test_parser_has_all_subcommands():
     # 子命令名在 choices
     for cmd in ("lookup", "neighbors", "relations", "hub-of", "read-section",
                 "read-raw", "recall", "remember", "workspace", "abbr", "frontier",
-                "ingest"):
+                "ingest", "cv"):
         assert cmd in _subcommand_names(ap), f"缺子命令 {cmd}"
+
+
+def test_cv_wrapper_preserves_json_and_failure_status():
+    calls = []
+    original = module.run_script
+    module.run_script = lambda command, **_kwargs: (
+        calls.append(command) or (1, json.dumps({
+            "schema": "cv-function-result-v1", "kind": "validate",
+            "status": "blocked", "error": "formal CV validation failed",
+        }), "")
+    )
+    try:
+        args = type("Args", (), {"cv_args": ["validate", "academic-full-en"]})()
+        result = capture_call(module.cmd_cv, args)
+    finally:
+        module.run_script = original
+    assert calls[0][1].endswith(".scripts/cv.py")
+    assert result["ok"] is False
+    assert result["status"] == "error"
+    assert result["result"]["output"]["status"] == "blocked"
 
 
 def test_ingest_wrapper_routes_external_file_and_resume_through_inbox():
@@ -204,6 +246,7 @@ def test_wiki_locator_reads_one_section_and_raw_citations():
                          })())
         assert d["ok"] is True
         assert d["result"]["section"] == "retrieval-control"
+        assert "\\" not in d["result"]["page"]
         assert "Stop rule" in d["result"]["text"]
         assert "不应进入上一节" not in d["result"]["text"]
         assert d["result"]["raw_citations"][0].endswith("#L3")
@@ -246,6 +289,7 @@ def test_wiki_graph_source_points_to_cited_section():
     try:
         source, evidence = module.wl.graph_wiki_source(wiki, "证据缺口")
         assert source.endswith("/wiki/page#retrieval-control")
+        assert "\\" not in source
         assert evidence and evidence[0].endswith("#L3")
     finally:
         cleanup()
@@ -526,6 +570,80 @@ def test_read_raw_pdf_page_native():
         cleanup()
 
 
+def test_read_raw_binary_uses_companion_and_cites_original():
+    """二进制原件可由同 stem companion 取证，但返回来源保持为原件。"""
+    TEMP_TEST_DIR.mkdir(parents=True, exist_ok=True)
+    original = TEMP_TEST_DIR / "managed_source.docx"
+    companion = TEMP_TEST_DIR / "managed_source.md"
+    original.write_bytes(b"synthetic docx fixture")
+    companion.write_text("alpha\nbeta evidence\ngamma\n", encoding="utf-8")
+    try:
+        original_rel = original.resolve().relative_to(REPO).as_posix()
+        companion_rel = companion.resolve().relative_to(REPO).as_posix()
+        from_original = capture_call(
+            module.cmd_read_raw,
+            type("A", (), {"locator": f"{original_rel}#L2"})(),
+        )
+        assert from_original["ok"] is True
+        assert from_original["result"]["text"] == "beta evidence"
+        assert from_original["result"]["source_path"] == original_rel
+        assert from_original["result"]["read_path"] == companion_rel
+        assert from_original["sources"] == [original_rel]
+
+        from_companion = capture_call(
+            module.cmd_read_raw,
+            type("A", (), {"locator": f"{companion_rel}#L2"})(),
+        )
+        assert from_companion["ok"] is True
+        assert from_companion["result"]["source_path"] == original_rel
+        assert from_companion["result"]["read_path"] == companion_rel
+        assert from_companion["sources"] == [original_rel]
+    finally:
+        cleanup()
+
+
+def test_read_raw_binary_without_companion_is_not_verified():
+    """无原生文本且无 companion 时不得把 locator 提示冒充已读证据。"""
+    TEMP_TEST_DIR.mkdir(parents=True, exist_ok=True)
+    original = TEMP_TEST_DIR / "unreadable_source.docx"
+    original.write_bytes(b"synthetic docx fixture")
+    try:
+        original_rel = original.resolve().relative_to(REPO).as_posix()
+        result = capture_call(
+            module.cmd_read_raw,
+            type("A", (), {"locator": f"{original_rel}#L1"})(),
+        )
+        assert result["ok"] is False
+        assert result["status"] == "empty"
+        assert "text" not in result["result"]
+    finally:
+        cleanup()
+
+
+def test_read_raw_text_image_uses_companion_without_decoding_image():
+    """文字图片查询只读 companion locator；原图可保持为不可解码测试字节。"""
+    TEMP_TEST_DIR.mkdir(parents=True, exist_ok=True)
+    original = TEMP_TEST_DIR / "text_image.png"
+    companion = TEMP_TEST_DIR / "text_image.md"
+    original.write_bytes(b"not a decodable image: read_raw must not open it")
+    companion.write_text("title\nform value: 42\nfooter\n", encoding="utf-8")
+    try:
+        original_rel = original.resolve().relative_to(REPO).as_posix()
+        companion_rel = companion.resolve().relative_to(REPO).as_posix()
+        result = capture_call(
+            module.cmd_read_raw,
+            type("A", (), {"locator": f"{original_rel}#L2"})(),
+        )
+        assert result["ok"] is True
+        assert result["result"]["text"] == "form value: 42"
+        assert result["result"]["source_path"] == original_rel
+        assert result["result"]["read_path"] == companion_rel
+        assert result["result"]["evidence_locator"] == f"{companion_rel}#L2"
+        assert result["sources"] == [original_rel]
+    finally:
+        cleanup()
+
+
 def test_read_raw_unresolvable_path():
     """路径不存在 → error。"""
     d = capture_call(module.cmd_read_raw,
@@ -553,6 +671,7 @@ def main():
     test_collect_sources_empty()
     test_collect_sources_skips_missing_source()
     test_parser_has_all_subcommands()
+    test_cv_wrapper_preserves_json_and_failure_status()
     test_ingest_wrapper_routes_external_file_and_resume_through_inbox()
     test_parser_defaults()
     test_wiki_locator_reads_one_section_and_raw_citations()
@@ -575,6 +694,9 @@ def main():
     test_read_raw_explicit_fact_anchor_returns_only_bound_assertion()
     test_read_raw_oversized_locator_requires_refinement()
     test_read_raw_pdf_page_native()
+    test_read_raw_binary_uses_companion_and_cites_original()
+    test_read_raw_binary_without_companion_is_not_verified()
+    test_read_raw_text_image_uses_companion_without_decoding_image()
     test_read_raw_unresolvable_path()
     test_main_unknown_command_errors()
     print("wg regression: PASS")

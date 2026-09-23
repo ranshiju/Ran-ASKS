@@ -7,7 +7,7 @@
 - 自描述溯源：每个能力返回带 sources，可接 read-raw 核验事实
 - 渐进披露：默认只返回导航/关联层，省 token；要深挖用 read-section / read-raw
 
-底层全部复用现有脚本（query_graph.py / wiki_locator.py /
+底层全部复用现有脚本（query_graph.py / wiki_locator.py / cv.py /
 workspace_state.py / research_memory.py / query_actions.py / source_locator.py），本文件只做薄包统一。
 
 输出 envelope（stdout 一行 JSON）:
@@ -26,6 +26,8 @@ workspace_state.py / research_memory.py / query_actions.py / source_locator.py�
   wg.py remember <project> --title "..." --intent <intent> [--content "..." | --stdin] [--tags a,b]
   wg.py workspace recall <workspace>
   wg.py workspace item add <workspace> --title "..." --state active --next-action "..."
+  wg.py cv status --workspace <workspace>
+  wg.py cv render <edition> --workspace <workspace>
   wg.py ingest <file> --subproject admin [--allow-remote-ocr]
   wg.py ingest --resume <transaction-id>
   wg.py abbr <term>
@@ -33,6 +35,9 @@ workspace_state.py / research_memory.py / query_actions.py / source_locator.py�
   wg.py frontier list
   wg.py frontier show <ID>
   wg.py frontier answer <ID>
+  wg.py functions list
+  wg.py functions show knowledge.query
+  wg.py functions resolve knowledge.query --caller main_agent --backend agent
 """
 from __future__ import annotations
 
@@ -51,6 +56,7 @@ import source_locator as sl
 import wiki_locator as wl
 import graph_lib as gl
 import query_actions as qa
+import function_registry as fr
 
 RAW_PREVIEW_CHARS = 6000
 
@@ -203,29 +209,30 @@ def cmd_read_raw(args):
     if target is None:
         return envelope("read-raw", {"locator": raw}, status="error",
                         error=f"raw 路径未解析: {path_part}")
-    rel = str(target.resolve().relative_to(REPO)) if target.is_absolute() else str(target)
+    requested_rel = str(target.resolve().relative_to(REPO)) if target.is_absolute() else str(target)
     if not loc or loc == "全篇":
-        return envelope("read-raw", {"locator": raw, "path": rel}, status="error",
+        return envelope("read-raw", {"locator": raw, "path": requested_rel}, status="error",
                         error="read-raw 需要精确 locator（标题、Lx-Ly 或 page-x-y）；不向 LLM 返回全文")
-    status = sl.locator_status(loc, target)
-    result = {"locator": raw, "path": rel, "section": loc,
+    source_target, read_target = sl.evidence_targets(target, loc)
+    source_rel = str(source_target.resolve().relative_to(REPO))
+    read_rel = str(read_target.resolve().relative_to(REPO))
+    status = sl.locator_status(loc, read_target)
+    result = {"locator": raw, "path": source_rel, "source_path": source_rel,
+              "read_path": read_rel, "evidence_locator": f"{read_rel}#{loc}", "section": loc,
               "locator_status": status,
-              "is_binary": target.suffix.lower() in sl.BINARY_SUFFIXES}
+              "is_binary": source_target.suffix.lower() in sl.BINARY_SUFFIXES}
     if status == "missing":
-        return envelope("read-raw", result, sources=[rel], status="empty", ok=False,
-                        error=f"locator '{loc}' 在 {rel} 中未找到")
-    seg = sl.read_locator_text(target, loc)
-    if seg is None and result["is_binary"]:
-        result["note"] = "原始材料没有可机械返回的 locator 文本；请读取同目录 Markdown companion。"
-        return envelope("read-raw", result, sources=[rel], status="ok")
+        return envelope("read-raw", result, sources=[source_rel], status="empty", ok=False,
+                        error=f"locator '{loc}' 在 {read_rel} 中未找到")
+    seg = sl.read_locator_text(read_target, loc)
     if seg is None:
-        return envelope("read-raw", result, sources=[rel], status="empty", ok=False,
+        return envelope("read-raw", result, sources=[source_rel], status="empty", ok=False,
                         error=f"locator '{loc}' 已验证但无法精确截取；未返回全文")
     if len(seg) > RAW_PREVIEW_CHARS:
-        return envelope("read-raw", result, sources=[rel], status="error", ok=False,
+        return envelope("read-raw", result, sources=[source_rel], status="error", ok=False,
                         error=f"locator '{loc}' 命中 {len(seg)} 字符，范围过大；请细化 locator，未返回半截内容")
     result["text"] = seg
-    return envelope("read-raw", result, sources=[rel], status="ok")
+    return envelope("read-raw", result, sources=[source_rel], status="ok")
 
 
 def cmd_recall(args):
@@ -344,6 +351,23 @@ def cmd_workspace(args):
                     error="" if ok else "workspace doctor reported errors")
 
 
+def cmd_cv(args):
+    """Thin wrapper around the deterministic CV workspace function."""
+    command = [sys.executable, str(SCRIPTS / "cv.py"), *args.cv_args]
+    rc, out, err = run_script(command)
+    try:
+        result = json.loads(out.strip())
+    except json.JSONDecodeError:
+        return envelope("cv", None, status="error",
+                        error=(err or out or "cv.py returned no JSON").strip()[:500])
+    sources = [value for key in ("source", "manifest", "artifact")
+               if isinstance((value := result.get(key)), str) and value]
+    failed = rc != 0 or result.get("status") in {"error", "blocked"}
+    return envelope("cv", {"command": args.cv_args, "output": result},
+                    sources=sources, status="error" if failed else "ok", ok=not failed,
+                    error=(result.get("error") or err.strip())[:500] if failed else "")
+
+
 def cmd_frontier(args):
     """Frontier 薄包；主逻辑和准入契约只定义在 frontier.py。"""
     cmd = ["python3", str(SCRIPTS / "frontier.py"), args.frontier_cmd]
@@ -385,6 +409,42 @@ def cmd_frontier(args):
     sources = result.get("raw_evidence", []) if isinstance(result, dict) else []
     return envelope("frontier", result, sources=sources,
                     status="empty" if isinstance(result, dict) and result.get("count") == 0 else "ok")
+
+
+def cmd_functions(args):
+    """Expose catalog discovery and policy resolution, never generic execution."""
+    if args.functions_cmd == "list":
+        result = fr.catalog(
+            audience=args.audience,
+            kind=args.kind,
+            include_internal=args.include_internal,
+        )
+    elif args.functions_cmd == "show":
+        result = fr.show(args.function_id)
+    elif args.functions_cmd == "resolve":
+        result = fr.resolve(
+            args.function_id,
+            caller=args.caller,
+            backend=args.backend,
+            state=args.state,
+        )
+    else:
+        errors = fr.validate_runtime() if args.runtime else fr.validate_registry()
+        result = {
+            "schema": "function-registry-validation-v1",
+            "status": "error" if errors else "ok",
+            "errors": errors,
+        }
+        if errors:
+            return envelope(
+                "functions", result,
+                sources=[str(fr.REGISTRY_PATH.relative_to(REPO))],
+                status="error", error="; ".join(errors),
+            )
+    return envelope(
+        "functions", result,
+        sources=[str(fr.REGISTRY_PATH.relative_to(REPO))],
+    )
 
 
 def build_parser():
@@ -459,6 +519,11 @@ def build_parser():
                    help="传给 workspace_state.py 的子命令与参数")
     p.set_defaults(func=cmd_workspace)
 
+    p = sub.add_parser("cv", help="简历状态、校验、日期版本生成与差异比较")
+    p.add_argument("cv_args", nargs=argparse.REMAINDER,
+                   help="传给 cv.py 的子命令与参数")
+    p.set_defaults(func=cmd_cv)
+
     p = sub.add_parser("frontier", help="研究前沿 Question/Trajectory")
     frontier_sub = p.add_subparsers(dest="frontier_cmd", required=True)
 
@@ -499,6 +564,30 @@ def build_parser():
     fp.add_argument("page"); fp.add_argument("--limit", type=int, default=3)
     fp.add_argument("--no-answer", action="store_true")
     fp.set_defaults(func=cmd_frontier)
+
+    p = sub.add_parser("functions", help="统一功能、状态和调用策略目录")
+    functions_sub = p.add_subparsers(dest="functions_cmd", required=True)
+
+    fp = functions_sub.add_parser("list", help="列出功能")
+    fp.add_argument("--audience", choices=sorted(fr.VALID_AUDIENCE), default="")
+    fp.add_argument("--kind", choices=sorted(fr.VALID_KINDS), default="")
+    fp.add_argument("--include-internal", action="store_true")
+    fp.set_defaults(func=cmd_functions)
+
+    fp = functions_sub.add_parser("show", help="查看一个 canonical 功能")
+    fp.add_argument("function_id")
+    fp.set_defaults(func=cmd_functions)
+
+    fp = functions_sub.add_parser("resolve", help="按调用者、后端和状态解析可用入口")
+    fp.add_argument("function_id")
+    fp.add_argument("--caller", required=True, choices=sorted(fr.VALID_CALLERS))
+    fp.add_argument("--backend", required=True, choices=sorted(fr.VALID_BACKENDS))
+    fp.add_argument("--state", default="")
+    fp.set_defaults(func=cmd_functions)
+
+    fp = functions_sub.add_parser("validate", help="校验功能注册表")
+    fp.add_argument("--runtime", action="store_true")
+    fp.set_defaults(func=cmd_functions)
 
     return ap
 

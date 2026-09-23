@@ -444,6 +444,7 @@ def route_profile(
     }
 
 
+@gl.graph_scoped
 def route_paper(conn, page: str, **kwargs) -> dict:
     profile = read_paper_profile(page)
     if profile is None:
@@ -1014,6 +1015,7 @@ def _score_membership_candidates(
     return ranked, "scored"
 
 
+@gl.graph_scoped
 def plan_memberships(conn, node_ids: Iterable[str] | None = None) -> dict:
     """Plan overlapping, rebuildable Hub memberships without modifying the graph."""
     profiles = ordinary_profiles(conn, node_ids)
@@ -1316,6 +1318,7 @@ def _profile_id(profile: NodeProfile | DirectionProfile) -> str:
     return profile.node_id if isinstance(profile, NodeProfile) else profile.page
 
 
+@gl.graph_scoped
 def analyze_split(conn, hub_path: str) -> dict:
     """Generate a typed-member split candidate; never write lifecycle state."""
     profiles = member_profiles(conn, hub_path)
@@ -1372,6 +1375,7 @@ def analyze_split(conn, hub_path: str) -> dict:
     }
 
 
+@gl.graph_scoped
 def analyze_new_hubs(conn, node_ids: Iterable[str] | None = None) -> dict:
     """Find coherent unassigned ordinary-node components; candidates only."""
     profiles = [item for item in ordinary_profiles(conn, node_ids)
@@ -1425,6 +1429,7 @@ def analyze_new_hubs(conn, node_ids: Iterable[str] | None = None) -> dict:
     }
 
 
+@gl.graph_scoped
 def analyze_merge_candidates(conn) -> dict:
     """Compare canonical Hub definitions/prototypes; a score can only nominate."""
     hubs = [hub for hub in list_hubs(conn) if hub.canonical]
@@ -1615,6 +1620,7 @@ def legacy_scope_plan(conn) -> dict:
     "split",
     lambda values: [values["parent"], *[child.get("path", "") for child in values["children"]]],
 )
+@gl.graph_scoped
 def apply_split(conn, parent: str, children: list[dict], *, agent_confirmed: bool = False) -> dict:
     if not agent_confirmed:
         raise PermissionError("Hub 分裂必须由 Agent 确认子 Scope")
@@ -1936,6 +1942,7 @@ def _redistribution_handoffs(
     return handoffs, residual_splits, backlog_count
 
 
+@gl.graph_scoped
 def plan_redistribution(conn, parent: str) -> dict:
     """Plan membership changes within one parent/direct-child Hub family."""
     definitions = {item.path: item for item in list_hubs(conn)}
@@ -2095,6 +2102,7 @@ def redistribute_hub_members(
     }
 
 
+@gl.graph_scoped
 def auto_create_check(conn, node_ids: Iterable[str] | None = None) -> dict:
     """摄入末期 Hub 检查：筛选新 Hub 与既存 Hub 分裂候选。
 
@@ -2182,6 +2190,7 @@ def _suggest_parent(conn, candidate: dict) -> dict:
     ],
     require_all=False,
 )
+@gl.graph_scoped
 def create_hubs_from_definitions(conn, definitions: list[dict]) -> dict:
     """Agent 生成定义后，validate + create_hub + apply membership。
 

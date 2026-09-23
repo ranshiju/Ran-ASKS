@@ -34,7 +34,7 @@ private 使用独立 `private/graph.db`，不进入主库 Sync 范围。
 
 ### 第二层：文件节点补漏
 
-1. 用 `rg --files */wiki/ */raw/` 获取文件路径，不读取正文。
+1. 用 `rg --files academic/wiki academic/raw admin/wiki admin/raw teaching/wiki teaching/raw business/wiki business/raw` 获取文件路径，不读取正文。
 2. 与 graph nodes/aliases 对账：每个 Wiki page 有独立节点；同目录同 stem 的 Raw 原件与 locator companion 合并为一个 Raw 文档包节点，各文件路径作为 alias。
 3. Wiki 缺节点时交给标准 ingest；Raw 缺文档包、alias 或来源边时交给标准 graph repair。
 4. Raw 文档包可以暂时没有 Wiki 消费者，报告为信息项，不按事实缺失处理。

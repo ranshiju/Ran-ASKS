@@ -114,7 +114,8 @@ def _cached_vectors(texts: list[str]) -> dict[str, object]:
     """仅读取既有候选向量，避免一次 Agent 调用批量生成全图缓存。"""
     if not texts:
         return {}
-    db_path = gl.REPO / "cross-domain" / "embeddings.db"
+    from embed_helper import _get_embed_db
+    db_path = _get_embed_db()
     if not db_path.exists():
         return {}
     try:
@@ -409,6 +410,7 @@ def _lexical_rank(query: str, rows: list[dict], top_k: int) -> list[dict]:
     return ranked[:top_k]
 
 
+@gl.graph_scoped
 def resolve_node(
     conn,
     name: str,
@@ -554,6 +556,7 @@ def resolve_node(
     }
 
 
+@gl.graph_scoped
 def semantic_search(
     conn,
     query: str,
@@ -619,8 +622,9 @@ def main():
     search.add_argument("query")
     search.add_argument("--scope", choices=["node", "hub"], default="node")
     search.add_argument("--top-k", type=int, default=8)
+    parser.add_argument("--db", type=Path, default=None)
     args = parser.parse_args()
-    conn = gl.connect()
+    conn = gl.connect(args.db, read_only=True)
     try:
         if args.command == "resolve":
             _json_print(resolve_node(conn, args.name, args.context, top_k=args.top_k))

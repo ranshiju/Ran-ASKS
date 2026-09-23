@@ -11,6 +11,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from visual_to_editable_ppt import run_visual_to_editable_ppt
 from dsh.harness import ToolDefinition
+from dsh.function_catalog import bind_tools
 
 
 def _visual_to_editable_ppt(arguments: dict) -> str:
@@ -35,7 +36,7 @@ def _visual_to_editable_ppt(arguments: dict) -> str:
 
 def build_visual_reconstruction_tools() -> list[ToolDefinition]:
     """Return the isolated write-capable visual reconstruction tool set."""
-    return [
+    tools = [
         ToolDefinition(
             name="visual_to_editable_ppt",
             description=(
@@ -119,3 +120,4 @@ def build_visual_reconstruction_tools() -> list[ToolDefinition]:
             timeout_ms=None,
         )
     ]
+    return bind_tools(tools)

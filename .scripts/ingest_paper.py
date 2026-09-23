@@ -17,6 +17,7 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -91,7 +92,7 @@ BIBLIOGRAPHIC_VALIDATOR_VERSION = "candidate-id-validator-v2"
 WIKI_VALIDATOR_VERSION = "paper-wiki-validator-v1"
 SEMANTIC_VALIDATOR_VERSION = "paper-semantic-validator-v3"
 GRAPH_PREFLIGHT_VALIDATOR_VERSION = "graph-plan-preflight-v1"
-BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v5"
+BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v6"
 API_WORKSPACE_OPERATION = "ingest_paper_workspace"
 BIBLIOGRAPHIC_AUTHOR_SHAPE_EXAMPLE = (
     '"authors": {"accepted_ids": [], "rejected_ids": [], "proposed": [], '
@@ -978,6 +979,219 @@ def venue_from_metadata_subject(subject: str) -> str:
     return ""
 
 
+def _extract_pdf_front_matter_blocks(doc, max_pages: int = 2) -> list[dict]:
+    """Preserve a bounded, reading-order view of PDF layout for candidate evidence."""
+    blocks = []
+    for page_index in range(min(len(doc), max_pages)):
+        page = doc[page_index]
+        try:
+            raw_blocks = page.get_text("blocks", sort=True)
+        except TypeError:
+            raw_blocks = page.get_text("blocks")
+        height = float(page.rect.height or 1.0)
+        width = float(page.rect.width or 1.0)
+        ordered = sorted(
+            raw_blocks,
+            key=lambda item: (round(float(item[1]), 1), round(float(item[0]), 1)),
+        )
+        for block_index, raw in enumerate(ordered, 1):
+            if len(raw) < 5 or (len(raw) > 6 and raw[6] not in (0, None)):
+                continue
+            lines = [" ".join(line.split()) for line in str(raw[4] or "").splitlines()]
+            text = "\n".join(line for line in lines if line)
+            if not text:
+                continue
+            x0, y0, x1, y1 = (float(raw[index]) for index in range(4))
+            blocks.append({
+                "page": page_index + 1,
+                "block": block_index,
+                "bbox": [round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2)],
+                "relative_bbox": [
+                    round(x0 / width, 4), round(y0 / height, 4),
+                    round(x1 / width, 4), round(y1 / height, 4),
+                ],
+                "text": text,
+                "evidence": (
+                    f"pdf_layout_front_matter.page{page_index + 1}.block{block_index}"
+                ),
+            })
+    return blocks
+
+
+def _layout_person_names(text: str) -> list[str]:
+    """Extract conservative person-name candidates from one title-page block."""
+    names = []
+
+    def clean(value: str) -> str:
+        value = re.sub(r"<sup\b[^>]*>.*?</sup>", "", value, flags=re.I)
+        value = re.sub(r"\b(?:ORCID|https?://orcid\.org/)\S*", "", value, flags=re.I)
+        value = re.sub(r"^[\d*†‡§¶#\s]+|[\d*†‡§¶#\s]+$", "", value)
+        value = re.sub(r"(?<=[A-Za-zÀ-ÿ])\d+(?:,\d+)*$", "", value)
+        return " ".join(value.split()).strip(" ,;:")
+
+    def is_person(value: str) -> bool:
+        if not value or "@" in value or AFFILIATION_HINT_RE.search(value):
+            return False
+        if re.search(
+                r"\b(?:abstract|keywords?|doi|published|accepted|received|revised|"
+                r"proceedings|journal|conference|volume|vol\.?|arxiv|preprint)\b",
+                value, re.I):
+            return False
+        if re.fullmatch(r"[\u3400-\u9fff]{2,4}", value):
+            return True
+        tokens = value.split()
+        if not 2 <= len(tokens) <= 6:
+            return False
+        if all(token.isupper() and len(token.strip(".-")) > 1 for token in tokens):
+            return False
+        return bool(
+            _AUTHOR_TOKEN_RE.fullmatch(tokens[0])
+            and _AUTHOR_TOKEN_RE.fullmatch(tokens[-1])
+            and all(
+                _AUTHOR_TOKEN_RE.fullmatch(token)
+                or token.casefold() in _AUTHOR_SURNAME_PARTICLES
+                for token in tokens[1:-1]
+            )
+        )
+
+    for raw_line in str(text or "").splitlines():
+        line = clean(raw_line)
+        if not line:
+            continue
+        affiliation = AFFILIATION_HINT_RE.search(line)
+        if affiliation:
+            line = clean(line[:affiliation.start()])
+        if not line:
+            continue
+        pieces = [clean(item) for item in re.split(
+            r"\s*(?:;|•|·|\band\b|\bAND\b|&)\s*|\s*,\s*(?=[A-ZÀ-ÖØ-Þ\u3400-\u9fff])",
+            line,
+        )]
+        if len(pieces) == 2 and all(len(item.split()) == 1 for item in pieces):
+            # Common PDF metadata/title-page form: "Surname, Given".
+            reversed_name = clean(f"{pieces[1]} {pieces[0]}")
+            pieces = [reversed_name] if is_person(reversed_name) else pieces
+        for piece in pieces:
+            if is_person(piece) and piece not in names:
+                names.append(piece)
+    return names
+
+
+def _layout_date_candidates(blocks: list[dict]) -> list[dict]:
+    patterns = (
+        ("published_online", r"\b(?:published\s+online|online\s+publication)\b.{0,80}?\b((?:19|20)\d{2})\b"),
+        ("published", r"\b(?:published(?!\s+online)|publication\s+date)\b.{0,80}?\b((?:19|20)\d{2})\b"),
+        ("accepted", r"\baccepted\b.{0,80}?\b((?:19|20)\d{2})\b"),
+        ("received", r"\breceived\b.{0,80}?\b((?:19|20)\d{2})\b"),
+        ("revised", r"\brevised\b.{0,80}?\b((?:19|20)\d{2})\b"),
+        ("preprint", r"\b(?:arxiv|preprint|submitted)\b.{0,80}?\b((?:19|20)\d{2})\b"),
+    )
+    found = []
+    seen = set()
+    for block in blocks:
+        flattened = " ".join(str(block["text"]).split())
+        for kind, pattern in patterns:
+            for match in re.finditer(pattern, flattened, re.I):
+                key = (match.group(1), kind, block["evidence"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append({
+                    "value": match.group(1), "kind": kind,
+                    "evidence": block["evidence"],
+                })
+    priority = {
+        "published": 0, "published_online": 1, "accepted": 2,
+        "received": 3, "revised": 4, "preprint": 5,
+    }
+    return sorted(found, key=lambda item: priority[item["kind"]])
+
+
+def _layout_venue_candidates(blocks: list[dict], doi: str = "", year: str = "") -> list[dict]:
+    found = []
+    seen = set()
+    patterns = (
+        r"\b(?:Proceedings|Findings)\s+of\s+.+?(?=,\s*(?:pages?|pp\.?|vol\.?|volume)\b|$)",
+        r"\bPhysical\s+Review\s+(?:Letters|[A-E]|X|Research|Applied)\b",
+        r"\b(?:Nature|Science|Cell)(?:\s+[A-Z][A-Za-z-]+){0,4}\b",
+        r"\bJournal\s+of\s+[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,8}\b",
+        r"\b(?:IEEE|ACM)\s+(?:Transactions|Journal|Proceedings|Conference)\b[^\n,;]{0,100}",
+    )
+    for block in blocks:
+        for line in str(block["text"]).splitlines():
+            for pattern in patterns:
+                match = re.search(pattern, line.strip(), re.I)
+                if not match:
+                    continue
+                value = " ".join(match.group(0).split()).strip(" .,;")
+                key = _bibliographic_text_key(value)
+                if value and key not in seen:
+                    seen.add(key)
+                    found.append({"value": value, "evidence": block["evidence"]})
+    aps = aps_venue_from_doi(doi, year)
+    if aps and _bibliographic_text_key(aps) not in seen:
+        found.append({"value": aps, "evidence": "doi_aps"})
+    return found
+
+
+def _layout_bibliographic_candidates(blocks: list[dict], title: str = "") -> dict:
+    result = {"authors": [], "affiliations": [], "dates": [], "venues": []}
+    if not blocks:
+        return result
+    title_key = _bibliographic_text_key(title)
+    title_position = None
+    for index, block in enumerate(blocks):
+        if block["page"] != 1:
+            continue
+        block_key = _bibliographic_text_key(block["text"])
+        if title_key and (title_key in block_key or block_key in title_key):
+            title_position = index
+            break
+    if title_position is None:
+        for index, block in enumerate(blocks):
+            text = " ".join(block["text"].split())
+            if (block["page"] == 1 and block["relative_bbox"][1] < 0.58
+                    and 12 <= len(text) <= 400
+                    and not re.search(
+                        r"\b(?:doi|published|received|accepted|abstract|proceedings|journal)\b",
+                        text, re.I,
+                    )):
+                title_position = index
+                break
+    if title_position is not None:
+        for block in blocks[title_position + 1:]:
+            if block["page"] != 1 or block["relative_bbox"][1] > 0.78:
+                break
+            text = block["text"]
+            abstract = re.search(r"(?im)^\s*(?:abstract|摘要)\b", text)
+            if abstract:
+                text = text[:abstract.start()].strip()
+            if not text:
+                break
+            affiliation_lines = [
+                " ".join(line.split()) for line in text.splitlines()
+                if AFFILIATION_HINT_RE.search(line) or "@" in line
+            ]
+            for affiliation in affiliation_lines:
+                result["affiliations"].append({
+                    "value": affiliation, "evidence": block["evidence"],
+                })
+            for author in _layout_person_names(text):
+                result["authors"].append({
+                    "value": author, "evidence": block["evidence"],
+                })
+            if abstract:
+                break
+    result["dates"] = _layout_date_candidates(blocks)
+    result["authors"] = list({
+        (item["value"], item["evidence"]): item for item in result["authors"]
+    }.values())
+    result["affiliations"] = list({
+        (item["value"], item["evidence"]): item for item in result["affiliations"]
+    }.values())
+    return result
+
+
 def extract_pdf_bibliography(pdf_path: Path) -> dict:
     """在 LLM/MinerU 前读取 PDF metadata 与第一页发表页脚。
 
@@ -987,6 +1201,7 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
     result = {
         "title": "", "authors": [], "year": "", "venue": "",
         "arxiv_id": "", "doi": "", "evidence": {},
+        "front_matter_blocks": [], "layout_candidates": {},
     }
     try:
         import fitz
@@ -994,6 +1209,7 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
         try:
             metadata = doc.metadata or {}
             first_page_text = doc[0].get_text("text") if len(doc) else ""
+            front_matter_blocks = _extract_pdf_front_matter_blocks(doc)
             evidence_scope = "pdf_first_page"
             # Some publisher downloads prepend a one-page access wrapper; the
             # actual journal header then starts on PDF page 2.  Treat that page
@@ -1021,6 +1237,13 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
         if authors:
             result["authors"] = authors
             result["evidence"]["authors"] = "pdf_metadata.author"
+
+    result["front_matter_blocks"] = front_matter_blocks
+    layout_candidates = _layout_bibliographic_candidates(front_matter_blocks, title)
+    result["layout_candidates"] = layout_candidates
+    if not result["authors"] and layout_candidates["authors"]:
+        result["authors"] = [item["value"] for item in layout_candidates["authors"]]
+        result["evidence"]["authors"] = layout_candidates["authors"][0]["evidence"]
 
     lines = [" ".join(line.split()) for line in first_page_text.splitlines() if line.strip()]
     evidence_lines = []
@@ -1058,8 +1281,17 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
     for line in evidence_lines:
         match = re.search(r"\bpublished\b.{0,64}?\b((?:19|20)\d{2})\b", line, re.I)
         if match:
-            year_candidates.append((match.group(1), f"{evidence_scope}.published"))
+            kind = (
+                "published_online"
+                if re.search(r"\bpublished\s+online\b|\bonline\s+publication\b", line, re.I)
+                else "published"
+            )
+            year_candidates.append((match.group(1), f"{evidence_scope}.{kind}"))
             break
+    for item in layout_candidates["dates"]:
+        candidate = (item["value"], f"{item['evidence']}.{item['kind']}")
+        if candidate not in year_candidates:
+            year_candidates.append(candidate)
     for line in evidence_lines:
         if year_candidates:
             break
@@ -1087,6 +1319,12 @@ def extract_pdf_bibliography(pdf_path: Path) -> dict:
 
     result["arxiv_id"] = extract_arxiv_id(first_page_text)
     result["doi"] = extract_doi(first_page_text)
+    layout_candidates["venues"] = _layout_venue_candidates(
+        front_matter_blocks, result["doi"], result["year"],
+    )
+    if not result["venue"] and layout_candidates["venues"]:
+        result["venue"] = layout_candidates["venues"][0]["value"]
+        result["evidence"]["venue"] = layout_candidates["venues"][0]["evidence"]
     if not result["venue"]:
         result["venue"] = aps_venue_from_doi(result["doi"], result["year"])
         if result["venue"]:
@@ -1266,7 +1504,8 @@ def load_bibliographic_metadata(raw_dir: Path) -> dict:
             continue
         # 重新摄入时，PDF 近端 published/DOI 证据优先于旧版错误缓存；raw 文件本身不改。
         detected_evidence = detected.get("evidence") or {}
-        stronger = (key == "year" and detected_evidence.get("year") == "pdf_first_page.published") \
+        stronger = (key == "year" and str(detected_evidence.get("year") or "").endswith(
+            (".published", ".published_online"))) \
             or (key == "venue" and detected_evidence.get("venue") == "doi_aps")
         if value and (not merged.get(key) or stronger):
             merged[key] = value
@@ -1281,6 +1520,10 @@ BIBLIOGRAPHIC_REVIEW_OPERATION = "ingest_bibliographic_review"
 BIBLIOGRAPHIC_REVIEW_FIELDS = ("title", "authors", "year", "venue", "doi", "arxiv_id")
 BIBLIOGRAPHIC_DECISION_PROTOCOL = "candidate-id-v2"
 BIBLIOGRAPHIC_SCALAR_FIELDS = ("title", "year", "venue", "doi", "arxiv_id")
+BIBLIOGRAPHIC_YEAR_KINDS = {
+    "published", "published_online", "accepted", "received", "revised",
+    "preprint", "unknown",
+}
 AFFILIATION_HINT_RE = re.compile(
     r"\b(?:university|universit[aä]t|institute|institution|laborator(?:y|ies)|lab\.?|"
     r"department|faculty|school|college|academy|center|centre|corporation|company|"
@@ -1475,11 +1718,15 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
     选择候选 ID；只有作者候选不完整时才可提交带 Raw locator 的逐人修正。
     """
     bibliography = bibliography or {}
+    layout = bibliography.get("layout_candidates") or {}
     pdf_authors = [str(author).strip() for author in (bibliography.get("authors") or [])]
+    layout_authors = [item.get("value", "") for item in layout.get("authors") or []]
     md_authors = _unique_nonempty(
         [*extract_authors_from_text(md_text), *_repeated_title_authors(md_text)]
     )
-    author_candidates = _unique_nonempty(pdf_authors + [str(author) for author in md_authors])
+    author_candidates = _unique_nonempty(
+        pdf_authors + layout_authors + [str(author) for author in md_authors]
+    )
     author_candidates = [
         candidate for candidate in author_candidates
         if not any(
@@ -1489,6 +1736,8 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
     ]
     first_page_evidence = bibliography.get("first_page_evidence") or []
     identity_region = bibliographic_identity_region(md_text)
+    layout_dates = list(layout.get("dates") or [])
+    layout_venues = list(layout.get("venues") or [])
     return {
         "doc_type": "paper",
         "title": _unique_nonempty([
@@ -1497,9 +1746,14 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
             extract_title_from_md(md_text),
         ]),
         "authors": author_candidates,
-        "year": _unique_nonempty([bibliography.get("year"), extract_year_from_md(md_text)]),
+        "year": _unique_nonempty(
+            [bibliography.get("year")]
+            + [item.get("value") for item in layout_dates]
+            + [extract_year_from_md(md_text)]
+        ),
         "venue": _unique_nonempty(
             [bibliography.get("venue")]
+            + [item.get("value") for item in layout_venues]
             + _acm_reference_venue_candidates(md_text)
             + _first_page_venue_candidates(first_page_evidence)
         ),
@@ -1509,6 +1763,18 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
         ),
         "evidence": bibliography.get("evidence") or {},
         "first_page_evidence": first_page_evidence,
+        "candidate_records": {
+            "authors": list(layout.get("authors") or []),
+            "year": [
+                {
+                    **item,
+                    "evidence": f"{item.get('evidence', '')}.{item.get('kind', 'unknown')}",
+                }
+                for item in layout_dates
+            ],
+            "venue": layout_venues,
+        },
+        "excluded_affiliations": list(layout.get("affiliations") or []),
     }
 
 
@@ -1554,7 +1820,7 @@ def bibliographic_review_schema(value) -> bool:
         return False
     if not (isinstance(year.get("value"), str) and isinstance(year.get("evidence"), str)):
         return False
-    if year.get("kind") not in {"published", "accepted", "received", "revised", "unknown"}:
+    if year.get("kind") not in BIBLIOGRAPHIC_YEAR_KINDS:
         return False
     if year.get("status") not in {"confirmed", "corrected", "ambiguous"}:
         return False
@@ -1609,7 +1875,7 @@ def bibliographic_decision_schema(value) -> bool:
         return False
     if not isinstance(year.get("candidate_id"), str):
         return False
-    if year.get("kind") not in {"published", "accepted", "received", "revised", "unknown"}:
+    if year.get("kind") not in BIBLIOGRAPHIC_YEAR_KINDS:
         return False
     if year.get("status") not in {"confirmed", "corrected", "ambiguous"}:
         return False
@@ -1647,8 +1913,30 @@ def _candidate_evidence(value: str, field: str, bibliography: dict, md_text: str
     if value in [str(item or "").strip() for item in source_values]:
         evidence = (bibliography.get("evidence") or {}).get(field)
         if evidence:
+            if str(evidence).startswith("pdf_layout_front_matter"):
+                layout_field = {
+                    "authors": "authors", "year": "dates", "venue": "venues",
+                }.get(field)
+                layout_items = (
+                    (bibliography.get("layout_candidates") or {}).get(layout_field, [])
+                    if layout_field else []
+                )
+                for item in layout_items:
+                    if str(item.get("value") or "").strip() == value:
+                        exact = str(item.get("evidence") or "")
+                        if field == "year" and item.get("kind"):
+                            exact += f".{item['kind']}"
+                        return exact
             return str(evidence)
         return "pdf_metadata"
+    layout_field = {"authors": "authors", "year": "dates", "venue": "venues"}.get(field)
+    if layout_field:
+        for item in (bibliography.get("layout_candidates") or {}).get(layout_field) or []:
+            if str(item.get("value") or "").strip() == value:
+                evidence = str(item.get("evidence") or "")
+                if field == "year" and item.get("kind"):
+                    evidence += f".{item['kind']}"
+                return evidence
     if field in {"title", "venue"}:
         value_key = _bibliographic_text_key(value)
         for entry in _acm_reference_bibliographic_entries(md_text):
@@ -1676,35 +1964,71 @@ def build_bibliographic_candidate_catalog(
         value = str(evidence or "")
         if value.startswith("pdf_metadata"):
             return "pdf_metadata"
+        if value.startswith("pdf_layout_front_matter"):
+            return "pdf_layout_front_matter"
         if value.startswith("pdf_first_page") or value == "doi_aps":
             return "pdf_first_page_rules"
         if value.startswith("paper.md#"):
             return "mineru_text"
         return "deterministic_rules"
 
+    candidate_records = candidates.get("candidate_records") or {}
     fields = {}
     for field in BIBLIOGRAPHIC_REVIEW_FIELDS:
         prefix = "author" if field == "authors" else field
         fields[field] = []
-        for index, value in enumerate(candidates.get(field) or [], 1):
+        records = []
+        for value in candidates.get(field) or []:
             evidence = _candidate_evidence(value, field, bibliography, md_text)
-            fields[field].append({
+            base = {"value": value, "evidence": evidence}
+            if field == "year":
+                base["kind"] = next(
+                    (kind for kind in BIBLIOGRAPHIC_YEAR_KINDS - {"unknown"}
+                     if str(evidence).endswith(f".{kind}")),
+                    "unknown",
+                )
+            records.append(base)
+            for item in candidate_records.get(field) or []:
+                if str(item.get("value") or "").strip() == value:
+                    records.append(dict(item))
+        deduplicated = []
+        seen = set()
+        for item in records:
+            key = (item.get("value"), item.get("evidence"), item.get("kind", ""))
+            if key not in seen:
+                seen.add(key)
+                deduplicated.append(item)
+        for index, item in enumerate(deduplicated, 1):
+            evidence = str(item.get("evidence") or "program_candidate")
+            entry = {
                 "id": f"{prefix}-{index:02d}",
-                "value": value,
+                "value": item["value"],
                 "evidence": evidence,
                 "provider": provider_for(evidence),
                 "authority": "candidate_only",
-            })
+            }
+            if field == "year":
+                entry["kind"] = item.get("kind", "unknown")
+            fields[field].append(entry)
     return {
         "protocol_version": BIBLIOGRAPHIC_DECISION_PROTOCOL,
         "provider_contract": BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION,
         "providers": [
             {"id": "pdf_metadata", "authority": "candidate_only"},
+            {"id": "pdf_layout_front_matter", "authority": "candidate_only"},
             {"id": "pdf_first_page_rules", "authority": "candidate_only"},
             {"id": "mineru_text", "authority": "candidate_only"},
             {"id": "deterministic_rules", "authority": "candidate_only"},
         ],
         "fields": fields,
+        "excluded_affiliations": [
+            {
+                **item,
+                "provider": "pdf_layout_front_matter",
+                "authority": "excluded_candidate",
+            }
+            for item in candidates.get("excluded_affiliations") or []
+        ],
     }
 
 
@@ -1745,6 +2069,14 @@ def compile_bibliographic_decision(
     if not selections["year"]["candidate_id"] and selections["year"]["status"] != "ambiguous":
         raise ValueError("year 未选择 candidate_id 时 status 必须为 ambiguous")
     year_value, year_evidence = selected("year", selections["year"]["candidate_id"])
+    selected_year = indexes["year"].get(selections["year"]["candidate_id"], {})
+    candidate_year_kind = selected_year.get("kind", "unknown")
+    if (candidate_year_kind != "unknown"
+            and selections["year"]["kind"] != candidate_year_kind):
+        raise ValueError(
+            "year.kind 与候选证据类型不一致: "
+            f"{selections['year']['kind']} != {candidate_year_kind}"
+        )
     bibliographic["year"] = {
         "value": year_value,
         "evidence": year_evidence,
@@ -1888,7 +2220,12 @@ def _deterministic_bibliographic_decision(
         return None
 
     fields = catalog["fields"]
-    year_kind = "published" if "published" in year_evidence else "unknown"
+    year_kind = next(
+        (kind for kind in (
+            "published_online", "published", "accepted", "received", "revised", "preprint",
+        ) if year_evidence.endswith(f".{kind}")),
+        "unknown",
+    )
 
     def only_id(field: str) -> str:
         return fields[field][0]["id"] if fields[field] else ""
@@ -2283,7 +2620,7 @@ def build_bibliographic_review_prompt(catalog: dict, md_text: str) -> str:
     title_view, evidence_view = _paper_md_review_view(md_text)
     return f"""你是受程序约束的论文书目裁决 Worker。一次处理整篇书目，优先返回候选 ID；只有作者候选不完整时可从给定标题邻域逐字提出带 evidence locator 的作者。其他字段不得复制、改写或生成候选外字符串或 locator。目录中的确定性提取结果只是 candidate provider，不是已锁定事实；每个候选仍须按 evidence 裁决。
 
-目标：锁定本篇论文的书目事实；排除机构/实验室/大学/公司等 affiliation 片段；year 区分 published/accepted/received/revised，发表年份优先。
+目标：锁定本篇论文的书目事实；排除机构/实验室/大学/公司等 affiliation 片段；year 区分 published/published_online/accepted/received/revised/preprint，发表年份优先。
 
 候选目录（value/evidence 只用于判断，输出只能引用 id）：
 {json.dumps(catalog, ensure_ascii=False)}
@@ -2302,7 +2639,7 @@ def build_bibliographic_review_prompt(catalog: dict, md_text: str) -> str:
   "selections": {{
     "title": {{"candidate_id": "title-01", "status": "confirmed|corrected|ambiguous"}},
     {BIBLIOGRAPHIC_AUTHOR_SHAPE_EXAMPLE},
-    "year": {{"candidate_id": "year-01", "kind": "published|accepted|received|revised|unknown", "status": "confirmed|corrected|ambiguous"}},
+    "year": {{"candidate_id": "year-01", "kind": "published|published_online|accepted|received|revised|preprint|unknown", "status": "confirmed|corrected|ambiguous"}},
     "venue": {{"candidate_id": "", "status": "ambiguous"}},
     "doi": {{"candidate_id": "", "status": "ambiguous"}},
     "arxiv_id": {{"candidate_id": "", "status": "ambiguous"}}
@@ -2315,12 +2652,13 @@ def build_bibliographic_review_prompt(catalog: dict, md_text: str) -> str:
 
 约束：
 1. 只能引用候选目录中对应字段的 id；不选择时 candidate_id 写空字符串。
-2. authors.accepted_ids/rejected_ids 只能引用 author-*，不得重复或交叉。
-3. 候选作者完整时 proposed=[]；候选缺失或含多人合并值时，accepted_ids=[]，proposed 必须给出标题邻域中完整、有序、逐人拆分的作者列表，每项 value 必须逐字出现在 evidence 指向的前 40 行窗口。
-4. proposed 不得包含 et al、机构或多人合并值；使用 proposed 时 authors.status 与 review_status 都必须为 corrected。
-5. rejected_ids 只标记候选目录中误识别为作者的机构或多人合并值；候选外机构仅可在 review_notes 描述。
-6. 无法裁决时对应 status=ambiguous 且 review_status=manual_required；不要猜测。
-7. 一次返回所有字段，禁止建议后续逐字段调用。"""
+2. 候选为空的字段只能输出 {{"candidate_id": "", "status": "ambiguous"}}，不得附加 value 或 evidence。
+3. authors.accepted_ids/rejected_ids 只能引用 author-*，不得重复或交叉。
+4. 候选作者完整时 proposed=[]；候选缺失或含多人合并值时，accepted_ids=[]，proposed 必须给出标题邻域中完整、有序、逐人拆分的作者列表，每项 value 必须逐字出现在 evidence 指向的前 40 行窗口。
+5. proposed 不得包含 et al、机构或多人合并值；使用 proposed 时 authors.status 与 review_status 都必须为 corrected。
+6. rejected_ids 只标记候选目录中误识别为作者的机构或多人合并值；候选外机构仅可在 review_notes 描述。
+7. 无法裁决时对应 status=ambiguous 且 review_status=manual_required；不要猜测。
+8. 一次返回所有字段，禁止建议后续逐字段调用。"""
 
 
 def merge_bibliographic_review(bibliography: dict | None, review: dict) -> dict:
@@ -2695,6 +3033,79 @@ def _mark_graph_failure(state: dict) -> None:
     inbox_state.save(state["transaction_id"], state)
 
 
+def _paper_artifact_entries(extract_dir: Path) -> list[dict]:
+    roles = {
+        "paper.pdf": "source",
+        "paper.md": "locator-companion",
+        "source.yaml": "source-provenance",
+        "parse_meta.yaml": "extraction-provenance",
+    }
+    paths = []
+    for name in roles:
+        path = extract_dir / name
+        if path.is_symlink():
+            raise ValueError(f"论文文档包不允许符号链接: {name}")
+        if path.is_file():
+            paths.append(Path(name))
+    for directory, role in (("images", "referenced-image"), ("mineru", "extraction-sidecar")):
+        root = extract_dir / directory
+        if root.is_symlink():
+            raise ValueError(f"论文文档包目录不允许符号链接: {directory}")
+        if root.exists() and not root.is_dir():
+            raise ValueError(f"论文文档包路径必须是目录: {directory}")
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            if path.is_symlink():
+                raise ValueError(
+                    f"论文文档包不允许符号链接: {path.relative_to(extract_dir).as_posix()}"
+                )
+            if path.is_file():
+                relative = path.relative_to(extract_dir)
+                paths.append(relative)
+                roles[relative.as_posix()] = role
+    names = {path.as_posix() for path in paths}
+    if not {"paper.pdf", "paper.md"}.issubset(names):
+        raise ValueError("提取未生成 paper.pdf 和 paper.md")
+    return [
+        {
+            "path": relative.as_posix(),
+            "role": roles[relative.as_posix()],
+            "bytes": (extract_dir / relative).stat().st_size,
+            "sha256": _file_sha256(extract_dir / relative),
+        }
+        for relative in paths
+    ]
+
+
+def _write_paper_artifact_manifest(state: dict, extract_dir: Path) -> str:
+    artifacts = _paper_artifact_entries(extract_dir)
+    payload = {
+        "schema": "inbox-artifact-manifest-v2",
+        "raw_artifacts": artifacts,
+        "wiki_file": "wiki.md",
+    }
+    manifest_path = extract_dir / "manifest.json"
+    temporary = manifest_path.with_name(f".{manifest_path.name}.partial-{os.getpid()}")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+    )
+    os.replace(temporary, manifest_path)
+    digest = hashlib.sha256(
+        json.dumps(artifacts, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    state["artifact_bundle_sha256"] = digest
+    return digest
+
+
+def _current_artifact_bundle_sha256(extract_dir: Path) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            _paper_artifact_entries(extract_dir), ensure_ascii=False, sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 # ===== 3.1 dedup_check =====
 
 TITLE_DEDUP_GATE = 0.95  # 标题相似度门槛：超过此值才作为候选进入 metadata 判断
@@ -2866,22 +3277,45 @@ def step_extract(state: dict) -> tuple[bool, str]:
     import shutil
     txn = state["transaction_id"]
     extract_dir = TEMP_EXTRACT / txn
-    if extract_dir.exists():
-        shutil.rmtree(extract_dir)
     extract_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = (REPO / state["source"]).resolve()
-    run([sys.executable, str(REPO / ".scripts/extractor.py"), "--external-pdf", str(pdf_path),
-         "--paper", txn, "--papers-dir", "temp/inbox-extract"])
+
+    def reusable_extraction() -> bool:
+        paper_md_path = extract_dir / "paper.md"
+        local_pdf = extract_dir / "paper.pdf"
+        meta_path = extract_dir / "parse_meta.yaml"
+        if not (paper_md_path.is_file() and local_pdf.is_file() and meta_path.is_file()):
+            return False
+        try:
+            meta = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+            mineru = ((meta.get("engines") or {}).get("mineru") or {})
+            return (
+                meta.get("preferred") == "mineru"
+                and mineru.get("input_sha256") == _file_sha256(pdf_path)
+                and _file_sha256(local_pdf) == _file_sha256(pdf_path)
+            )
+        except (OSError, ValueError, TypeError, yaml.YAMLError):
+            return False
+
+    if not reusable_extraction():
+        # Preserve only the remote MinerU job checkpoint across an interrupted extract.
+        for child in extract_dir.iterdir():
+            if child.name == ".mineru":
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        run([sys.executable, str(REPO / ".scripts/extractor.py"), "--external-pdf", str(pdf_path),
+             "--paper", txn, "--papers-dir", "temp/inbox-extract"])
     paper_md = extract_dir / "paper.md"
     if not paper_md.is_file():
         return False, "提取未生成 paper.md"
-    raw_files = [name for name in ("paper.pdf", "paper.md", "source.yaml", "parse_meta.yaml")
-                 if (extract_dir / name).is_file()]
-    if not {"paper.pdf", "paper.md"}.issubset(raw_files):
-        return False, "提取未生成 paper.pdf 和 paper.md"
-    (extract_dir / "manifest.json").write_text(
-        json.dumps({"raw_files": raw_files, "wiki_file": "wiki.md"}, ensure_ascii=False) + "\n",
-        encoding="utf-8")
+
+    try:
+        _write_paper_artifact_manifest(state, extract_dir)
+    except ValueError as exc:
+        return False, str(exc)
     engine = "unknown"
     meta_path = extract_dir / "parse_meta.yaml"
     if meta_path.is_file():
@@ -2989,6 +3423,7 @@ def step_extract(state: dict) -> tuple[bool, str]:
     if not relation_ok:
         return False, relation_message
     persist_bibliographic_metadata(extract_dir, state.get("bibliographic_meta"))
+    _write_paper_artifact_manifest(state, extract_dir)
     if engine != "mineru":
         print(f"⚠️  WARNING: 提取引擎为 {engine}（非 MinerU），结果可能需要人工复核")
     return True, ""
@@ -3193,9 +3628,10 @@ def build_api_paper_workspace_prompt(
 
 [A. 书目裁决]
 1. 输出 {BIBLIOGRAPHIC_DECISION_PROTOCOL} JSON，一次裁决 title/authors/year/venue/doi/arxiv_id；除 authors.proposed 外只能引用对应字段的候选 ID。
-2. authors.accepted_ids/rejected_ids 只能引用 author-* 且不得交叉；候选不完整时 accepted_ids=[]，authors.proposed 按原文顺序逐人给 value 与前 40 行 paper.md#Lx[-Ly]。
-3. 无法裁决时字段 status=ambiguous 且 review_status=manual_required，不猜测；发表年份优先于 accepted/received/revised。
-4. JSON 必须严格使用以下形状，不增删 key：
+2. 候选为空的字段只能输出 {{"candidate_id": "", "status": "ambiguous"}}，不得附加 value 或 evidence。
+3. authors.accepted_ids/rejected_ids 只能引用 author-* 且不得交叉；候选不完整时 accepted_ids=[]，authors.proposed 按原文顺序逐人给 value 与前 40 行 paper.md#Lx[-Ly]。
+4. 无法裁决时字段 status=ambiguous 且 review_status=manual_required，不猜测；published/published_online 优先于 accepted/received/revised/preprint。
+5. JSON 必须严格使用以下形状，不增删 key：
 {{
   "protocol_version": "{BIBLIOGRAPHIC_DECISION_PROTOCOL}",
   "doc_type": "paper|document|ambiguous",
@@ -3203,7 +3639,7 @@ def build_api_paper_workspace_prompt(
   "selections": {{
     "title": {{"candidate_id": "title-01", "status": "confirmed|corrected|ambiguous"}},
     {BIBLIOGRAPHIC_AUTHOR_SHAPE_EXAMPLE},
-    "year": {{"candidate_id": "year-01", "kind": "published|accepted|received|revised|unknown", "status": "confirmed|corrected|ambiguous"}},
+    "year": {{"candidate_id": "year-01", "kind": "published|published_online|accepted|received|revised|preprint|unknown", "status": "confirmed|corrected|ambiguous"}},
     "venue": {{"candidate_id": "venue-01", "status": "confirmed|corrected|ambiguous"}},
     "doi": {{"candidate_id": "", "status": "ambiguous"}},
     "arxiv_id": {{"candidate_id": "", "status": "ambiguous"}}
@@ -3386,6 +3822,7 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
         "status": "awaiting_output",
         "paper_md_sha256": _file_sha256(paper_md),
         "source_pdf_sha256": _file_sha256(extract_dir / "paper.pdf"),
+        "artifact_bundle_sha256": state.get("artifact_bundle_sha256", ""),
         "bibliographic_pages_sha256": (
             _file_sha256(bibliographic_pages_path)
             if bibliographic_pages_path.is_file() else ""
@@ -3466,6 +3903,7 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
             "raw_source_placeholder": raw_placeholder,
             "paper_md_sha256": _file_sha256(paper_md),
             "source_pdf_sha256": _file_sha256(extract_dir / "paper.pdf"),
+            "artifact_bundle_sha256": state.get("artifact_bundle_sha256", ""),
             "bibliographic_pages_sha256": (
                 _file_sha256(bibliographic_pages_path)
                 if bibliographic_pages_path.is_file() else ""
@@ -3505,6 +3943,7 @@ def execute_api_paper_workspace(
         "status": "awaiting_output",
         "paper_md_sha256": _file_sha256(paper_md),
         "source_pdf_sha256": _file_sha256(pdf_path) if pdf_path.is_file() else "",
+        "artifact_bundle_sha256": state.get("artifact_bundle_sha256", ""),
         "bibliographic_input_hash": review_result.get("input_hash", ""),
         "output_path": str(output_path.relative_to(REPO)),
         "raw_source_placeholder": raw_placeholder,
@@ -3663,6 +4102,16 @@ def refresh_agent_workspace_handoff(
     if not paper_md.is_file() or _file_sha256(paper_md) != workspace.get("paper_md_sha256"):
         state["errors"] = ["候选刷新前 paper.md 已变化"]
         return False
+    expected_bundle = str(workspace.get("artifact_bundle_sha256") or "")
+    if expected_bundle:
+        try:
+            current_bundle = _current_artifact_bundle_sha256(paper_md.parent)
+        except ValueError as exc:
+            state["errors"] = [str(exc)]
+            return False
+        if current_bundle != expected_bundle:
+            state["errors"] = ["候选刷新前论文文档包已变化"]
+            return False
     md_text = paper_md.read_text(encoding="utf-8")
     bibliography = state.get("bibliographic_meta") or {}
     candidates = build_bibliographic_candidates(bibliography, md_text)
@@ -3753,6 +4202,16 @@ def resume_agent_workspace(
     if not paper_md.is_file() or _file_sha256(paper_md) != workspace.get("paper_md_sha256"):
         state["errors"] = ["Agent workspace 输入 paper.md 在交接后发生变化"]
         return False
+    expected_bundle = str(workspace.get("artifact_bundle_sha256") or "")
+    if expected_bundle:
+        try:
+            current_bundle = _current_artifact_bundle_sha256(paper_md.parent)
+        except ValueError as exc:
+            state["errors"] = [str(exc)]
+            return False
+        if current_bundle != expected_bundle:
+            state["errors"] = ["Agent workspace 输入论文文档包在交接后发生变化"]
+            return False
     if (state.get("agent_task") or {}).get("schema") == agent_task.SCHEMA_VERSION:
         missing = agent_task.missing_outputs(state, REPO)
         if missing:
@@ -3817,6 +4276,8 @@ def resume_agent_workspace(
         state["errors"] = ["Agent workspace 缺少近似论文关系裁决"]
         return False
     persist_bibliographic_metadata(paper_md.parent, state.get("bibliographic_meta"))
+    if (paper_md.parent / "paper.pdf").is_file():
+        _write_paper_artifact_manifest(state, paper_md.parent)
     combined_path = REPO / state["extract_dir"] / "agent-wiki-slots.txt"
     materialized_wiki = state.get("wiki_content", "") if repair_scope == "slots" else wiki
     combined_path.write_text(
@@ -3863,6 +4324,18 @@ def agent_workspace_hash_errors(state: dict, *, validated: bool = False) -> list
             workspace.get("bibliographic_pages_sha256"),
             "first-two-pages.txt",
         ))
+    bundle_expected = str(state.get("artifact_bundle_sha256") or "")
+    if bundle_expected:
+        try:
+            bundle_current = _current_artifact_bundle_sha256(REPO / state["extract_dir"])
+        except ValueError:
+            bundle_current = ""
+        if bundle_current != bundle_expected:
+            errors = ["论文文档包在 Agent 校验后发生变化或缺少已验证哈希"]
+        else:
+            errors = []
+    else:
+        errors = []
     relationship = state.get("relationship_review") or {}
     if workspace.get("relationship_output_sha256"):
         checks.append((
@@ -3876,7 +4349,6 @@ def agent_workspace_hash_errors(state: dict, *, validated: bool = False) -> list
             (REPO / state["extract_dir"] / "wiki.md", hashes.get("wiki.md"), "wiki.md"),
             (REPO / state.get("semantic_path", ""), hashes.get("semantic.txt"), "semantic.txt"),
         ])
-    errors = []
     for path, expected, label in checks:
         if not expected or not path.is_file() or _file_sha256(path) != expected:
             errors.append(f"{label} 在 Agent 校验后发生变化或缺少已验证哈希")
@@ -3990,6 +4462,7 @@ def read_agent_workspace(state: dict) -> dict:
             "paper_md_sha256": workspace.get("paper_md_sha256", ""),
             "source_pdf": str((REPO / state["extract_dir"] / "paper.pdf").relative_to(REPO)),
             "source_pdf_sha256": workspace.get("source_pdf_sha256", ""),
+            "artifact_bundle_sha256": workspace.get("artifact_bundle_sha256", ""),
             "bibliographic_pages": (
                 str(bibliographic_pages_path.relative_to(REPO))
                 if bibliographic_pages_path.is_file() else ""
@@ -4050,6 +4523,7 @@ def build_agent_validation_receipt(state: dict, graph_preflight=None) -> dict:
         "hashes": {
             "paper_md": _file_hash_if_present(Path(state["extract_dir"]) / "paper.md"),
             "source_pdf": _file_hash_if_present(Path(state["extract_dir"]) / "paper.pdf"),
+            "artifact_bundle": state.get("artifact_bundle_sha256", ""),
             "bibliographic_pages": _file_hash_if_present(
                 Path(state["extract_dir"]) / "first-two-pages.txt"
             ),
@@ -4579,6 +5053,8 @@ def step_validate_wiki(state: dict) -> list[str]:
     raw_overrides = {final_raw: extract_dir / "paper.md"} if final_raw.strip("/") else {}
     errors.extend(wl.validate_wiki_page(
         wiki_path, require_citations=True, raw_overrides=raw_overrides))
+    errors.extend(wl.validate_claim_sections(
+        wiki_path, ("研究方向定位", "Content")))
     direction_section = wl.get_wiki_section(wiki_path, "研究方向定位")
     if direction_section is None:
         errors.append("缺少 ## 研究方向定位")
@@ -5784,7 +6260,9 @@ def run_inbox_batch(verbose: bool) -> int:
     """
     pdf_paths = inbox_pdf_paths()
     if not pdf_paths:
-        print(json.dumps({"status": "completed", "items": []}, ensure_ascii=False, indent=2))
+        print(json.dumps(inbox_state.batch_output_payload(
+            items=[], status="completed", phase="commit",
+        ), ensure_ascii=False, indent=2))
         return 0
     # Phase 1：全部准备到 graph_ready 屏障（不写图）
     prepared: list[dict | None] = [None] * len(pdf_paths)
@@ -5829,12 +6307,15 @@ def run_inbox_batch(verbose: bool) -> int:
             s["status"] in {"prepared", "graph_ready", "duplicate_found"}
             for s in prepared
         )
-        print(json.dumps({
-            "status": "prepared" if expected_wait else "partial",
-            "phase": "prepare", "items": items,
-            "next": "完成各 item.agent_task 后按其 commands.check/commit 推进；"
-                    "graph_ready 论文可按 transaction_id 恢复提交",
-        }, ensure_ascii=False, indent=2))
+        print(json.dumps(inbox_state.batch_output_payload(
+            items=items,
+            status="prepared" if expected_wait else "partial",
+            phase="prepare",
+            next_action=(
+                "完成各 item.agent_task 后按其 commands.check/commit 推进；"
+                "graph_ready 论文可按 transaction_id 恢复提交"
+            ),
+        ), ensure_ascii=False, indent=2))
         return 0 if expected_wait else 1
     # Phase 2：全部就绪，批量写图
     results = []
@@ -5842,10 +6323,15 @@ def run_inbox_batch(verbose: bool) -> int:
         if state["status"] == "graph_ready":
             state = _run_phase(state, verbose, run_commit)
         results.append(_batch_item_payload(state))
-    print(json.dumps({
-        "status": "completed" if all(r["status"] in {"completed", "duplicate_found"} for r in results) else "partial",
-        "phase": "commit", "items": results,
-    }, ensure_ascii=False, indent=2))
+    print(json.dumps(inbox_state.batch_output_payload(
+        items=results,
+        status=(
+            "completed"
+            if all(r["status"] in {"completed", "duplicate_found"} for r in results)
+            else "partial"
+        ),
+        phase="commit",
+    ), ensure_ascii=False, indent=2))
     return 0 if all(r["status"] in {"completed", "duplicate_found"} for r in results) else 1
 
 

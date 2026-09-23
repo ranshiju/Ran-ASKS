@@ -547,10 +547,14 @@ def test_task_specific_execution_guidance_is_dispatched():
 
 def test_state_capability_tool_dispatch_is_explicit():
     listing = run("python3", ".scripts/route.py", "--list").stdout
-    assert "可用 task/state（write 为兼容别名）:" in listing
-    assert "[compat -> capability write/general]" in listing
-    assert "可用 capability:" in listing
-    assert "write: profiles=academic,general" in listing
+    assert "持续状态:" in listing
+    assert "research: 研究工作 route=research" in listing
+    assert "可路由任务:" in listing
+    assert "按需能力:" in listing
+    assert "write: artifact.write profiles=academic,general" in listing
+    assert "兼容 task 别名:" in listing
+    assert "write: artifact.write -> write/general" in listing
+    assert "task/state" not in listing
 
     research = run("python3", ".scripts/route.py", "--task", "research").stdout
     assert "research 是持续状态，write 是按需能力" in research
@@ -606,6 +610,34 @@ def test_engineering_graph():
     for task in ("sync", "write", "scan", "inbox"):
         routed = run("python3", ".scripts/route.py", "--task", task)
         assert "工程上下文(按元图派发)" in routed.stdout
+
+
+def test_engineering_graph_on_demand_coverage():
+    if str(REPO / ".scripts") not in sys.path:
+        sys.path.insert(0, str(REPO / ".scripts"))
+    import engineering_graph as graph
+    import function_registry
+
+    contracts = [{"checks": ["function_registry_coverage"]}]
+    registered = {"research": {"entry": "route"}, "slides": {"entry": "route"}}
+    with patch.object(function_registry, "validate_runtime", return_value=[]), \
+         patch.object(
+             function_registry,
+             "registered_route_surface",
+             return_value=({"research"}, {"slides"}),
+         ):
+        assert graph.contract_failures({}, registered, contracts) == []
+        missing_task = graph.contract_failures({}, {"slides": {"entry": "route"}}, contracts)
+        assert any("Route task missing capability" in error for error in missing_task)
+        missing_cap = graph.contract_failures({}, {"research": {"entry": "route"}}, contracts)
+        assert any("on-demand route missing capability" in error for error in missing_cap)
+        extra = graph.contract_failures({}, {**registered, "orphan": {"entry": "route"}}, contracts)
+        assert any("missing registered Route binding" in error for error in extra)
+        bad_entry = graph.contract_failures({}, {**registered, "slides": {"entry": "other"}}, contracts)
+        assert any("entry is not route" in error for error in bad_entry)
+    tasks, on_demand = function_registry.registered_route_surface()
+    assert "presentation" in on_demand
+    assert "presentation" not in tasks
 
 
 def test_engineering_graph_target_resolution():
@@ -948,6 +980,7 @@ if __name__ == "__main__":
     test_state_capability_tool_dispatch_is_explicit()
     test_query_stage_dispatch()
     test_engineering_graph()
+    test_engineering_graph_on_demand_coverage()
     test_engineering_graph_target_resolution()
     test_meeting_workflow_documentation()
     test_inbox_single_read_documentation()

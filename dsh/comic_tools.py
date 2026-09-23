@@ -12,6 +12,7 @@ if str(SCRIPTS) not in sys.path:
 
 from comic_generation import generate_asset, generate_batch, image_candidates
 from dsh.harness import ToolDefinition
+from dsh.function_catalog import bind_tools
 
 
 def _scope(arguments: dict) -> tuple[str | None, Path | None]:
@@ -107,7 +108,7 @@ def build_comic_tools() -> list[ToolDefinition]:
             {"required": ["output_root"], "not": {"required": ["project"]}},
         ]
     }
-    return [
+    tools = [
         ToolDefinition(
             name="comic_models",
             description="列出已登记的 API 图片生成候选；不联网、不修改文件",
@@ -156,3 +157,4 @@ def build_comic_tools() -> list[ToolDefinition]:
             timeout_ms=None,
         ),
     ]
+    return bind_tools(tools)

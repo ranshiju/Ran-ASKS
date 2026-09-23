@@ -45,6 +45,16 @@ def test_impact_success_marks_impact_seen():
         name=TOOL_BUILD_IMPACT, arguments={"target": "ingest_paper"}), result)
     assert guard.audit.impact_seen is True
     assert guard.audit.impact_target == "ingest_paper"
+    assert guard.audit.impact_status == "legacy"
+
+
+def test_guard_requires_exactly_one_impact_source():
+    guard = BuildLocatorGuard()
+    for arguments in ({}, {"target": "route", "working_tree": True}):
+        decision = guard.on_pre_execute(ToolExecution(
+            name=TOOL_BUILD_IMPACT, arguments=arguments,
+        ))
+        assert decision is not None and decision.kind == "deny"
 
 
 def test_guard_accepts_canonical_locator_after_impact():
@@ -87,9 +97,34 @@ def test_cockpit_impact_accepts_registered_script_path():
     })
     payload = json.loads(result.content)
     assert payload["ok"] is True, payload
-    assert "[建设影响面] engineering_graph:" in payload["output"]
+    impact = json.loads(payload["output"])
+    assert impact["schema"] == "engineering-impact-v1"
+    assert impact["status"] == "ok"
+    assert impact["source"]["target"] == "engineering_graph"
     assert cockpit.audit()["impact_seen"] is True
     assert cockpit.audit()["impact_target"] == ".scripts/engineering_graph.py"
+    assert cockpit.audit()["impact_status"] == "ok"
+
+
+def test_cockpit_impact_exposes_partial_change_set():
+    cockpit = BuildLocatorCockpit()
+    result = cockpit.execute(TOOL_BUILD_IMPACT, {
+        "files": [".scripts/engineering_graph.py", "not-registered.py"],
+        "verify": True,
+    })
+    payload = json.loads(result.content)
+    assert payload["ok"] is True, payload
+    impact = json.loads(payload["output"])
+    assert impact["status"] == "partial"
+    assert impact["completeness"]["unresolved_files_total"] == 1
+    assert cockpit.audit()["impact_seen"] is True
+    assert cockpit.audit()["impact_target"] == "files:2"
+    assert cockpit.audit()["impact_status"] == "partial"
+    read_result = cockpit.execute(TOOL_BUILD_READ, {
+        "locator": "operations/engineering/graph.yaml#yaml:/nodes/engineering_graph",
+    })
+    assert json.loads(read_result.content)["ok"] is True
+    assert cockpit.audit()["compliant"] is False
 
 
 def main():
