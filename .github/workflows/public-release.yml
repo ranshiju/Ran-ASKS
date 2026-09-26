@@ -1,0 +1,36 @@
+name: Public release gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install verification dependencies
+        run: python -m pip install PyMuPDF==1.28.0 PyYAML==6.0.3
+      - name: Verify generated public tree
+        run: python .scripts/open_source_release.py verify .
+      - name: Run public release regressions
+        run: |
+          python .scripts/test_open_source_release.py
+          python .scripts/test_open_source_publish.py
+      - name: Validate public engineering graph
+        run: python .scripts/engineering_graph.py validate
+      - name: Verify frozen paper artifacts
+        run: |
+          python .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
+          python paper-artifacts/v0.2.1/verify.py

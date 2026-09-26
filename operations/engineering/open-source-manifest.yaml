@@ -5,6 +5,7 @@ include:
   - AGENTS.md
   - .env.example
   - .gitignore
+  - .github/workflows/public-release.yml
   - preprocess.py
   # Includes local-only presentation runtime/state/renderer/delivery and isolated regression fixtures.
   - .scripts/**

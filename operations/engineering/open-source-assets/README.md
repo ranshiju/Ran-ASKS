@@ -168,6 +168,24 @@ require code changes. See the [ingestion contract](operations/INGEST.md),
 [presentation contract](operations/PRESENTATION.md), and
 [query contract](operations/QUERY.md).
 
+## Reproducible public releases
+
+The public repository is generated from an explicit committed source snapshot,
+not from arbitrary local working-tree contents. The publication orchestrator
+checks every manifest-selected source file, builds and verifies a temporary
+tree, records the source commit/tree, manifest and payload hashes in
+`RELEASE_PROVENANCE.json`, then transactionally installs the result while
+preserving the public repository's Git metadata. Remote URL, branch and
+ahead/behind checks run before publication; pushing requires an explicit flag
+and is confirmed against the remote commit without force-push, tags, or a
+GitHub Release.
+
+GitHub Actions repeats the release boundary, engineering-graph, regression and
+frozen-artifact checks on pull requests and `main`. The downloadable Chinese
+introduction is also checked page by page for extractable text, missing-glyph
+markers and nonblank rendering. Changelog entries and semantic version
+rationales are published in English and Chinese from this release onward.
+
 ## Image documents and reviewed ingestion
 
 Single-frame document images now use a reusable, source-bound OCR adapter.

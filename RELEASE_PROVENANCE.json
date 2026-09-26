@@ -1,0 +1,93 @@
+{
+  "manifest_sha256": "1190b22b3531ffc0bd1e937f83e11e6b75fdcdca43a472e10edc27c810ca43b0",
+  "payload_sha256": "dc6c78ba2df4fe2fd26c7125ec4f44892a887a0cbb45659d2d66377c97ae74af",
+  "pdf_render_health": {
+    "docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf": {
+      "page_count": 15,
+      "pages": [
+        {
+          "ink_pixels": 13859,
+          "page": 1,
+          "text_chars": 577
+        },
+        {
+          "ink_pixels": 24113,
+          "page": 2,
+          "text_chars": 1244
+        },
+        {
+          "ink_pixels": 24234,
+          "page": 3,
+          "text_chars": 1197
+        },
+        {
+          "ink_pixels": 23807,
+          "page": 4,
+          "text_chars": 1166
+        },
+        {
+          "ink_pixels": 23306,
+          "page": 5,
+          "text_chars": 1118
+        },
+        {
+          "ink_pixels": 26594,
+          "page": 6,
+          "text_chars": 1273
+        },
+        {
+          "ink_pixels": 21104,
+          "page": 7,
+          "text_chars": 1028
+        },
+        {
+          "ink_pixels": 25767,
+          "page": 8,
+          "text_chars": 921
+        },
+        {
+          "ink_pixels": 21818,
+          "page": 9,
+          "text_chars": 1735
+        },
+        {
+          "ink_pixels": 16782,
+          "page": 10,
+          "text_chars": 974
+        },
+        {
+          "ink_pixels": 19439,
+          "page": 11,
+          "text_chars": 1036
+        },
+        {
+          "ink_pixels": 18167,
+          "page": 12,
+          "text_chars": 1179
+        },
+        {
+          "ink_pixels": 15485,
+          "page": 13,
+          "text_chars": 917
+        },
+        {
+          "ink_pixels": 14488,
+          "page": 14,
+          "text_chars": 823
+        },
+        {
+          "ink_pixels": 14534,
+          "page": 15,
+          "text_chars": 916
+        }
+      ]
+    }
+  },
+  "schema": "wikigraph-public-release-provenance-v1",
+  "source": {
+    "commit": "cf40d03297508de09a0075c25fb7991bc1c2cf0f",
+    "mode": "committed",
+    "tree": "e413004ee42a57cbba0ec0461c51b13392067df7"
+  },
+  "version": "0.9.0"
+}

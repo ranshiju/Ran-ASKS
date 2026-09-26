@@ -158,6 +158,19 @@ Agent 模式准备好的摄入事务现在可以用同一个 transaction ID 跨�
 具体边界见[摄入契约](operations/INGEST.md)、[演示文稿契约](operations/PRESENTATION.md)
 和[查询契约](operations/QUERY.md)。
 
+## 可复现的公开发布
+
+公开仓库现在从显式、已提交的源快照生成，不再依赖任意本地工作树内容。发布编排器
+检查所有 manifest 选中文件，在临时目录构建并验证公开树，将源 commit／tree、manifest
+与 payload 哈希写入 `RELEASE_PROVENANCE.json`，然后在保留公开仓库 Git 元数据的
+前提下事务性安装；安装失败会恢复旧树。
+
+发布前还会核对远端 URL、分支以及 ahead／behind 状态。推送必须显式授权，且在完成后
+对照远端 commit，不使用 force push，也不自动创建标签或 GitHub Release。GitHub Actions
+会在 pull request 和 `main` 上重复执行发布边界、工程图、回归和冻结论文产物校验。
+中文介绍 PDF 还会逐页检查可提取文本、缺字标记和非空渲染。从本版本起，Changelog
+更新内容和语义版本判断同时使用英文与中文。
+
 ## 论文与代码版本
 
 `main` 分支持续开发，因此仓库可能比论文更新得更快。每个与论文对应的实现

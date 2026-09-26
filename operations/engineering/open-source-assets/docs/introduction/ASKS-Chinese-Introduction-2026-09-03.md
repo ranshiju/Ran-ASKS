@@ -12,7 +12,7 @@
 
 **公开入口：** [GitHub 仓库](https://github.com/ranshiju/Ran-ASKS) | [arXiv:2608.29612](https://arxiv.org/abs/2608.29612) | [下载 PDF 版](ASKS-Chinese-Introduction-2026-09-03.pdf) | [版本对应关系](README.md)
 
-项目中文介绍，2026年9月3日发布，2026年9月26日同步至 Ran-ASKS v0.8.0。本页是 GitHub 在线阅读版，PDF 保留用于下载和打印。
+项目中文介绍，2026年9月3日发布，2026年9月26日同步至 Ran-ASKS v0.9.0。本页是 GitHub 在线阅读版，PDF 保留用于下载和打印。
 
 ## 目录
 
@@ -203,6 +203,23 @@ Embedding 路径，适配不同兼容服务而无需修改代码。
 
 这些能力构成2026年9月26日的 `v0.8.0` 兼容更新，不改变论文实验、冻结数据产物或复现
 边界，也不自动创建标签或 Release。
+
+### 从已提交源快照生成可复现的公开版本
+
+公开版本不再直接依赖当前工作树。发布编排器首先确认 manifest 选中的源文件已经提交，
+再从明确的 source commit 建立临时 worktree，生成并验证临时公开树。每个公开版本中的
+`RELEASE_PROVENANCE.json` 记录源 commit／tree、manifest 哈希、版本、公开 payload
+哈希和 PDF 渲染健康信息，使发布内容可以回到确定的工程来源。
+
+临时树完整通过后才替换 `WikiGraph_clean` 的非 Git 内容；安装中途失败会恢复旧树。
+提交与推送前还要核对公开仓库远端 URL、目标分支、工作树和 ahead／behind 状态。
+推送必须显式授权，完成后以远端 commit 再确认；流程不使用 force push，也不自动创建
+标签或 GitHub Release。
+
+GitHub Actions 在 pull request 和 `main` 上重新执行发布边界、工程图、发布回归和冻结
+论文产物校验。中文介绍 PDF 除人工对照编辑源外，还逐页机械检查文本可提取性、缺字
+标记和非空渲染。从2026年9月26日的 `v0.9.0` 起，公开 Changelog 的更新内容和语义
+版本判断同时使用英文与中文。本次兼容更新不改变论文实验或冻结数据产物边界。
 
 ### DSH：受守卫的 Agent 驾驶舱
 

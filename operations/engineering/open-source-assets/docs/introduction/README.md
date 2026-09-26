@@ -57,6 +57,14 @@ code and synthetic tests, not private knowledge. The update changes no frozen
 paper artifact; the PDF retains its reviewed earlier pages and appends the same
 engineering update.
 
+The 2026-09-26 `v0.9.0` addendum makes public publication reproducible from an
+explicit committed source snapshot. It adds release provenance, transactional
+clean-tree installation with rollback, remote/branch/divergence guards,
+post-push commit confirmation, GitHub-side verification, mechanical PDF page
+health checks, and bilingual changelog/version rationales. This is a compatible
+engineering and publication capability and does not change any frozen paper
+artifact or authorize a tag/GitHub Release.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -106,6 +114,12 @@ Markdown 增加带日期的工程补充；PDF 保留之前已审阅的版式，�
 可复用幻灯片组件、受管可编辑图稿和显式服务商 API 路径。上述内容是向后兼容的工作流
 与配置能力，因此按 MINOR 升版。公开树只包含通用隔离实现和合成测试，不包含私有知识；
 本次更新不改变冻结论文产物，PDF 保留此前已审阅页面，并附加同一工程更新内容。
+
+2026年9月26日的 `v0.9.0` 补充说明把公开发布固定为从显式、已提交源快照生成，
+新增发布 provenance、带回滚的事务性 clean 树安装、远端／分支／分叉检查、推送后
+commit 确认、GitHub 侧验证、PDF 逐页机械健康检查，以及中英文双语 Changelog 与
+版本判断。这是兼容新增的工程发布能力，不改变任何冻结论文产物，也不授权创建标签
+或 GitHub Release。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

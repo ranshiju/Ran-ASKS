@@ -589,6 +589,14 @@ nodes:
     path: .scripts/open_source_release.py
     kind: implementation
     role: manifest-governed-public-release-builder-and-reader-documentation-guard
+  open_source_publish:
+    path: .scripts/open_source_publish.py
+    kind: implementation
+    role: committed-source-snapshot-to-transactional-public-worktree-commit-push-and-remote-confirmation-orchestrator
+  public_release_ci:
+    path: .github/workflows/public-release.yml
+    kind: automation
+    role: github-side-public-release-boundary-engineering-graph-and-regression-gate
   paper_artifact:
     path: .scripts/paper_artifact.py
     kind: implementation
@@ -726,6 +734,10 @@ nodes:
     path: .scripts/test_open_source_release.py
     kind: test
     role: public-release-isolation-regression
+  open_source_publish_test:
+    path: .scripts/test_open_source_publish.py
+    kind: test
+    role: committed-source-dirty-boundary-transactional-install-and-git-publication-regression
   paper_artifact_test:
     path: .scripts/test_paper_artifact.py
     kind: test
@@ -1826,6 +1838,21 @@ edges:
 - - open_source_release
   - tested_by
   - open_source_release_test
+- - open_source_publish
+  - uses
+  - open_source_release
+- - open_source_publish
+  - reads
+  - open_source_manifest
+- - open_source_publish
+  - tested_by
+  - open_source_publish_test
+- - public_release_ci
+  - uses
+  - open_source_release
+- - public_release_ci
+  - uses
+  - open_source_publish_test
 - - paper_artifact
   - writes
   - paper_artifact_v020
@@ -2828,6 +2855,14 @@ verification:
   - python3 .scripts/test_ingest_pipeline.py
   open_source_release:
   - python3 .scripts/test_open_source_release.py
+  open_source_publish:
+  - python3 .scripts/test_open_source_publish.py
+  - python3 .scripts/test_open_source_release.py
+  - python3 .scripts/engineering_graph.py validate
+  public_release_ci:
+  - python3 .scripts/test_open_source_publish.py
+  - python3 .scripts/test_open_source_release.py
+  - python3 .scripts/engineering_graph.py validate
   paper_artifact:
   - python3 .scripts/test_paper_artifact.py
   - python3 .scripts/paper_artifact.py verify paper-artifacts/v0.2.0
@@ -3357,10 +3392,10 @@ script_contracts:
     - source and destination paths must remain confined without symlink escape; verify rejects private paths even when the manifest approves them
     - 每次有实际公开变更的 GitHub 同步先由当前 Agent 评估 PATCH/MINOR/MAJOR 并说明功能与兼容性依据，不按文件数/行数推断；脚本 prepare-version 按显式级别与预期旧版本计算新版本，同次构建重试不重复排号
     - 根目录 VERSION 是当前 MAJOR.MINOR.PATCH 发布边界；verify 对比公开仓库的待提交或最新提交基线，拒绝同版本或版本倒退的公开更新；Git tag/Release 的创建与版本排号分别授权
-    - 根目录 CHANGELOG.md 由公开资产生成，且最新版本标题与 VERSION 一致
+    - 根目录 CHANGELOG.md 由公开资产生成，最新版本标题与 VERSION 一致；Unreleased、当前版本 highlights 和语义版本判断均同时包含英文与中文
     - 每次 GitHub 公开树更新均须内容级审阅并同步英文 README、中文 README、带日期的中文说明 Markdown 及其版本范围说明；相关机制、能力、配置或使用方式不得只写 changelog
     - 中文说明 Markdown 是 GitHub 默认在线阅读入口，图片使用公开相对路径；PDF 保留用于下载和打印，在读者内容变化时从同一已审阅来源同步更新
-    - 中文说明 PDF 在进入公开资产前已经过 Ghostscript 标准化并完成逐页渲染对比；Word/Quartz 原始导出只作为生成输入
+    - 中文说明 PDF 在进入公开资产前已经过 Ghostscript 标准化并由人完成与编辑源的逐页对比；verify 机械检查页数、可提取文本、缺字标记、非空渲染和 provenance 中的 render-health
     - 中英文 README 公开资产均存在，包含双向语言入口与公开联系邮箱
     - 公开 capability 的 required 节点均存在于 allowlisted 目标树；active projects/.project 路径只保留在私有工程图
     - 公开 graph.yaml 是发布器在复制后生成的受管自举产物；投影可用性检查必须把该目标路径视为预期存在，使首次 build 与随后 verify 得到同一节点闭包
@@ -3368,8 +3403,9 @@ script_contracts:
     - manifest 的 documentation_omissions 约束公开说明 Markdown，不影响获准技能的运行指令；文档同步不得宣传被省略的功能
     - 已发布的冻结 paper-artifacts 版本全部保留，并分别通过其声明的版本化验证器
     writes:
-    - build 写入指定目标公开树（目标绝不能是 REPO 自身）
-    - prepare-version --apply 仅同步源 VERSION、公开资产 CHANGELOG 和根目录 CHANGELOG 镜像，将 Unreleased 条目归入新版本并记录判断依据；缺省只输出计划，不调用 LLM 或 Git 网络
+    - build 先写入同文件系统临时树，验证通过后事务性替换指定目标公开树并保留 .git；目标绝不能是 REPO 自身，安装失败恢复旧树
+    - build 写 RELEASE_PROVENANCE.json，记录 source mode/commit/tree、manifest SHA-256、版本、payload SHA-256 和 PDF render-health
+    - prepare-version --apply 仅同步源 VERSION、公开资产 CHANGELOG 和根目录 CHANGELOG 镜像，将双语 Unreleased 条目归入新版本并记录中英文判断依据；缺省只输出计划，不调用 LLM 或 Git 网络
     - 目标树中的 operations/engineering/graph.yaml 确定性投影，仅保留公开路径闭包
     forbidden:
     - 手工向生成公开树补入业务文件
@@ -3377,6 +3413,7 @@ script_contracts:
     - 将 active projects/.project 节点、依赖边、验证命令或脚本契约复制到公开工程图
     - VERSION 缺失、非 semver，或 README release badge 与 VERSION 不一致时仍验证通过
     - CHANGELOG.md 缺失当前 VERSION 标题时仍验证通过
+    - 当前版本或 Unreleased 更新日志缺少英文/中文任一语言时仍准备或验证通过
     - 只更新英文 README 的版本标记，造成中英文版本信息漂移
     - 公开代码、规范或能力已变化，但本次 Git diff 未同时更新中英文 README、中文说明 Markdown 与版本范围说明
     - README 把 PDF 预览器作为中文说明的默认阅读入口，或中文说明正文变化后未同步下载/打印 PDF
@@ -3385,6 +3422,26 @@ script_contracts:
     - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
     verify:
     - python3 .scripts/test_open_source_release.py
+    - python3 .scripts/test_open_source_publish.py
+  open_source_publish:
+    preconditions:
+    - 发布源必须是显式 source ref 解析出的 commit；当前工作树中所有 manifest 选中文件、公开资产源、VERSION、manifest 和发布脚本相对该 commit 必须无 tracked/untracked 漂移，非公开项目文件可保持未提交
+    - 目标必须是独立 Git 工作树、位于源库之外、当前分支与请求分支一致且无预存变更；fetch 后本地 HEAD 必须与 remote branch 完全一致
+    - 发布版本、读者文档和 changelog 已由 prepare-version 准备；语义版本级别仍由宿主 Agent 判断，编排器不自动分类
+    - push、tag 和 GitHub Release 分别授权；publish 缺省只构建、验证和提交，只有显式 --push 才推送，永不创建 tag 或 Release
+    writes:
+    - 从临时 detached source worktree 构建临时发布树并写 RELEASE_PROVENANCE.json，记录 source commit/tree、manifest SHA-256、版本与不含 provenance 自身的 payload SHA-256
+    - 临时树全部验证通过后才事务性替换目标非 .git 内容；安装失败恢复原目标树
+    - 目标仓库按显式 commit message 暂存并提交生成树；--push 时推送指定 remote/branch 并以 ls-remote 确认远端 commit
+    forbidden:
+    - 从含 manifest 相关未提交变更的工作树发布，或把 projects/private/temp 等非公开脏文件误判为阻塞
+    - 在临时树验证前清空目标，安装失败后留下半生成树，或删除/改写目标 .git
+    - 在 fetch 后存在 ahead/behind、分支不符、远端 URL 未确认或目标预存变更时继续提交或推送
+    - 用 force push、自动 tag/Release、推送个人源库，或在远端 commit 未确认时报告成功
+    verify:
+    - python3 .scripts/test_open_source_publish.py
+    - python3 .scripts/test_open_source_release.py
+    - python3 .scripts/engineering_graph.py validate
   paper_artifact:
     preconditions:
     - 冻结的隔离实验、G056 JSONL、56 个 step report、论文派生指标与三个维护型说明文件均存在

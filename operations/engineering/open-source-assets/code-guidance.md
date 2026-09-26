@@ -1107,11 +1107,11 @@ python3 .scripts/visual_to_editable_ppt.py <figure.png|document.pdf> \
 ## 6. 开源发布：`.scripts/open_source_release.py`
 
 - **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。中英文 README 与根 `CHANGELOG.md` 均由公开资产生成；发布时同步写入版本标记、验证双向语言入口，并要求 changelog 最新版本标题与 `VERSION` 一致。每次 GitHub 更新还必须让中英文 README、带日期的中文说明 Markdown 及其版本范围说明同时进入本次 diff，且内容反映受影响的机制、能力、配置或使用方式；PDF 是下载/打印版，在中文说明读者内容变化时同步更新。
-- **排号**：每批实际公开更新由当前 Agent 对照公开仓库状态及 `VERSION` 自动判断最高语义级别并记录依据：兼容修复/小文档为 PATCH，兼容新增能力为 MINOR，破坏公开契约为 MAJOR；不按文件数或行数判断。先在公开资产 CHANGELOG 的 Unreleased 补充说明，再运行 `python3 .scripts/open_source_release.py prepare-version --level <patch|minor|major> --reason '<功能与兼容性依据>' --from-version <旧版本>` 预览，加 `--apply` 才写入源 VERSION、公开资产 CHANGELOG 和根 CHANGELOG 镜像。重建同批次不再排号，无实际更新不空升版本；创建 tag/Release 须另行授权。
+- **排号**：每批实际公开更新由当前 Agent 对照公开仓库状态及 `VERSION` 自动判断最高语义级别并记录依据：兼容修复/小文档为 PATCH，兼容新增能力为 MINOR，破坏公开契约为 MAJOR；不按文件数或行数判断。公开资产 CHANGELOG 的 Unreleased 同时写 `### Highlights` 与 `### 主要更新`，再运行 `python3 .scripts/open_source_release.py prepare-version --level <patch|minor|major> --reason '<English rationale>' --reason-zh '<中文依据>' --from-version <旧版本>` 预览，加 `--apply` 才写入源 VERSION、双语版本判断、公开资产 CHANGELOG 和根 CHANGELOG 镜像。重建同批次不再排号，无实际更新不空升版本；创建 tag/Release 须另行授权。
 - **先读**：`operations/engineering/open-source-release.md` 与 `operations/engineering/open-source-manifest.yaml`。
-- **调用**：`python3 .scripts/open_source_release.py build <目标目录> --clean --force`；随后 `python3 .scripts/open_source_release.py verify <目标目录>`。
+- **调用**：`open_source_release.py build/verify` 是确定性底层和开发预览；正式发布先提交全部 manifest 相关源文件，再用 `python3 .scripts/open_source_publish.py <目标目录> --expected-remote-url <URL> --message '<提交说明>' --dry-run` 审阅计划，授权推送时去掉 `--dry-run` 并加 `--push`。
 - **边界**：只复制 manifest 批准文件和公开资产；不读取或复制业务知识内容。DSH 作为公开执行层随 `dsh/**` 发布；active `projects/` 与 `.project/` 节点从公开工程图移除，Codex 技能仅复制 manifest 精确批准的功能文件，个人资料与样稿保持私有；`documentation_omissions` 限制公开说明 Markdown 的内容，不影响获准运行指令，也不免除版本与文档同步检查。目标非空时必须同时显式给出 `--clean --force`；脚本保留目标的 `.git` 元数据。
-- **验证**：`python3 .scripts/test_open_source_release.py`；提交前后均运行 `verify`，并在生成树内运行 `python3 .scripts/engineering_graph.py validate` 与相关工程回归。目标是 Git 工作树时，`verify` 对照待提交 HEAD 或已提交 HEAD^ 的 VERSION，拒绝同版本/倒退的公开更新；同时拒绝被目标 `.gitignore` 隐藏的白名单文件。中文介绍 Markdown 必须使用公开相对路径并能解析图片；PDF 还须包含 Ghostscript 标准化标记并通过逐页渲染对比，保证下载版可移植。
+- **验证**：运行 `test_open_source_release.py`、`test_open_source_publish.py` 与 `engineering_graph.py validate`；GitHub Actions 在 PR/main 重复公开树、工程图和冻结产物校验。目标是 Git 工作树时，`verify` 对照待提交 HEAD 或已提交 HEAD^ 的 VERSION，拒绝同版本/倒退更新并检查双语 Changelog、读者文档、provenance、payload 哈希和 `.gitignore`。PDF 机械检查页数、可提取文本、缺字标记和非空渲染；与编辑源的版式/语义等价仍由人审。
 
 ## 7. 论文数据产物：`.scripts/paper_artifact.py`
 

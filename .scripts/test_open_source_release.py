@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import fitz
 import open_source_release as release
 
 
@@ -36,18 +37,29 @@ def check_version_preparation() -> None:
         version_path = repository / "VERSION"
         changelog = repository / "public-CHANGELOG.md"
         mirror = repository / "CHANGELOG.md"
-        original = "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- Image OCR.\n\n## [0.4.0] - 2026-09-04\n\n- Earlier work.\n"
+        original = (
+            "# Changelog\n\n## [Unreleased]\n\n### Highlights\n\n- Image OCR.\n\n"
+            "### 主要更新\n\n- 新增图片文字识别。\n\n"
+            "## [0.4.0] - 2026-09-04\n\n- Earlier work.\n"
+        )
         version_path.write_text("0.4.0\n", encoding="utf-8")
         changelog.write_text(original, encoding="utf-8")
         mirror.write_text("old mirror\n", encoding="utf-8")
         manifest = {"public_assets": {"CHANGELOG.md": changelog.name}}
         with patch.object(release, "REPO", repository), patch.object(release, "VERSION_PATH", version_path), patch.object(release, "load_manifest", return_value=manifest):
-            arguments = {"level": "minor", "reason": "Compatible image ingestion capability", "from_version": "0.4.0", "release_date": "2026-09-08"}
+            arguments = {
+                "level": "minor", "reason": "Compatible image ingestion capability",
+                "reason_zh": "新增向后兼容的图片摄入能力", "from_version": "0.4.0",
+                "release_date": "2026-09-08",
+            }
             snapshot = {item: item.read_bytes() for item in (version_path, changelog, mirror)}
             planned = release.prepare_version(**arguments)
             assert planned["status"] == "planned" and planned["to"] == "0.5.0"
             assert all(item.read_bytes() == content for item, content in snapshot.items())
-            for changes in [{"reason": " "}, {"reason": "two\nlines"}, {"release_date": "invalid"}]:
+            for changes in [
+                {"reason": " "}, {"reason": "two\nlines"}, {"reason_zh": " "},
+                {"reason_zh": "English only"}, {"release_date": "invalid"},
+            ]:
                 try:
                     release.prepare_version(**(arguments | changes), apply=True)
                 except ValueError:
@@ -55,7 +67,12 @@ def check_version_preparation() -> None:
                 else:
                     raise AssertionError(changes)
                 assert all(item.read_bytes() == content for item, content in snapshot.items())
-            for invalid in ["# Changelog\n", "## [Unreleased]\n\n### Added\n", original + "\n## [0.5.0]\n"]:
+            for invalid in [
+                "# Changelog\n",
+                "## [Unreleased]\n\n### Highlights\n\n- English only.\n",
+                "## [Unreleased]\n\n### 主要更新\n\n- 只有中文。\n",
+                original + "\n## [0.5.0]\n",
+            ]:
                 changelog.write_text(invalid, encoding="utf-8")
                 try:
                     release.prepare_version(**arguments, apply=True)
@@ -88,6 +105,7 @@ def check_version_preparation() -> None:
             updated = changelog.read_text()
             assert "## [Unreleased]\n\n## [0.5.0] - 2026-09-08" in updated
             assert "- MINOR: Compatible image ingestion capability" in updated
+            assert "- MINOR（中文）：新增向后兼容的图片摄入能力" in updated
             assert "- Image OCR." in updated and "- Earlier work." in updated
             try:
                 release.prepare_version(**arguments, apply=True)
@@ -204,11 +222,46 @@ def check_private_release_boundary() -> None:
                 assert sorted(p.name for p in destination.iterdir()) == ['keep.txt']
 
 
+def check_pdf_render_health() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        valid = root / "valid.pdf"
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 72), "Valid release page")
+        document.save(valid)
+        document.close()
+        assert release.pdf_render_health(valid)["page_count"] == 1
+
+        missing = root / "missing.pdf"
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 72), "missing □", fontname="china-s")
+        document.save(missing)
+        document.close()
+        try:
+            release.pdf_render_health(missing)
+        except ValueError as error:
+            assert "missing-glyph" in str(error)
+        else:
+            raise AssertionError("missing-glyph PDF accepted")
+
+        blank = root / "blank.pdf"
+        document = fitz.open(); document.new_page(); document.save(blank); document.close()
+        try:
+            release.pdf_render_health(blank)
+        except ValueError as error:
+            assert "renders blank" in str(error)
+        else:
+            raise AssertionError("blank PDF accepted")
+
+
 def main() -> None:
     check_private_release_boundary()
     check_documentation_omissions()
     check_version_preparation()
     check_version_progression()
+    check_pdf_render_health()
     expected_version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
     with tempfile.TemporaryDirectory() as temporary:
         destination = Path(temporary) / "release"
@@ -454,11 +507,20 @@ def main() -> None:
         synchronized_originals = {path: path.read_bytes() for path in synchronized_paths}
         for path in synchronized_paths:
             path.write_bytes(path.read_bytes() + b"\n")
+        provenance_path = destination / release.PROVENANCE_PATH
+        provenance_original = provenance_path.read_bytes()
+        provenance = release.json.loads(provenance_original)
+        provenance["payload_sha256"] = release.release_payload_sha256(destination)
+        provenance_path.write_text(
+            release.json.dumps(provenance, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         synchronized = run("verify", str(destination))
         assert "Public release verified" in synchronized.stdout
         changed_path.write_bytes(original_changed)
         for path, content in synchronized_originals.items():
             path.write_bytes(content)
+        provenance_path.write_bytes(provenance_original)
 
         gitignore = destination / ".gitignore"
         original_gitignore = gitignore.read_text(encoding="utf-8")
