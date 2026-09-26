@@ -2,8 +2,11 @@
 """Regression checks for committed-snapshot public publication orchestration."""
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import tempfile
+import traceback
 from pathlib import Path
 from unittest.mock import patch
 
@@ -138,4 +141,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            details = traceback.format_exc().replace("%", "%25")
+            details = details.replace("\r", "%0D").replace("\n", "%0A")
+            print(
+                f"::error title=Open source publish regression failed::{details}",
+                file=sys.stderr,
+            )
+        raise

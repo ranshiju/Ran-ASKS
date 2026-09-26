@@ -65,6 +65,12 @@ health checks, and bilingual changelog/version rationales. This is a compatible
 engineering and publication capability and does not change any frozen paper
 artifact or authorize a tag/GitHub Release.
 
+The 2026-09-26 `v0.9.1` patch exposes uncaught public-release regression
+tracebacks as machine-readable GitHub Actions annotations. This improves CI
+diagnosis without changing the knowledge model, ingestion contracts, or frozen
+paper artifacts. The Markdown introduction records this patch; the PDF remains
+the reviewed `v0.9.0` edition.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -120,6 +126,10 @@ Markdown 增加带日期的工程补充；PDF 保留之前已审阅的版式，�
 commit 确认、GitHub 侧验证、PDF 逐页机械健康检查，以及中英文双语 Changelog 与
 版本判断。这是兼容新增的工程发布能力，不改变任何冻结论文产物，也不授权创建标签
 或 GitHub Release。
+
+2026年9月26日的 `v0.9.1` 补丁把公开发布回归中的未捕获 traceback 输出为机器可读的
+GitHub Actions 错误注解，以增强 CI 故障定位能力。该补丁不改变知识模型、摄入契约
+或冻结论文产物；Markdown 说明记录本次更新，PDF 保持为已审阅的 `v0.9.0` 版本。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

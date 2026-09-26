@@ -7,6 +7,24 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-26
+
+### Version decision / 版本判断
+
+- PATCH: Expose uncaught public-release regression tracebacks as machine-readable GitHub Actions error annotations for reliable CI diagnosis.
+- PATCH（中文）：将公开发布回归中的未捕获异常输出为机器可读的 GitHub Actions 错误注解，便于可靠定位 CI 故障。
+
+### Highlights
+
+- GitHub Actions now emits uncaught public-release regression tracebacks as
+  machine-readable error annotations, so CI failures remain diagnosable through
+  the public Checks API even when raw logs are unavailable.
+
+### 主要更新
+
+- GitHub Actions 现在会把公开发布回归中的未捕获异常输出为机器可读的错误注解；
+  即使原始日志不可用，也能通过公开 Checks API 定位 CI 故障。
+
 ## [0.9.0] - 2026-09-26
 
 ### Version decision / 版本判断

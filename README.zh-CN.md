@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前发布版本: v0.9.0
+> 当前发布版本: v0.9.1
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 

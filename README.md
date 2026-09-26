@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.9.0
+> Current release: v0.9.1
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 

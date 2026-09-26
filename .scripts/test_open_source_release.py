@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Regression checks for manifest-governed public release construction."""
+import os
 import subprocess
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 from unittest.mock import patch
 
@@ -555,4 +557,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            details = traceback.format_exc().replace("%", "%25")
+            details = details.replace("\r", "%0D").replace("\n", "%0A")
+            print(
+                f"::error title=Open source release regression failed::{details}",
+                file=sys.stderr,
+            )
+        raise
