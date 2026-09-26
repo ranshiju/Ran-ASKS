@@ -7,6 +7,31 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-26
+
+### Version decision / 版本判断
+
+- MINOR: Add public governance for independent community downstreams, evaluated ecosystem status, generated-tree contribution round trips, and a downstream registration template.
+- MINOR（中文）：新增独立社区下游治理、受评估的生态身份、生成式公开树贡献回灌流程和社区下游登记模板。
+
+### Highlights
+
+- Added public governance for independently maintained Community Downstreams,
+  evaluated ASKS-Compatible status, later explicit Reference Distribution
+  designation, and the contribution round trip required by the generated
+  GitHub release tree.
+- Added a non-normative downstream record template for exact upstream baseline,
+  maintainer ownership, Core modifications, checks, domain evaluations, data
+  boundaries, and upstream candidates without prematurely defining a plugin API.
+
+### 主要更新
+
+- 新增独立 Community Downstream、受评估的 ASKS-Compatible 身份、后续明确授予
+  Reference Distribution 的公开治理规则，并固化生成式 GitHub 公开树所需的贡献
+  回灌流程。
+- 新增非规范性的社区下游登记模板，用于记录精确上游基线、维护责任、Core 修改、
+  校验、领域评测、数据边界与上游候选，不提前定义插件 API。
+
 ## [0.9.3] - 2026-09-26
 
 ### Version decision / 版本判断

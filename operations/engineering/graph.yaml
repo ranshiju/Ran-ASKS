@@ -581,6 +581,18 @@ nodes:
     path: operations/engineering/open-source-assets/
     kind: documentation-family
     role: governed-public-release-documentation-and-static-assets
+  open_source_governance:
+    path: operations/engineering/open-source-assets/GOVERNANCE.md
+    kind: policy
+    role: public-core-authority-community-downstream-status-and-maintainer-responsibility-policy
+  open_source_ecosystem:
+    path: operations/engineering/open-source-assets/ECOSYSTEM.md
+    kind: policy
+    role: independent-community-downstream-compatible-and-reference-distribution-identity-policy
+  downstream_registration_template:
+    path: operations/engineering/open-source-assets/templates/downstream/DOWNSTREAM.md
+    kind: template
+    role: non-normative-community-downstream-upstream-baseline-maintainer-and-core-modification-record
   open_source_references:
     path: operations/engineering/open-source-references.md
     kind: documentation
@@ -1853,6 +1865,30 @@ edges:
 - - public_release_ci
   - uses
   - open_source_publish_test
+- - open_source_release
+  - publishes
+  - open_source_governance
+- - open_source_release
+  - publishes
+  - open_source_ecosystem
+- - open_source_release
+  - publishes
+  - downstream_registration_template
+- - open_source_manifest
+  - governs
+  - open_source_governance
+- - open_source_manifest
+  - governs
+  - open_source_ecosystem
+- - open_source_manifest
+  - governs
+  - downstream_registration_template
+- - open_source_governance
+  - specifies
+  - open_source_ecosystem
+- - open_source_ecosystem
+  - specifies
+  - downstream_registration_template
 - - paper_artifact
   - writes
   - paper_artifact_v020
@@ -2838,6 +2874,15 @@ verification:
   open_source_assets:
   - python3 .scripts/test_open_source_release.py
   - python3 .scripts/engineering_graph.py validate
+  open_source_governance:
+  - python3 .scripts/test_open_source_release.py
+  - python3 .scripts/engineering_graph.py validate
+  open_source_ecosystem:
+  - python3 .scripts/test_open_source_release.py
+  - python3 .scripts/engineering_graph.py validate
+  downstream_registration_template:
+  - python3 .scripts/test_open_source_release.py
+  - python3 .scripts/engineering_graph.py validate
   build_locator_tools:
   - python3 dsh/test_build_tools.py
   - python3 .scripts/test_engineering_locator.py
@@ -3401,6 +3446,8 @@ script_contracts:
     - 公开 graph.yaml 是发布器在复制后生成的受管自举产物；投影可用性检查必须把该目标路径视为预期存在，使首次 build 与随后 verify 得到同一节点闭包
     - Codex 技能仅发布 manifest 精确批准的功能文件；active projects、个人画像与样稿仍隔离；缺少本地风格资料不得阻止通用模式
     - manifest 的 documentation_omissions 约束公开说明 Markdown，不影响获准技能的运行指令；文档同步不得宣传被省略的功能
+    - GitHub 公开仓库是从受管源仓库生成的发布树；外部 PR 在权威源回灌、验证并重新发布前只构成贡献提案，接受时保留原作者署名
+    - 社区下游由其维护者独立负责领域代码、数据、评测、发布与用户支持；ASKS-Compatible 与 Reference Distribution 身份只能在明确校验和维护评估后授予
     - 已发布的冻结 paper-artifacts 版本全部保留，并分别通过其声明的版本化验证器
     writes:
     - build 先写入同文件系统临时树，验证通过后事务性替换指定目标公开树并保留 .git；目标绝不能是 REPO 自身，安装失败恢复旧树
@@ -3418,6 +3465,8 @@ script_contracts:
     - 公开代码、规范或能力已变化，但本次 Git diff 未同时更新中英文 README、中文说明 Markdown 与版本范围说明
     - README 把 PDF 预览器作为中文说明的默认阅读入口，或中文说明正文变化后未同步下载/打印 PDF
     - 将未经标准化和渲染对比的 Word/Quartz PDF 直接发布到 GitHub
+    - 直接合并或手改生成的 GitHub 公开树并把它当作权威源修改，绕过受管源仓库回灌与重新发布
+    - 把独立社区下游描述为官方、兼容或 Reference Distribution，或把其领域维护与用户支持默认为 Core 维护者责任
     - 目标 `.gitignore` 隐藏白名单文件，导致生成树通过但 Git 提交缺件
     - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
     verify:

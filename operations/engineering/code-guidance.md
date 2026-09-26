@@ -1106,7 +1106,7 @@ python3 .scripts/visual_to_editable_ppt.py <figure.png|document.pdf> \
 
 ## 6. 开源发布：`.scripts/open_source_release.py`
 
-- **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。中英文 README 与根 `CHANGELOG.md` 均由公开资产生成；发布时同步写入版本标记、验证双向语言入口，并要求 changelog 最新版本标题与 `VERSION` 一致。每次 GitHub 更新还必须让中英文 README、带日期的中文说明 Markdown 及其版本范围说明同时进入本次 diff，且内容反映受影响的机制、能力、配置或使用方式；PDF 是下载/打印版，在中文说明读者内容变化时同步更新。
+- **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。中英文 README、治理/生态身份规则与根 `CHANGELOG.md` 均由公开资产生成；发布时同步写入版本标记、验证双向语言入口，并要求 changelog 最新版本标题与 `VERSION` 一致。GitHub 外部 PR 在当前阶段是贡献提案：接受后先回灌权威源并保留署名，再通过受管发布器重建公开树，不直接把生成树 merge 当权威修改。每次 GitHub 更新还必须让中英文 README、带日期的中文说明 Markdown 及其版本范围说明同时进入本次 diff，且内容反映受影响的机制、能力、配置或使用方式；PDF 是下载/打印版，在中文说明读者内容变化时同步更新。
 - **排号**：每批实际公开更新由当前 Agent 对照公开仓库状态及 `VERSION` 自动判断最高语义级别并记录依据：兼容修复/小文档为 PATCH，兼容新增能力为 MINOR，破坏公开契约为 MAJOR；不按文件数或行数判断。公开资产 CHANGELOG 的 Unreleased 同时写 `### Highlights` 与 `### 主要更新`，再运行 `python3 .scripts/open_source_release.py prepare-version --level <patch|minor|major> --reason '<English rationale>' --reason-zh '<中文依据>' --from-version <旧版本>` 预览，加 `--apply` 才写入源 VERSION、双语版本判断、公开资产 CHANGELOG 和根 CHANGELOG 镜像。重建同批次不再排号，无实际更新不空升版本；创建 tag/Release 须另行授权。
 - **先读**：`operations/engineering/open-source-release.md` 与 `operations/engineering/open-source-manifest.yaml`。
 - **调用**：`open_source_release.py build/verify` 是确定性底层和开发预览；正式发布先提交全部 manifest 相关源文件，再用 `python3 .scripts/open_source_publish.py <目标目录> --expected-remote-url <URL> --message '<提交说明>' --dry-run` 审阅计划，授权推送时去掉 `--dry-run` 并加 `--push`。

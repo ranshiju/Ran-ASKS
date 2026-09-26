@@ -60,6 +60,21 @@ separately reviewed migration. Private maintenance receipts and backups stay und
 6. Run `open_source_publish.py` with `--dry-run`. It resolves an explicit source commit, checks selected-source cleanliness, fetches and checks the public branch, builds from a detached source worktree, writes provenance, validates a temporary release tree and reports the planned diff without changing the public worktree.
 7. Review the planned diff and confirm that documentation describes the affected behavior rather than merely changing dates or version badges. Re-run without `--dry-run` to transactionally install and commit the generated public tree. Add `--push` only when GitHub publication is authorized; the command uses a non-force push and confirms the remote commit with `ls-remote`. It never creates a tag or GitHub Release.
 
+### External contribution round trip
+
+The public GitHub repository is currently a generated release tree, not an
+independent source of truth. Treat an external pull request as a reviewable
+contribution proposal. If accepted, import the patch into the governed source
+repository, preserve the contributor's authorship, run the complete release
+checks, regenerate the public tree, and close the proposal with the resulting
+public commit. Do not merge a public-tree-only change and wait for a later
+release to reconcile it; the next managed publication could overwrite it.
+
+Independent Community Downstreams own their domain behavior, data, evaluations,
+releases, upgrades, and support. The publication process does not grant
+ASKS-Compatible, official, or Reference Distribution status. Those identities
+are governed by the published `GOVERNANCE.md` and `ECOSYSTEM.md`.
+
 Normalize the Word-exported PDF before placing it in the public-assets directory:
 
 ```bash
@@ -88,7 +103,7 @@ python3 .scripts/open_source_publish.py /path/to/WikiGraph_clean \
   --message 'feat: release vX.Y.Z ...' --push
 ```
 
-The generated `.wikigraph-public-release` marker identifies the managed tree. `RELEASE_PROVENANCE.json` records the source commit/tree, manifest hash, release version, payload hash and PDF render health. GitHub Actions repeats release verification, engineering-graph validation, release regressions and frozen-artifact verification on pull requests and `main` pushes. Protect `main` with this required check in repository settings.
+The generated `.wikigraph-public-release` marker identifies the managed tree. `RELEASE_PROVENANCE.json` records the source commit/tree, manifest hash, release version, payload hash and PDF render health. GitHub Actions repeats release verification, engineering-graph validation, release regressions and frozen-artifact verification on pull requests and `main` pushes. Protect `main` with this required check while retaining an explicit path for the managed publisher. Do not require every update to arrive through a GitHub merge until the publisher has a reviewed bypass or public code becomes the authoritative source.
 
 The generated `operations/engineering/graph.yaml` is a deterministic public projection. Nodes whose concrete paths are absent from the allowlisted release, including active `projects/` and `.project/` material, are removed together with dependent edges, verification entries, and script contracts. Placeholder paths remain available for reusable templates. A public capability may not lose a required node: the build fails instead of publishing an incomplete capability. Run `engineering_graph.py validate` inside the generated tree as part of release review.
 

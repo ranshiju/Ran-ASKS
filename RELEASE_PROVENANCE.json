@@ -1,9 +1,9 @@
 {
-  "manifest_sha256": "1190b22b3531ffc0bd1e937f83e11e6b75fdcdca43a472e10edc27c810ca43b0",
-  "payload_sha256": "d8ad94ea9c461fa694534bba331b7d8d00a954e0a32f94995eb3ad6ec1880a47",
+  "manifest_sha256": "4afac1f634a2c1c4e960b67df407439824d7507a8cc169d1aeb7481320012c81",
+  "payload_sha256": "6e481eaa36de4ed264395f1aabf982d8f098c3316266781ca2fcd6ea84119b1c",
   "pdf_render_health": {
     "docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf": {
-      "page_count": 15,
+      "page_count": 16,
       "pages": [
         {
           "ink_pixels": 13859,
@@ -79,15 +79,20 @@
           "ink_pixels": 14534,
           "page": 15,
           "text_chars": 916
+        },
+        {
+          "ink_pixels": 12447,
+          "page": 16,
+          "text_chars": 670
         }
       ]
     }
   },
   "schema": "wikigraph-public-release-provenance-v1",
   "source": {
-    "commit": "d6b358f91dba196a48a4b089bd3d10d1edef8c91",
+    "commit": "3e53c72a8e8dbe49b1247e3330405b4e919d59f5",
     "mode": "committed",
-    "tree": "489ebcdeebefa169083f891fccd9271798798d7b"
+    "tree": "8b7c9d864a1a840e15f6992289542770625f7990"
   },
-  "version": "0.9.3"
+  "version": "0.10.0"
 }

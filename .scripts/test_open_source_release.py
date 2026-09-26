@@ -300,6 +300,16 @@ def main() -> None:
         assert (destination / "README.md").is_file()
         assert (destination / "README.zh-CN.md").is_file()
         assert (destination / "CHANGELOG.md").is_file()
+        governance = (destination / "GOVERNANCE.md").read_text(encoding="utf-8")
+        ecosystem = (destination / "ECOSYSTEM.md").read_text(encoding="utf-8")
+        downstream_template = (
+            destination / "templates/downstream/DOWNSTREAM.md"
+        ).read_text(encoding="utf-8")
+        assert "generated public release tree" in governance
+        assert "contribution proposal" in governance
+        normalized_ecosystem = " ".join(ecosystem.split())
+        assert "Ran-ASKS currently lists none." in normalized_ecosystem
+        assert "not an extension manifest" in downstream_template
         changelog = (destination / "CHANGELOG.md").read_text(encoding="utf-8")
         assert f"## [{expected_version}]" in changelog
         assert "[CHANGELOG.md](CHANGELOG.md)" in (

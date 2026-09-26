@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前发布版本: v0.9.3
+> 当前发布版本: v0.10.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -10,6 +10,9 @@
 **GitHub：** [github.com/ranshiju/Ran-ASKS](https://github.com/ranshiju/Ran-ASKS)
 
 **项目更新日志：** [CHANGELOG.md](CHANGELOG.md)
+
+**协作规则：** [治理](GOVERNANCE.md) | [ASKS 生态](ECOSYSTEM.md) |
+[贡献指南](CONTRIBUTING.md)
 
 **中文说明：** [在 GitHub 在线阅读](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.md) |
 [下载或打印 PDF](docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf) |
@@ -171,6 +174,23 @@ Agent 模式准备好的摄入事务现在可以用同一个 transaction ID 跨�
 会在 pull request 和 `main` 上重复执行发布边界、工程图、回归和冻结论文产物校验。
 中文介绍 PDF 还会逐页检查可提取文本、缺字标记和非空渲染。从本版本起，Changelog
 更新内容和语义版本判断同时使用英文与中文。
+
+## 独立社区下游
+
+Ran-ASKS 是由维护者主导的通用发行版和公开工程基线。其他团队可以针对自己的领域
+独立开发系统，其领域 Agent、数据、评测、发布、升级和用户支持不会因此转由
+Ran-ASKS 维护者负责。
+
+新的下游项目首先属于 **Community Downstream（社区下游）**，不会自动成为官方版本
+或 Reference Distribution。`ASKS-Compatible` 是绑定到明确 Ran-ASKS 版本和 commit
+的受评估身份；Reference Distribution 则需要持续维护、升级记录、可复现的兼容校验、
+领域评测以及清楚的数据和许可证边界，并由项目明确授予。目前 Ran-ASKS 没有指定任何
+官方领域发行版。
+
+由于当前 GitHub 仓库是受管生成的公开树，外部 pull request 只构成贡献提案。接受的
+修改会保留贡献者署名，先回灌权威源、完成完整验证，再通过受管流程重新发布。具体见
+[GOVERNANCE.md](GOVERNANCE.md)、[ECOSYSTEM.md](ECOSYSTEM.md)和
+[社区下游登记模板](templates/downstream/DOWNSTREAM.md)。
 
 ## 论文与代码版本
 

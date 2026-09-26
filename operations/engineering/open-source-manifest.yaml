@@ -57,12 +57,15 @@ public_assets:
   .gitignore: operations/engineering/open-source-assets/.gitignore
   DATA_POLICY.md: operations/engineering/open-source-assets/DATA_POLICY.md
   CONTRIBUTING.md: operations/engineering/open-source-assets/CONTRIBUTING.md
+  GOVERNANCE.md: operations/engineering/open-source-assets/GOVERNANCE.md
+  ECOSYSTEM.md: operations/engineering/open-source-assets/ECOSYSTEM.md
   SECURITY.md: operations/engineering/open-source-assets/SECURITY.md
   LICENSE: operations/engineering/open-source-assets/LICENSE
   templates/cv/README.md: operations/engineering/open-source-assets/templates/cv/README.md
   templates/cv/academic-full.docx: operations/engineering/open-source-assets/templates/cv/academic-full.docx
   templates/cv/academic-full.template.yaml: operations/engineering/open-source-assets/templates/cv/academic-full.template.yaml
   templates/cv/cv-records.example.yaml: operations/engineering/open-source-assets/templates/cv/cv-records.example.yaml
+  templates/downstream/DOWNSTREAM.md: operations/engineering/open-source-assets/templates/downstream/DOWNSTREAM.md
   operations/engineering/engineering-handbook.md: operations/engineering/open-source-assets/engineering-handbook.md
   operations/engineering/code-guidance.md: operations/engineering/open-source-assets/code-guidance.md
 template_dirs:
