@@ -7,6 +7,23 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-09-26
+
+### Version decision / 版本判断
+
+- PATCH: Add the pinned python-pptx dependency required by editable-presentation runtime imports during public function-registry validation.
+- PATCH（中文）：补充公开功能注册表校验导入可编辑演示文稿工具所需的固定 python-pptx 依赖。
+
+### Highlights
+
+- Added the pinned python-pptx dependency required when the public runtime
+  function registry imports editable-presentation tooling on a fresh CI runner.
+
+### 主要更新
+
+- 在 CI 固定依赖中补充 python-pptx，确保公开运行时功能注册表可在全新 runner
+  中导入可编辑演示文稿工具。
+
 ## [0.9.2] - 2026-09-26
 
 ### Version decision / 版本判断

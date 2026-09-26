@@ -76,6 +76,10 @@ GitHub Actions verification environment so runtime function-registry imports
 can be validated on a fresh Python 3.12 runner. This is a CI dependency fix
 only; the PDF remains the reviewed `v0.9.0` edition.
 
+The 2026-09-26 `v0.9.3` patch adds pinned python-pptx for the editable-
+presentation tool imported by runtime function-registry validation. This is a
+CI dependency fix only; the PDF remains the reviewed `v0.9.0` edition.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -139,6 +143,10 @@ GitHub Actions 错误注解，以增强 CI 故障定位能力。该补丁不改�
 2026年9月26日的 `v0.9.2` 补丁在 GitHub Actions 固定校验环境中补充 NumPy 与 Pillow，
 使公开功能注册表的运行时导入检查可以在全新的 Python 3.12 runner 上执行。该补丁只
 修复 CI 依赖声明；PDF 保持为已审阅的 `v0.9.0` 版本。
+
+2026年9月26日的 `v0.9.3` 补丁在 GitHub Actions 固定校验环境中补充 python-pptx，
+供运行时功能注册表校验导入可编辑演示文稿工具。该补丁只修复 CI 依赖声明；PDF
+保持为已审阅的 `v0.9.0` 版本。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

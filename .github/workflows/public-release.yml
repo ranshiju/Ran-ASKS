@@ -24,6 +24,7 @@ jobs:
         run: >-
           python -m pip install
           numpy==2.5.1 Pillow==12.3.0 PyMuPDF==1.28.0 PyYAML==6.0.3
+          python-pptx==1.0.2
       - name: Verify generated public tree
         run: python .scripts/open_source_release.py verify .
       - name: Run public release regressions
