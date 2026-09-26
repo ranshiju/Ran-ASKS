@@ -7,6 +7,24 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-26
+
+### Version decision / 版本判断
+
+- PATCH: Complete the pinned GitHub Actions verification environment with NumPy and Pillow for runtime function-registry validation.
+- PATCH（中文）：在 GitHub Actions 固定校验环境中补充 NumPy 与 Pillow，以支持运行时功能注册表校验。
+
+### Highlights
+
+- Completed the pinned GitHub Actions verification environment with NumPy and
+  Pillow, matching the runtime imports exercised by the public function-registry
+  validation.
+
+### 主要更新
+
+- 在 GitHub Actions 固定校验环境中补充 NumPy 与 Pillow，使其覆盖公开功能注册表
+  运行时校验实际导入的依赖。
+
 ## [0.9.1] - 2026-09-26
 
 ### Version decision / 版本判断
