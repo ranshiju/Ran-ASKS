@@ -444,7 +444,7 @@ def _venue_key(value):
     value = re.sub(r"^(?:proceedings|findings)\s+of\s+", "", value, flags=re.I)
     value = re.sub(r"^the\s+", "", value, flags=re.I)
     value = re.sub(r"\s*,?\s*(?:pages?|pp\.)\s+\S+.*$", "", value, flags=re.I)
-    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+    return "".join(char for char in value.casefold() if char.isalnum())
 
 
 def check_bibliographic_consistency(path, fm):

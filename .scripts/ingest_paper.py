@@ -36,6 +36,7 @@ from predicate_governance import DEFAULT_CONFIG, govern as govern_predicates, no
 import ingest_common as ic
 import ingest_pipeline
 import recovery_policy as rp
+import source_locator as sl
 import source_fingerprints as sf
 import wiki_locator as wl
 from ingest_common import (parse_meta_block, validate_meta,
@@ -288,6 +289,9 @@ _APS_TITLE_PREFIX_RE = re.compile(
     r"(?i)^PHYSICAL REVIEW\s+(?:LETTERS|[A-Z])\s+\d+\s*,\s*"
     r"[A-Z0-9.]+(?:\([A-Z0-9]+\))?\s*\((?:19|20)\d{2}\)\s*"
 )
+_GENERIC_H1_TITLE_RE = re.compile(
+    r"^(?:PERSPECTIVES?|ARTICLES?|LETTERS?|COMMUNICATIONS?)$", re.I,
+)
 
 
 def _clean_title_candidate(title: str) -> str:
@@ -295,7 +299,7 @@ def _clean_title_candidate(title: str) -> str:
     stripped = _APS_TITLE_PREFIX_RE.sub("", text).strip()
     if stripped != text:
         return stripped
-    if _JOURNAL_HEADER_RE.search(text):
+    if _JOURNAL_HEADER_RE.search(text) or _GENERIC_H1_TITLE_RE.fullmatch(text):
         return ""
     return text
 
@@ -1734,6 +1738,14 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
             for other in author_candidates
         )
     ]
+    author_candidates = [
+        candidate for candidate in author_candidates
+        if not any(
+            other != candidate
+            and _is_truncated_author_candidate(candidate, other, md_text)
+            for other in author_candidates
+        )
+    ]
     first_page_evidence = bibliography.get("first_page_evidence") or []
     identity_region = bibliographic_identity_region(md_text)
     layout_dates = list(layout.get("dates") or [])
@@ -2390,6 +2402,32 @@ def _author_covers_title_fragment(author: str, title_fragment: str) -> bool:
     )
 
 
+def _author_appears_exactly(author: str, md_text: str) -> bool:
+    needle = _bibliographic_text_key(author)
+    haystack = _bibliographic_text_key(md_text)
+    return bool(needle and re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack))
+
+
+def _is_truncated_author_candidate(short: str, full: str, md_text: str) -> bool:
+    """Identify a surname truncated in metadata only when Raw confirms the full name."""
+    short_tokens = " ".join(str(short or "").split()).split()
+    full_tokens = " ".join(str(full or "").split()).split()
+    if len(short_tokens) < 2 or len(short_tokens) != len(full_tokens):
+        return False
+    if [token.casefold() for token in short_tokens[:-1]] != [
+        token.casefold() for token in full_tokens[:-1]
+    ]:
+        return False
+    short_surname = short_tokens[-1].casefold()
+    full_surname = full_tokens[-1].casefold()
+    if not full_surname.startswith(short_surname) or short_surname == full_surname:
+        return False
+    return (
+        _author_appears_exactly(full, md_text)
+        and not _author_appears_exactly(short, md_text)
+    )
+
+
 def _validate_author_proposals(proposed: list[dict], md_text: str) -> list[str]:
     """Validate Worker author expansions against the bounded title-page evidence."""
     errors = []
@@ -3037,6 +3075,7 @@ def _paper_artifact_entries(extract_dir: Path) -> list[dict]:
     roles = {
         "paper.pdf": "source",
         "paper.md": "locator-companion",
+        "paper.pdf.source.json": "companion-binding",
         "source.yaml": "source-provenance",
         "parse_meta.yaml": "extraction-provenance",
     }
@@ -3065,8 +3104,8 @@ def _paper_artifact_entries(extract_dir: Path) -> list[dict]:
                 paths.append(relative)
                 roles[relative.as_posix()] = role
     names = {path.as_posix() for path in paths}
-    if not {"paper.pdf", "paper.md"}.issubset(names):
-        raise ValueError("提取未生成 paper.pdf 和 paper.md")
+    if not {"paper.pdf", "paper.md", "paper.pdf.source.json"}.issubset(names):
+        raise ValueError("提取未生成 paper.pdf、paper.md 和 companion binding sidecar")
     return [
         {
             "path": relative.as_posix(),
@@ -3078,7 +3117,45 @@ def _paper_artifact_entries(extract_dir: Path) -> list[dict]:
     ]
 
 
+def _write_paper_companion_sidecar(state: dict, extract_dir: Path) -> None:
+    pdf = extract_dir / "paper.pdf"
+    companion = extract_dir / "paper.md"
+    sidecar = extract_dir / sl.companion_sidecar_name(pdf.name)
+    if sidecar.is_file():
+        binding = sl.companion_binding_status(pdf, companion)
+        if binding["status"] == "valid":
+            context = json.loads(sidecar.read_text(encoding="utf-8"))
+            state["paper_companion"] = context["companion"]
+            state["companion_generated_at"] = context["companion"]["generated_at"]
+            return
+        if state.get("artifact_bundle_sha256"):
+            raise ValueError("论文 companion binding 在文档包锁定后失效")
+    generated_at = state.get("companion_generated_at")
+    if not generated_at:
+        generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        state["companion_generated_at"] = generated_at
+    record = sl.make_companion_record(
+        pdf, companion, generator={"name": "extractor", "version": "1"},
+        generated_at=generated_at, locator_scheme="line",
+        method="academic-pdf-document-extraction",
+        limitations=["layout-and-nontext-visuals-require-original"],
+    )
+    context = {
+        "schema": "document-source-context-v1",
+        "source": state.get("source"),
+        "filename": pdf.name,
+        "directories": [],
+        "companion": record,
+    }
+    temporary = sidecar.with_name(f".{sidecar.name}.partial-{os.getpid()}")
+    temporary.write_text(
+        json.dumps(context, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, sidecar)
+    state["paper_companion"] = record
+
+
 def _write_paper_artifact_manifest(state: dict, extract_dir: Path) -> str:
+    _write_paper_companion_sidecar(state, extract_dir)
     artifacts = _paper_artifact_entries(extract_dir)
     payload = {
         "schema": "inbox-artifact-manifest-v2",
@@ -3121,8 +3198,19 @@ def step_dedup_check(state: dict) -> tuple[bool, str]:
     import difflib
     pdf_path = REPO / state["source"]
     try:
-        sf.ensure_index()
-        fingerprint_match = sf.lookup_exact(pdf_path)
+        sf.ensure_index(
+            db_path=REPO / "cross-domain/source-fingerprints.db",
+            roots=tuple(
+                REPO / domain / "raw"
+                for domain in ("academic", "admin", "teaching", "business")
+            ),
+            repo=REPO,
+        )
+        fingerprint_match = sf.lookup_exact(
+            pdf_path,
+            db_path=REPO / "cross-domain/source-fingerprints.db",
+            repo=REPO,
+        )
     except Exception as exc:
         fingerprint_match = None
         state.setdefault("quality_warnings", []).append({
@@ -5621,6 +5709,16 @@ FINALIZE_CONFIG = {
     "copy_source": False,
 }
 
+
+def _fingerprint_artifact(state: dict, repo: Path) -> dict:
+    raw_dir = repo / str(state["raw_dir"])
+    return {
+        "source_path": raw_dir / "paper.pdf",
+        "text_path": raw_dir / "paper.md",
+        "source_kind": "pdf",
+    }
+
+
 FINALIZE_TAIL_CONFIG = {
     "doc_id_key": "paper_id",
     "get_log_path": lambda state, REPO: REPO / "academic" / "wiki" / "log.md",
@@ -5630,6 +5728,7 @@ FINALIZE_TAIL_CONFIG = {
     "frontier_capture": True,
     "frontier_capture_limit": 3,
     "frontier_answer": True,
+    "fingerprint_artifact": _fingerprint_artifact,
     "build_log_entry": lambda ctx: (
         "\n## [" + ctx["today"] + "] ingest | ingest_paper.py 摄入 " + ctx["doc_id"] + "\n"
         + (
@@ -5803,20 +5902,6 @@ def step_finalize_tail(state: dict) -> tuple[bool, str]:
     success, message = ic.step_finalize_tail(state, REPO, FINALIZE_TAIL_CONFIG)
     if not success:
         return success, message
-    raw_dir = REPO / str(state.get("raw_dir") or "")
-    paper_pdf = raw_dir / "paper.pdf"
-    paper_md = raw_dir / "paper.md"
-    if paper_pdf.is_file():
-        try:
-            state["source_fingerprint"] = sf.register_source(
-                paper_pdf,
-                text_path=paper_md if paper_md.is_file() else None,
-                source_kind="pdf",
-            )
-        except Exception as exc:
-            state.setdefault("quality_warnings", []).append({
-                "issue": "fingerprint_register_failed", "detail": str(exc),
-            })
     _sync_quality_status(state)
     return True, message
 

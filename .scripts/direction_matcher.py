@@ -325,11 +325,8 @@ def ensure_direction_embeddings(force=False):
             unique.append(s)
     # v8.2: force 时先删这些文本缓存,再走 embed_cached_batch(全 miss 重算写回)
     if force:
-        db = sqlite3.connect(EMBED_DB)
-        ph = ",".join("?" * len(unique))
-        db.execute(f"DELETE FROM embeddings WHERE text IN ({ph})", unique)
-        db.commit()
-        db.close()
+        from embed_helper import invalidate_cached
+        invalidate_cached(unique)
     from embed_helper import embed_cached_batch
     vecs = embed_cached_batch(unique, cache_type="arxiv-direction")
     uniq_vecs = {unique[i]: vecs[i] for i in range(len(unique))}

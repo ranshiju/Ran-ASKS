@@ -30,6 +30,9 @@ workspace_state.py / research_memory.py / query_actions.py / source_locator.py�
   wg.py cv render <edition> --workspace <workspace>
   wg.py ingest <file> --subproject admin [--allow-remote-ocr]
   wg.py ingest --resume <transaction-id>
+  wg.py task inspect <transaction-id>
+  wg.py task advance <transaction-id>
+  wg.py task run <transaction-id> --task-command check|commit|resume|refresh|read
   wg.py abbr <term>
   wg.py frontier ask "<academic question>"
   wg.py frontier list
@@ -57,6 +60,8 @@ import wiki_locator as wl
 import graph_lib as gl
 import query_actions as qa
 import function_registry as fr
+import agent_task
+import inbox_state
 
 RAW_PREVIEW_CHARS = 6000
 
@@ -100,7 +105,8 @@ def extract_last_json(text: str) -> dict:
 
 
 def query_graph_json(cmd: str, pos_args: list[str], opts: list[str] | None = None) -> dict:
-    args = ["python3", str(SCRIPTS / "query_graph.py"), cmd, *pos_args, "--json"]
+    args = ["python3", str(SCRIPTS / "query_graph.py"), cmd, *pos_args, "--json",
+            "--db", str(qa.query_db_path())]
     if opts:
         args.extend(opts)
     rc, out, err = run_script(args)
@@ -185,7 +191,7 @@ def cmd_read_section(args):
             )
             sources = result["wiki"]["raw_citations"]
         else:
-            result = wl.read_wiki_locator(args.page, args.section or "")
+            result = qa.read_wiki_data(args.page, args.section or "")
             sources = result["raw_citations"]
     except (FileNotFoundError, ValueError, KeyError) as exc:
         return envelope("read-section", None, status="error", error=str(exc))
@@ -209,17 +215,28 @@ def cmd_read_raw(args):
     if target is None:
         return envelope("read-raw", {"locator": raw}, status="error",
                         error=f"raw 路径未解析: {path_part}")
+    qa.check_path_scope(target)
     requested_rel = str(target.resolve().relative_to(REPO)) if target.is_absolute() else str(target)
     if not loc or loc == "全篇":
         return envelope("read-raw", {"locator": raw, "path": requested_rel}, status="error",
                         error="read-raw 需要精确 locator（标题、Lx-Ly 或 page-x-y）；不向 LLM 返回全文")
+    companion_binding = sl.companion_binding_for_target(target)
+    if companion_binding and companion_binding["status"] == "invalid":
+        return envelope(
+            "read-raw", {"locator": raw, "path": requested_rel,
+                         "companion_binding": companion_binding}, status="error", ok=False,
+            error="companion 与原件绑定失效，须重新生成后再查询",
+        )
     source_target, read_target = sl.evidence_targets(target, loc)
+    qa.check_path_scope(source_target)
+    qa.check_path_scope(read_target)
     source_rel = str(source_target.resolve().relative_to(REPO))
     read_rel = str(read_target.resolve().relative_to(REPO))
     status = sl.locator_status(loc, read_target)
     result = {"locator": raw, "path": source_rel, "source_path": source_rel,
               "read_path": read_rel, "evidence_locator": f"{read_rel}#{loc}", "section": loc,
               "locator_status": status,
+              "companion_binding": companion_binding,
               "is_binary": source_target.suffix.lower() in sl.BINARY_SUFFIXES}
     if status == "missing":
         return envelope("read-raw", result, sources=[source_rel], status="empty", ok=False,
@@ -284,6 +301,8 @@ def cmd_ingest(args):
             command.extend(["--document-type", args.document_type])
     if args.ocr_result:
         command.extend(["--ocr-result", args.ocr_result])
+    if getattr(args, "allow_remote_ppt", False):
+        command.append("--allow-remote-ppt")
     if args.allow_remote_ocr:
         command.append("--allow-remote-ocr")
     rc, out, err = run_script(command, cwd=REPO, **input_options)
@@ -304,6 +323,96 @@ def cmd_ingest(args):
         return envelope("ingest", result, sources=sources, status="error",
                         error=str(result.get("errors") or result.get("error") or "摄入失败")[:500])
     return envelope("ingest", result, sources=sources, status="ok")
+
+
+def _task_execution_payload(execution: dict) -> dict:
+    parsed = extract_last_json(execution.get("stdout", ""))
+    return {
+        "action": execution["action"],
+        "returncode": execution["returncode"],
+        "command": execution["command"],
+        "environment_overrides": execution["environment_overrides"],
+        "result": parsed,
+        "error": "" if parsed else (execution.get("stderr") or execution.get("stdout") or "受管 action 未返回 JSON").strip()[:500],
+    }
+
+
+def _run_task_action(state: dict, action: str) -> dict:
+    return _task_execution_payload(agent_task.run_action(state, action, REPO))
+
+
+def cmd_task(args):
+    """Expose one content-agnostic host loop for persisted Agent tasks."""
+    state = inbox_state.load(args.transaction_id)
+    if not state:
+        return envelope(
+            f"task.{args.task_action}", None, status="error",
+            error=f"事务不存在: {args.transaction_id}",
+        )
+    try:
+        view = agent_task.control_view(state, REPO)
+    except ValueError as exc:
+        return envelope(f"task.{args.task_action}", None, status="error", error=str(exc))
+    if args.task_action == "inspect":
+        return envelope("task.inspect", view)
+    if view["workflow_status"] in {"completed", "failed"}:
+        return envelope(f"task.{args.task_action}", {"control": view, "executions": []})
+    reading_only = args.task_action == "run" and args.task_command == "read"
+    if view["missing_outputs"] and not reading_only:
+        return envelope(
+            f"task.{args.task_action}", {"control": view, "executions": []},
+            status="empty", ok=False,
+            error="请先写完 task.outputs 中的 required 暂存产物",
+        )
+
+    commands = (view["task"].get("commands") or {})
+    executions = []
+    try:
+        if args.task_action == "advance":
+            if "check" in commands:
+                checked = _run_task_action(state, "check")
+                executions.append(checked)
+                checked_result = checked.get("result") or {}
+                ready = (
+                    checked_result.get("workflow_status") == "ready_to_commit"
+                    or checked_result.get("status") == "ready_to_commit"
+                )
+                if not ready or checked["returncode"] != 0:
+                    return envelope("task.advance", {
+                        "control": view, "executions": executions,
+                        "next_action": "repair_outputs" if checked_result else "inspect_error",
+                    }, status="ok" if checked_result else "error",
+                    error=checked.get("error", ""))
+                if "commit" in commands:
+                    executions.append(_run_task_action(state, "commit"))
+            elif "resume" in commands:
+                executions.append(_run_task_action(state, "resume"))
+            elif "commit" in commands:
+                executions.append(_run_task_action(state, "commit"))
+            else:
+                return envelope("task.advance", {"control": view, "executions": []},
+                                status="error", error="任务未声明可推进的受管 action")
+        else:
+            action = args.task_command
+            if action == "read":
+                executions.append(_run_task_action(state, "read"))
+            else:
+                executions.append(_run_task_action(state, action))
+    except ValueError as exc:
+        return envelope(f"task.{args.task_action}", {
+            "control": view, "executions": executions,
+        }, status="error", error=str(exc))
+
+    refreshed = inbox_state.load(args.transaction_id) or state
+    refreshed_view = agent_task.control_view(refreshed, REPO)
+    last = executions[-1] if executions else {}
+    failed = last.get("returncode", 0) != 0 or bool(last.get("error"))
+    return envelope(
+        f"task.{args.task_action}",
+        {"control": refreshed_view, "executions": executions},
+        status="error" if failed else "ok",
+        error=last.get("error", "") if failed else "",
+    )
 
 
 def cmd_remember(args):
@@ -481,7 +590,7 @@ def build_parser():
     p.add_argument("query")
     p.add_argument("--intent", default="exploration",
                    choices=("fact", "relation", "explanation", "exploration", "lineage"))
-    p.add_argument("--domain", default="", choices=("", "academic", "admin", "teaching", "business"))
+    p.add_argument("--domain", default="", choices=("", "academic", "admin", "teaching", "business", "private"))
     p.add_argument("--topk", type=int, default=8)
     p.set_defaults(func=cmd_hybrid_recall)
 
@@ -502,9 +611,18 @@ def build_parser():
     p.add_argument("--document-type", default="",
                    choices=("", "editorial", "academic-reference", "conference-summary"))
     p.add_argument("--ocr-result", default="", help="已有源绑定 OCR JSON 回执")
+    p.add_argument("--allow-remote-ppt", action="store_true", help="显式授权所选PPTX的API内容识读")
     p.add_argument("--allow-remote-ocr", action="store_true",
                    help="显式授权单张图片上传 GLM OCR API")
     p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser("task", help="跨 Agent 的受管任务 inspect/advance/action 入口")
+    p.add_argument("task_action", choices=("inspect", "advance", "run"))
+    p.add_argument("transaction_id")
+    p.add_argument("--task-command", default="read",
+                   choices=("read", "check", "commit", "resume", "refresh"),
+                   help="task run 时执行任务显式声明的受管 action")
+    p.set_defaults(func=cmd_task)
 
     p = sub.add_parser("remember", help="研究记忆沉淀")
     p.add_argument("project"); p.add_argument("--title", required=True)
@@ -589,6 +707,10 @@ def build_parser():
     fp.add_argument("--runtime", action="store_true")
     fp.set_defaults(func=cmd_functions)
 
+    for name in ("lookup", "neighbors", "relations", "hub-of", "abbr", "read-section", "hybrid-recall", "read-raw"):
+        sub.choices[name].add_argument("--subproject", default="",
+            choices=("public", "academic", "admin", "teaching", "business", "private"),
+            help="查询存储范围；private 仅访问隔离子库，空值按明确路径推断，否则使用公共库")
     return ap
 
 
@@ -596,6 +718,15 @@ def main(argv=None):
     ap = build_parser()
     args = ap.parse_args(argv)
     try:
+        if hasattr(args, "subproject") and args.cmd in {
+                "lookup", "neighbors", "relations", "hub-of", "abbr", "read-section", "hybrid-recall", "read-raw"}:
+            paths = [getattr(args, key, "") for key in ("page", "locator")]
+            scope = qa.scope_for(args.subproject or getattr(args, "domain", ""), *paths)
+            with qa.query_scope(scope):
+                for path in paths:
+                    if path:
+                        qa.check_path_scope(path)
+                return args.func(args)
         return args.func(args)
     except Exception as e:
         return envelope(args.cmd, None, status="error",

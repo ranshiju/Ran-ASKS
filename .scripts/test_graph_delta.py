@@ -638,6 +638,72 @@ def test_query_probes_cover_anchor_raw_and_two_hop_boundary():
     assert probes["boundary_path_success"] == 1.0
 
 
+def test_meeting_v2_resolves_deictics_requires_sources_and_scopes_actions():
+    conn = make_db()
+    page = "academic/wiki/conferences/0903-example"
+    person = "academic/wiki/authors/example"
+    add_node(conn, person, "Example Person")
+    fm = {
+        "title": "Example Meeting",
+        "type": "conference-summary",
+        "compiler_protocol": "meeting-compiler-v2",
+        "sources": ["academic/raw/conferences/2026/0903-example/source.txt"],
+    }
+    triples = [
+        {"subject": person, "predicate": "参会", "object": "本会议", "source": "wiki#attendees"},
+        {"subject": page, "predicate": "决策", "object": "采用统一方案", "source": "wiki#decisions"},
+        {"subject": person, "predicate": "待办", "object": "验证统一方案", "source": "wiki#tasks"},
+    ]
+    delta = gd.build_document_delta(page, fm, triples)
+    assert not delta.hard_errors
+    assert all("本会议" not in (edge["subject"], edge["object"]) for edge in gd.knowledge_edges(delta))
+    plan = gd.plan_attachment(conn, delta)
+    actions = {item["mention"]: item["action"] for item in plan["decisions"]}
+    assert actions["采用统一方案"] == "create_scoped_proposition"
+    assert actions["验证统一方案"] == "create_scoped_task"
+    probes = gd.run_query_probes(conn, delta, plan)
+    assert probes["meeting_navigation"] == {
+        "attendee_count": 1,
+        "decision_count": 1,
+        "task_count": 1,
+        "deictics_resolved": True,
+        "semantic_edges_located": True,
+    }
+
+    missing = gd.build_document_delta(page, fm, [
+        {"subject": page, "predicate": "讨论", "object": "无来源议题"},
+    ])
+    assert any("缺来源定位" in error for error in missing.hard_errors)
+
+
+def test_meeting_v2_writer_uses_document_scoped_task_and_decision_nodes():
+    conn = make_db()
+    page = "academic/wiki/conferences/0903-example"
+    person = "academic/wiki/authors/example"
+    add_node(conn, page, "Example Meeting", "page")
+    add_node(conn, person, "Example Person")
+    triples = [
+        {"subject": page, "predicate": "决策", "object": "采用统一方案", "source": "wiki#decisions"},
+        {"subject": person, "predicate": "待办", "object": "验证统一方案", "source": "wiki#tasks"},
+    ]
+    delta = gd.build_document_delta(page, {
+        "title": "Example Meeting", "type": "conference-summary",
+        "compiler_protocol": "meeting-compiler-v2",
+    }, triples)
+    plan = gd.plan_attachment(conn, delta)
+    gi.add_knowledge_edges(conn, page, gd.knowledge_edges(delta), attach_plan=plan)
+    decision = conn.execute(
+        "SELECT object FROM edges WHERE subject=? AND predicate='决策'", (page,),
+    ).fetchone()[0]
+    task = conn.execute(
+        "SELECT object FROM edges WHERE subject=? AND predicate='待办'", (person,),
+    ).fetchone()[0]
+    assert decision.startswith(page + "/decisions/")
+    assert task.startswith(page + "/tasks/")
+    assert conn.execute("SELECT entity_subtype FROM nodes WHERE path=?", (decision,)).fetchone()[0] == "proposition"
+    assert conn.execute("SELECT entity_subtype FROM nodes WHERE path=?", (task,)).fetchone()[0] == "task"
+
+
 def test_empty_endpoint_and_self_loop_are_hard_errors():
     delta = gd.build_document_delta(
         "academic/wiki/papers/example",

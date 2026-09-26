@@ -33,6 +33,8 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
+import env_config
+
 from mineru_api import (
     MinerUAuthError,
     MinerUError,
@@ -41,11 +43,6 @@ from mineru_api import (
     MinerUQuotaError,
     extract_pdf_bundle_with_mineru,
 )
-
-try:
-    from dotenv import load_dotenv
-except ImportError:  # pragma: no cover - optional during minimal local runs
-    load_dotenv = None
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("extractor")
@@ -78,14 +75,8 @@ class ExtractionContent:
     metadata: dict
     mineru_bundle: Optional[MinerUExtraction] = None
 
-if load_dotenv is not None:
-    load_dotenv(PROJECT_ROOT / ".env")
-elif (PROJECT_ROOT / ".env").exists():
-    for line in (PROJECT_ROOT / ".env").read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+for _name, _value in env_config.load_env(PROJECT_ROOT / ".env").items():
+    os.environ.setdefault(_name, _value)
 
 
 # ═══════════════════════════════════════════════════════════

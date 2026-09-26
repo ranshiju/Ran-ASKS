@@ -48,12 +48,13 @@ def load_config() -> dict[str, str]:
     from llm_structured import load_env, expand_env_references
     config = load_env()
     config.update({name: value for name, value in os.environ.items()
-                   if name.startswith("IMAGE_OCR_")})
+                   if name.startswith(("IMAGE_OCR_", "VISUAL_QA_"))})
     config = expand_env_references(config)
     return {
         "base": config.get("IMAGE_OCR_API_BASE") or config.get("LLM_API_BASE", ""),
         "key": config.get("IMAGE_OCR_API_KEY") or config.get("LLM_API_KEY", ""),
         "model": config.get("IMAGE_OCR_MODEL") or "GLM-5.3-Flash",
+        "review_model": config.get("IMAGE_OCR_REVIEW_MODEL") or config.get("VISUAL_QA_MODEL") or "GLM-5.3-FlashX",
         "fallback_model": config.get("IMAGE_OCR_FALLBACK_MODEL", "GLM-4.6V"),
         "reasoning_effort": config.get("IMAGE_OCR_REASONING_EFFORT", "low"),
         "fallback_reasoning_effort": config.get("IMAGE_OCR_FALLBACK_REASONING_EFFORT", "default"),
@@ -343,6 +344,7 @@ def review_image(source: Path, receipt: dict, *, allow_remote: bool = False,
     if receipt.get("review"):
         return receipt
     config = dict(config if config is not None else load_config())
+    config["model"] = config.get("review_model") or "GLM-5.3-FlashX"
     if not config.get("base") or not config.get("key") or not config.get("model"):
         raise ImageOCRError("视觉复核缺少 API 配置")
     try:

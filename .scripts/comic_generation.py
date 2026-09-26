@@ -22,6 +22,8 @@ from typing import Any
 
 import yaml
 
+import env_config
+
 
 REPO = Path(__file__).resolve().parent.parent
 MODEL_CATALOG = REPO / "operations" / "config" / "llm-models.yaml"
@@ -67,29 +69,11 @@ def _append_jsonl(path: Path, value: Any) -> None:
 
 
 def _expand_env(values: dict[str, str]) -> dict[str, str]:
-    pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
-    expanded = dict(values)
-    for _ in range(len(values) + 1):
-        updated = {
-            key: pattern.sub(lambda match: expanded.get(match.group(1), match.group(0)), value)
-            for key, value in expanded.items()
-        }
-        if updated == expanded:
-            return updated
-        expanded = updated
-    return expanded
+    return env_config.expand_references(values)
 
 
 def load_comic_env(env_file: Path | None = None) -> dict[str, str]:
-    values: dict[str, str] = {}
     source = env_file or (REPO / ".env")
-    if source.is_file():
-        for raw_line in source.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            name, value = line.split("=", 1)
-            values[name.strip()] = value.strip().strip('"').strip("'")
     known = {
         "LLM_API_BASE",
         "LLM_API_KEY",
@@ -99,8 +83,7 @@ def load_comic_env(env_file: Path | None = None) -> dict[str, str]:
         "COMIC_IMAGE_ENDPOINT",
         "COMIC_IMAGE_RESPONSE_FORMAT",
     }
-    values.update({name: value for name, value in os.environ.items() if name in known})
-    return _expand_env(values)
+    return env_config.load_env(source, keys=known)
 
 
 def load_catalog(path: Path = MODEL_CATALOG) -> dict[str, Any]:

@@ -1,16 +1,16 @@
 """embed_init.py — 文本向量缓存初始化 + 增量同步(解耦版)
 
-向量与 path 解耦(v8.2, 2026-07-28):
-  - embeddings 表: 文本 → 向量(纯缓存,去重,所有用途共享)
+向量与 path 解耦，并按 endpoint/model 隔离:
+  - embeddings 表: namespace + 文本 → 向量(纯缓存,同配置内去重)
   - node_texts 表: path → 文本(title) 映射(标注 graph 节点,随图增删)
   - 同一文本只存一份向量: keyword / arxiv-direction seed / node title 命中即复用
 
-旧结构(含 type 列)自动迁移,旧表保留为 embeddings_legacy。
+旧结构自动保留为 legacy 备份；因 provider/model 身份未知，不复用旧向量。
 """
 import sqlite3, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-from embed_helper import enforce_size_cap
+from embed_helper import _ensure_cache_schema, enforce_size_cap
 
 DB = Path(__file__).resolve().parent.parent / "cross-domain" / "embeddings.db"
 GRAPH_DB = Path(__file__).resolve().parent.parent / "cross-domain" / "graph.db"
@@ -23,63 +23,35 @@ def _has_legacy_type(conn):
 
 
 def init_table(conn):
-    """建解耦表结构(幂等): embeddings(文本→向量) + node_texts(path→文本)"""
-    conn.executescript("""
-    CREATE TABLE IF NOT EXISTS embeddings (
-        text TEXT PRIMARY KEY,
-        vector BLOB NOT NULL,
-        last_used REAL,
-        created REAL NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS node_texts (
-        path TEXT PRIMARY KEY,
-        text TEXT NOT NULL,
-        updated REAL NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_emb_lru ON embeddings(last_used);
-    """)
+    """Create the endpoint/model-namespaced cache schema idempotently."""
+    _ensure_cache_schema(conn)
 
 
 def migrate_from_legacy(conn, gconn):
-    """从旧结构(含 type 列)迁移到解耦结构。幂等:已迁移则跳过。返回迁移向量数。"""
+    """Quarantine typed legacy vectors whose provider/model identity is unknown."""
     if not _has_legacy_type(conn):
-        return None  # 已是新结构
-    print("=== 检测到旧结构(type 列),开始迁移 ===")
-    conn.executescript("""
-    CREATE TABLE IF NOT EXISTS embeddings_new (
-        text TEXT PRIMARY KEY, vector BLOB NOT NULL,
-        last_used REAL, created REAL NOT NULL);
-    CREATE TABLE IF NOT EXISTS node_texts (
-        path TEXT PRIMARY KEY, text TEXT NOT NULL, updated REAL NOT NULL);
-    """)
-    # keyword / arxiv-direction / query: node_id 即文本,直接转
-    conn.execute("""
-        INSERT OR IGNORE INTO embeddings_new(text, vector, last_used, created)
-        SELECT node_id, vector, last_used, created FROM embeddings
-        WHERE type IN ('keyword','arxiv-direction','query') AND node_id IS NOT NULL
-    """)
-    # node: node_id=path, 需补 text=title(从 graph.db 查)
+        return None
+    print("=== 检测到旧结构(type 列),隔离未知配置向量 ===")
+    suffix = 0
+    while True:
+        legacy = "embeddings_legacy_typed" + (f"_{suffix}" if suffix else "")
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (legacy,)
+        ).fetchone()
+        if not exists:
+            break
+        suffix += 1
+    conn.execute(f'ALTER TABLE embeddings RENAME TO "{legacy}"')
+    _ensure_cache_schema(conn)
     path_title = {r[0]: (r[1] or r[0]) for r in gconn.execute("SELECT path, title FROM nodes").fetchall()}
     now = time.time()
-    for path, vec, created in conn.execute(
-        "SELECT node_id, vector, created FROM embeddings WHERE type='node'"
-    ).fetchall():
-        text = path_title.get(path, path)
-        conn.execute(
-            "INSERT OR IGNORE INTO embeddings_new(text, vector, last_used, created) VALUES(?,?,?,?)",
-            (text, vec, None, created))
-    # 建 node_texts: 全图节点 path→title
     conn.executemany(
         "INSERT OR REPLACE INTO node_texts(path, text, updated) VALUES(?,?,?)",
         [(p, t, now) for p, t in path_title.items()])
-    # 交换表名
-    conn.execute("ALTER TABLE embeddings RENAME TO embeddings_legacy")
-    conn.execute("ALTER TABLE embeddings_new RENAME TO embeddings")
     conn.commit()
-    total = conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
     nt = conn.execute("SELECT COUNT(*) FROM node_texts").fetchone()[0]
-    print(f"  迁移完成: 向量 {total} 条(去重), node_texts {nt} 条, 旧表保留为 embeddings_legacy")
-    return total
+    print(f"  旧向量保留为 {legacy}；当前 namespace 从空缓存开始，node_texts {nt} 条")
+    return 0
 
 
 def get_status(conn, gconn):

@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 import agent_task
 import recovery_policy as rp
+import source_fingerprints as sf
 
 
 def call_json(*args, **kwargs):
@@ -2049,7 +2050,7 @@ def step_finalize(state: dict, REPO: Path, config: dict) -> tuple[bool, str]:
 
 
 def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str]:
-    """收尾三件：log.md 追加 + index.md 追加 + ingest_build 派生同步。
+    """收尾：log/index、派生同步及成功提交源文件的可重建指纹登记。
 
     config:
         doc_id_key: state 中的 ID 字段名
@@ -2062,6 +2063,7 @@ def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str
         skip_index: bool — True 时跳过 index.md 追加（re-ingest 等已有索引场景）
         frontier_capture: bool — 论文成功后限量捕获作者明示开放问题；失败仅 warning
         frontier_answer: bool — 捕获后在当前 WikiGraph 内非阻断尝试回答；默认 True
+        fingerprint_artifact: (state, REPO) -> {source_path,text_path,source_kind}
     """
     import graph_lib as gl
     today = datetime.now().strftime("%Y-%m-%d")
@@ -2123,7 +2125,32 @@ def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str
         run([sys.executable, str(REPO / ".scripts/ingest_build.py"), "--catalog"], REPO)
     except Exception as exc:
         return False, "ingest_build.py 失败: " + str(exc)
-    # 4. Frontier 候选捕获：独立于 ingest 事务，只抓作者明示问题/局限/future work。
+    # 4. 指纹是 Raw 派生缓存；登记失败不回滚已验证的事实提交。
+    fingerprint_artifact = config.get("fingerprint_artifact")
+    if fingerprint_artifact:
+        state["quality_warnings"] = [
+            warning for warning in state.get("quality_warnings", [])
+            if not (isinstance(warning, dict)
+                    and warning.get("issue") == "fingerprint_register_failed")
+        ]
+        try:
+            artifact = fingerprint_artifact(state, REPO)
+            source_path = Path(artifact["source_path"]).resolve()
+            relative = source_path.relative_to(REPO.resolve())
+            if len(relative.parts) < 3 or relative.parts[1] != "raw":
+                raise ValueError("fingerprint source must be a managed Raw artifact")
+            text_path = artifact.get("text_path")
+            state["source_fingerprint"] = sf.register_source(
+                source_path,
+                text_path=Path(text_path) if text_path else None,
+                source_kind=str(artifact.get("source_kind") or ""),
+                repo=REPO,
+            )
+        except Exception as exc:
+            state.setdefault("quality_warnings", []).append({
+                "issue": "fingerprint_register_failed", "detail": str(exc),
+            })
+    # 5. Frontier 候选捕获：独立于 ingest 事务，只抓作者明示问题/局限/future work。
     # 失败不得让事实摄入回滚或失败。
     if config.get("frontier_capture") and wiki_page:
         cmd = [sys.executable, str(REPO / ".scripts/frontier.py"),

@@ -363,6 +363,8 @@ def _classification_task(pending: list[dict], args, issues: list | None = None) 
         rerun.extend(["--file", args.file])
     if getattr(args, "ocr_result", None):
         rerun.extend(["--ocr-result", args.ocr_result])
+    if getattr(args, "allow_remote_ppt", False):
+        rerun.append("--allow-remote-ppt")
     if getattr(args, "allow_remote_ocr", False):
         rerun.append("--allow-remote-ocr")
     rerun.extend(["--classification-file", str(output_path.relative_to(REPO))])
@@ -461,7 +463,7 @@ def classify_academic_document(path: Path) -> str | None:
 def dispatch_command(file_type: str, rel_path: str, subproject: str,
                      document_type: str | None = None,
                      source_kind: str = "ordinary", *, ocr_result: str | None = None,
-                     allow_remote_ocr: bool = False) -> list[str]:
+                     allow_remote_ocr: bool = False, allow_remote_ppt: bool = False) -> list[str]:
     """返回对应类型的分发命令；academic 文档必须已有显式分类。"""
     if file_type == "paper":
         return [sys.executable, str(REPO / ".scripts/ingest_paper.py"), "--pdf", rel_path]
@@ -479,6 +481,8 @@ def dispatch_command(file_type: str, rel_path: str, subproject: str,
         command.extend(["--source-kind", source_kind])
     if ocr_result:
         command.extend(["--ocr-result", ocr_result])
+    if allow_remote_ppt:
+        command.append("--allow-remote-ppt")
     if allow_remote_ocr:
         command.append("--allow-remote-ocr")
     return command
@@ -487,7 +491,7 @@ def dispatch_command(file_type: str, rel_path: str, subproject: str,
 def dsi_tool(file_type: str, rel_path: str, subproject: str,
              document_type: str | None = None,
              source_kind: str = "ordinary", *, ocr_result: str | None = None,
-             allow_remote_ocr: bool = False) -> tuple[str, dict]:
+             allow_remote_ocr: bool = False, allow_remote_ppt: bool = False) -> tuple[str, dict]:
     """返回 DSH ingest tool 名与参数，替代直接 subprocess dispatch。"""
     if file_type == "paper":
         return "ingest_paper_pdf", {"pdf": rel_path}
@@ -502,6 +506,8 @@ def dsi_tool(file_type: str, rel_path: str, subproject: str,
         args["source_kind"] = source_kind
     if ocr_result:
         args["ocr_result"] = ocr_result
+    if allow_remote_ppt:
+        args["allow_remote_ppt"] = True
     if allow_remote_ocr:
         args["allow_remote_ocr"] = True
     return "ingest_document_file", args
@@ -976,7 +982,7 @@ def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
 
 
 def resume_transaction(transaction_id: str, backend: str, *,
-                       ocr_result: str = "", allow_remote_ocr: bool = False) -> dict:
+                       ocr_result: str = "", allow_remote_ocr: bool = False, allow_remote_ppt: bool = False) -> dict:
     """Resume one existing ingest transaction through the unified inbox boundary."""
     if not transaction_id or "/" in transaction_id or "\\" in transaction_id or ".." in transaction_id:
         raise ValueError("事务 ID 非法")
@@ -998,6 +1004,10 @@ def resume_transaction(transaction_id: str, backend: str, *,
     tool_args = {"txn": transaction_id}
     if ocr_result:
         tool_args["ocr_result"] = ocr_result
+    if allow_remote_ppt:
+        if pipeline != "ingest_document.py" or Path(state.get("source", "")).suffix.lower() != ".pptx":
+            raise ValueError("PPT 授权仅适用于 PPTX 文档事务")
+        tool_args["allow_remote_ppt"] = True
     if allow_remote_ocr:
         tool_args["allow_remote_ocr"] = True
     if backend == "api":
@@ -1015,6 +1025,8 @@ def resume_transaction(transaction_id: str, backend: str, *,
                    "--resume", transaction_id]
         if ocr_result:
             command.extend(["--ocr-result", ocr_result])
+        if allow_remote_ppt:
+            command.append("--allow-remote-ppt")
         if allow_remote_ocr:
             command.append("--allow-remote-ocr")
         completed = subprocess.run(
@@ -1739,6 +1751,7 @@ def main():
     ap.add_argument("--classification-file", default="",
                     help="Agent backend 的 temp/ 分类裁决 JSON")
     ap.add_argument("--ocr-result", help="单图片已有 OCR JSON 回执，校验后复用")
+    ap.add_argument("--allow-remote-ppt", action="store_true", help="显式授权单个PPTX的API内容识读")
     ap.add_argument("--allow-remote-ocr", action="store_true", help="显式授权单图片上传 OCR API")
     ap.add_argument("--reconcile-maintenance-report", type=Path,
                     help="修复指定历史摄入报告的维护关联并重放已有裁决（不重摄入）")
@@ -1757,6 +1770,7 @@ def main():
                 args.resume, backend,
                 ocr_result=args.ocr_result or "",
                 allow_remote_ocr=args.allow_remote_ocr,
+                allow_remote_ppt=args.allow_remote_ppt,
             )
         except (OSError, ValueError) as exc:
             result = {"status": "validation_error", "errors": [str(exc)],
@@ -1782,6 +1796,11 @@ def main():
     if args.import_file and not args.run:
         ap.error("--import-file 必须与 --run 同用")
     ocr_options = {}
+    if args.allow_remote_ppt:
+        selected_file = args.file or args.import_file or ""
+        if not selected_file or Path(selected_file).suffix.lower() != ".pptx":
+            ap.error("PPT 授权只用于 --file/--import-file 指定的单个 PPTX")
+        ocr_options["allow_remote_ppt"] = True
     if args.ocr_result or args.allow_remote_ocr:
         selected_file = args.file or args.import_file or ""
         if not selected_file or Path(selected_file).suffix.lower() not in inbox_plan.IMAGE_SUFFIXES:
@@ -1873,8 +1892,16 @@ def main():
     used_classifications: set[str] = set()
     fingerprint_matches: dict[str, dict] = {}
     fingerprint_index_error = ""
+    fingerprint_db = REPO / "cross-domain/source-fingerprints.db"
     try:
-        sf.ensure_index()
+        sf.ensure_index(
+            db_path=fingerprint_db,
+            roots=tuple(
+                REPO / domain / "raw"
+                for domain in ("academic", "admin", "teaching", "business")
+            ),
+            repo=REPO,
+        )
     except Exception as exc:
         fingerprint_index_error = str(exc)
     for f in files:
@@ -1891,7 +1918,7 @@ def main():
             continue
         if not fingerprint_index_error:
             try:
-                match = sf.lookup_exact(f)
+                match = sf.lookup_exact(f, db_path=fingerprint_db, repo=REPO)
             except Exception as exc:
                 fingerprint_index_error = str(exc)
                 match = None

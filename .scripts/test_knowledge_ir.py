@@ -347,6 +347,109 @@ def test_invalid_direct_ir_fails_before_database_open():
             graph_ingest._connect_for = old_connect
 
 
+def test_triples_json_normalizes_document_page_subject():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        page = "admin/wiki/policies/direct-json"
+        page_file = repo / f"{page}.md"
+        page_file.parent.mkdir(parents=True)
+        (repo / "cross-domain").mkdir()
+        page_file.write_text(
+            "---\ntitle: Direct JSON\ntype: policy\nsources: []\n"
+            "status: current\n---\n\n## Navigation\n\nDirect input.\n",
+            encoding="utf-8",
+        )
+        db_path = repo / "cross-domain/graph.db"
+        old_repo, old_db = graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB
+        graph_ingest.gl.REPO = repo
+        graph_ingest.gl.GRAPH_DB = db_path
+        try:
+            conn = graph_ingest.gl.connect()
+            graph_ingest.gl.init_schema(conn)
+            conn.close()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                graph_ingest.cmd_ingest(Namespace(
+                    page=page,
+                    page_file=None,
+                    semantic=None,
+                    knowledge_ir=None,
+                    triples=None,
+                    triples_json=json.dumps([{
+                        "subject": "本文件", "predicate": "涉及", "object": "导航主题",
+                    }], ensure_ascii=False),
+                    citations=None,
+                    raw_relationship_json=None,
+                    clean=False,
+                    db=None,
+                    plan_only=False,
+                ))
+            report = json.loads(output.getvalue())
+            assert report["semantic_subjects"]["resolved_subjects"] == 1
+            assert report["semantic_subjects"]["placeholder_subjects"] == 0
+            with sqlite3.connect(db_path) as conn:
+                assert conn.execute(
+                    "SELECT COUNT(*) FROM edges "
+                    "WHERE subject=? AND predicate='涉及' AND object='导航主题'",
+                    (page,),
+                ).fetchone()[0] == 1
+        finally:
+            graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB = old_repo, old_db
+
+
+def test_teaching_prerequisite_compiles_once_from_frontmatter():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        page = "teaching/wiki/courses/quantum"
+        topic = "teaching/wiki/topics/linear-algebra"
+        for path, content in (
+            (repo / f"{topic}.md", "---\ntitle: Linear algebra\ntype: topic\n---\n"),
+            (repo / f"{page}.md",
+             "---\ntitle: Quantum\ntype: course\nsources: []\n"
+             "prerequisites:\n  - '[[topics/linear-algebra]]'\n---\n"
+             "\n## Navigation\n\nQuantum course.\n"),
+        ):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        (repo / "cross-domain").mkdir()
+        db_path = repo / "cross-domain/graph.db"
+        old_repo, old_db = graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB
+        graph_ingest.gl.REPO = repo
+        graph_ingest.gl.GRAPH_DB = db_path
+        try:
+            conn = graph_ingest.gl.connect()
+            graph_ingest.gl.init_schema(conn)
+            graph_ingest.gl.ensure_node(conn, topic, "Linear algebra", "page")
+            conn.commit()
+            conn.close()
+            args = Namespace(
+                page=page,
+                page_file=None,
+                semantic=None,
+                knowledge_ir=None,
+                triples=None,
+                triples_json=json.dumps([{
+                    "subject": "本文档", "predicate": "前置", "object": topic,
+                }], ensure_ascii=False),
+                citations=None,
+                raw_relationship_json=None,
+                clean=False,
+                db=None,
+                plan_only=False,
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                graph_ingest.cmd_ingest(args)
+                graph_ingest.cmd_ingest(args)
+            with sqlite3.connect(db_path) as conn:
+                assert conn.execute(
+                    "SELECT COUNT(*) FROM edges WHERE subject=? AND predicate='前置' AND object=?",
+                    (page, topic),
+                ).fetchone()[0] == 1
+        finally:
+            graph_ingest.gl.REPO, graph_ingest.gl.GRAPH_DB = old_repo, old_db
+
+
 def test_staged_plan_only_uses_logical_page_and_rolls_back_live_graph():
     with tempfile.TemporaryDirectory() as directory:
         repo = Path(directory)

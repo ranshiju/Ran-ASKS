@@ -9,12 +9,12 @@
 - PPT/PPTX：LibreOffice `soffice` 先转 PDF，再按页渲染；
 - 不覆盖动画、嵌入视频、演讲者备注和切换效果。
 
-默认视觉模型为 `GLM-5.3-Flash`，主模型接口或输出失败时兼容回退 `GLM-4.6V`。回退模型不是真值裁判，不会因为主模型报告缺陷而再次请求回退模型以覆盖结论。二者登记在 `operations/config/llm-models.yaml`。模型调用使用 OpenAI-compatible `chat/completions` 接口：
+默认视觉模型为 `GLM-5.3-FlashX`，主模型接口或输出失败时兼容回退 `GLM-4.6V`。回退模型不是真值裁判，不会因为主模型报告缺陷而再次请求回退模型以覆盖结论。二者登记在 `operations/config/llm-models.yaml`。模型调用使用 OpenAI-compatible `chat/completions` 接口：
 
 ```bash
 VISUAL_QA_API_BASE=...
 VISUAL_QA_API_KEY=...
-VISUAL_QA_MODEL=GLM-5.3-Flash
+VISUAL_QA_MODEL=GLM-5.3-FlashX
 VISUAL_QA_FALLBACK_MODEL=GLM-4.6V
 VISUAL_QA_REASONING_EFFORT=low
 VISUAL_QA_FALLBACK_REASONING_EFFORT=default
@@ -25,7 +25,9 @@ VISUAL_QA_MAX_TOKENS=1800
 
 主/回退推理档位分别设置，允许 `low/high/default`；`default` 表示不发送该字段。常规 QA 用 low，复杂页面可显式 `--reasoning-effort high`；`--max-tokens` 可单次覆盖输出预算。CLI/Python 显式参数优先于环境配置。这些设置与 OCR、文本模型独立，不因升级模型而改变远程授权。
 
-2026-09-07 在三张固定合成页面上按原 QA 协议对照后，经用户确认启用新默认；这不是整体准确率排名。可编辑 PPT 重建另由 `.env` 的 `VISUAL_RECONSTRUCTION_MODEL=GLM-5.3-Flash` 与 `VISUAL_RECONSTRUCTION_FALLBACK_MODEL=GLM-4.5V` 独立配置；重建主模型于 2026-09-11 按用户明确指令切换，并未进行重建质量对测。
+2026-09-26 用户明确指定检查主模型为 `GLM-5.3-FlashX`，覆盖通用视觉 QA、PPT 检查及独立 OCR 复核；不把历史探测结果冒充 FlashX 的质量证明。
+
+历史记录：2026-09-07 在三张固定合成页面上按原 QA 协议对照后，经用户确认启用当时的 `GLM-5.3-Flash` 默认；这不是整体准确率排名。可编辑 PPT 重建另由 `.env` 的 `VISUAL_RECONSTRUCTION_MODEL=GLM-5.3-Flash` 与 `VISUAL_RECONSTRUCTION_FALLBACK_MODEL=GLM-4.5V` 独立配置；重建主模型于 2026-09-11 按用户明确指令切换，并未进行重建质量对测。
 
 ## 使用
 

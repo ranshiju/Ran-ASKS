@@ -300,7 +300,11 @@ def execute_plan(session: QuerySession, plan: list[dict], is_continuation: bool 
             session.record_step({"action": action, "input": inp, "output_summary": f"否决: {deny}",
                                   "decision": "否决(硬约束)"})
             continue
-        r = actions.execute(action, inp)
+        # This API adapter persists public sessions. Model-chosen paths/domains
+        # cannot opt into private data; the local Agent uses the same actions
+        # through their explicit private scope, outside this API control loop.
+        with actions.query_scope("public"):
+            r = actions.execute(action, inp)
         session.add_tokens(r["tokens"])
         session.record_visit(action, inp)
         if action in {"read_section", "wiki_context"} and isinstance(inp, dict) and r["ok"]:

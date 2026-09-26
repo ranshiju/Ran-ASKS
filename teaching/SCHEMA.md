@@ -38,6 +38,11 @@ updated: YYYY-MM-DD
 ---
 ```
 
+`prerequisites` 是受验证的图契约，而非展示字段：只接受
+`[[topics/<topic>]]`（或完整 `[[teaching/wiki/topics/<topic>]]`）且目标 topic 页面必须已摄入同一 graph.db。
+摄入器确定性生成 `本页 → 前置 → topic`，拒绝普通文本、带锚点/显示名的链接和跨域目标；
+语义槽中的同一关系会去重，不得使用别名谓词 `前置知识`。
+
 ---
 
 ## 标准 section 结构

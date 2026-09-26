@@ -47,9 +47,31 @@ def test_people_skeleton_has_role_neutral_locatable_portrait():
     assert "行政人员" in text and "学生" in text and "精确 Raw locator" in text
 
 
+def test_title_extraction_skips_generic_journal_section_headers():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        paper = repo / "academic/raw/references/demo/paper.md"
+        paper.parent.mkdir(parents=True)
+        paper.write_text(
+            "# PERSPECTIVES\n\n"
+            "# New avenues for the large-scale harvesting of blue energy\n",
+            encoding="utf-8",
+        )
+        old_repo = module.REPO
+        module.REPO = repo
+        try:
+            title = module.extract_title_from_papermd(
+                "academic/raw/references/demo/paper.md"
+            )
+        finally:
+            module.REPO = old_repo
+    assert title == "New avenues for the large-scale harvesting of blue energy"
+
+
 def main():
     test_temporary_raw_writes_final_source_path()
     test_people_skeleton_has_role_neutral_locatable_portrait()
+    test_title_extraction_skips_generic_journal_section_headers()
     print("wiki skeleton regression: PASS")
 
 

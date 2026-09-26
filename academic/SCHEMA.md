@@ -41,6 +41,10 @@
 `academic` 非论文摄入不得回退到 `admin`。自动分类接受专题导言、特邀编辑、本期专题等强 editorial 信号，以及文件名同时含会议实体词与信息整理、记录、总结、议程、通知、安排等事务记录词的 `conference-summary` 强信号；其余文档返回 `classification_required`，由调用方显式选择 `editorial`、`academic-reference` 或 `conference-summary` 后再进入事务。存量误存 Raw 保持原位，只能通过单独迁移计划调整 Wiki/图归属。
 
 
+### 学术报告 PPT
+
+学术报告使用 `academic-reference`，原件与同名忠实 Markdown 存入受管 `raw/reference-documents/`。Wiki 组织题目、报告人/单位、主会议、报告日期/地点、主题摘要和页码导航；未知字段留空，会议宣传页另记“提及活动”。不要按文件扩展名视为论文或会议纪要，不把报告日期充当源文件日期。新摄入视觉识读经独立 API，宿主消费文字；模板收藏在报告归档后另行执行。
+
 ### people 页定位
 
 people 页是**人物节点**，page 即节点（不分两个）。核心功能是「人→论文/关系」入口。**不是人物档案**。

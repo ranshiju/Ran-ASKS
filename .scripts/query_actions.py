@@ -9,7 +9,10 @@ import subprocess
 import json
 import re
 import sys
-import sqlite3
+import inspect
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
+from functools import wraps
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +25,104 @@ import graph_lib as gl
 import node_semantics as ns
 import hub_semantics as hs
 import query_graph as qg
+
+PUBLIC_DOMAINS = {"academic", "admin", "teaching", "business"}
+_QUERY_SCOPE = ContextVar("query_storage_scope", default=None)
+
+
+def scope_for(domain: str = "", *paths: str) -> str:
+    """Select storage scope; an explicit scope always wins over path inference."""
+    if domain:
+        if domain not in PUBLIC_DOMAINS | {"private", "public", "cross-domain"}:
+            raise ValueError("unsupported query domain")
+        return "private" if domain == "private" else "public"
+    active = _QUERY_SCOPE.get()
+    if active:
+        return active
+    for value in paths:
+        part = str(value or "").split("#", 1)[0]
+        path = Path(part)
+        if path.is_absolute():
+            try:
+                path = path.relative_to(_REPO)
+            except ValueError:
+                continue
+        if path.parts and path.parts[0] == "private":
+            return "private"
+    return "public"
+
+
+def check_path_scope(value: str | Path) -> Path:
+    """Reject traversal/symlink escapes before reading either source representation."""
+    path = Path(str(value).split("#", 1)[0])
+    target = path if path.is_absolute() else _REPO / path
+    try:
+        logical = target.relative_to(_REPO)
+        physical = target.resolve().relative_to(_REPO.resolve())
+    except ValueError:
+        raise ValueError("query path escapes repository") from None
+    if not logical.parts or not physical.parts or ".." in logical.parts:
+        raise ValueError("query path traversal is forbidden")
+    expected_private = scope_for("", str(logical)) == "private"
+    if ((logical.parts[0] == "private") != expected_private
+            or (physical.parts[0] == "private") != expected_private):
+        raise ValueError("private/public query scope mismatch")
+    return target
+
+
+def query_db_path() -> Path:
+    return check_path_scope("private/graph.db" if _QUERY_SCOPE.get() == "private"
+                            else "cross-domain/graph.db")
+
+
+@contextmanager
+def query_scope(scope: str):
+    selected = scope_for(scope)
+    current = _QUERY_SCOPE.get()
+    if current and current != selected:
+        raise ValueError("nested query cannot change private/public scope")
+    token = _QUERY_SCOPE.set(selected)
+    try:
+        from embed_helper import offline
+        with gl.graph_scope(query_db_path()), (offline() if selected == "private" else nullcontext()):
+            yield
+    finally:
+        _QUERY_SCOPE.reset(token)
+
+
+def scoped_query(fn):
+    """Keep direct Python, wg and API callers on the same deterministic boundary."""
+    signature = inspect.signature(fn)
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        values = signature.bind(*args, **kwargs).arguments
+        identifiers = [values.get(key, "") for key in ("page", "node", "hub", "locator", "name")]
+        with query_scope(scope_for(values.get("domain", ""), *identifiers)):
+            for key, value in ((key, values.get(key, "")) for key in ("page", "node", "hub", "locator", "name")):
+                managed = str(value).split("/", 1)[0] in PUBLIC_DOMAINS | {"private", "cross-domain"}
+                if value and (key in {"page", "locator"} or managed or Path(str(value)).is_absolute()):
+                    check_path_scope(value)
+            return fn(*args, **kwargs)
+    return wrapped
+
+
+def _connect():
+    return gl.connect(query_db_path(), read_only=True)
+
+
+def check_wiki_result(result: dict) -> dict:
+    check_path_scope(result["page"])
+    for citation in result.get("raw_citations", []):
+        check_path_scope(citation)
+    return result
+
+
+def read_wiki_data(page: str, section: str = "") -> dict:
+    check_path_scope(page)
+    target = wl.resolve_wiki_path(page)
+    if target is not None:
+        check_path_scope(target)
+    return check_wiki_result(wl.read_wiki_locator(page, section))
 
 try:
     import tiktoken
@@ -36,10 +137,11 @@ def _tok(text: str) -> int:
         return len(_ENC.encode(text))
     return len(text) // 2
 
+@scoped_query
 def read_section(page: str, section: str = "") -> tuple[str, int]:
     """按 Wiki heading slug 截取一节，并只带回该节使用的 Raw locators。"""
     try:
-        result = wl.read_wiki_locator(page, section)
+        result = read_wiki_data(page, section)
     except (FileNotFoundError, ValueError, KeyError) as exc:
         return f"[ERROR {exc}]", _tok(str(exc))
     text = json.dumps(result, ensure_ascii=False, indent=2)
@@ -48,16 +150,18 @@ def read_section(page: str, section: str = "") -> tuple[str, int]:
 def graph_query(command: str, args: list[str]) -> tuple[str, int]:
     """执行只读图查询；图结果纳入统一编排轨迹和 token 计量。"""
     db_script = _SCRIPTS / "query_graph.py"
-    r = subprocess.run(["python3", str(db_script), command, *args, "--json"],
+    r = subprocess.run(["python3", str(db_script), command, *args, "--json", "--db", str(query_db_path())],
                        capture_output=True, text=True, cwd=_REPO)
     text = r.stdout.strip() or r.stderr.strip()
     return text, _tok(text)
 
 
+@scoped_query
 def graph_search(term: str = "") -> tuple[str, int]:
     return graph_query("search", [term]) if term else ("[ERROR 缺 term]", 0)
 
 
+@scoped_query
 def graph_neighbors(node: str = "", depth: str = "2", similar_topk: str = "",
                     profile: str = "", families: str = "") -> tuple[str, int]:
     # similar_topk: ""=用CLI默认(5), "0"=排除相似边, "-1"=全部, "N"=动态K上限
@@ -72,6 +176,7 @@ def graph_neighbors(node: str = "", depth: str = "2", similar_topk: str = "",
     return graph_query("neighbors", args) if node else ("[ERROR 缺 node]", 0)
 
 
+@scoped_query
 def graph_relations(node: str = "", predicate: str = "", profile: str = "",
                     families: str = "") -> tuple[str, int]:
     args = [node]
@@ -84,10 +189,12 @@ def graph_relations(node: str = "", predicate: str = "", profile: str = "",
     return graph_query("relations", args) if node else ("[ERROR 缺 node]", 0)
 
 
+@scoped_query
 def graph_hub_of(page: str = "") -> tuple[str, int]:
     return graph_query("hub_of", [page]) if page else ("[ERROR 缺 page]", 0)
 
 
+@scoped_query
 def node_resolve(
     name: str = "", context: str = "", node_types: str = "", topk: str = "5"
 ) -> tuple[str, int]:
@@ -95,7 +202,7 @@ def node_resolve(
     if not name.strip():
         return "[ERROR 缺 name]", 0
     types = [item.strip() for item in str(node_types).split(",") if item.strip()]
-    conn = gl.connect()
+    conn = _connect()
     try:
         result = ns.resolve_node(
             conn, name, context, node_types=types or None,
@@ -107,11 +214,12 @@ def node_resolve(
     return text, _tok(text)
 
 
+@scoped_query
 def semantic_search(query: str = "", scope: str = "node", topk: str = "8") -> tuple[str, int]:
     """按含义召回节点/Hub；相关候选不构成节点同一性。"""
     if not query.strip():
         return "[ERROR 缺 query]", 0
-    conn = gl.connect()
+    conn = _connect()
     try:
         result = ns.semantic_search(
             conn, query, scope=scope,
@@ -125,11 +233,12 @@ def semantic_search(query: str = "", scope: str = "node", topk: str = "8") -> tu
     return text, _tok(text)
 
 
+@scoped_query
 def hub_route(page: str = "", topk: str = "5") -> tuple[str, int]:
     """读取论文的可定位方向句并与 canonical Hub Scope 路由；只读。"""
     if not page.strip():
         return "[ERROR 缺 page]", 0
-    conn = gl.connect()
+    conn = _connect()
     try:
         result = hs.route_paper(conn, page, top_k=max(1, min(int(topk), 20)))
     finally:
@@ -138,11 +247,12 @@ def hub_route(page: str = "", topk: str = "5") -> tuple[str, int]:
     return text, _tok(text)
 
 
+@scoped_query
 def hub_inspect(hub: str = "") -> tuple[str, int]:
     """返回 Hub Scope、类型化普通成员及动力学候选；只读。"""
     if not hub.strip():
         return "[ERROR 缺 hub]", 0
-    conn = gl.connect()
+    conn = _connect()
     try:
         result = hs.inspect_hub(conn, hub)
         result["writes"] = False
@@ -153,19 +263,21 @@ def hub_inspect(hub: str = "") -> tuple[str, int]:
 
 
 
-DOMAIN_DIRS = {"academic", "admin", "teaching", "business"}
+DOMAIN_DIRS = PUBLIC_DOMAINS
 
 
+@scoped_query
 def wiki_recall(query: str = "", domain: str = "", topk: str = "8") -> tuple[str, int]:
     """跨域直接召回+图回退；只返回候选 Navigation，不读 Content/raw。"""
     if not query.strip():
         return "[ERROR 缺 query]", 0
     domain = domain.strip().lower()
-    if domain and domain not in DOMAIN_DIRS:
+    if _QUERY_SCOPE.get() == "private":
+        domain = "private"
+    if domain and domain not in DOMAIN_DIRS | {"private"}:
         return f"[ERROR 不支持 domain: {domain}]", 0
     limit = max(1, min(int(topk), 20))
-    conn = sqlite3.connect(str(_REPO / "cross-domain/graph.db"))
-    conn.row_factory = sqlite3.Row
+    conn = _connect()
     terms = []
     for chunk in re.findall(r"[\u3400-\u9fff]+|[A-Za-z0-9-]{2,}", query.lower()):
         if re.fullmatch(r"[\u3400-\u9fff]+", chunk):
@@ -189,6 +301,7 @@ def wiki_recall(query: str = "", domain: str = "", topk: str = "8") -> tuple[str
         for path in sorted((_REPO / root / "wiki").rglob("*.md")):
             if path.name in {"index.md", "log.md"}:
                 continue
+            check_path_scope(path)
             text = path.read_text(encoding="utf-8", errors="ignore")
             match = re.search(r"^## Navigation\s*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
             nav = match.group(1).strip() if match else ""
@@ -232,6 +345,7 @@ def wiki_recall(query: str = "", domain: str = "", topk: str = "8") -> tuple[str
                      for p in sorted(graph_paths)[:limit]]
     out = []
     for item in candidates:
+        check_path_scope(item["path"])
         title, nav = pages.get(item["path"], (item.get("title", ""), ""))
         out.append({"path": item["path"], "title": title, "status": item.get("status"), "score": item.get("score", 0), "navigation": nav})
     conn.close()
@@ -275,12 +389,14 @@ def _adjacent_wiki_pages(conn, node: str, domain: str = "", limit: int = 30) -> 
 
 
 def _section_capsule(page: str, *terms: str) -> dict:
-    target = _REPO / f"{page.removesuffix('.md')}.md"
+    target = check_path_scope(f"{page.removesuffix('.md')}.md")
     if not target.is_file():
         return {}
     section = wl.best_cited_section(target, *terms)
     if section is None:
         return {}
+    for citation in section.raw_citations:
+        check_path_scope(citation)
     body = re.sub(r"\s+", " ", section.text).strip()
     return {
         "semantic_address": f"{page.removesuffix('.md')}#{section.slug}",
@@ -292,15 +408,32 @@ def _section_capsule(page: str, *terms: str) -> dict:
 
 def _query_entity_terms(query: str) -> list[str]:
     terms = []
+    math_patterns = (
+        r"\|\s*[A-Za-z][A-Za-z0-9_]*\s*\|",
+        r"\b(?:Arg|Re|Im)\s+[A-Za-z][A-Za-z0-9_]*(?:\*|\^\*|†)?",
+        r"\b[A-Za-z][A-Za-z0-9_]*(?:\*|\^\*|†)",
+    )
+    for pattern in math_patterns:
+        for match in re.finditer(pattern, query):
+            candidate = re.sub(r"\s+", " ", match.group(0)).strip()
+            if candidate:
+                terms.append(candidate)
+    chinese_stops = {"是什么", "怎么算", "如何算", "为什么", "如何", "怎样"}
     for chunk in re.findall(r"[\u3400-\u9fff]+|[A-Za-z][A-Za-z0-9-]{1,}", query):
         if re.fullmatch(r"[\u3400-\u9fff]+", chunk):
-            parts = re.split(r"(?:有什么关系|什么关系|为什么|如何|怎样|与|和|及|的)", chunk)
-            terms.extend(part for part in parts if len(part) >= 2)
+            parts = re.split(
+                r"(?:有什么关系|什么关系|是什么|怎么算|如何算|为什么|如何|怎样|与|和|及|的)",
+                chunk,
+            )
+            terms.extend(
+                part for part in parts if len(part) >= 2 and part not in chinese_stops
+            )
         else:
             terms.append(chunk)
     return list(dict.fromkeys(terms))[:8]
 
 
+@scoped_query
 def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = "",
                   topk: str = "8") -> tuple[str, int]:
     """Fuse Wiki narrative recall and Graph structural recall with weighted RRF."""
@@ -310,7 +443,9 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
     if intent not in _INTENT_WEIGHTS:
         return f"[ERROR 不支持 intent: {intent}]", 0
     domain = domain.strip().lower()
-    if domain and domain not in DOMAIN_DIRS:
+    if _QUERY_SCOPE.get() == "private":
+        domain = "private"
+    if domain and domain not in DOMAIN_DIRS | {"private"}:
         return f"[ERROR 不支持 domain: {domain}]", 0
     limit = max(1, min(int(topk), 20))
     wiki_weight, graph_weight = _INTENT_WEIGHTS[intent]
@@ -336,7 +471,7 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
     for rank, item in enumerate(wiki_items, start=1):
         add(item.get("path", ""), "wiki", rank, wiki_weight)
 
-    conn = gl.connect()
+    conn = _connect()
     try:
         exact_rank = 0
         for term in _query_entity_terms(query):
@@ -397,12 +532,13 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
     return text, _tok(text)
 
 
+@scoped_query
 def wiki_context_data(page: str, section: str, profile: str = "explanation",
                       topk: int = 12) -> dict:
     """Read one semantic address and attach a bounded, derived Graph envelope."""
-    located = wl.read_wiki_locator(page, section)
+    located = read_wiki_data(page, section)
     node = located["page"].removesuffix(".md")
-    conn = gl.connect(str(gl.graph_db_for(node)))
+    conn = _connect()
     try:
         relation_result = qg.relations(
             conn, node, top_k=max(1, min(int(topk), 30)), profile=profile
@@ -438,6 +574,7 @@ def wiki_context(page: str = "", section: str = "", profile: str = "explanation"
 RAW_PREVIEW_CHARS = 8000
 
 
+@scoped_query
 def read_raw(locator: str = "") -> tuple[str, int]:
     """按精确 locator 读 raw 片段；拒绝裸路径和 #全篇。
     复用 source_locator 解析路径+定位器；companion 可承载读取，引用保留原件。"""
@@ -449,9 +586,15 @@ def read_raw(locator: str = "") -> tuple[str, int]:
     target = sl.resolve_path(path_part)
     if target is None:
         return f"[ERROR raw 路径未解析: {path_part}]", 0
+    check_path_scope(target)
     if not loc or loc == "全篇":
         return "[ERROR read_raw 需要精确 locator（标题、Lx-Ly 或 page-x-y）；不向 LLM 返回全文]", 0
+    companion_binding = sl.companion_binding_for_target(target)
+    if companion_binding and companion_binding["status"] == "invalid":
+        return "[ERROR companion 与原件绑定失效，须重新生成后再查询]", 0
     source_target, read_target = sl.evidence_targets(target, loc)
+    check_path_scope(source_target)
+    check_path_scope(read_target)
     source_rel = str(source_target.resolve().relative_to(_REPO))
     read_rel = str(read_target.resolve().relative_to(_REPO))
     status = sl.locator_status(loc, read_target)
@@ -510,13 +653,20 @@ DISPATCH = {
     ),
 }
 
-def execute(action: str, input_: dict) -> dict:
+def execute(action: str, input_: dict, *, subproject: str = "") -> dict:
     fn = DISPATCH.get(action)
     if fn is None:
         return {"ok": False, "text": "", "tokens": 0,
                 "error": f"未知动作 {action}(允许: {list(DISPATCH)})"}
     try:
-        text, tokens = fn(input_ or {})
+        inputs = dict(input_ or {})
+        requested = inputs.pop("subproject", "")
+        scope = scope_for(subproject or requested or inputs.get("domain", ""),
+                          *(inputs.get(k, "") for k in ("page", "locator", "node", "hub", "name")))
+        with query_scope(scope):
+            if requested and scope_for(requested) != scope:
+                raise ValueError("query subproject conflicts with caller scope")
+            text, tokens = fn(inputs)
         ok = not text.startswith("[ERROR")
         return {"ok": ok, "text": text, "tokens": tokens, "error": "" if ok else text[:300]}
     except Exception as e:

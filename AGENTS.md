@@ -30,10 +30,10 @@ python3 .scripts/playbook_dispatch.py '指令关键词'
 - 建设：修改 `operations/`、`.scripts/`、`dsh/` 或项目基础设施=`build`。
 - 其他：直接回答。
 
-使用任务随后调用 `.scripts/route.py --task <task>`；建设任务先调用 `.scripts/route.py --task build` 加载轻量方法卡，再按“建设任务”执行 impact。路由卡提供当前任务边界，不代替工程文档。其中：
+使用任务随后调用 `.scripts/route.py --task <task>`；建设任务先调用 `.scripts/route.py --task build` 加载轻量方法卡，再按“建设任务”执行 impact。路由卡提供当前任务边界，不代替工程文档。当前对话上下文首次执行公共域摄入时是例外：完成参数判断后先调用 ingest 路由的 `--context-warmup --format json`，以返回的 `ingest-context-warmup-v1` 作为一次性预热回执，不同时加载完整摄入规范；同一上下文后续摄入、batch item、stage 切换与 resume 不重复预热，也不把回执写成仓库或机器级标记。无法确认当前上下文是否已有回执时可低成本重跑；private 不执行该预热。其中：
 
 - `query` 从 `--query-stage start` 开始；候选定位后用 `evidence`，有明确缺口才用 `continue`，交付前用 `answer`。
-- `ingest` 显式给出 `--subproject academic|admin|teaching|business`、`--mode create|update|batch`、`--content paper|other` 和 `--source-kind ordinary|meeting`；`create` 再给单个 `--stage 1|2|3`。`source-kind` 由内容语义决定，扩展名不构成会议来源判据。
+- `ingest` 显式给出 `--subproject academic|admin|teaching|business|private`、`--mode create|update|batch`、`--content paper|other` 和 `--source-kind ordinary|meeting`；`create` 再给单个 `--stage 1|2|3`。首次预热后直接调用受管功能入口；仅手动旧流程或程序任务明确要求时再加载完整当前 stage 卡。`source-kind` 由内容语义决定，扩展名不构成会议来源判据。
 - `research` 等 task 表示持续状态；实际落笔按需加载 `write` capability，不切换研究状态。`wg.py` 暴露可组合的结构化执行工具。
 
 ## 使用任务
@@ -42,6 +42,7 @@ python3 .scripts/playbook_dispatch.py '指令关键词'
 - 路由前只做补齐参数或定位目标所需的最小读取，不预读规范全文、SCHEMA 或脚本源码。
 - 路由后以任务卡和派发规范为操作边界；只有任务卡要求、参数仍不确定或命令报错时才定向补读。
 - 功能性任务调用已封装入口；Raw/Wiki locator 是事实证据地址，engineering locator 只服务建设定位。
+- 图像、Word/PDF 预览与版式验证遵循“结构化检查优先，局部视觉抽检兜底”：先用解析器、元数据、文本/表格结构和确定性校验完成可机械检查项；仅对无法机械判断的排版、截断、重叠等问题查看图像，优先低分辨率或局部裁剪，避免重复加载整页高分辨率图。`visualize` 仅在创建或交互探索可视化能实质改善理解时调用，不作为现有图片审阅的替代。
 
 ## 建设任务
 

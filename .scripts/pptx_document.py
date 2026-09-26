@@ -255,6 +255,8 @@ def validated(source: Path, directory: Path) -> tuple[str, dict, list[dict]]:
     for page, original in zip(manifest["pages"], expected["pages"]):
         if any(page.get(k) != v for k, v in original.items()):
             raise PPTXError("PPTX 页清单内容与原件不一致")
+    if review.get("schema") == "pptx-api-review-v1":
+        return _validated_api(source, directory, manifest, review)
     if review.get("schema") != REVIEW_SCHEMA or any(review.get(k) != manifest[k] for k in ("source_sha256", "native_sha256")):
         raise PPTXError("PPTX 复核记录未绑定原件/原生文本")
     if file_hash(directory / "pptx-renders" / "source-slides.pdf") != manifest["render_sha256"]:
@@ -314,6 +316,59 @@ def validated(source: Path, directory: Path) -> tuple[str, dict, list[dict]]:
     receipt = {"schema": "pptx-source-v1", "source_sha256": manifest["source_sha256"],
                "native_sha256": manifest["native_sha256"], "text_sha256": digest(companion.encode()),
                "render_sha256": manifest["render_sha256"], "reviewer": reviewer,
+               "review_status": "reviewed_with_limits" if warnings else "reviewed",
+               "pages": archived, "warnings": warnings}
+    return companion, receipt, warnings
+
+
+def prepare_api_review(source: Path, directory: Path, *, allow_remote=False, retry_failed=False) -> dict:
+    """Only API sees page images; shared validation still owns source integrity."""
+    import pptx_visual
+    analysis = pptx_visual.analyze(source, directory=directory, mode="content",
+                                   allow_remote=allow_remote, retry_failed=retry_failed)
+    if analysis["status"] != "complete":
+        return analysis
+    manifest = _read_json(directory / "pptx-manifest.json")
+    review = {"schema": "pptx-api-review-v1", "source_sha256": manifest["source_sha256"],
+              "native_sha256": manifest["native_sha256"], "pages": analysis["pages"]}
+    pptx_visual.write(directory / "pptx-review.json", review)
+    return analysis
+
+
+def _validated_api(source, directory, manifest, review):
+    import pptx_visual
+    import pptx_structure
+    if any(review.get(k) != manifest[k] for k in ("source_sha256", "native_sha256")):
+        raise PPTXError("API review source binding mismatch")
+    if file_hash(directory / "pptx-renders/source-slides.pdf") != manifest["render_sha256"]:
+        raise PPTXError("PPTX render changed")
+    structure = pptx_structure.extract(source)
+    pages = review.get("pages", [])
+    if not isinstance(pages, list) or len(pages) != len(manifest["pages"]):
+        raise PPTXError("API review must cover every slide")
+    warnings, blocks, archived = [], [], []
+    for original, shape, checked in zip(manifest["pages"], structure["pages"], pages):
+        try:
+            pptx_visual.validate_receipt(checked, image=directory / "pptx-renders" / original["image"],
+                mode="content", source_sha256=manifest["source_sha256"], page=shape)
+        except ValueError as exc:
+            raise PPTXError(str(exc)) from exc
+        result = checked["result"]
+        if result["verdict"] in ("fail", "not_checked") or any(x["critical"] for x in result["limitations"]):
+            raise PPTXError(f"第 {original['number']} 页API识读存在关键未决项；保留结果，需定向复核")
+        block = original["text"].rstrip()
+        if result["supplement"].strip():
+            block += "\n\n### 页面可见信息补充（API视觉识读，非原生文本）\n" + "\n".join("> " + l for l in result["supplement"].strip().splitlines())
+        limits = result["limitations"] + [{"detail": i["description"], "critical": False} for i in result["issues"]]
+        if limits:
+            block += "\n\n### 复核限制（非原文）\n" + "\n".join("> " + l["detail"].replace("\n", " ") for l in limits)
+            warnings.extend({"issue": "pptx_review_limit", "detail": f"第 {original['number']} 页：{l['detail']}"} for l in limits)
+        blocks.append(block + "\n")
+        archived.append({k:v for k,v in checked.items() if k != "receipt_path"})
+    companion = manifest["header"] + "\n".join(blocks)
+    receipt = {"schema": "pptx-source-v2", "source_sha256": manifest["source_sha256"],
+               "native_sha256": manifest["native_sha256"], "text_sha256": digest(companion.encode()),
+               "render_sha256": manifest["render_sha256"], "reviewer": {"kind": "api", "name": "pptx_visual"},
                "review_status": "reviewed_with_limits" if warnings else "reviewed",
                "pages": archived, "warnings": warnings}
     return companion, receipt, warnings

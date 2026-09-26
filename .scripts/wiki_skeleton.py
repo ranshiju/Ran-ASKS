@@ -124,13 +124,19 @@ def find_admin_raw(subproject, wiki_dir, page_id):
 
 # ===== 从 paper.md 机械提取 =====
 _JOURNAL_HEADER_RE = re.compile(r"(?i)\b(?:VOLUME|VOL\.?)\s*\d")
+_GENERIC_H1_TITLE_RE = re.compile(
+    r"^(?:PERSPECTIVES?|ARTICLES?|LETTERS?|COMMUNICATIONS?)$", re.I,
+)
 
 def extract_title_from_papermd(paper_path):
     """从 paper.md 第一个非期刊页眉的 # 行提取标题。"""
     text = (REPO / paper_path).read_text(encoding="utf-8")
     for m in re.finditer(r'^# (.+)$', text, re.M):
         title = m.group(1).strip()
-        if not _JOURNAL_HEADER_RE.search(title):
+        if (
+            not _JOURNAL_HEADER_RE.search(title)
+            and not _GENERIC_H1_TITLE_RE.fullmatch(title)
+        ):
             return title
     return ""
 

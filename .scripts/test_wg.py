@@ -137,8 +137,142 @@ def test_parser_has_all_subcommands():
     # 子命令名在 choices
     for cmd in ("lookup", "neighbors", "relations", "hub-of", "read-section",
                 "read-raw", "recall", "remember", "workspace", "abbr", "frontier",
-                "ingest", "cv"):
+                "ingest", "task", "cv"):
         assert cmd in _subcommand_names(ap), f"缺子命令 {cmd}"
+
+
+def test_task_inspect_reports_missing_outputs_without_running_action():
+    state = {"status": "prepared", "transaction_id": "txn", "agent_task": {
+        "schema": "agent-task-v1", "status": "prepared", "kind": "demo",
+        "transaction_id": "txn", "inputs": [], "outputs": [],
+        "protocol": {"name": "demo-v1"}, "issues": [],
+        "commands": {"resume": "python3 .scripts/demo.py --resume txn"},
+        "context": {},
+    }}
+    original_load = module.inbox_state.load
+    original_view = module.agent_task.control_view
+    module.inbox_state.load = lambda _txn: state
+    module.agent_task.control_view = lambda _state, _repo: {
+        "workflow_status": "awaiting_agent", "internal_status": "prepared",
+        "next_action": "write_outputs", "missing_outputs": ["temp/demo/result.json"],
+        "task": state["agent_task"],
+    }
+    try:
+        args = type("A", (), {
+            "transaction_id": "txn", "task_action": "inspect", "task_command": "read",
+        })()
+        result = capture_call(module.cmd_task, args)
+    finally:
+        module.inbox_state.load = original_load
+        module.agent_task.control_view = original_view
+    assert result["ok"] is True
+    assert result["result"]["next_action"] == "write_outputs"
+
+
+def test_task_advance_checks_before_commit():
+    state = {"status": "prepared", "transaction_id": "txn", "agent_task": {
+        "schema": "agent-task-v1", "status": "prepared", "kind": "demo",
+        "transaction_id": "txn", "inputs": [], "outputs": [],
+        "protocol": {"name": "demo-v1"}, "issues": [],
+        "commands": {"check": "check", "commit": "commit"}, "context": {},
+    }}
+    calls = []
+    original_load = module.inbox_state.load
+    original_view = module.agent_task.control_view
+    original_run = module._run_task_action
+    module.inbox_state.load = lambda _txn: state
+    module.agent_task.control_view = lambda _state, _repo: {
+        "workflow_status": "awaiting_agent", "internal_status": "prepared",
+        "next_action": "advance", "missing_outputs": [], "task": state["agent_task"],
+    }
+    module._run_task_action = lambda _state, action: (
+        calls.append(action) or {
+            "action": action, "returncode": 0, "command": [action],
+            "environment_overrides": [], "error": "",
+            "result": ({"status": "ready_to_commit", "workflow_status": "ready_to_commit"}
+                       if action == "check" else {"status": "completed"}),
+        }
+    )
+    try:
+        args = type("A", (), {
+            "transaction_id": "txn", "task_action": "advance", "task_command": "read",
+        })()
+        result = capture_call(module.cmd_task, args)
+    finally:
+        module.inbox_state.load = original_load
+        module.agent_task.control_view = original_view
+        module._run_task_action = original_run
+    assert result["ok"] is True
+    assert calls == ["check", "commit"]
+    assert [item["action"] for item in result["result"]["executions"]] == calls
+
+
+def test_task_advance_stops_after_rejected_check():
+    state = {"status": "prepared", "transaction_id": "txn", "agent_task": {
+        "schema": "agent-task-v1", "status": "prepared", "kind": "demo",
+        "transaction_id": "txn", "inputs": [], "outputs": [],
+        "protocol": {"name": "demo-v1"}, "issues": [],
+        "commands": {"check": "check", "commit": "commit"}, "context": {},
+    }}
+    calls = []
+    original_load = module.inbox_state.load
+    original_view = module.agent_task.control_view
+    original_run = module._run_task_action
+    module.inbox_state.load = lambda _txn: state
+    module.agent_task.control_view = lambda _state, _repo: {
+        "workflow_status": "awaiting_agent", "internal_status": "prepared",
+        "next_action": "advance", "missing_outputs": [], "task": state["agent_task"],
+    }
+    module._run_task_action = lambda _state, action: (
+        calls.append(action) or {
+            "action": action, "returncode": 0, "command": [action],
+            "environment_overrides": [], "error": "",
+            "result": {"status": "validation_error", "errors": ["bad output"]},
+        }
+    )
+    try:
+        args = type("A", (), {
+            "transaction_id": "txn", "task_action": "advance", "task_command": "read",
+        })()
+        result = capture_call(module.cmd_task, args)
+    finally:
+        module.inbox_state.load = original_load
+        module.agent_task.control_view = original_view
+        module._run_task_action = original_run
+    assert calls == ["check"]
+    assert result["result"]["next_action"] == "repair_outputs"
+
+
+def test_task_advance_requires_declared_outputs_before_running_action():
+    state = {"status": "prepared", "transaction_id": "txn", "agent_task": {
+        "schema": "agent-task-v1", "status": "prepared", "kind": "demo",
+        "transaction_id": "txn", "inputs": [], "outputs": [],
+        "protocol": {"name": "demo-v1"}, "issues": [],
+        "commands": {"resume": "resume"}, "context": {},
+    }}
+    calls = []
+    original_load = module.inbox_state.load
+    original_view = module.agent_task.control_view
+    original_run = module._run_task_action
+    module.inbox_state.load = lambda _txn: state
+    module.agent_task.control_view = lambda _state, _repo: {
+        "workflow_status": "awaiting_agent", "internal_status": "prepared",
+        "next_action": "write_outputs", "missing_outputs": ["temp/demo/result.json"],
+        "task": state["agent_task"],
+    }
+    module._run_task_action = lambda _state, action: calls.append(action)
+    try:
+        args = type("A", (), {
+            "transaction_id": "txn", "task_action": "advance", "task_command": "read",
+        })()
+        result = capture_call(module.cmd_task, args)
+    finally:
+        module.inbox_state.load = original_load
+        module.agent_task.control_view = original_view
+        module._run_task_action = original_run
+    assert result["ok"] is False
+    assert result["status"] == "empty"
+    assert calls == []
 
 
 def test_cv_wrapper_preserves_json_and_failure_status():
@@ -550,7 +684,7 @@ def test_read_raw_oversized_locator_requires_refinement():
 
 
 def test_read_raw_pdf_page_native():
-    """有文本层 PDF 使用原始页码 locator，不需要 Markdown companion。"""
+    """历史 PDF 没有 companion 时仍可回退原生页码 locator。"""
     import fitz
     TEMP_TEST_DIR.mkdir(parents=True, exist_ok=True)
     p = TEMP_TEST_DIR / "native_pages.pdf"
@@ -566,6 +700,56 @@ def test_read_raw_pdf_page_native():
         assert d["ok"] is True
         assert "second page" in d["result"]["text"]
         assert "first page" not in d["result"]["text"]
+    finally:
+        cleanup()
+
+
+def test_read_raw_pdf_prefers_paginated_companion():
+    """有 companion 的 PDF 从 Markdown 读取，但引用来源保持为 PDF。"""
+    import fitz
+    TEMP_TEST_DIR.mkdir(parents=True, exist_ok=True)
+    original = TEMP_TEST_DIR / "managed_pages.pdf"
+    companion = TEMP_TEST_DIR / "managed_pages.md"
+    document = fitz.open()
+    document.new_page().insert_text((72, 72), "native first")
+    document.new_page().insert_text((72, 72), "native second")
+    document.save(str(original))
+    document.close()
+    companion.write_text(
+        "# Managed pages\n\n## Page 1\n\nprojected first\n\n## Page 2\n\nprojected second\n",
+        encoding="utf-8",
+    )
+    record = module.sl.make_companion_record(
+        original, companion, generator={"name": "test", "version": "1"},
+        generated_at="2026-09-26T00:00:00+00:00", locator_scheme="page-heading",
+        method="test-projection", limitations=["synthetic fixture"],
+    )
+    original.with_name(original.name + ".source.json").write_text(
+        json.dumps({"schema": "document-source-context-v1", "companion": record}),
+        encoding="utf-8",
+    )
+    try:
+        original_rel = original.resolve().relative_to(REPO).as_posix()
+        companion_rel = companion.resolve().relative_to(REPO).as_posix()
+        result = capture_call(
+            module.cmd_read_raw,
+            type("A", (), {"locator": f"{original_rel}#page-2"})(),
+        )
+        assert result["ok"] is True
+        assert result["result"]["text"] == "projected second"
+        assert result["result"]["source_path"] == original_rel
+        assert result["result"]["read_path"] == companion_rel
+        assert result["result"]["companion_binding"]["status"] == "valid"
+        assert result["sources"] == [original_rel]
+        companion.write_text("tampered projection", encoding="utf-8")
+        rejected = capture_call(
+            module.cmd_read_raw,
+            type("A", (), {"locator": f"{original_rel}#page-2"})(),
+        )
+        assert rejected["ok"] is False
+        assert rejected["status"] == "error"
+        assert rejected["result"]["companion_binding"]["reason"] == "companion_hash_mismatch"
+        assert "text" not in rejected["result"]
     finally:
         cleanup()
 
@@ -694,6 +878,7 @@ def main():
     test_read_raw_explicit_fact_anchor_returns_only_bound_assertion()
     test_read_raw_oversized_locator_requires_refinement()
     test_read_raw_pdf_page_native()
+    test_read_raw_pdf_prefers_paginated_companion()
     test_read_raw_binary_uses_companion_and_cites_original()
     test_read_raw_binary_without_companion_is_not_verified()
     test_read_raw_text_image_uses_companion_without_decoding_image()

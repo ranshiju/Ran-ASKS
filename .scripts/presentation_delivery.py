@@ -201,9 +201,9 @@ class Delivery:
                 selected_content = {sid: exported_content[sid] for sid in slide_ids}
                 if kind == 'form-check':
                     for sid in slide_ids:
-                        inputs.append({'name': 'final_' + sid, 'path': rel(folder / receipt['artifacts']['preview:' + sid])})
+                        inputs.append({'name': 'final_' + sid, 'path': rel(folder / receipt['artifacts']['preview:' + sid]), 'read': 'reference'})
                         approved = state['slides'][sid]['build']['artifacts']['preview']['sha256']
-                        inputs.append({'name': 'approved_' + sid, 'path': rel(self.store.root / f'assets/{approved}.png')})
+                        inputs.append({'name': 'approved_' + sid, 'path': rel(self.store.root / f'assets/{approved}.png'), 'read': 'reference'})
             request_id = uuid.uuid4().hex
             intent = {'kind': kind, 'expected_revision': expected_revision, 'slide_ids': slide_ids,
                       'instruction': instruction, 'question': question, 'output_id': output_id,
@@ -233,11 +233,55 @@ class Delivery:
                           'section': '阶段1B 导出与按需操作协议', 'operation': kind},
                 issues=[{'message': 'Only the requested scope; no fabricated user consent or semantic certification'}],
                 commands={'check': command.format('check'), 'commit': command.format('commit'),
+                          **({'refresh': command.format('form-api') + ' --allow-remote'} if kind == 'form-check' else {}),
                           'resume': 'python3 .scripts/presentation_delivery.py status --store ' + shlex.quote(rel(self.store.root))},
                 context={'label': LABELS[kind], 'question': question, 'instruction': instruction,
-                         'source_policy': 'local_only', 'semantic_executor': 'current_host_agent'})
+                         'source_policy': 'local_only', 'semantic_executor': 'pptx_visual_api' if kind == 'form-check' else 'current_host_agent'})
             ps._write(directory / 'task.json', ps.json_bytes(task))
             return task
+
+    def _form_inputs(self, state, base, folder, sid):
+        import pptx_structure
+        ps.require(not any(s.get('sensitivity')=='private' or 'private' in Path(s['path']).parts for s in state['slides'][sid]['content']['sources']), 'Private source cannot be uploaded')
+        pptx = folder / base['artifacts']['pptx']
+        data = pptx_structure.extract(pptx)
+        order = [x['content']['slide_id'] for x in ps.load_json(folder / 'deck-content.json')]
+        page = data['pages'][order.index(sid)]
+        image = folder / base['artifacts']['preview:' + sid]
+        approved = self.store.root / 'assets' / (state['slides'][sid]['build']['artifacts']['preview']['sha256'] + '.png')
+        return pptx, image, approved, page
+
+    def _validate_api_form(self, item, state, base, folder):
+        import pptx_visual
+        pptx, image, approved, page = self._form_inputs(state, base, folder, item['slide_id'])
+        r = pptx_visual.validate_receipt(item['api_receipt'], image=image, reference=approved,
+                mode='form-check', source_sha256=render.file_hash(pptx), page=page)
+        verdict = {'pass': 'passed', 'warn': 'issues_found', 'fail': 'issues_found', 'not_checked': 'unable_to_check'}[r['result']['verdict']]
+        ps.require(item['verdict'] == verdict, 'API form verdict changed')
+
+    def form_api(self, result, *, allow_remote=False):
+        import pptx_visual
+        _, request = _read(self._root('requests'), result['request_id'])
+        intent = ps.load_json(request / 'intent.json')
+        ps.require(intent['kind'] == 'form-check' and result['intent_sha256'] == render.digest(intent), 'Explicit form request required')
+        state = self._current(intent['expected_revision'])
+        ps.require(render.digest(state) == intent['state_sha256'], 'Requested state changed')
+        base, folder = self._output(intent['output_id'])
+        ps.require(render.file_hash(folder / 'receipt.json') == intent['output_receipt_sha256'], 'Requested output changed')
+        items = []
+        for sid in intent['slide_ids']:
+            pptx, image, approved, page = self._form_inputs(state, base, folder, sid)
+            r = pptx_visual.analyze_image(image, mode='form-check', source_sha256=render.file_hash(pptx), page=page,
+                                          reference=approved, allow_remote=allow_remote)
+            if r['status'] != 'complete': return {'status':'partial','page':sid,'reason':r.get('reason')}
+            v = r['result']; findings = [x['description'] for x in v['issues']] + [x['detail'] for x in v['limitations']]
+            verdict = {'pass':'passed','warn':'issues_found','fail':'issues_found','not_checked':'unable_to_check'}[v['verdict']]
+            if verdict != 'passed' and not findings: findings = [v['summary'] or 'API could not complete inspection']
+            items.append({'slide_id':sid, 'verdict':verdict, 'findings':findings,
+                         'inspected_preview_sha256':render.file_hash(image), 'approved_preview_sha256':render.file_hash(approved), 'api_receipt':r})
+        candidate = dict(result, actor='pptx_visual API', summary='API form inspection; no user approval', items=items)
+        self.apply(candidate, dry_run=True)
+        return candidate
 
     def _quote(self, source, locator, quote):
         """Check exact source location/quote only, never whether it supports a claim."""
@@ -284,13 +328,16 @@ class Delivery:
         used_fields = set()
         for item in items:
             if kind == 'form-check':
-                ps.fields(item, 'slide_id verdict findings inspected_preview_sha256 approved_preview_sha256')
+                ps.fields(item, 'slide_id verdict findings inspected_preview_sha256 approved_preview_sha256'
+                          + (' api_receipt' if 'api_receipt' in item else ''))
                 sid = item['slide_id']
                 ps.require(item['verdict'] in {'passed', 'issues_found', 'unable_to_check'}, 'Invalid form verdict')
                 ps.require(isinstance(item['findings'], list) and all(isinstance(x, str) and x.strip() for x in item['findings']), 'Invalid findings')
                 ps.require(item['verdict'] == 'passed' or item['findings'], 'Non-pass review must explain findings')
                 ps.require(item['inspected_preview_sha256'] == base['files'][base['artifacts']['preview:' + sid]], 'Wrong final preview')
                 ps.require(item['approved_preview_sha256'] == state['slides'][sid]['build']['artifacts']['preview']['sha256'], 'Wrong approved preview')
+                if 'api_receipt' in item:
+                    self._validate_api_form(item,state,base,folder)
             elif kind == 'evidence-check':
                 ps.fields(item, 'slide_id claim verdict reason evidence')
                 sid = item['slide_id']; ps.text(item['claim']); ps.text(item['reason'], 6000)
@@ -343,7 +390,8 @@ class Delivery:
             statuses = _unchecked(); statuses[kind] = 'executed'
             record = {'kind': kind, 'revision_id': state['session']['revision_id'], 'assistance': statuses,
                       'origin_state_sha256': render.digest(state), 'request_id': result['request_id'],
-                      'semantic_executor': 'host_agent', 'user_approval': 'not_requested', 'remote_calls': 0}
+                      'semantic_executor': 'pptx_visual_api' if kind == 'form-check' and all('api_receipt' in i for i in result['items']) else 'host_agent',
+                      'user_approval': 'not_requested', 'remote_calls': sum(len(i.get('api_receipt',{}).get('attempts',[])) for i in result['items'])}
             files = {'result.json': ps.json_bytes(result), 'intent.json': ps.json_bytes(intent),
                      'context.json': (self._root('requests') / result['request_id'] / 'context.json')}
             if kind == 'citation-redact':
@@ -361,7 +409,7 @@ class Delivery:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('export', 'status', 'prepare', 'check', 'commit'):
+    for name in ('export', 'status', 'prepare', 'check', 'commit', 'form-api'):
         command = sub.add_parser(name)
         command.add_argument('--store', required=True)
         if name in ('export', 'prepare'):
@@ -372,7 +420,9 @@ def main(argv=None):
             command.add_argument('--instruction', required=True, help='Actual user request, not inferred authorization')
             command.add_argument('--question')
             command.add_argument('--output-id')
-        if name in ('check', 'commit'):
+        if name == 'form-api':
+            command.add_argument('--allow-remote', action='store_true')
+        if name in ('check', 'commit', 'form-api'):
             command.add_argument('--result', required=True)
     args = parser.parse_args(argv)
     try:
@@ -384,6 +434,12 @@ def main(argv=None):
         elif args.command == 'prepare':
             result = delivery.prepare(args.kind, args.expected_revision, args.slides, args.instruction,
                                       output_id=args.output_id, question=args.question)
+        elif args.command == 'form-api':
+            result = delivery.form_api(ps.load_json(args.result), allow_remote=args.allow_remote)
+            if result.get('schema') == RESULT_SCHEMA:
+                path = Path(args.result).resolve()
+                ps.require(path.is_relative_to(delivery.store.repo / 'temp'), 'Candidate must stay in temp')
+                ps._write(path, ps.json_bytes(result))
         else:
             result = delivery.apply(ps.load_json(args.result), dry_run=args.command == 'check')
         print(json.dumps(result, ensure_ascii=False, indent=2))

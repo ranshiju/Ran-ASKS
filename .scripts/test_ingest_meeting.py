@@ -17,6 +17,7 @@ if str(REPO / ".scripts") not in sys.path:
     sys.path.insert(0, str(REPO / ".scripts"))
 
 import ingest_meeting as meeting
+import graph_ingest
 import llm_structured
 from meeting_compiler_contract import PROTOCOL_VERSION
 
@@ -86,14 +87,19 @@ updated: 2026-09-03
 ### 知识库
 - 任胜泉讨论知识库。
 """,
-        "semantic_slots": """参会者:
-cnu-ren-shengquan
-汇报者:
-决策:
-待办:
-三元组:
-本会议 | 讨论 | 知识库knowledge base
-""",
+        "meeting_ir": {
+            "protocol_version": PROTOCOL_VERSION,
+            "attendees": [{"person": "cnu-ren-shengquan", "label": "任胜泉",
+                           "evidence_ids": ["s0001"]}],
+            "topics": [{"label": "知识库knowledge base", "predicate": "讨论",
+                        "evidence_ids": ["s0001"]}],
+            "reports": [{"person": "cnu-ren-shengquan", "person_label": "任胜泉",
+                         "topic": "知识库knowledge base", "evidence_ids": ["s0001"]}],
+            "decisions": [{"text": "采用知识库方案", "evidence_ids": ["s0001"]}],
+            "tasks": [{"text": "验证知识库方案", "assignee": "cnu-ren-shengquan",
+                       "assignee_label": "任胜泉", "evidence_ids": ["s0001"]}],
+            "relations": [],
+        },
     }
 
 
@@ -108,12 +114,12 @@ doc_type: meeting
 %s
 <<<WIKI>>>
 %s
-<<<SLOTS>>>
+<<<MEETING_IR>>>
 %s
 """ % (
         json.dumps(proposal["preprocess"], ensure_ascii=False),
         proposal["wiki_markdown"],
-        proposal["semantic_slots"],
+        json.dumps(proposal["meeting_ir"], ensure_ascii=False),
     )
 
 
@@ -165,6 +171,8 @@ def test_api_path_uses_one_compiler_for_all_semantic_outputs():
         assert len(calls) == 1
         assert "任胜泉讨论知识库" in (work / "corrected.txt").read_text(encoding="utf-8")
         assert state["slots_content"].startswith("参会者:")
+        assert "验证知识库方案 | cnu-ren-shengquan" in state["slots_content"]
+        assert "本会议 | 讨论 | 知识库knowledge base" in state["slots_content"]
         assert state["semantic_worker"] == "meeting-compiler-api"
         assert state["meeting_id"] == "0903-测试会议"
         assert state["meeting_id_source"] == "compiler_meta"
@@ -173,12 +181,48 @@ def test_api_path_uses_one_compiler_for_all_semantic_outputs():
         assert resolution["protocol_version"] == PROTOCOL_VERSION
         assert resolution["compiler_entity_resolutions"][0]["canonical"] == "cnu-ren-shengquan"
         assert state["raw_dir"] in (work / "wiki.md").read_text(encoding="utf-8")
+        rendered = (work / "wiki.md").read_text(encoding="utf-8")
+        assert "## 会议导航" in rendered and "### 待办事项" in rendered
+        assert "[^meeting-s0001]:" in rendered and "#L1" in rendered
+        assert (work / "meeting-ir.json").is_file()
+        fm, _body = meeting._meeting_frontmatter(rendered)
+        triples, *_rest = graph_ingest.parse_semantic_text(
+            state["slots_content"], state["wiki_path"], fm,
+        )
+        locator_report = graph_ingest.attach_wiki_section_sources(
+            triples, state["wiki_path"], page_file=work / "wiki.md",
+            raw_overrides={
+                f"{state['raw_dir']}/{state['source_filename']}": REPO / state["source"],
+            },
+        )
+        assert locator_report == {"located_edges": len(triples), "unlocated_edges": 0}
         ok, error = meeting.step_write_slots(state)
         assert ok, error
         assert len(calls) == 1
     finally:
         meeting.run_api_meeting_compiler = original_runner
         meeting.ingest_mode = original_mode
+        shutil.rmtree(work)
+
+
+def test_meeting_ir_rejects_unbound_evidence_before_staging():
+    work = _workspace()
+    try:
+        state = _state(work)
+        proposal = _proposal()
+        proposal["meeting_ir"]["tasks"][0]["evidence_ids"] = ["s9999"]
+        result = SimpleNamespace(
+            status="compiled", reason="proposal_ready", proposal=proposal,
+            trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "compiled"},
+        )
+        with patch.object(meeting, "run_api_meeting_compiler", return_value=result), patch.object(
+            meeting, "ingest_mode", return_value="api",
+        ):
+            ok, error = meeting.step_write_wiki(state)
+        assert not ok and "evidence" in error
+        assert not (work / "meeting-ir.json").exists()
+        assert not (work / "wiki.md").exists()
+    finally:
         shutil.rmtree(work)
 
 
@@ -219,40 +263,81 @@ def test_date_context_preserves_explicit_year_and_marks_mmdd_inference():
     }
 
 
-def test_dedup_uses_full_date_and_subproject_scope():
+def test_dedup_same_date_different_meeting_continues():
+    with tempfile.TemporaryDirectory() as temporary:
+        repo = Path(temporary)
+        source = repo / "inbox/20250901-2.txt"
+        stored = repo / "academic/raw/conferences/2025/0901-first-topic/0901-1.txt"
+        source.parent.mkdir(parents=True)
+        stored.parent.mkdir(parents=True)
+        source.write_text("会议主题：第二个课题\n不同议程。", encoding="utf-8")
+        stored.write_text("会议主题：第一个课题\n已有议程。", encoding="utf-8")
+        state = {"source": str(source.relative_to(repo)), "source_filename": source.name,
+                 "subproject": "academic", "dedup_result": [{"path": "stale"}]}
+        original_repo = meeting.REPO
+        try:
+            meeting.REPO = repo
+            duplicate, message = meeting.step_dedup_check(state)
+        finally:
+            meeting.REPO = original_repo
+        assert not duplicate and not message
+        assert "dedup_result" not in state
+
+
+def test_dedup_split_meeting_is_independent_of_segment_order():
+    for landed_name, landed_text, incoming_name, incoming_text in (
+        ("0901-1.txt", "同一会议前半段", "20250901-2.txt", "同一会议后半段"),
+        ("0901-2.txt", "同一会议后半段", "20250901-1.txt", "同一会议前半段"),
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            source = repo / "inbox" / incoming_name
+            stored = repo / "academic/raw/conferences/2025/0901-session" / landed_name
+            source.parent.mkdir(parents=True)
+            stored.parent.mkdir(parents=True)
+            source.write_text(incoming_text, encoding="utf-8")
+            stored.write_text(landed_text, encoding="utf-8")
+            state = {"source": str(source.relative_to(repo)), "source_filename": source.name,
+                     "subproject": "academic"}
+            original_repo = meeting.REPO
+            try:
+                meeting.REPO = repo
+                duplicate, message = meeting.step_dedup_check(state)
+            finally:
+                meeting.REPO = original_repo
+            assert not duplicate and not message
+            assert "dedup_result" not in state
+
+
+def test_dedup_exact_fingerprint_precedes_graph_and_date_candidates():
     import graph_lib
 
-    work = _workspace()
-    original_repo = meeting.REPO
-    original_connect = graph_lib.connect
-    queries = []
-
-    class FakeCursor:
-        def fetchall(self):
-            return []
-
-    class FakeConnection:
-        def execute(self, sql, params):
-            queries.append((sql, params))
-            return FakeCursor()
-
-        def close(self):
-            pass
-
-    try:
-        meeting.REPO = work
-        graph_lib.connect = lambda: FakeConnection()
-        duplicate, message = meeting.step_dedup_check({
-            "source_filename": "20250901-lab.txt", "subproject": "academic",
-        })
-        assert not duplicate and not message
-        assert queries[0][1] == (
-            "2025-09-01", "academic/wiki/conferences/%",
+    with tempfile.TemporaryDirectory() as temporary:
+        repo = Path(temporary)
+        source = repo / "inbox/renamed.txt"
+        stored = repo / "academic/raw/conferences/existing/source.txt"
+        source.parent.mkdir(parents=True)
+        stored.parent.mkdir(parents=True)
+        source.write_text("same meeting", encoding="utf-8")
+        stored.write_bytes(source.read_bytes())
+        meeting.sf.register_source(
+            stored, db_path=repo / "cross-domain/source-fingerprints.db", repo=repo,
         )
-    finally:
-        meeting.REPO = original_repo
-        graph_lib.connect = original_connect
-        shutil.rmtree(work)
+        state = {"source": "inbox/renamed.txt", "source_filename": source.name,
+                 "subproject": "academic"}
+        original_repo = meeting.REPO
+        try:
+            meeting.REPO = repo
+            with patch.object(graph_lib, "connect", side_effect=AssertionError("graph must not run")):
+                duplicate, message = meeting.step_dedup_check(state)
+            assert duplicate
+            assert "SHA-256" in message
+            assert state["dedup_result"] == [{
+                "path": "academic/raw/conferences/existing/source.txt",
+                "binary_sha256": meeting.sf.sha256_file(source),
+            }]
+        finally:
+            meeting.REPO = original_repo
 
 
 def test_mmdd_compiler_output_marks_inferred_date_and_rebases_id():
@@ -341,7 +426,7 @@ def test_exhausted_revision_handoff_uses_full_protocol_without_inline_source():
         assert state["agent_write_to"].endswith("agent-meeting-compiler.txt")
         assert "<<<PREPROCESS>>>" in state["agent_prompt"]
         assert "<<<WIKI>>>" in state["agent_prompt"]
-        assert "<<<SLOTS>>>" in state["agent_prompt"]
+        assert "<<<MEETING_IR>>>" in state["agent_prompt"]
         assert "任老师讨论知事库。" not in state["agent_prompt"]
         assert state["source"] in state["agent_prompt"]
         assert state["meeting_compiler"]["reason"] == "wiki_revision_budget_exhausted"
@@ -357,7 +442,7 @@ def test_prompt_requires_one_coherent_protocol():
     assert "同一上下文中一次性完成" in prompt
     assert "<<<PREPROCESS>>>" in prompt
     assert "<<<WIKI>>>" in prompt
-    assert "<<<SLOTS>>>" in prompt
+    assert "<<<MEETING_IR>>>" in prompt
     assert PROTOCOL_VERSION in prompt
     assert "只读事实源" in prompt
 
@@ -444,7 +529,7 @@ def test_wiki_retry_exhaustion_hands_off_full_compiler_protocol():
         handoffs.append(list(errors))
         current["handoff_reason"] = handoff_reason
         current["_awaiting_agent_wiki_slots"] = True
-        current["agent_prompt"] = "return <<<PREPROCESS>>> + <<<WIKI>>> + <<<SLOTS>>>"
+        current["agent_prompt"] = "return <<<PREPROCESS>>> + <<<WIKI>>> + <<<MEETING_IR>>>"
         current["agent_write_to"] = "temp/inbox-extract/meeting-unified-wiki-handoff/agent-meeting-compiler.txt"
         return True, ""
 
@@ -662,7 +747,9 @@ def test_source_binding_rebases_all_yaml_styles_in_both_backends():
                 expected = f"{state['raw_dir']}/{state['source_filename']}"
                 fm, _ = meeting._meeting_frontmatter(state["wiki_content"])
                 assert fm["sources"] == [expected], (backend, form, fm)
-                assert state["wiki_content"].split("\n---", 1)[1] == body
+                assert "### 知识库\n- 任胜泉讨论知识库。" in state["wiki_content"]
+                assert "## 会议导航" in state["wiki_content"]
+                assert "验证知识库方案" in state["wiki_content"]
                 assert meeting.step_validate_wiki(state) == []
                 assert (work / "wiki.md").read_text() == state["wiki_content"]
             finally:
@@ -701,9 +788,12 @@ def main():
     test_agent_parse_diagnostic_does_not_enter_api_retry()
     test_preprocess_only_builds_candidates()
     test_api_path_uses_one_compiler_for_all_semantic_outputs()
+    test_meeting_ir_rejects_unbound_evidence_before_staging()
     test_agent_path_prepares_task_without_entering_api_adapter()
     test_date_context_preserves_explicit_year_and_marks_mmdd_inference()
-    test_dedup_uses_full_date_and_subproject_scope()
+    test_dedup_same_date_different_meeting_continues()
+    test_dedup_split_meeting_is_independent_of_segment_order()
+    test_dedup_exact_fingerprint_precedes_graph_and_date_candidates()
     test_mmdd_compiler_output_marks_inferred_date_and_rebases_id()
     test_rejected_compiler_records_attempt_and_protocol_error()
     test_agent_task_roundtrip_consumes_same_protocol()

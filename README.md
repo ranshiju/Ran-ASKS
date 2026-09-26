@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.7.0
+> Current release: v0.8.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -142,6 +142,32 @@ maintains persistent revisions, separates draft approval from locking, applies
 constrained layouts, and produces deterministic delivery copies while carrying
 forward source-sensitivity rules. Presentation ingestion and presentation
 authoring remain distinct functions with explicit contracts.
+
+## Persistent handoff, isolated private work, and reusable slides
+
+Prepared Agent-mode ingestion can now be continued across host sessions through
+one transaction ID. `wg.py task inspect` reports the typed task, declared inputs
+and outputs, and the next managed action; `wg.py task advance` runs only the
+original check, resume, or commit command after required outputs exist. This
+keeps long-running work resumable without copying source text into a task log or
+turning temporary state into evidence.
+
+Private knowledge work uses a physically separate Raw/Wiki tree and
+`private/graph.db`. Its ingestion and query commands reuse deterministic
+validation and source-addressing rules, but never merge private nodes, indexes,
+or receipts into the public-domain graph. The source-available repository
+publishes these generic isolation tools and synthetic tests, not a user's
+private content or local state.
+
+Native presentations now have separate deterministic structure and
+source-bound visual-reading layers. Reusable slide components preserve their
+source deck, editability, layout profile, and receipt; project-specific artwork
+is created through a governed editable-vector path with explicit remote-call
+consent. Chat and embedding endpoints can also set `LLM_API_PATH` and
+`EMBED_API_PATH`, so providers with different compatible URL layouts do not
+require code changes. See the [ingestion contract](operations/INGEST.md),
+[presentation contract](operations/PRESENTATION.md), and
+[query contract](operations/QUERY.md).
 
 ## Image documents and reviewed ingestion
 

@@ -112,7 +112,8 @@ def classify_failure(state: dict) -> dict | None:
         )
     elif any(marker in text for marker in (
             "空输出", "schema 校验", "缺少 <<<", "missing <<<",
-            "invalid preprocess json", "invalid meeting-compiler-v1 preprocess proposal",
+            "invalid preprocess json", "invalid meeting compiler preprocess proposal",
+            "invalid meeting-compiler-v1 preprocess proposal",
     )):
         category = "worker_output_invalid"
         domain = "worker"

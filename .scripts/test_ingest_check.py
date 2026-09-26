@@ -8,6 +8,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ingest_check
 
 
+def test_venue_key_preserves_non_ascii_venue_names():
+    assert ingest_check._venue_key("新型炭材料") == "新型炭材料"
+    assert ingest_check._venue_key("新型炭材料") != ingest_check._venue_key("炭材料学报")
+    assert ingest_check._venue_key("The Journal of Testing (2024)") == "journaloftesting"
+
+
 def test_graph_flag_is_not_treated_as_path():
     import subprocess
     result = subprocess.run(
@@ -463,6 +469,7 @@ def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
 
 
 def main():
+    test_venue_key_preserves_non_ascii_venue_names()
     test_academic_non_paper_types_validate_in_final_domain()
     test_graph_checks_with_isolated_database()
     test_graph_checks_rejects_cross_layer_metadata_without_requiring_locator()

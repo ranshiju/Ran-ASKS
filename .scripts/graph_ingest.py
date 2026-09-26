@@ -16,6 +16,7 @@
   graph_ingest.py ingest --page <wiki路径> --triples-json '<JSON字符串>'
 """
 import argparse
+import hashlib
 import json
 import re
 import datetime
@@ -86,6 +87,8 @@ PRIVATE_NAV_PREDICATES = {
 PRIVATE_KW_PREDICATES = {"涉及", "讨论", "属于", "相关于", "基于"}
 
 _DOMAIN_PREDICATES = {
+    "academic": ({"涉及", "引用", "基于", "应用于", "作者", "发表于", "紧密相关于"},
+                 {"涉及", "引用", "基于", "应用于"}),
     "admin": (ADMIN_NAV_PREDICATES, {"涉及", "讨论", "形成决策", "推动", "申请事项", "适用对象"}),
     "teaching": (TEACHING_NAV_PREDICATES, TEACHING_KW_PREDICATES),
     "business": (BUSINESS_NAV_PREDICATES, BUSINESS_KW_PREDICATES),
@@ -102,7 +105,9 @@ TEMPORAL_PAGE_PREDICATE = "生效"
 
 
 def _get_domain_from_path(page_path):
-    """从 wiki 路径提取域前缀: admin/teaching/business/private。academic 走论文专用流程。"""
+    """Identify general-document navigation, leaving academic papers/meetings separate."""
+    if page_path.startswith(("academic/wiki/references/", "academic/wiki/editorials/")):
+        return "academic"
     for domain in ("admin", "teaching", "business", "private"):
         if page_path.startswith(f"{domain}/wiki/"):
             return domain
@@ -692,6 +697,40 @@ def resolve_related_path(page_path, target):
     return f"{sub}/wiki/{target}"
 
 
+def extract_teaching_prerequisite_edges(page_path, fm):
+    """Compile verified teaching topic links into deterministic graph relations."""
+    values = gl.parse_list_field(fm, "prerequisites")
+    if not values:
+        return []
+    if not page_path.startswith("teaching/wiki/"):
+        raise ValueError("prerequisites 只允许用于 teaching Wiki 页面")
+    edges = []
+    seen = set()
+    for value in values:
+        match = re.fullmatch(r"\[\[([^\]|#]+)\]\]", str(value).strip())
+        if not match:
+            raise ValueError(f"非法 teaching prerequisite，须为规范 Wiki link: {value!r}")
+        target = match.group(1).strip().removesuffix(".md")
+        if target.startswith("topics/"):
+            target = f"teaching/wiki/{target}"
+        if (not target.startswith("teaching/wiki/topics/")
+                or ".." in Path(target).parts):
+            raise ValueError(f"teaching prerequisite 必须指向 teaching/wiki/topics/: {value!r}")
+        if not (gl.REPO / f"{target}.md").is_file():
+            raise ValueError(f"teaching prerequisite 目标不存在: {target}")
+        if target in seen:
+            continue
+        seen.add(target)
+        edges.append({
+            "subject": page_path,
+            "predicate": "前置",
+            "object": target,
+            "subject_is_canonical": True,
+            "object_is_canonical": True,
+        })
+    return edges
+
+
 # ===== 机械边提取 =====
 
 def extract_mechanical_edges(page_path, fm=None):
@@ -727,6 +766,7 @@ def extract_mechanical_edges(page_path, fm=None):
                 "subject": page_path, "predicate": "引用", "object": resolved,
                 "subject_is_canonical": True, "object_is_canonical": True,
             })
+    edges.extend(extract_teaching_prerequisite_edges(page_path, fm))
     return edges
 
 
@@ -859,6 +899,9 @@ SIMILAR_PREDICATE = "相似"  # ADR-003: embedding resolve 的相似边,对称�
 # 方向谓词集(论文→研究方向 hub 的谓词,用于提取 direction_predicates)
 DIRECTION_PREDICATES = {"主要研究", "基于", "紧密相关于", "应用于", "贡献于", "延伸至", "涉及", "探索", "属于"}
 PROTECTED_ROUTE_PREDICATE = "主要研究"
+PAGE_SUBJECT_PRONOUNS = frozenset({
+    "本文件", "本文档", "本论文", "本会议", PAPER_SUBJECT_PLACEHOLDER,
+})
 
 
 def reject_protected_edge_proposals(triples, page: str) -> None:
@@ -871,6 +914,41 @@ def reject_protected_edge_proposals(triples, page: str) -> None:
             raise ValueError(
                 "page → 主要研究 → Hub 是受保护边；请使用 hub_semantics route-apply"
             )
+
+
+def normalize_page_subjects(triples, page: str, fm=None):
+    """Normalize owning-page pronouns identically for every semantic input channel."""
+    fm = fm or {}
+    domain = _get_domain_from_path(page)
+    is_paper = fm.get("type") == "paper-summary" or page.startswith(
+        "academic/wiki/papers/"
+    )
+    is_meeting = fm.get("type") == "conference-summary" or page.startswith(
+        "academic/wiki/conferences/"
+    )
+    allowed = set()
+    if domain is not None:
+        allowed.update({"本文件", "本文档"})
+    if is_paper:
+        allowed.add("本论文")
+    if is_meeting:
+        allowed.add("本会议")
+    normalized = []
+    unresolved = []
+    for index, triple in enumerate(triples or []):
+        item = dict(triple)
+        subject = str(item.get("subject") or "").strip()
+        if subject in allowed:
+            item["subject"] = page
+        elif subject in PAGE_SUBJECT_PRONOUNS:
+            unresolved.append({"index": index, "subject": subject})
+        normalized.append(item)
+    if unresolved:
+        detail = ", ".join(
+            f"#{item['index']}={item['subject']}" for item in unresolved
+        )
+        raise ValueError(f"semantic page subject pronoun was not resolved: {detail}")
+    return normalized
 
 # 语义槽已知的 section header 集合(论文/行政/会议类全覆盖)
 SEMANTIC_SECTION_HEADERS = {"期刊", "第一作者", "其他作者", "通讯作者", "三元组",
@@ -1019,7 +1097,7 @@ def parse_semantic_text(text, page_path, fm=None):
     triples = []
     sections, _diagnostics = parse_semantic_sections(text)
 
-    # 通用文档域: admin/teaching/business — 统一三元组格式
+    # General documents share the page-subject and navigation predicate contract.
     domain = _get_domain_from_path(page_path)
     if domain is not None:
         nav_preds, kw_preds = _DOMAIN_PREDICATES[domain]
@@ -1059,14 +1137,13 @@ def parse_semantic_text(text, page_path, fm=None):
             decision = item.strip()
             if decision:
                 triples.append({"subject": page_path, "predicate": "决策", "object": decision})
-        # 待办: 任务 | 负责人 → 人→待办→任务（任务作 keyword，不建独立节点）
+        # 待办: 任务 | 负责人 → 人→待办→文档作用域 task
         for item in sections.get("待办", []):
             parts = [x.strip() for x in item.split("|", 1)]
             if len(parts) == 2 and all(parts):
                 task, person_field = parts
                 for person in [p.strip() for p in person_field.split(",") if p.strip()]:
                     triples.append({"subject": person, "predicate": "待办", "object": task})
-                keywords.append(task)
         # 三元组: 主体|谓词|客体 (统一格式，同论文)
         for item in sections.get("三元组", []):
             parts = [x.strip() for x in item.split("|", 2)]
@@ -1255,7 +1332,7 @@ def semantic_subject_report(triples, page_path):
     """Report whether semantic-edge subjects resolve to the owning page."""
     resolved = sum(triple.get("subject") == page_path for triple in triples)
     placeholders = sum(
-        triple.get("subject") == PAPER_SUBJECT_PLACEHOLDER for triple in triples
+        triple.get("subject") in PAGE_SUBJECT_PRONOUNS for triple in triples
     )
     return {
         "resolved_subjects": resolved,
@@ -1838,7 +1915,7 @@ def _ensure_entity_node(conn, name, node_path, entity_subtype, title_idx, alias_
         title_idx.setdefault(name, []).append(node_path)
         # proposition 是描述性命题,非概念端点;其 decompose alias 不进 resolve 索引
         # (避免句内片段如「MPS」与概念 alias 冲突造成 resolve 歧义,同 build_name_index)
-        if entity_subtype != "proposition":
+        if entity_subtype not in {"proposition", "task"}:
             for a in aliases:
                 alias_idx.setdefault(a, []).append(node_path)
     return node_path
@@ -1860,10 +1937,19 @@ def _is_proposition_slot(name, triple, key):
         return True
     # 会议决策谓词的 object 是论断（会议说了什么），作 proposition 节点
     if pred == "决策" and key == "object":
-        return has_predicate_structure(name)
+        return True
     if pred == "包含" and key == "subject":  # 仅包含;相似(对称概念边)subject 非命题
         return True
     return is_descriptive_phrase(name)
+
+
+def _is_task_slot(triple, key):
+    return key == "object" and triple.get("predicate") == "待办"
+
+
+def _scoped_meeting_node_path(page_path: str, kind: str, title: str) -> str:
+    digest = hashlib.sha256(title.encode("utf-8")).hexdigest()[:16]
+    return f"{page_path}/{kind}/{digest}"
 
 
 def _build_subgraph(triples, page_path):
@@ -2083,7 +2169,7 @@ def add_knowledge_edges(
         for key in ("subject", "object"):
             name = t.get(key, "").strip()
             # 仅概念（非命题）进 concept_map：命题谓词 object / 包含边 subject 是命题，排除
-            if name and not _is_proposition_slot(name, t, key):
+            if name and not _is_proposition_slot(name, t, key) and not _is_task_slot(t, key):
                 kid = gl.extract_keyword_id(name)
                 if kid:
                     concept_map[name] = kid
@@ -2144,14 +2230,17 @@ def add_knowledge_edges(
                         "(entity_subtype IS NULL OR entity_subtype='')",
                         (target,),
                     )
-                if not _is_proposition_slot(name, t, key):
+                if not _is_proposition_slot(name, t, key) and not _is_task_slot(t, key):
                     resolved_mentions[name] = target
                 resolve_hits += 1
                 continue
             if decision and decision["action"].startswith("abstain"):
                 # 正常情况下已在上方整边过滤；保留防御性分支。
                 continue
-            if gl.node_exists(conn, name):
+            scoped_action = (decision or {}).get("action") in {
+                "create_scoped_task", "create_scoped_proposition",
+            }
+            if gl.node_exists(conn, name) and not scoped_action:
                 if is_person_reference(t, key):
                     conn.execute(
                         "UPDATE nodes SET entity_subtype='person' "
@@ -2167,7 +2256,7 @@ def add_knowledge_edges(
                         "(entity_subtype IS NULL OR entity_subtype='')",
                         (name,),
                     )
-                if not _is_proposition_slot(name, t, key):
+                if not _is_proposition_slot(name, t, key) and not _is_task_slot(t, key):
                     resolved_mentions[name] = name
                 continue
             if decision:
@@ -2194,9 +2283,20 @@ def add_knowledge_edges(
                     # 人物节点直接用原名
                     gl.ensure_node(conn, name, name, "entity", entity_subtype=subtype)
                     created_node_paths.add(name)
+                elif _is_task_slot(t, key):
+                    task_path = _scoped_meeting_node_path(page_path, "tasks", name)
+                    path_existed = gl.node_exists(conn, task_path)
+                    _ensure_entity_node(
+                        conn, name, task_path, "task", title_idx, alias_idx, t, key,
+                    )
+                    if not path_existed:
+                        created_node_paths.add(t[key])
                 elif _is_proposition_slot(name, t, key):
                     # proposition 节点：用 extract_descriptive_id 算 path（替换内嵌概念为 ID）
-                    prop_path = gl.extract_descriptive_id(name, concept_map, abbr_map)
+                    if (decision or {}).get("action") == "create_scoped_proposition":
+                        prop_path = _scoped_meeting_node_path(page_path, "decisions", name)
+                    else:
+                        prop_path = gl.extract_descriptive_id(name, concept_map, abbr_map)
                     existing_title = conn.execute(
                         "SELECT title FROM nodes WHERE path=?", (prop_path,)
                     ).fetchone()
@@ -2227,7 +2327,7 @@ def add_knowledge_edges(
                     resolve_ambig += 1
                 else:
                     nodes_created += 1
-            if not _is_proposition_slot(name, t, key):
+            if not _is_proposition_slot(name, t, key) and not _is_task_slot(t, key):
                 concept_map[name] = t[key]
                 resolved_mentions[name] = t[key]
         origin_source = str(t.get("source") or page_source_note or "")
@@ -2694,6 +2794,7 @@ def _cmd_ingest_locked(args):
     page = args.page.removesuffix(".md")
     page_file = _page_file_for(args, page)
     fm = gl.read_frontmatter(page_file)
+    prerequisite_edges = extract_teaching_prerequisite_edges(page, fm)
     for source in gl.parse_list_field(fm, "sources"):
         gl.validate_graph_target(gl.raw_node_path(source, page), _graph_db_path_for(args))
     raw_overrides = _staged_raw_overrides(args, fm)
@@ -2716,10 +2817,21 @@ def _cmd_ingest_locked(args):
         direct_semantic, direct_glosses = kir.semantic_proposal_content(
             direct_ir, page, fm
         )
+        direct_semantic = normalize_page_subjects(direct_semantic, page, fm)
     else:
         direct_semantic, direct_glosses = None, None
     structural_relations = _plan_raw_relationship(args, page, fm)
     conn = _connect_for(args)
+    missing_prerequisites = [
+        edge["object"] for edge in prerequisite_edges
+        if not gl.node_exists(conn, edge["object"])
+    ]
+    if missing_prerequisites:
+        conn.close()
+        raise ValueError(
+            "teaching prerequisite 目标尚未摄入 graph.db: "
+            + ", ".join(missing_prerequisites)
+        )
     origin_snapshot_before = _page_origin_snapshot(conn, page)
     # --clean: re-ingest 模式，清本页旧边后重建（单事务原子，无风险窗口）
     if getattr(args, "clean", False):
@@ -2832,6 +2944,7 @@ def _cmd_ingest_locked(args):
                 sem_text, page, fm
             )
             concept_glosses = parse_concept_glosses(sem_text)
+        sem_triples = normalize_page_subjects(sem_triples, page, fm)
         report["semantic_subjects"] = semantic_subject_report(sem_triples, page)
         if report["semantic_subjects"]["placeholder_subjects"]:
             raise ValueError("semantic subject placeholder was not resolved")
@@ -2910,6 +3023,22 @@ def _cmd_ingest_locked(args):
             else:
                 _dd["truly_orphan_keywords"] = []
         # 合并 + 可选 Wiki section locator + 补默认值。
+        mechanical_keys = {
+            (item.get("subject"), item.get("predicate"), item.get("object"))
+            for item in mechanical
+        }
+        duplicate_deterministic = [
+            item for item in sem_triples
+            if (item.get("subject"), item.get("predicate"), item.get("object"))
+            in mechanical_keys
+        ]
+        if duplicate_deterministic:
+            sem_triples = [
+                item for item in sem_triples if item not in duplicate_deterministic
+            ]
+            report["semantic_deterministic_duplicates_ignored"] = len(
+                duplicate_deterministic
+            )
         all_triples = mechanical + sem_triples
         report["edge_locators"] = attach_wiki_section_sources(
             all_triples, page, page_file=page_file, raw_overrides=raw_overrides,
@@ -2969,7 +3098,7 @@ def _cmd_ingest_locked(args):
         })
     else:
         # 兼容:直接 JSON / 引文自动模式
-        triples = []
+        triples = list(prerequisite_edges)
         if args.citations:
             # 引文自动模式:从 citations JSON 转 triples(引用+发表于)
             citations = json.loads(Path(args.citations).read_text(encoding="utf-8"))
@@ -2983,9 +3112,10 @@ def _cmd_ingest_locked(args):
                     triples.append({"subject": node, "predicate": "发表于", "object": venue})
             report["citations_processed"] = len(citations)
         elif args.triples:
-            triples = json.loads(Path(args.triples).read_text(encoding="utf-8"))
+            triples.extend(json.loads(Path(args.triples).read_text(encoding="utf-8")))
         elif args.triples_json:
-            triples = json.loads(args.triples_json)
+            triples.extend(json.loads(args.triples_json))
+        triples = normalize_page_subjects(triples, page, fm)
         reject_protected_edge_proposals(triples, page)
         report["semantic_subjects"] = semantic_subject_report(triples, page)
         if report["semantic_subjects"]["placeholder_subjects"]:
@@ -2995,7 +3125,7 @@ def _cmd_ingest_locked(args):
             triples, page, page_file=page_file, raw_overrides=raw_overrides,
         )
         fill_defaults(triples, fm)
-        deterministic_count = len(triples) if args.citations else 0
+        deterministic_count = len(triples) if args.citations else len(prerequisite_edges)
         knowledge_ir_doc, triples = _compile_knowledge_ir(
             args,
             page,

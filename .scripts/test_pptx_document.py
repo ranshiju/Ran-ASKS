@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pptx_document as ppt
 import ingest_document as ingest
 import visual_qa
+import pptx_visual
 
 P, A, R = ppt.NS['p'], ppt.NS['a'], ppt.NS['r']
 REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
@@ -68,7 +69,7 @@ class PPTXTests(unittest.TestCase):
         self.source.parent.mkdir()
         fixture(self.source)
         self.directory = self.repo / 'temp/inbox-extract/test'
-        for patcher in (patch.object(ppt, 'REPO', self.repo), patch.object(ingest, 'REPO', self.repo),
+        for patcher in (patch.object(ppt, 'REPO', self.repo), patch.object(ingest, 'REPO', self.repo), patch.object(pptx_visual, 'REPO', self.repo),
                         patch.object(visual_qa, '_prepare_source', side_effect=render_source),
                         patch.object(visual_qa, 'render_page', side_effect=render_page)):
             patcher.start()
@@ -159,7 +160,8 @@ class PPTXTests(unittest.TestCase):
                 with patch.object(ingest, 'call_text', side_effect=AssertionError('no API before review')):
                     ok, _ = ingest.step_preprocess(state)
                 self.assertFalse(ok)
-                self.assertEqual(state['agent_task']['kind'], 'pptx_review')
+                self.assertEqual(state['agent_task']['kind'], 'pptx_api_action')
+                self.assertFalse(any(x['path'].endswith('.png') for x in state['agent_task']['inputs']))
                 self.assertEqual(state['pre_handoff_status'], 'preprocess')
                 self.assertEqual(state['semantic_backend'], backend)
                 manifest = json.loads((directory / 'pptx-manifest.json').read_text())

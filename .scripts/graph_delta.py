@@ -15,6 +15,7 @@ import re
 from typing import Callable, Iterable
 
 import graph_lib as gl
+import knowledge_ir as kir
 import node_semantics as ns
 
 
@@ -34,6 +35,7 @@ class GraphDelta:
     concept_glosses: list[dict] = field(default_factory=list)
     canonical_endpoints: list[str] = field(default_factory=list)
     deterministic_metadata_endpoints: dict[str, str] = field(default_factory=dict)
+    strict_navigation: bool = False
     hard_errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -55,9 +57,9 @@ def _clean_edge(edge: dict, page: str) -> tuple[dict | None, str | None]:
     subject = str(edge.get("subject") or "").strip()
     predicate = str(edge.get("predicate") or "").strip()
     obj = str(edge.get("object") or "").strip()
-    if subject == "本论文":
+    if subject in kir.DEICTIC_PAGE_ENDPOINTS:
         subject = page
-    if obj == "本论文":
+    if obj in kir.DEICTIC_PAGE_ENDPOINTS:
         obj = page
     if not subject or not predicate or not obj:
         return None, f"空三元组字段: {subject or '-'} | {predicate or '-'} | {obj or '-'}"
@@ -120,6 +122,7 @@ def build_document_delta(
         for raw_path in raw_packages
     ]
 
+    strict_navigation = str((frontmatter or {}).get("compiler_protocol") or "") == kir.MEETING_COMPILER_V2
     cleaned_triples = []
     seen = set()
     for edge in triples or []:
@@ -132,6 +135,11 @@ def build_document_delta(
             continue
         seen.add(key)
         cleaned_triples.append(cleaned)
+        if strict_navigation and not cleaned.get("source"):
+            hard_errors.append(
+                f"meeting-compiler-v2 语义边缺来源定位: {cleaned['subject']} | "
+                f"{cleaned['predicate']} | {cleaned['object']}"
+            )
 
     all_edges = source_edges + cleaned_triples
     raw_set = set(raw_packages)
@@ -195,6 +203,7 @@ def build_document_delta(
         concept_glosses=cleaned_glosses,
         canonical_endpoints=canonical_endpoints,
         deterministic_metadata_endpoints=deterministic_metadata_endpoints,
+        strict_navigation=strict_navigation,
         hard_errors=hard_errors,
     )
 
@@ -240,18 +249,24 @@ def _mention_node_types(delta: GraphDelta, mention: str) -> list[str] | None:
     return ["entity"]
 
 
-PROPOSITION_PREDICATES = {"核心创新点", "局限性", "未来展望"}
-
-
 def _mention_is_proposition(delta: GraphDelta, mention: str) -> bool:
     """Return whether the edge contract assigns this mention proposition identity."""
     for edge in knowledge_edges(delta):
         predicate = edge.get("predicate")
-        if edge.get("object") == mention and predicate in PROPOSITION_PREDICATES:
+        if (edge.get("object") == mention
+                and kir.relation_endpoint_kind(predicate, "object") == "proposition"):
             return True
         if edge.get("subject") == mention and predicate == "包含":
             return True
     return False
+
+
+def _mention_is_task(delta: GraphDelta, mention: str) -> bool:
+    return any(
+        edge.get("object") == mention
+        and kir.relation_endpoint_kind(edge.get("predicate", ""), "object") == "task"
+        for edge in knowledge_edges(delta)
+    )
 
 
 def _proposition_candidates(conn, candidates: list[str]) -> list[str]:
@@ -349,7 +364,25 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
                     "reason": resolution.get("reason", "canonical_id_not_found"),
                 })
             continue
+        if _mention_is_task(delta, mention):
+            decisions.append({
+                "mention": mention,
+                "action": "create_scoped_task",
+                "target": mention,
+                "reason": "meeting_task_identity_is_document_scoped",
+            })
+            new_nodes.append(mention)
+            continue
         if _mention_is_proposition(delta, mention):
+            if delta.strict_navigation:
+                decisions.append({
+                    "mention": mention,
+                    "action": "create_scoped_proposition",
+                    "target": mention,
+                    "reason": "meeting_decision_identity_is_document_scoped",
+                })
+                new_nodes.append(mention)
+                continue
             candidates = _proposition_candidates(
                 conn, _exact_candidates(mention, title_idx, alias_idx, suffix_idx))
             if len(candidates) == 1:
@@ -533,6 +566,24 @@ def run_query_probes(conn, delta: GraphDelta, attach_plan: dict) -> dict:
         item.get("candidate_count", 1 if item["action"].startswith("reuse") else 0)
         for item in attach_plan["decisions"]
     ]
+    knowledge = knowledge_edges(delta)
+    unresolved_deictics = sorted({
+        endpoint
+        for edge in knowledge
+        for endpoint in (edge.get("subject"), edge.get("object"))
+        if endpoint in kir.DEICTIC_PAGE_ENDPOINTS
+    })
+    semantic_rows = [edge for edge in knowledge if edge.get("origin") != "raw_source_skeleton"]
+    located_semantic = sum(bool(edge.get("source")) for edge in semantic_rows)
+    attendees = [
+        edge["subject"] for edge in knowledge
+        if edge.get("predicate") == "参会" and edge.get("object") == delta.page
+    ]
+    decisions = [
+        edge["object"] for edge in knowledge
+        if edge.get("predicate") == "决策" and edge.get("subject") == delta.page
+    ]
+    tasks = [edge["object"] for edge in knowledge if edge.get("predicate") == "待办"]
     return {
         "usable": not delta.hard_errors,
         "anchor_hit": bool(delta.page),
@@ -547,6 +598,17 @@ def run_query_probes(conn, delta: GraphDelta, attach_plan: dict) -> dict:
         "boundary_path_success": round(reachable / total, 3) if total else 1.0,
         "ambiguous_mentions": len(attach_plan["ambiguous"]),
         "max_candidate_burden": max(candidate_counts, default=0),
+        "unresolved_deictic_endpoints": unresolved_deictics,
+        "semantic_locator_coverage": (
+            round(located_semantic / len(semantic_rows), 4) if semantic_rows else 1.0
+        ),
+        "meeting_navigation": {
+            "attendee_count": len(attendees),
+            "decision_count": len(decisions),
+            "task_count": len(tasks),
+            "deictics_resolved": not unresolved_deictics,
+            "semantic_edges_located": located_semantic == len(semantic_rows),
+        } if delta.strict_navigation else None,
         "boundary_results": boundary_results,
     }
 
@@ -567,6 +629,14 @@ def inspect_delta(conn, delta: GraphDelta, attach_plan: dict | None = None) -> d
             "raw_reachable_when_applicable": (
                 probes.get("raw_reachable_one_hop")
                 if probes.get("raw_probe_applicable") else None
+            ),
+            "meeting_deictics_resolved": (
+                not probes.get("unresolved_deictic_endpoints")
+                if delta.strict_navigation else None
+            ),
+            "meeting_semantic_edges_located": (
+                probes.get("semantic_locator_coverage") == 1.0
+                if delta.strict_navigation else None
             ),
         },
         "outer_commit_required": True,

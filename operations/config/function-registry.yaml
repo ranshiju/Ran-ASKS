@@ -64,7 +64,7 @@ functions:
     maturity: stable
     bindings:
       route_tasks: [ingest, inbox]
-      wg: [ingest]
+      wg: [ingest, task]
       dsh:
         - ingest_inbox_dry_run
         - ingest_inbox_run
@@ -88,7 +88,7 @@ functions:
         - .scripts/ingest_meeting.py
         - .scripts/ingest_document.py
       pipelines: [.scripts/ingest_pipeline.py]
-    protocols: [agent-task-v1, ingest-result-v1, knowledge-ir-v1, graph-plan-v1]
+    protocols: [agent-task-v1, agent-task-control-v1, ingest-result-v1, knowledge-ir-v1, graph-plan-v1]
 
   knowledge.query:
     title: 知识查询与溯源

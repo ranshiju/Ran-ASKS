@@ -96,7 +96,7 @@ nodes:
   ingest_meeting:
     path: .scripts/ingest_meeting.py
     kind: implementation
-    role: code-driven-meeting-minutes-ingest-orchestrator-cross-domain-subproject
+    role: code-driven-evidence-bound-meeting-ir-orchestrator-with-deterministic-wiki-and-graph-projections
   ingest_meeting_test:
     path: .scripts/test_ingest_meeting.py
     kind: test
@@ -117,6 +117,14 @@ nodes:
     path: .scripts/extractor.py
     kind: implementation
     role: raw-adjacent-pdf-document-bundle-extractor-with-atomic-markdown-and-referenced-assets
+  env_config:
+    path: .scripts/env_config.py
+    kind: contract
+    role: dependency-free-dotenv-parser-with-process-precedence-variable-expansion-and-normalized-api-endpoints
+  env_config_test:
+    path: .scripts/test_env_config.py
+    kind: test
+    role: dotenv-comments-quotes-expansion-precedence-and-api-endpoint-regression
   llm_structured:
     path: .scripts/llm_structured.py
     kind: implementation
@@ -124,7 +132,7 @@ nodes:
   agent_task:
     path: .scripts/agent_task.py
     kind: contract
-    role: prompt-free-current-agent-work-manifest-and-shared-environment-first-backend-selection
+    role: prompt-free-current-agent-work-manifest-portable-host-control-contract-safe-action-dispatch-and-shared-environment-first-backend-selection
   agent_task_test:
     path: .scripts/test_agent_task.py
     kind: test
@@ -180,7 +188,15 @@ nodes:
   presentation_ops:
     path: operations/PRESENTATION.md
     kind: spec
-    role: agent-first-presentation-authoring-native-deck-delivery-and-explicit-scoped-assistance-contract
+    role: agent-first-strict-per-slide-presentation-authoring-title-page-workflow-academic-narrative-native-delivery-and-explicit-scoped-assistance-contract
+  presentation_artwork:
+    path: .scripts/presentation_artwork.py
+    kind: script
+    role: explicit-agent-or-api-artwork-authoring-with-shared-bounded-vector-validation-and-local-rendering
+  presentation_artwork_test:
+    path: .scripts/test_presentation_artwork.py
+    kind: test
+    role: artwork-remote-consent-path-schema-and-native-fragment-regression
   presentation_test_plan:
     path: operations/engineering/presentation-test-plan.md
     kind: spec
@@ -200,7 +216,7 @@ nodes:
   presentation_delivery:
     path: .scripts/presentation_delivery.py
     kind: implementation
-    role: shared-local-deck-export-and-explicit-scoped-agent-form-evidence-redaction-transactions
+    role: shared-local-deck-export-scoped-api-form-review-and-agent-evidence-redaction-transactions
   presentation_delivery_test:
     path: .scripts/test_presentation_delivery.py
     kind: test
@@ -277,6 +293,10 @@ nodes:
     path: .scripts/embed_helper.py
     kind: implementation
     role: shared-graph-scoped-text-embedding-cache-with-private-physical-isolation
+  embed_init:
+    path: .scripts/embed_init.py
+    kind: implementation
+    role: embedding-cache-schema-initializer-and-node-text-index-synchronizer
   private_maintenance:
     path: .scripts/private_maintenance.py
     kind: implementation
@@ -293,6 +313,14 @@ nodes:
     path: .scripts/test_private_reingest.py
     kind: test
     role: synthetic-private-reingest-transaction-isolation-rollback-and-idempotence-regression
+  private_ingest:
+    path: .scripts/private_ingest.py
+    kind: implementation
+    role: agent-only-private-create-for-text-reviewed-images-and-text-layer-pdf-with-shared-validation-hash-bound-original-companion-bundle-and-local-transaction-rollback
+  private_ingest_test:
+    path: .scripts/test_private_ingest.py
+    kind: test
+    role: synthetic-private-create-source-integrity-image-review-offline-and-rollback-regression
   node_semantics:
     path: .scripts/node_semantics.py
     kind: implementation
@@ -341,10 +369,14 @@ nodes:
     path: .scripts/experience_recall.py
     kind: implementation
     role: deterministic-lightweight-capability-experience-recall
+  private_query_test:
+    path: .scripts/test_private_query.py
+    kind: test
+    role: synthetic-shared-query-private-scope-recall-evidence-symlink-and-offline-regression
   wg:
     path: .scripts/wg.py
     kind: implementation
-    role: cross-capability-unified-entry-including-managed-external-file-to-inbox-ingest-and-same-transaction-resume
+    role: cross-capability-unified-entry-including-managed-external-file-ingest-and-portable-same-transaction-agent-task-control
   frontier:
     path: .scripts/frontier.py
     kind: implementation
@@ -492,7 +524,7 @@ nodes:
   source_fingerprints:
     path: .scripts/source_fingerprints.py
     kind: implementation
-    role: rebuildable-domain-isolated-source-binary-and-normalized-text-fingerprint-index
+    role: incrementally-reconciled-rebuildable-domain-isolated-source-binary-and-normalized-text-fingerprint-index
   duplicate_remediation:
     path: .scripts/remediate_exact_duplicate.py
     kind: implementation
@@ -721,7 +753,31 @@ nodes:
   pptx_document:
     path: .scripts/pptx_document.py
     kind: implementation
-    role: shared-native-pptx-slide-extraction-source-bound-local-render-and-host-review-validation
+    role: shared-native-pptx-extraction-and-source-bound-api-or-legacy-review-validation
+  pptx_structure:
+    path: .scripts/pptx_structure.py
+    kind: implementation
+    role: shared-read-only-pptx-style-layout-component-and-coverage-extraction
+  pptx_visual:
+    path: .scripts/pptx_visual.py
+    kind: implementation
+    role: explicit-api-only-pptx-content-layout-and-form-analysis-with-shared-source-bound-receipts
+  slide_library:
+    path: .scripts/slide_library.py
+    kind: implementation
+    role: shared-scoped-native-slide-template-export-atomic-collection-and-typed-reuse-search
+  slide_reuse:
+    path: .scripts/slide_reuse.py
+    kind: implementation
+    role: shared-direct-and-adaptable-template-profiles-native-slot-replacement-and-bounded-instantiation
+  slide_reuse_test:
+    path: .scripts/test_slide_reuse.py
+    kind: test
+    role: direct-adaptable-classification-capacity-native-object-and-source-integrity-regression
+  pptx_academic_test:
+    path: .scripts/test_pptx_academic.py
+    kind: test
+    role: pptx-style-api-companion-and-template-transaction-regression
   pptx_document_test:
     path: .scripts/test_pptx_document.py
     kind: test
@@ -837,7 +893,7 @@ nodes:
   source_locator:
     path: .scripts/source_locator.py
     kind: implementation
-    role: raw-locator-parse-validate-excerpt-explicit-fact-anchor-and-source-read-citation-companion-contract
+    role: raw-locator-parse-validate-excerpt-explicit-fact-anchor-and-hash-bound-binary-companion-first-source-read-citation-contract
   ingest_user_assertions:
     path: .scripts/ingest_user_assertions.py
     kind: implementation
@@ -939,6 +995,39 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - env_config
+  - tested_by
+  - env_config_test
+- - embed_helper
+  - uses
+  - env_config
+- - embed_init
+  - uses
+  - embed_helper
+- - llm_structured
+  - uses
+  - env_config
+- - agent_task
+  - uses
+  - env_config
+- - visual_qa
+  - uses
+  - env_config
+- - comic_generation
+  - uses
+  - env_config
+- - visual_to_editable_ppt
+  - uses
+  - env_config
+- - answer_judge
+  - uses
+  - env_config
+- - extractor
+  - uses
+  - env_config
+- - cluster_keywords
+  - uses
+  - env_config
 - - graph_lib
   - tested_by
   - private_isolation_test
@@ -969,6 +1058,18 @@ edges:
 - - private_reingest
   - tested_by
   - private_reingest_test
+- - private_ingest
+  - uses
+  - private_reingest
+- - private_ingest
+  - uses
+  - image_ocr
+- - private_ingest
+  - uses
+  - embed_helper
+- - private_ingest
+  - tested_by
+  - private_ingest_test
 - - cv_ops
   - specifies
   - cv
@@ -987,6 +1088,24 @@ edges:
 - - presentation_ops
   - specifies
   - presentation_delivery
+- - presentation_ops
+  - specifies
+  - presentation_artwork
+- - presentation_artwork
+  - uses
+  - env_config
+- - presentation_artwork
+  - uses
+  - visual_qa
+- - presentation_artwork
+  - uses
+  - agent_task
+- - presentation_artwork
+  - uses
+  - llm_model_catalog
+- - presentation_artwork
+  - tested_by
+  - presentation_artwork_test
 - - presentation_delivery
   - uses
   - presentation_state
@@ -1056,6 +1175,54 @@ edges:
 - - pptx_document
   - tested_by
   - pptx_document_test
+- - pptx_document
+  - uses
+  - pptx_visual
+- - pptx_visual
+  - uses
+  - pptx_structure
+- - pptx_visual
+  - uses
+  - visual_qa
+- - slide_library
+  - uses
+  - pptx_structure
+- - slide_reuse
+  - uses
+  - slide_library
+- - slide_reuse
+  - uses
+  - pptx_structure
+- - slide_reuse
+  - tested_by
+  - slide_reuse_test
+- - slide_library
+  - tested_by
+  - slide_reuse_test
+- - slide_library
+  - uses
+  - pptx_visual
+- - pptx_structure
+  - tested_by
+  - pptx_academic_test
+- - pptx_visual
+  - tested_by
+  - pptx_academic_test
+- - slide_library
+  - tested_by
+  - pptx_academic_test
+- - graph_ingest
+  - tested_by
+  - pptx_academic_test
+- - ingest_document
+  - tested_by
+  - pptx_academic_test
+- - presentation_delivery
+  - uses
+  - pptx_visual
+- - presentation_state
+  - uses
+  - pptx_visual
 - - ingest
   - specifies
   - relocate_own_ip
@@ -1422,6 +1589,9 @@ edges:
 - - wg
   - uses
   - ingest_inbox
+- - wg
+  - uses
+  - agent_task
 - - dsh_tools
   - uses
   - query_actions
@@ -1633,6 +1803,15 @@ edges:
   - uses
   - source_fingerprints
 - - ingest_paper
+  - uses
+  - source_fingerprints
+- - ingest_meeting
+  - uses
+  - source_fingerprints
+- - ingest_common
+  - uses
+  - source_fingerprints
+- - private_ingest
   - uses
   - source_fingerprints
 - - ingest
@@ -1866,6 +2045,9 @@ edges:
 - - query_actions
   - uses
   - source_locator
+- - query_actions
+  - tested_by
+  - private_query_test
 - - wg
   - uses
   - source_locator
@@ -2140,6 +2322,29 @@ capabilities:
     - 关系和 keyword 先有 raw/wiki 证据；graph.db 是当前边主数据，禁用 Markdown triples 主路径。
     - 每个改动页必须 ingest_check；ERROR 清零，WARN 向用户提示。
     - INGEST_BACKEND=api 时 ingest_paper.py 内部通过 call_text() 调用 API LLM 撰写 wiki 与语义槽；api_ingest.py 仅用于证据卡受限场景，非 inbox 论文主入口。hybrid 模式已删除，INGEST_BACKEND 只接受 agent|api。
+    context_warmup:
+      schema: ingest-context-warmup-v1
+      max_chars: 1800
+      state_machine: managed_entry -> prepare -> awaiting_agent(if required) -> check -> ready_to_commit -> commit -> completed
+      repeat_policy: 同一对话上下文后续摄入、batch item、stage 切换与 resume 不重复预热；无法确认本回执时可低成本重跑。
+      shared_rules:
+      - Raw 只经受管摄入事务写入；Wiki 与 Graph 必须通过原 validator、preflight 和 commit。
+      - temp、Agent task 与 session log 不是事实源；不得绕过 schema 或用中间产物冒充完成。
+      - 程序持有机械状态与提交边界；Agent backend 只完成 agent-task-v1 声明的输入、输出、协议和后续命令，API backend 由程序持有语义控制循环。
+      - workflow_status=completed 且 committed=true 才是新知识提交完成；duplicate_found 是无新提交的闭合终态。
+      execution_rules:
+      - 首次预热后立即调用受管入口；不为熟悉流程预读完整 INGEST、SCHEMA 或脚本源码。
+      - 若程序返回 agent-task-v1，只读取其中声明的输入与协议，写入指定输出，再执行原 check/commit；diagnostics 只修当前问题。
+      profiles:
+        paper:
+          entrypoint: python3 .scripts/wg.py ingest <file> --subproject <domain>
+          focus: 论文走统一入口和 paper workspace；书目、Wiki、语义槽与 Graph 分层校验后提交。
+        meeting:
+          entrypoint: python3 .scripts/wg.py ingest <file> --subproject <domain>
+          focus: 会议来源由内容语义判定；实体纠错、纪要编译与建图沿同一事务完成。
+        document:
+          entrypoint: python3 .scripts/wg.py ingest <file> --subproject <domain>
+          focus: 通用文档先确定域与文档类型，再由受管事务生成 Wiki、语义槽与 Graph 计划。
   query:
     entry: route
     required:
@@ -2274,6 +2479,7 @@ capabilities:
     - agents
     - presentation_ops
     optional:
+    - presentation_artwork
     - presentation_runtime
     - presentation_state
     - presentation_render
@@ -2284,10 +2490,15 @@ capabilities:
     - source_locator
     - visual_qa
     - pptx_document
+    - pptx_structure
+    - pptx_visual
+    - slide_library
+    - slide_reuse
     forbidden: []
     guardrails:
     - presentation/create 是当前工作状态内按需加载的创作能力，不切换 research 等持续状态；阶段0提供运行时探测，阶段1A提供持久状态与三个受限版式的单页闭环；阶段1B提供整套原生组装和三个独立按需辅助入口；真实人机验收仍待完成。
     - 宿主 Agent 负责语义规划、设计和用户交互；shared 程序只做机械工作，Agent 路径不导入 DSH 或隐式调用远程模型。
+    - 默认一步一页：宿主合并完成当前页内容、设计、生成与API视觉审阅，只向用户确认实际整页；接受并锁定后才推进下一页。当前页实施授权与预览接受分别记录，禁止跨页代签或把开始制作当成预览接受。
     - 最终检查以用户为主；PPT形式检查、PPT引用脱敏仅用户明确指令触发，可提醒但不自动执行；PPT证据核查仅用户对具体内容有疑问时按范围执行。三项独立、默认不执行，不作为默认交付门禁；基本机械校验、来源记录与隐私边界保持。
     - 创作记录是项目派生状态，科学事实回溯 Raw；源敏感性沿派生产物继承，不因输出路径改变而放开上传。
   research:
@@ -2412,6 +2623,21 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  env_config:
+  - python3 .scripts/test_env_config.py
+  env_config_test:
+  - python3 .scripts/test_env_config.py
+  pptx_structure:
+  - python3 .scripts/test_pptx_academic.py
+  pptx_visual:
+  - python3 .scripts/test_pptx_academic.py
+  - python3 .scripts/test_pptx_document.py
+  - python3 .scripts/test_visual_qa.py
+  slide_library:
+  - python3 .scripts/test_pptx_academic.py
+  - python3 .scripts/test_slide_reuse.py
+  slide_reuse:
+  - python3 .scripts/test_slide_reuse.py
   mineru_api:
   - python3 .scripts/test_mineru_api.py
   - python3 .scripts/test_extractor.py
@@ -2436,12 +2662,21 @@ verification:
   dsh_function_catalog:
   - python3 .scripts/test_function_registry.py
   embed_helper:
+  - python3 .scripts/test_env_config.py
   - python3 .scripts/test_private_isolation.py
   - python3 .scripts/test_node_semantics.py
+  embed_init:
+  - python3 .scripts/test_env_config.py
+  - python3 .scripts/test_private_isolation.py
   private_maintenance:
   - python3 .scripts/test_private_isolation.py
   - python3 .scripts/engineering_graph.py validate
   private_reingest:
+  - python3 .scripts/test_private_reingest.py
+  - python3 .scripts/test_private_isolation.py
+  - python3 .scripts/engineering_graph.py validate
+  private_ingest:
+  - python3 .scripts/test_private_ingest.py
   - python3 .scripts/test_private_reingest.py
   - python3 .scripts/test_private_isolation.py
   - python3 .scripts/engineering_graph.py validate
@@ -2461,6 +2696,9 @@ verification:
   - python3 .scripts/test_presentation_state.py
   - python3 .scripts/test_presentation_runtime.py
   - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/engineering_graph.py validate
+  presentation_artwork:
+  - python3 .scripts/test_presentation_artwork.py
   - python3 .scripts/engineering_graph.py validate
   presentation_runtime:
   - python3 .scripts/test_presentation_runtime.py
@@ -2579,6 +2817,7 @@ verification:
   - python3 .scripts/engineering_graph.py validate
   wg:
   - python3 .scripts/test_wg.py
+  - python3 .scripts/test_agent_task.py
   frontier:
   - python3 .scripts/test_frontier.py
   - python3 .scripts/test_wg.py
@@ -2611,6 +2850,53 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  env_config:
+    preconditions:
+    - 仓库 .env 是可选配置输入；进程环境始终覆盖文件值，变量引用在同一合并配置中确定性展开
+    - 行尾注释仅在未加引号且井号前为空白时生效；引号值和转义井号保留为值内容
+    - API base 与 path 分开配置；path 必须为站内绝对路径，拼接后不得重复或隐式补写 provider-specific /v1
+    writes: []
+    forbidden:
+    - 吞入未加引号行尾注释作为 token、模型名或 URL 的一部分
+    - 让仓库 .env 覆盖同名进程环境，或递归变量引用无限展开
+    - 在调用方重复实现不一致的 dotenv 解析、变量展开或 URL 拼接
+    verify:
+    - python3 .scripts/test_env_config.py
+  pptx_visual:
+    preconditions:
+    - API-only 视觉 adapter，shared 负责本地结构、渲染、schema、源哈希与回执校验；主 Agent 只消费文字，不回落宿主看图或 DSH 控制循环
+    - content/layout/form-check 三个模式独立；远程调用须绑定显式授权的来源和页范围；private 不经公共模板或视觉入口上传
+    - 默认导出不触发三项辅助动作；形式检查和引用脱敏仍须用户指令，证据核查只处理具体疑问
+    writes:
+    - temp 下源绑定、模式隔离的逐页 API 回执与分析；通过原摄入 validator 后 companion 与原件同事务进入 Raw
+    forbidden:
+    - 失败或未检查标记通过、API 署名冒充用户批准、图像估读冒充原生精确数据、密钥或 data URL 进入日志
+    verify:
+    - python3 .scripts/test_pptx_academic.py
+    - python3 .scripts/test_pptx_document.py
+    - python3 .scripts/test_visual_qa.py
+  slide_library:
+    preconditions:
+    - shared 只读源原生页与关系依赖；候选提取写 temp，正式收藏须有选页指令且来源已受管归档公共域 Raw
+    - v2 组件通过 reuse.json 区分 direct（直接使用型）与 adaptable（套用填充型）；同源不同类型/槽位版本不误去重；v1/旧平铺组件为未分类，不能冒充已有填充槽位
+    - v2 collect 可附 API layout 回执，绑定实际衍生 PPTX/逐页结构/图像；只作为设计分析，不替代用户最终检查或批准
+    writes:
+    - slide-library/templates/<name> 完整组件目录原子发布，索引可重建；旧模板兼容
+    forbidden:
+    - 修改原件、悄悄带入未选页、静默扁平化、自动通用化或脱敏、收藏失败回滚已摄入报告
+    verify:
+    - python3 .scripts/test_pptx_academic.py
+    - python3 .scripts/test_slide_reuse.py
+  slide_reuse:
+    preconditions:
+    - shared 确定性内核只消费 Agent 编写的用途/限制/槽位 profile 与已收藏来源，语义选择由当前 Agent 执行；视觉另调现有 API，内核不自动联网
+    - direct 保留原页内容；adaptable 将明确对象映射为文本/图片槽位并清理衍生页原演讲备注，来源组件及 Raw 不变；文字容量仅机械预算，不保证实际排版
+    writes:
+    - temp 下完整 v2 候选；用户授权范围内经 slide_library collect 原子收藏；fill 仅向新 temp 输出目录生成独立实例/PPTX/预览与输入来源回执
+    forbidden:
+    - 猜测任意表格/图表槽位、修改已收藏模板或 Raw、遗漏必填值后声称完成、把通用化称作全面脱敏、自动最终形式检查或用户批准
+    verify:
+    - python3 .scripts/test_slide_reuse.py
   cv:
     preconditions:
     - shared deterministic workspace function; the selected project must stay under projects/ and contain a cv-records.yaml working record
@@ -2641,6 +2927,24 @@ script_contracts:
     - backups or reports outside private; Git history changes or publication
     verify:
     - python3 .scripts/test_private_isolation.py
+  private_ingest:
+    preconditions:
+    - Agent-only create adapter; shared validators and graph compiler; no API or DSH semantic fallback
+    - source inputs and all staging stay in private; images require a source-bound Agent OCR review with no critical blockers; PDF documents require a readable local text layer
+    - text sources explicitly select user-assertion, web or official-doc provenance at prepare; omitted type preserves legacy defaults and image bundles remain ocr
+    writes:
+    - prepare seals an immutable source bundle and emits agent-task-v1 for Wiki and semantic slots
+    - PDF prepare archives the original official document, its same-stem paginated Markdown companion and raw-companion-v1 source sidecar in one hash-bound bundle; Agent encoding and later query reads use that companion while citations remain bound to the PDF and exact page locators
+    - repeating commit for a completed legacy PDF transaction may add its missing companion only after the archived PDF hash and retained extraction match; the migration is idempotent, receipted and logged without rewriting Wiki or graph
+    - commit holds the private graph writer lock, archives new Raw files exclusively, validates Wiki and graph, records a receipt and compensates exceptions
+    - successful commit incrementally reconciles source hashes only into private/source-fingerprints.db; cache failure is recorded as a private receipt warning and never writes public storage
+    - image original, same-stem transcription and source sidecar are one bundle; existing Raw is never replaced
+    - private graph locks stay under private/outputs; embedding offline context blocks provider calls and cache writes during this adapter
+    forbidden:
+    - public storage, shared temp artifacts, remote OCR or embeddings, publication, existing Raw overwrite
+    - automatic recovery after process termination; interrupted committing state requires inspecting its private journal before recovery
+    verify:
+    - python3 .scripts/test_private_ingest.py
   private_reingest:
     preconditions:
     - private-only pilot transaction; page, Raw source, workspace and graph must all remain under the physical private domain
@@ -2658,15 +2962,41 @@ script_contracts:
   embed_helper:
     preconditions:
     - shared Agent/API graph scope is context-local and restored on exit; private cache selection precedes any provider call
+    - embedding endpoint 由 EMBED_API_BASE 与 EMBED_API_PATH（默认 /v1/embeddings）规范化拼接；默认模型为 provider code `embedding-3`
+    - embedding cache identity 至少绑定规范化 endpoint 与 model；旧 text-only cache 可迁移但不得跨未知 provider/model 复用
     writes:
     - private graph operations use an embeddings database beside their private graph; public and isolated experiment caches remain separate
     forbidden:
     - private text reads or writes in the public embedding cache, including explicit cache override escape
     verify:
     - python3 .scripts/test_private_isolation.py
+  embed_init:
+    preconditions:
+    - 新缓存直接创建 endpoint/model namespace schema；未知 provider/model 的历史向量只保留为 legacy 备份，不导入当前 namespace
+    - node_texts 仍是可重建的 path→title 映射，不改变事实图
+    writes:
+    - cross-domain/embeddings.db 的派生缓存 schema、node_texts 与容量维护
+    forbidden:
+    - 把旧 typed/text-only 向量猜测归属后导入当前 provider/model namespace
+    - 修改 graph.db、Raw 或 Wiki
+    verify:
+    - python3 .scripts/test_env_config.py
+    - python3 .scripts/test_private_isolation.py
+  presentation_artwork:
+    preconditions:
+    - Agent 默认返回 agent-task-v1；API 仅显式 creator=api、allow_remote 与 public brief 同时满足才执行，默认模型 GLM-5.3-FlashX
+    - API 负责图元构图，宿主负责科学简报和整页整合；shared 仅校验有限JSON协议并生成静态SVG及原生HTML
+    writes:
+    - 仅 temp/presentation-artwork/<id> 的独立请求、候选、导出、哈希回执；模型与用量如实记录
+    forbidden:
+    - 任意模型代码/外链执行、未知图元、越界几何、symlink输出及Raw/Wiki/graph写入
+    - API失败隐式回退宿主、宿主改画后沿用API归属、将render成功称为视觉或用户批准
+    verify:
+    - python3 .scripts/test_presentation_artwork.py
+    - python3 .scripts/engineering_graph.py validate
   presentation_delivery:
     preconditions:
-    - shared 只处理导出、路径/哈希/schema/事务；Agent 负责形式审阅、证据支持判断和引用替换建议，无 API adapter
+    - shared 处理导出、路径/哈希/schema/事务；独立且显式授权的 pptx_visual API adapter 负责视觉，Agent 负责证据支持判断和引用替换建议；不转交 DSH
     - 导出要求全部页真实预览已批准锁定、expected revision 一致；三个辅助动作仅独立显式请求，证据核查必须有具体疑问
     writes:
     - 项目创作包 outputs/<id> 原子发布不可变本地成品/报告；requests/<id> 保留请求范围，temp 仅暂存候选结果
@@ -2753,6 +3083,7 @@ script_contracts:
     - shared 复核状态与摄入事务状态正交；completed 可与 partial/review_required 并存，非关键未决项不自动生成用户待办；已确认空白的字段可 verified，不因缺值要求补填，阻断仍以风险评估及关键字段校验为准
     - shared image-ocr-review-v1 绑定原图与正文哈希，记录风险分级、API/Agent/人工复核者、时间、逐字段行号和结论；风险未评估或关键字段未核对时不得进入 Wiki/图生成，普通项与非关键未决项保留警告
     - OCR CLI --review-file 只附加本地复核记录，不调用模型；显式 Agent 图片模式在转写后交接宿主复核任务，默认 API 图片模式缺复核时经授权调用视觉复核，无授权或失败只交接文字行动任务，不隐式切换 backend
+    - API 复核模型由 IMAGE_OCR_REVIEW_MODEL 独立控制，复用 VISUAL_QA_MODEL 后缺省 GLM-5.3-FlashX；回执记录实际模型，不改写转写模型
     - API 主模型 GLM-5.3-Flash 使用 IMAGE_OCR_REASONING_EFFORT=low，兼容回退 GLM-4.6V 默认不传 reasoning_effort；独立 IMAGE_OCR_MAX_TOKENS 默认 8192，参数写入新回执，旧回执仍可源绑定复用
     - shared 内核只验证图片、源 SHA-256、OCR 文本与回执；API-only adapter 必须显式 allow_remote，不借用 DSH 或 llm_structured 控制循环
     - IMAGE_OCR_MODEL 与可选 IMAGE_OCR_FALLBACK_MODEL 选择固定模型；endpoint/key 默认复用 LLM_API_BASE/LLM_API_KEY，进程环境优先，不自动发现或提升模型
@@ -2911,6 +3242,9 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   route:
     preconditions:
+    - 当前上下文首次公共域摄入可用 --context-warmup 从 ingest capability 机械生成一次性限长回执；同一上下文后续摄入不重复，private 不进入该预热，完整 stage 规范只在手动旧流程或任务明确要求时加载
+    - query subproject=private dispatches the same four stages with explicit private scope, local Agent backend and private artifact paths; semantic evidence judgments remain Agent-owned
+    - private query uses query-topic=auto|general|metaphysics for conditional topic guidance; auto matches explicit topic terms, while the host Agent selects metaphysics for contextual follow-ups and carries it across stages. Topic guidance combines model knowledge with private evidence, without changing storage scope or delegating semantic judgments to code.
     - 通用文档编码及建图阶段按需派发 INGEST「表格型清单与台账」，由 Agent 判断适用性；论文和收尾阶段不加载
     - 已判定 task；ingest 必须提供 subproject 与单个 stage；会议纪要须传 source-kind=meeting；query 按当前阶段传 query-stage
     - --task 是一次路由标签；持续状态由 workspace/research/frontier 的权威文件承载；状态内按需规范使用 --capability；当前宿主 Agent 直接调用受管脚本或 wg.py，API backend 可经 DSH ToolRegistry
@@ -2918,6 +3252,7 @@ script_contracts:
     - build 处理缺陷时须在首次编辑前明确说明，并以复现、代码路径或反事实建立和验证从症状到责任组件的因果链；默认修复责任组件并在该边界回归，局部补偿只用于明确的边界外根因、兼容性、迁移或历史数据修复
     writes: []
     forbidden:
+    - 让模型在预热时总结完整 INGEST/SCHEMA/脚本，或把预热状态写成跨上下文共享的仓库/机器标记
     - 绕过路由凭记忆选规范
     - 把 Route task 或 capability 调用当作持续状态切换，或把提示规范能力伪装成已执行工具
     - build 路由重复展开 shared-conventions 或 code-guidance 正文，把总提示词变成工程手册副本
@@ -3120,7 +3455,10 @@ script_contracts:
   source_locator:
     preconditions:
     - 查询取证区分 citation source 与 read target；同 stem 唯一原件可作为引用来源，受管 Markdown companion 可作为实际读取载体，二者不得混为事实来源
-    - 二进制原件已有可精确截取的原生 locator 时直接读取；否则只在同 stem Markdown companion 中验证并读取同一 locator
+    - 二进制原件存在受管同 stem Markdown companion 时优先读取 companion；引用来源始终保留原件。只有 companion 缺失时，PDF 原生 page locator 才作为兼容回退
+    - 新摄入的二进制 companion 必须在原件同名 `.source.json` 中保存 raw-companion-v1：原件/companion 名称与 SHA-256、生成器及版本、生成时间、locator scheme、忠实投影方法和限制
+    - query 读取 companion 前机械验证 sidecar 绑定；明确存在但损坏、缺字段或哈希失配的绑定视为 invalid，不把 companion 内容送入 Agent。缺少新绑定字段的历史包按 legacy 兼容并等待受管迁移
+    - PDF 的 page-N/page-N-M locator 可映射到 companion 中按 `## Page N` 分隔的忠实分页投影；不得把页码映射扩张为全文或相邻页
     - 图片 Raw 的文本查询只读取源绑定 Markdown companion 的精确 locator，并保留原图为 citation source；定位内核不解码图片、不调用 OCR 或视觉模型
     - shared Excel 忠实 Markdown 可用 table:<百分号编码工作表名>:<逗号分隔列字母>:R<起行>-R<止行> 投影原始值；严格验证工作表、列号和完整行范围，不计算汇总、不修改 Raw，继续遵守 Wiki/Raw 片段大小限制
     - .xls/.xlsx 原件不接受伪行号 locator，事实读取使用受管归档的忠实 Markdown companion
@@ -3177,6 +3515,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   graph_ingest:
     preconditions:
+    - academic/wiki/references 与 academic/wiki/editorials 使用通用学术文档导航谓词；本文档/本文件替换为本页 canonical ID，主题边直接连接本页，不走论文方向推断；论文与会议路径保留各自语义
     - shared Agent/API writer rejects page/source and database domain mismatch before lock or connection; private derivatives and scratch receipts remain private
     - arXiv Hub construction is academic-only; private never consumes the public catch-all or abbreviation queue
     - 正式提交时 wiki 页已落盘；--plan-only 可通过 --page-file 读取事务内暂存 Wiki，同时用 --page 保持最终逻辑页面 ID；类型语义输出必须先归一为经校验的 knowledge-ir-v1（历史 corrected.md 仅作兼容参考）
@@ -3185,6 +3524,8 @@ script_contracts:
     - graph_ingest 所有会写 live graph 的子命令（prefill/ingest/merge/init/cleanup-*）在打开目标 graph.db 前必须经同一命令边界取得按数据库路径隔离的跨进程 writer lock；--plan-only 与正式 commit 共用该锁并串行访问 live graph，SQLite busy_timeout 只作锁外异常争用的第二层保护
     - --plan-only 必须在 live graph 上运行同一 IR、GraphDelta inspection/fusion 与结构关系校验，最后 rollback；只允许写 temp IR/plan 回执，不得持久化节点、边、alias、gloss、Hub 动力学或待办
     - clean/update 在清理前后比较本页 edge_origins，只把关系差量端点交给 Hub refresh；不得因更新既有 People page 重算全部历史邻居
+    - 所有 semantic text、--triples-json 与 --triples-file 关系在进入 knowledge IR 前统一归一页面指代；本文档/本文件仅在文档域替换为 owning page，仍有页面指代则拒绝
+    - teaching frontmatter prerequisites 只接受指向 teaching/wiki/topics 的规范 Wiki link，并确定性编译为 page→前置→topic；semantic 提案中的同边去重
     writes:
     - cross-domain/graph.db
     - Wiki 页面节点、同 stem 原件与 locator companion 合并后的 Raw 文档包节点，以及各文件路径 aliases
@@ -3216,6 +3557,8 @@ script_contracts:
     - 将 Wiki section source 当最终事实证据；事实核验必须继续沿该节脚注下钻 Raw locator
     - 因知识边缺少 locator 或 edge_evidence 而拒绝写入；二者都不是强制完整性字段
     - 让未通过 knowledge-ir-v1 校验的关系进入 GraphDelta，或让 graph-plan-v1 的 IR hash 与实际输入不一致
+    - 让 unresolved 本文档/本文件进入直接 triples JSON，或因输入通道不同绕过页面指代归一
+    - 静默接受 malformed/out-of-domain teaching prerequisites，或由 semantic worker 重复生成其确定性前置边
     - 为 Graph 预检复制一套简化编译/校验逻辑，或让 --plan-only 提交 live graph 变更
     - 让任一 graph_ingest 写子命令绕过数据库路径级 writer lock，或并发运行多个 live graph preflight/commit，或把多个独立论文绑定成一个全有全无的 SQLite 事务；可并发生成各自暂存 IR/子图，进入 live graph 的 inspection/fusion 必须由单 writer 逐篇原子执行
     - merge 源/目标缺失或相同仍继续写入，或删除重复边前不迁移 edge_evidence/edge_origins，或删除源节点时级联丢失节点说明复核与 Hub Scope 历史、遗留未改写的 temporal_facts
@@ -3382,9 +3725,12 @@ script_contracts:
     - 检查 paper.md 并继续骨架/摄入流程
   query_actions:
     preconditions:
+    - shared query scope selects public or private across discovery, Wiki, Raw and companion reads; nested actions cannot change storage domain
+    - private uses the same actions with private/graph.db, physical path checks and local-only embedding fallback; no public scans or provider calls
     - hybrid_recall 的 intent 必须是 fact/relation/explanation/exploration/lineage；结果只是候选，不形成 identity 或事实断言
     - wiki_context 必须指定可解析的 page#section，Graph envelope 有 top-k 与 traversal profile 边界
     - read_raw 通过 source_locator 读取原件的精确 locator 或受管 Markdown companion；返回中显式区分可引用原件与实际读取路径
+    - graph_exact 候选保留有辨识力的数学写法（如 z*、|z|、Arg z），同时不把裸单字母变量扩散为通用噪声
     writes: []
     forbidden:
     - 把 section capsule、embedding 分数或 Graph neighbor 直接当作事实证据
@@ -3393,6 +3739,7 @@ script_contracts:
     verify:
     - python3 .scripts/test_query_orchestrate.py
     - python3 .scripts/test_wg.py
+    - python3 .scripts/test_private_query.py
   query_graph:
     preconditions:
     - 已确定查询目标；事实性结论另行从相邻 Wiki section 的 Raw 脚注回到 Raw，边 locator 仅作可选捷径
@@ -3431,8 +3778,10 @@ script_contracts:
     - 共享摄入器只接收事务内 staged Wiki/semantic、结构化 validator issues 与受限候选目录
     - Agent backend 生成 agent-task-v1 并等待当前宿主提交；API backend 才调用 semantic patch Worker
     - 通用文档语义槽非空但未解析出任何三元组、三元组区存在非 pipe 三字段行或仍使用旧行政主题/行政关系 section 时，必须在 finalize 前作为结构硬错误拒绝
+    - 事实与图校验通过后，finalize_tail 按各摄入器显式声明的 Raw 源实体与文本 companion 登记可重建指纹；指纹缓存失败只记质量告警，不回滚已验证的事实提交
     writes:
     - 当前摄入事务的 staged semantic 产物与 temp 语义修补缓存
+    - cross-domain/source-fingerprints.db 中的可重建源指纹记录
     forbidden:
     - 在 Agent backend 调用外部模型，或让 API Worker 持有事务控制循环
     - 接受候选目录外 issue ID、整页改写、无证据元数据或绕过 validator 的局部补丁
@@ -3480,6 +3829,7 @@ script_contracts:
     - ingest_relation_review 与 ingest_semantic_fill 使用 call_json Schema + fast 档；前者只选 relation candidate ID，后者只按 issue ID 返回局部 patch，均不得自由改写程序定位或提交状态
     - ingest_semantic_recovery 使用 standard 档和可选 SEMANTIC_RECOVERY_* specialist profile；三项配置不完整时回退主模型，不得因目录推荐值缺失或模型上下线阻断摄入
     - 空输出且 finish_reason=length 时下一尝试必须切到已配置的 fast/low effort 并扩大输出预算；不得以省略字段冒充禁用默认思考
+    - chat endpoint 由 LLM_API_BASE 与 LLM_API_PATH（默认 /v1/chat/completions）规范化拼接；兼容服务可显式覆盖 path
     writes:
     - 仅输出调用方指定的结构化响应或草稿文件
     - temp/llm-events/YYYY-MM-DD.jsonl（canonical ExecutionEvent；每次真实 API 请求一条，API configuration 为非调用事件）
@@ -3519,24 +3869,27 @@ script_contracts:
     - INGEST_BACKEND、QUERY_BACKEND 与 RESEARCH_BACKEND 由无模型依赖的共享选择器读取，进程环境优先于仓库 .env，缺省为 agent
     - manifest 是数据契约而非二次提示词；语义判断由当前 Agent 基于来源与项目规范完成，程序不模拟、约束或评价 Agent 的推理过程
     - 输入和输出必须是仓库内相对路径；输出只能位于受管暂存区，提交仍由原摄入器或专用事务工具负责
+    - 每个任务携带 agent-task-control-v1 宿主协议；任意宿主只需 inspect、写声明输出、advance，同一入口按任务已有 check/commit/resume 顺序推进，不要求宿主理解内容类型内部状态
+    - 受管 action 不经 shell；只解析白名单 backend 环境覆盖与仓库 .scripts 下的 Python 入口，实际 schema、validator、preflight 和提交仍由原任务命令负责
     writes:
-    - 仅修改调用方的内存/事务 state.agent_task；不直接写 raw/wiki/graph.db 或调用模型
+    - prepare/reopen 仅修改调用方的内存/事务 state.agent_task；受管 action 只调用任务已声明的原 validator/commit/resume 入口
     forbidden:
     - 导入 dsh 或 llm_structured，构造角色提示词，调用模型，或把 Agent 正常工作记为 agent_required/API failure
     - 让 Agent 自证产物正确，绕过原有 parser/schema/validator/graph preflight/commit/rollback
     - 在 manifest 中复制工程文档全文或把内部状态枚举当作 Agent 操作流程
+    - 用 shell 执行 task command、接受 .scripts 外脚本、任意环境变量、重定向/管道，或在 required output 缺失时推进事务
     verify:
     - python3 .scripts/test_agent_task.py
     - python3 .scripts/test_ingest_pipeline.py
     - python3 .scripts/engineering_graph.py validate
   meeting_compiler_contract:
     preconditions:
-    - API adapter 与当前 Agent 产物共同使用 meeting-compiler-v1 delimiter、context hash、parser、preprocess schema 与非级联 replacement 规则
+    - API adapter 与当前 Agent 产物共同使用 meeting-compiler-v2 delimiter、context hash、parser、preprocess schema、evidence-bound typed MEETING_IR 与非级联 replacement 规则；v1 只解析在途兼容产物
     - shared 的 parse_proposal_detailed 返回 proposal、兼容错误摘要与结构化诊断；JSON 位置相对去除外围空白及标准 fence 后的 PREPROCESS，保留严格解析，不吞掉尾部结束标签
     writes: []
     forbidden:
     - 导入 dsh 或 llm_structured、调用模型、写暂存/最终文件，或因 backend 改变协议解析与机械校验
-    - 接受空 Wiki/slots、重叠/重复 replacement 或原文中不存在的 replacement source
+    - 接受空 Wiki/MEETING_IR、未绑定 evidence ID、指代端点、typed predicate 重复、重叠/重复 replacement 或原文中不存在的 replacement source
     verify:
     - python3 .scripts/test_agent_task.py
     - python3 dsh/test_meeting_compiler_agent.py
@@ -3601,7 +3954,7 @@ script_contracts:
     - read_paper 只在可机械识别的摘要边界内从 preamble 收窄摘要；没有摘要边界时返回 missing，不得把标题、作者或机构地址冒充 abstract；全大写单字母间隔标题仅在折叠后命中已知 section 名时规范化匹配，locator 仍指向原始 paper.md
     - Wiki validator 必须拒绝仅含脚注或“待巩固/待补充/TBD/unknown”等明确占位陈述；该机械门不判断引文是否语义蕴含陈述，证据一致性仍归 Agent/API semantic adapter
     writes:
-    - temp/inbox-extract/<txn>/ paper.pdf、paper.md、被 Markdown 引用的 images/、allowlist mineru/ sidecar、parse_meta.yaml、inbox-artifact-manifest-v2、语义槽与 wiki 草稿
+    - temp/inbox-extract/<txn>/ paper.pdf、paper.md、paper.pdf.source.json（raw-companion-v1 双哈希绑定）、被 Markdown 引用的 images/、allowlist mineru/ sidecar、parse_meta.yaml、inbox-artifact-manifest-v2、语义槽与 wiki 草稿
     - temp/inbox-extract/<txn>/agent-workspace.txt（paper-agent-workspace-v1 共用语义输出；Agent 直接写入或 API adapter 单次生成）及独立物化的 bibliographic-review.json/wiki.md/semantic.txt；各自产物通过对应 validator 后才可进入提交
     - temp/inbox-extract/<txn>/workspace-history/*（显式 --agent-refresh 归档的未提交旧 workspace 输出）
     - temp/inbox-state/<txn>-bibliographic-decision.json（candidate-id-v2 Worker 的事务级幂等缓存，不是事实源；extract 目录重建后仍可复用）
@@ -3660,24 +4013,26 @@ script_contracts:
   ingest_meeting:
     preconditions:
     - inbox 会议纪要仅接受 .txt 与显式 subproject=academic|admin|business；去重后先生成 entity-candidates.json，不提前 apply 最终纠错
-    - Meeting Compiler 初次调用同时返回 meeting-compiler-v1 PREPROCESS/WIKI/SLOTS；API 与 agent handoff/resume 共用同一协议
+    - 直接入口与统一 inbox 入口均先查询公共 Raw 指纹索引；只有二进制 SHA-256 精确命中可直接返回 duplicate_found，同日、同标题或既有 Raw/Wiki 目录不足以确认重复，不得丢弃不同字节的会议分段来源
+    - Meeting Compiler 初次调用返回 meeting-compiler-v2 PREPROCESS/WIKI/MEETING_IR；MEETING_IR 的人物、议题、汇报、决策、待办与扩展关系均引用程序分配的 Raw evidence_id，API 与 agent handoff/resume 共用同一协议
     - API Meeting Compiler 返回 rejected/协议解析错误时必须保存失败 trace，并在原事务生成 prompt/write_to 后进入 agent_required；不得新建事务或把错误归类为不可恢复 unknown_failure
     - YYYYMMDD 文件名保留显式年份；仅有 MMDD 或无日期时允许用摄入年分区，但 state 与 Wiki frontmatter 必须标记 date_inferred，禁止把推断年份伪装成 raw 明示事实
     - Meeting Compiler META 的非空 title 在落位前生成最终 meeting-id 并重算 raw/wiki 路径；sources 由程序回填最终路径，重试时保持 canonical ID 稳定
     - 会议 sources 按 YAML 结构回填为唯一最终 Raw 来源，覆盖标量、行内列表与多行列表；Wiki validator 必须检查与事务 raw_dir/source_filename 精确一致，缺失或错位不得进入落位
-    - replacement 只在原文精确命中并通过非级联应用校验后写 staged corrected.txt；Wiki 与 semantic 必须分别通过 validator
+    - replacement 只在原文精确命中并通过非级联应用校验后写 staged corrected.txt；程序从同一 MEETING_IR 确定性生成 Wiki 会议导航块与 semantic slots，二者集合一致后分别通过 validator
+    - typed meeting slots 独占参会、汇报、决策、待办和会议主题关系；自由 relations 不得重复这些谓词、不得含本会议等指代端点；核心语义边必须经 Wiki section 抵达精确 Raw locator
     - 所有会议语义经 knowledge-ir-v1 和绑定 hash 的 graph-plan-v1 进入 graph_ingest 唯一 writer
     writes:
-    - temp/inbox-extract/<txn>/entity-candidates.json、corrected.txt、entity-resolution.json、wiki.md、agent-meeting-compiler.txt
+    - temp/inbox-extract/<txn>/entity-candidates.json、evidence-catalog.json、corrected.txt、entity-resolution.json、meeting-ir.json、wiki.md、agent-meeting-compiler.txt
     - temp/inbox-state/<txn>.json、knowledge-ir-v1 与 graph-plan-v1 临时产物
     - 最终 Raw/Wiki 经 inbox_finalize；cross-domain/graph.db 或 private graph 经 graph_ingest
     forbidden:
     - 修改原始会议 Raw，或把 corrected/entity-resolution/DSH session log 当事实源
-    - 让 Wiki-only、slots-only 或第二个语义 Worker参与正常会议编译
+    - 让 Wiki-only、slots-only 或第二个语义 Worker参与正常会议编译，或让模型分别维护 Wiki 待办与 Graph 待办两份事实集合
     - agent handoff 后从原 .txt 新建事务，或在缺 write_to 产物时跳过 resume 校验
     - 让 rejected Meeting Compiler 输出直接进入 failed，或在协议 handoff 已可用时要求人工覆盖事务状态
     - 丢弃 YYYYMMDD 文件名中的年份，或对 MMDD 当前年推断不留 date_inferred 审计标记
-    - 绕过 Wiki/semantic/IR/graph validator 或由 Meeting Compiler 直接写图
+    - 绕过 Wiki/semantic/IR/graph/navigation validator，由 Meeting Compiler 直接写图，或把无证据核心关系标成可追溯
     verify:
     - python3 .scripts/test_ingest_meeting.py
     - python3 dsh/test_meeting_compiler_agent.py
@@ -3687,8 +4042,9 @@ script_contracts:
   ingest_document:
     preconditions:
     - shared PPTX 原生解析按 presentation 顺序输出逐页 Markdown、对象坐标、列表层级、原生表格空值与合并范围及独立备注；不以 pandoc plain 作为摄入正文
-    - PPTX 复用 visual_qa 本地渲染，不以版式 QA pass 代替内容复核；Agent/API 语义前均交接源、原生文本和逐页图像哈希绑定的 pptx_review agent-task-v1，保持原 semantic_backend，不自动上传或调用 DSH
-    - PPTX 复核须覆盖全部页的文字、布局及高风险数字/状态；表格另核行列，图片/非文本对象须核遗漏信息；关键未决项阻断，非关键限制持久化；独立 image_ocr 回执仅在页图源哈希匹配时复用，不另造远程视觉调用
+    - PPTX 复用 visual_qa 本地渲染与独立 pptx_visual API 内容识读；显式授权后调用，缺权限/配置/失败返回纯文字 pptx_api_action；保持原 semantic_backend，不将图像交给主 Agent 或切换 DSH；旧 pptx_review 回执仅保留历史兼容
+    - PPTX 内容识读覆盖全部页；关键未决项阻断，非关键限制持久化；API 逐页回执绑定源、原生文字、结构与渲染哈希；形式检查与内容识读是不同模式
+    - PPTX 来源日期仅取原始文件名或 inbox 来源目录中的明确日期；封面报告日期、引用文献日期及宣传活动日期留在正文，不由通用正文日期正则冒充源文件日期
     - PPTX 原件、逐页 companion 与同源 source.json 同事务落位；finalize 重校源/渲染/原生文本/复核与 companion 哈希及 sidecar，任何缺失或变更均拒绝；页图/PDF 仅暂存，不进入 Raw manifest
     - shared 表格清单原则只维护于 INGEST「表格型清单与台账」；Agent 路由与任务输入 locator 指向该段，API wiki/slots adapter 加载同一段，不新增分类调用或控制循环
     - shared Excel 提取支持 .xls（xlrd）与 .xlsx（openpyxl），原件和忠实 Markdown companion 同事务落位；保留工作表、原始行号、空值、隐藏状态和合并范围，不静默清洗或去重；xls 单元格为保存值，xlsx 同时保留公式与缓存值，不重新计算公式
@@ -3745,6 +4101,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   query_orchestrate:
     preconditions:
+    - existing API sessions are public-only; private scope cannot be selected by a model action or read into shared session storage
     - 本脚本只为 API backend 保存受预算约束的 query session 与运行模型循环；当前宿主 Agent 直接按 query task card 调用 query_actions/query_graph/source locator
     - read_sources 同时登记已验证 locator 与 source_locator 确定性映射出的原件引用路径；citation contract 只接受该白名单
     writes:
@@ -3869,14 +4226,14 @@ script_contracts:
     - api-only 修订携带最近一次同源 compiler 完整输出与诊断；纯 JSON 语法错误最小修复，schema/内容错误按当前 validator 修复，仍返回完整协议并消费原有预算
     - API result 保留 response_text 与 diagnostic；ingest_meeting 按事务和轮次保存 temp/inbox-extract 下的 compiler-attempt-N.json，状态只引用最近一次输出，普通 trace 不包含响应正文或诊断片段
     - API 模式运行 operation=ingest_meeting_compile，优先复用 INGEST_GENERATION profile；模型目录只作审计，运行时选择仍服从 llm_structured/.env
-    - 初次编译只允许一个 Meeting Compiler execution，同时返回 meeting-compiler-v1 的转写纠错决策、实体决策、Wiki 草稿和语义槽；不得拆给多个语义 Worker，provider transport/fallback 仍由 llm_structured 受控处理
-    - transcript replacements 必须逐条精确命中原文且不可级联；调用方确定性应用后生成 staged corrected.txt，并分别校验 Wiki 与语义槽
+    - 初次编译只允许一个 Meeting Compiler execution，同时返回 meeting-compiler-v2 的转写纠错决策、实体决策、Wiki 草稿和 evidence-bound typed MEETING_IR；不得拆给多个语义 Worker，provider transport/fallback 仍由 llm_structured 受控处理
+    - transcript replacements 必须逐条精确命中原文且不可级联；调用方确定性应用后生成 staged corrected.txt，并从同一 MEETING_IR 投影 Wiki 导航和语义槽后校验一致性与 Raw locator 覆盖
     - INGEST_BACKEND=agent 时只生成带 write_to 的同一协议 handoff；resume 必须先校验 agent 输出再恢复原事务
     writes:
     - 不直接写任何文件；仅返回 MeetingCompilerResult，调用方只可写 temp/inbox-extract 与事务状态
     forbidden:
     - 读写 raw/、wiki/、graph.db，调用落位/提交工具，或自报最终文件路径和 Knowledge IR 确定性字段
-    - 猜测未出现的实体替换、接受空 Wiki/slots，或对同一原文做重叠、重复、级联替换
+    - 猜测未出现的实体替换、接受空 Wiki/MEETING_IR 或未绑定证据的核心语义，或对同一原文做重叠、重复、级联替换
     - 绕过 Wiki/semantic validator、knowledge-ir-v1、graph-plan-v1 或 graph_ingest 唯一 writer
     verify:
     - python3 dsh/test_meeting_compiler_agent.py
@@ -3935,8 +4292,10 @@ script_contracts:
     preconditions:
     - 图片类型复用 source_locator.IMAGE_SUFFIXES，WebP/BMP/TIFF 与 PNG/JPEG 一样以原图作为源实体，排除同名 Markdown companion 独立计源
     - 受管来源元数据使用保留后缀 .source.json，指纹重建排除该 sidecar；普通独立 JSON 来源不受影响
+    - 隐藏系统文件、source.yaml、纠错稿及二进制源的同名提取 companion 不作为独立源实体
     - 只索引 inbox 输入或 academic/admin/teaching/business Raw 源文件；binary SHA-256 由 derivation_state.sha256_file 流式计算
     - 索引是派生缓存，raw 文件字节与路径是唯一可重建依据；private 域使用 private/source-fingerprints.db 物理隔离
+    - ensure_index 每次以路径/大小/mtime 进行轻量增量协调，仅对新增或变化源重算 hash，并在单一 SQLite 事务中登记变化、清除悬空路径；全量 rebuild 也不暴露半空索引
     writes:
     - cross-domain/source-fingerprints.db 或 private/source-fingerprints.db
     forbidden:
@@ -3977,7 +4336,7 @@ script_contracts:
     preconditions:
     - 输入是现有图片、PDF、PPT 或 PPTX；PPT/PPTX 只检查静态渲染页，不覆盖动画、视频或切换效果
     - Agent 只在用户显式要求视觉检查，或修改请求依赖布局、位置、颜色、遮挡、比例、页面流等可见状态且需先检查才能可靠理解指令时调用；常规文字修改、编译与每轮交付不自动触发
-    - 视觉模型默认 GLM-5.3-Flash + VISUAL_QA_REASONING_EFFORT=low，接口或输出失败时兼容回退 GLM-4.6V；回退模型不是真值裁判，不用其 pass 覆盖主模型缺陷报告
+    - 视觉模型默认 GLM-5.3-FlashX + VISUAL_QA_REASONING_EFFORT=low，接口或输出失败时兼容回退 GLM-4.6V；回退模型不是真值裁判，不用其 pass 覆盖主模型缺陷报告
     - shared QA 缓存绑定主/回退推理档位与 VISUAL_QA_MAX_TOKENS（默认 1800）；API-only adapter 按候选发送其独立参数，default 档省略 reasoning_effort，不继承 OCR 或文本 LLM 的推理设置
     - QA prompt-v2 仅将可见、有实际影响的缺陷列入 issues；纯审美建议放 summary，不升级 warn；不机械压制模型已报告的问题，非 stop 或拒答响应不得作为成功
     - 本次仅迁移 OCR/视觉检测；可编辑 PPT 重建独立配置；2026-09-11 用户显式指定主模型 GLM-5.3-Flash，回退 GLM-4.5V，不以 OCR/QA 测试冒充重建质量验证

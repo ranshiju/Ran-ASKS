@@ -44,7 +44,8 @@ def _qa_call(action: str, input_: dict) -> str:
     避免子进程开销和 JSON envelope 二次解析。
     """
     import query_actions as qa
-    result = qa.execute(action, input_)
+    with qa.query_scope("public"):
+        result = qa.execute(action, input_)
     if not result.get("ok"):
         return result.get("error", "[ERROR unknown]") or "[ERROR empty]"
     return result.get("text", "")

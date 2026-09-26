@@ -3,6 +3,29 @@
 
 ---
 
+## 上下文首次预热
+
+当前对话上下文第一次执行公共域摄入指令时，在参数判断后调用 `route.py --task ingest ... --context-warmup --format json`。程序从工程元图的 `ingest.context_warmup` 契约机械生成 `ingest-context-warmup-v1`：只包含本次范围、受管入口、控制循环、状态机、公共红线、完成条件和一次性回执，不展开本文件、SCHEMA 或脚本源码。同一上下文的后续摄入、batch item、stage 切换与 resume 复用已有认知，不重复预热；上下文压缩后无法确认回执时允许低成本重跑。回执只存在于对话上下文，不落盘为跨上下文状态，也不替代实际事务的 `agent-task-v1`、validator 或 commit receipt。private 有独立隔离契约，不进入该预热。
+
+---
+
+## 跨 Agent 的持久任务闭环
+
+公共域摄入返回持久化的 `prepared + agent-task-v1` 后，事务 ID 是不同宿主 Agent 之间唯一的接力点。宿主不需要猜论文、会议或通用文档的内部阶段，统一执行：
+
+```bash
+python3 .scripts/wg.py task inspect <transaction-id>
+# 只写 inspect 返回的 task.outputs 中声明的暂存产物
+python3 .scripts/wg.py task advance <transaction-id>
+```
+
+- `inspect` 返回 `agent-task-control-v1`、公开 workflow 状态、缺失输出和下一动作；大型 `context` 值只返回类型、字节数与 SHA-256，原事务内容不改写。需要正文或完整上下文时读取 `task.inputs` 或执行任务声明的 `read`，不得把紧凑回执当事实材料。
+- `advance` 在 required output 缺失时停止。任务同时声明 `check` 与 `commit` 时固定先检查，只有检查明确返回 `ready_to_commit` 才提交；其他任务只执行其声明的 `resume` 或 `commit`。所有 action 不经 shell，只能调用仓库 `.scripts/` 下的受管 Python 入口。
+- 终态任务返回 `next_action=none`，不因事务清理了暂存输出而重新要求生成。validator、preflight、提交、回滚和内容类型的 typed schema 仍由原摄入器负责；统一的是宿主控制循环，不是把不同内容协议降为一种自由文本格式。
+- 此入口只接续已经写入 `temp/inbox-state/` 的任务。摄入入口直接返回、尚未建立持久事务的分类裁决继续按该入口自己的批次协议处理，不得伪造 transaction ID。
+
+---
+
 ## 会话级总计划（条件触发）
 
 总计划仅协调一次摄入会话的阶段，不替代下文创建/更新/批量模式、三阶段任务卡或其工具约束。满足任一条件时，在首次路由后、开始执行前建立 3–5 项抽象计划：多个文件、混合文件类型、跨子项目归类、批量摄入，或可能进入更新/冲突分支。单篇且归属、模式明确时直接进入当前任务卡。
@@ -59,21 +82,23 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
 
 ## 会议纪要预处理
 
-> **双后端执行**（2026-09-03）：inbox 下的会议纪要 `.txt` 由 `ingest_meeting.py` 提供共享状态机。去重、候选召回、校验、落位和落图均为确定性步骤；Meeting Compiler 语义执行单元在同一上下文中完成转写纠错决策、Wiki 编译和语义槽抽取。Agent 后端由当前宿主 Agent 完成该任务，API 后端由程序通过 DSH 调用 API LLM。`.docx/.doc/.pptx/.md` 仍由 `ingest_document.py` 提取，但文件名或正文同时满足强会议速记标记时，inbox 必须显式传入 `source_kind=meeting`，保留 `speech-recognition` 来源语义。
+> **双后端执行**（2026-09-03）：inbox 下的会议纪要 `.txt` 由 `ingest_meeting.py` 提供共享状态机。去重、候选召回、证据目录、IR/Wiki/Graph 投影、校验、落位和落图均为确定性步骤；Meeting Compiler 语义执行单元在同一上下文中完成转写纠错决策、Wiki 正文草稿和 evidence-bound typed meeting IR。Agent 后端由当前宿主 Agent 完成该任务，API 后端由程序通过 DSH 调用 API LLM。`.docx/.doc/.pptx/.md` 仍由 `ingest_document.py` 提取，但文件名或正文同时满足强会议速记标记时，inbox 必须显式传入 `source_kind=meeting`，保留 `speech-recognition` 来源语义。
+
+会议来源只有在二进制 SHA-256 与受管 Raw 源实体精确一致时才直接判为 `duplicate_found`。日期、标题、参会人或既有目录只能帮助定位相关会议，不能证明来源重复；同日多场会议和同一会议的分段文件只要字节不同，就继续完成编译、校验与落位，结果不得依赖 inbox 文件名排序。
 
 若 sources 是 `.txt` 会议纪要（`conferences/`、`discussions/` 或会议目录，`source_type: speech-recognition`），执行以下闭环：
 
 1. **Raw 不可修改**：原始 ASR 文本是事实源。`corrected.txt`、`entity-resolution.json`、Wiki 和 semantic 都是可重建派生物，先写事务临时目录；任何纠错不得覆盖 Raw。
 2. **程序只准备候选**：`speech_entity_resolver.py <raw.txt> --output <entity-candidates.json>` 从 `graph.db` 的 people、aliases 和人物关系生成 exact/review 候选，不使用 `--apply` 提前形成最终纠错文本。可用 `--candidate-file` 缩小本次局部召回；索引按人物知识指纹增量刷新。
-3. **一个 specialist 一次理解全文**：`dsh/meeting_compiler_agent.py` 接收只读原文、人物候选、程序生成的 meeting ID/目标 sources 和 validator 错误，在同一上下文中返回 `meeting-compiler-v1`：
+3. **一个 specialist 一次理解全文**：程序先把 Raw 非空行编成稳定的 `sNNNN` evidence catalog；`dsh/meeting_compiler_agent.py` 接收只读原文、证据目录、人物候选、程序生成的 meeting ID/目标 sources 和 validator 错误，在同一上下文中返回 `meeting-compiler-v2`：
    - `<<<PREPROCESS>>>`：仅包含原文精确片段替换和人物 resolved/unchanged/unresolved 决策；证据不足必须 unresolved。
    - `<<<WIKI>>>`：conference-summary Wiki 草稿，参与者、术语和正文与同轮纠错决策一致。
-   - `<<<SLOTS>>>`：参会者、汇报者、决策、待办和受限三元组，与同轮 Wiki 使用同一实体判断。
-4. **程序编译派生物**：所有 replacement 必须命中原文，按一次非级联替换生成 staged `corrected.txt`；候选目录与 specialist 决策合并为 `entity-resolution.json`。重叠、重复、无命中或协议不完整均拒绝，不静默降级。
-5. **产物分别校验**：Wiki 与 semantic 仍分别经过 3.4/3.6 validator。任一硬错误带精确错误回到同一个 Meeting Compiler 做一次定向修订；warning 继续走局部确定性修复。Wiki 与 slots 复用同一 Compiler 上下文和实体判断。
+   - `<<<MEETING_IR>>>`：参会者、议题、汇报、决策、待办和受限扩展关系；每项必须引用 evidence ID，不得用“本会议”等指代端点，也不得在自由关系中重复 typed predicate。
+4. **程序编译派生物**：所有 replacement 必须命中原文，按一次非级联替换生成 staged `corrected.txt`；候选目录与 specialist 决策合并为 `entity-resolution.json`。程序从同一 MEETING_IR 确定性生成 Wiki `会议导航` 与 semantic slots：概念保持全局可解析，决策和待办生成页面作用域 proposition/task，不进入全局 keyword 池。重叠、重复、无命中、无证据或协议不完整均拒绝，不静默降级。
+5. **产物与导航校验**：MEETING_IR、Wiki、semantic、knowledge IR 和 graph plan 逐层校验集合一致；v2 核心语义边必须 100% 具备 Wiki section locator，并经脚注抵达精确 Raw 行号。任一硬错误带精确错误回到同一个 Meeting Compiler 做一次定向修订；warning 继续走局部确定性修复。
 6. **后端与恢复**：`INGEST_BACKEND=agent` 时脚本返回 `prepared + agent-task-v1`，当前宿主直接读取任务列出的原文、候选和协议，写入同一暂存输出后执行 resume；校验失败只更新原任务的 issues。`INGEST_BACKEND=api` 时程序通过 DSH 调用一次 Meeting Compiler；rejected、协议解析失败或预算耗尽保留 trace，并进入兼容 `agent_required`。两端共用同一事务与 validator，不把长原文复制进任务清单。文件名中的 `YYYYMMDD` 是权威年份；仅 `MMDD` 或无日期时才允许用摄入年推断，并在事务与 Wiki 中写 `date_inferred`。Compiler 提供非空 title 后，程序在落位前重算最终 meeting ID、Raw/Wiki 路径和 sources。
 7. **统一落图**：校验后的 semantic 经 `knowledge-ir-v1` → 绑定 IR SHA-256 的 `graph-plan-v1` → 唯一 writer `graph_ingest.py`。Meeting Compiler 不写 Raw、Wiki 或 `graph.db`，也不自报 IR 的确定性字段。
-8. **置信与回溯**：会议人物关系继续按 speech-recognition 来源处理；Wiki `sources` 始终指向原始 Raw，不指向 corrected。事实回答必须回溯 Raw，不能把纠错审计或 DSH session log 当事实源。
+8. **置信与回溯**：会议人物关系继续按 speech-recognition 来源处理；Wiki `sources` 始终指向原始 Raw，不指向 corrected。导航质量以可到达、关系类型正确、IR/Wiki/Graph 一致和精确 Raw locator 覆盖为硬门，不以固定新节点比例代替语义判断。事实回答必须回溯 Raw，不能把纠错审计或 DSH session log 当事实源。
 
 已有历史 `corrected.md` 保留不动、不回填、不删除，也不作为新流程输入。人物页/别名变化只影响下一次候选召回；历史会议仅在明确重摄入时更新。
 
@@ -337,10 +362,12 @@ Ingest 时，除来源摘要页外，还应触发的级联页面。
 | `来源` | Wiki page → Raw 文档包节点（原件与同 stem locator companion 共用一个节点） | cnu-ran-shiju → 来源 → 个人简历(raw) |
 | `主讲` | 人 → 课程节点 | 张明远 → 主讲 → 电动力学 |
 | `依据` | 政策/决策依据某文件 | 决策A → 依据 → 政策文件B |
-| `前置知识` | 概念/知识点有前置依赖 | 量子纠缠 → 前置知识 → 量子态 |
+| `前置` | 教学页面/知识点有前置依赖；teaching `prerequisites` 确定性编译使用此规范谓词 | 量子纠缠 → 前置 → 量子态 |
 | `应用于` | 某方法应用于某场景 | 张量网络 → 应用于 → 模型压缩 |
 
 只建能脱离上下文独立成立的原子边；派生或间接关系由图遍历推出。graph.db 只保存导航级关联，数值、证明、步骤与背景叙述留在 wiki `Content`；每条边必须能回溯其 raw 或 wiki 证据。
+
+页面主体指代由写图器统一处理，不依赖 Worker 自觉：document 域的 `本文件`/`本文档`、论文的 `本论文`、会议的 `本会议` 在 semantic、`--triples-json`、`--triples-file` 和直接 IR 通道使用同一归一与残留拒绝规则。teaching `prerequisites` 只接受已摄入同一图的 `[[topics/...]]` topic，并与 semantic 中重复的 `前置` 边去重。
 
 ## 学术图边关系
 
@@ -590,13 +617,16 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 
 ## 演示文稿（PPTX）
 
-- 原生 PPTX 按 `presentation.xml` 页序提取，逐页保留文本框/列表层级、对象位置、组变换、表格原始行列/空值/合并标记和独立演讲者备注；隐藏页也保留。Markdown 的 `## 幻灯片 N` 与物理行号支持精确定位；图表、SmartArt 等未转写对象显式标记，不静默遗漏。
-- 原件是最终核对依据，同名 Markdown 是同源可读 companion。原件、companion 和 `<原文件名>.source.json` 经同一受管事务落位；sidecar 保存原件、原生文本和逐页图像哈希及宿主复核记录，不是独立事实来源。
-- 语义生成前复用 `visual_qa` 的本地静态渲染，返回 `pptx_review` Agent task；当前宿主逐页核对文字、布局、金额/数量/单位/状态，表格另核行列，图片及非文本对象另核信息遗漏。备注不冒充可见正文；图片中补出的信息另标“页面可见信息补充”，不改写原生转写。原生提取错误应修提取器后重做，不能用补充段掩盖。
-- 保持原 semantic backend：Agent/API 均先通过同一个源绑定复核关卡，再沿原事务恢复。页图/PDF 默认仅本地临时使用，不上传、不归档、不调用可编辑 PPT 重建；QA 的版式 pass 不替代内容保真复核。需要 OCR 时可按 IMAGE_OCR 规范显式授权独立识别，再在对应页 `ocr_receipt` 提供源绑定回执；不新增 HTTP/model adapter。
-- 复核记录必须覆盖全部页；关键未决项阻断，非关键限制进入 companion、sidecar 和质量告警。只覆盖静态页面和原生备注，不保证动画、视频或隐藏对象在播放时的信息；渲染页数不一致时阻断，不以错位页图继续。
-- Wiki 以项目/主题组织，先定位已有项目来源页，避免把每页幻灯片变成新页面或新节点。严格区分现状、拟建设、预期成效、已获批与已完成；答辩/申报不等于已批准实施。材料标题或设备条目不自动成为独立项目实体。
-- finalize 重新核对原件、原生文本、页图、复核记录、companion、sidecar 与暂存原件；任何缺失或变更拒绝落位，不依靠 manifest 过滤绕过校验。旧 `.ppt` 不是本次原生支持范围，需先显式转换，不能仅改扩展名。
+- 原生 PPTX 按 presentation.xml 页序提取文本、列表、表格、对象位置与独立演讲者备注，隐藏页保留；`## 幻灯片 N` 和物理行号支持精确回溯。原生提取不支持的信息显式标记，不猜数据。
+- 原件是最终核对依据；同名 Markdown 为忠实可读 companion。原件、companion、source.json 同一受管事务归档并复验哈希；页图/PDF 只在 temp 缓存，回执不作独立事实源。
+- 新摄入采用独立 `pptx_visual` API 内容识读；主 Agent 只消费文字。`--allow-remote-ppt` 授权选定 PPTX 的内容识读与显式失败重试，Agent/API 语义 backend 均保持原模式，统一 inbox/wg/DSH 入口透传。既有图片 OCR 持续授权不自动扩展到 PPT。无许可、配置缺失或失败返回纯文字 `pptx_api_action`，不打开宿主图像、不回落 DSH。
+- 首版逐页 API 对照原生结构与渲染画面；输入包含结构文字，图片补充明确标记“API视觉识读”，备注不冒充可见正文。原生错误应修提取器；图中不清楚的数值和含义标记限制，不用猜测填充。API `fail/not_checked` 或关键未决项阻断提交；非关键限制进入 companion、sidecar 和告警。
+- 源绑定 `pptx-api-review-v1` 回执记录每页的实际 API 身份、原件/原生文字/图像/结构哈希及结果，程序最终复验；旧宿主回执仅历史兼容，不能改标 API 或人工确认。已完成且依赖一致的页续做复用，API 失败不视作已检查。
+- 静态渲染复用 visual_qa 与本地 LibreOffice；页数与原始页序不一致阻断，不能将错位图像绑定。动画、视频、任意嵌入对象重建不在保真承诺内。API 看图用于摄入保真，不是自动执行用户最终的 PPT形式检查、证据核查或引用脱敏。
+- 学术报告采用 academic-reference / ordinary。Wiki 保存报告题目、报告人/单位、主会议、报告日期/地点、主题摘要、主要内容与页码导航。未明确字段留空；报告日期、会议起止日期和源文件日期分开；附带活动宣传不能替代主会议。报告内容以“该报告展示/提出”表述，不自动认证科学结论。
+- PPTX 的源文件日期仅从原文件名或 inbox 来源目录中的明确日期提取；没有则保持未知。封面报告日期、文献发布日期及附带活动日期只作正文事实，不填入程序的来源日期字段。
+- 图只保留必要的报告主题与已有实体导航，不为每页建节点；词语别名服务中英文检索。日常查询先用伴生文字和 Wiki，到原 PPT 页核对；只有确实涉及视觉信息才按范围调用 API。
+- 模板收藏是独立派生动作，用户选定页后使用 slide_library.py；先完成报告归档再收藏，不自动抽取全部页面或静默改动来源。详见 PRESENTATION“学术报告摄入与模板结构复用”。
 
 ## 通用 raw 路径约束
 
@@ -605,9 +635,9 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 - **Raw Locator 契约（2026-08-25）**：原始 raw 能稳定局部读取时直接使用原件，不创建副本。Markdown/TXT/YAML/JSON/CSV 支持标题或行范围 locator；有文本层 PDF 支持页码 locator。读取工具只把命中片段交给 LLM。
 - **Excel 列定位**：忠实 Markdown 的 `R行号: JSON数组` 支持 `#table:<工作表名>:<列字母列表>:R<起行>-R<止行>`，例如 `#table:savedrecs:AI,AV:R2-R154`；工作表名含冒号等特殊字符时使用百分号编码。`wg.py read-raw` 返回指定原始列名和各行原值，不执行统计、不改写 Raw；整列仍超限时缩小行范围，不放宽片段上限。
 - **论文 PDF 例外（硬约束）**：学术论文 PDF 无论是否有文本层，都必须经 MinerU 生成高质量 `paper.md`；论文 locator、wiki `sources` 与事实读取统一指向 `paper.md`。PDF 原件同时保留在 raw，只作为原始凭据，不替代论文 Markdown 读取层。
-- **Companion 兜底**：DOCX/DOC/PPTX、扫描 PDF 等没有稳定可读原生 locator 的文档，摄入时把忠实提取文本保存为 `<原文件 stem>.md`，与原文件一起原子落到同一 raw 目录。该 Markdown 是 raw 事实包的一部分，不是 wiki、审计记录或临时派生物；成功落位后 wiki `sources` 指向它，原文件继续保留。若原件原生可定位则不生成 companion。
+- **Companion 标准读取接口**：PDF、DOCX/DOC、PPTX、XLS/XLSX、文字图片等 Agent 不便直接读取的受支持二进制文档，摄入时都把忠实提取文本保存为 `<原文件 stem>.md`，与原件及 `<原文件名>.source.json` 一起原子落到同一 Raw 目录。原件是事实源与最终核对依据；companion 是 Query 默认读取的可重建投影，不是摘要、Wiki 或第二份来源。sidecar 的 `raw-companion-v1` 必须绑定原件/companion 名称与 SHA-256，并记录生成器、版本、生成时间、locator scheme、投影方法与限制。
 - **Wiki Page Locator 契约**：新摄入的论文和通用文档页按自然主题分节；heading slug 是可重建导航地址，不用 Wiki 行号。事实段落/列表项先使用程序提供的完整 `RAW#Lx` handle，再由共享编译器单遍精确转换为 `[^rN]`，页末 `## Sources` 定义为 `[^rN]: raw/path#Lx-Ly`；不得按升序逐个替换行号，避免 `L13` 吞掉 `L136` 前缀。API 长文档必须在裁剪前为完整 `doc.md` 绑定原始行号，缩减时按完整行保留 handle，不得对裁剪结果重新编号。机械校验闭环包括：heading slug 页内唯一、引用脚注均有定义、Raw locator 可精确读取且非空、正文无残留 handle、无残缺脚注片段；不新增 claim card、覆盖率评分或全库迁移告警。
-- `temp/inbox-extract/.../doc.md` 只是事务暂存输入；需要 companion 时，manifest 必须同时提交原文件与同 stem Markdown，不能只留下临时文件。
+- `temp/inbox-extract/.../doc.md` 只是事务暂存输入；二进制来源的 manifest 必须同时提交原件、同 stem Markdown 和来源 sidecar，不能只留下临时文件。提交前重新验证三者绑定；任一哈希变化即阻断。
 - 具体目录、命名和预处理工具只读本子项目 SCHEMA 与按域派发的补充规则。
 
 ## private 领域（物理隔离，v1，2026-08-04）
@@ -628,6 +658,35 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 - **历史缓存不是安全起点**：若旧公共缓存已包含 private 文本，先用 `private_maintenance.py --quarantine-public-cache` 的 hash-gated 维护流程完整备份至 private 并清空公共衍生缓存；不要只改未来路由而保留历史泄漏项。两个域后续分别重建。
 - **不是物理论文模板**：private 按自身页面类型与内容组织，不套 arXiv 物理方向、`research-direction` 或 catch-all 研究 Hub。旧 research Hub 创建器仅允许 academic；当前自动 membership refresh 只对 academic 启用，private 的领域 Hub 仍需按本域契约显式建设。
 - **不发布**：private 的 Raw、Wiki、图、缓存、暂存、备份与日志均不进入 clean/GitHub；发布入口对 private 路径执行独立于 manifest 的硬拒绝。不要把 private 暂存物复制到已允许发布的工程资产中。
+
+### private 新增口述、PDF 与图片（Agent 本地事务）
+
+`.scripts/private_ingest.py` 提供 private 新建入口，不借用公共 inbox 或 `ingest_document.py` 的公共域事务。
+先将用户原话保存为 `private/outputs/` 内的 Markdown 输入；PDF 或图片原件也暂存于该域。
+带可读文本层的 PDF 使用 `--document`，prepare 在 private workspace 生成分页文字供宿主编码，并将原件与同 stem Markdown companion 作为一个哈希绑定 Raw 包提交。原件仍是 `official-doc` 事实源，companion 只是忠实读取投影，不是摘要或第二份来源；Wiki 事实脚注继续引用最终 PDF 的 `#page-N` locator，查询时由 locator 层优先映射到 companion 的对应分页。没有可用文本层的扫描 PDF 必须先进入受审核的本地 OCR 流程，不得静默按空文本摄入。
+图片由宿主 Agent 显式转写与复核，使用 `image_ocr.make_receipt/validate_receipt` 的共享协议，回执保存在 private。
+不得通过独立 OCR CLI 的共享 `temp/` 默认输出泄漏 private 内容。
+
+```bash
+python3 .scripts/private_ingest.py prepare \
+  --page private/wiki/health/example --title 示例记录 --page-type health-record \
+  --date YYYY-MM-DD --assertion private/outputs/input.md \
+  --image private/outputs/image.jpg --ocr private/outputs/image-ocr.json
+python3 .scripts/private_ingest.py prepare \
+  --page private/wiki/health/example-pdf --title PDF记录 --page-type health-record \
+  --date YYYY-MM-DD --document private/outputs/example.pdf
+python3 .scripts/private_ingest.py commit --txn <transaction-id>
+```
+
+纯口述省略 `--image/--ocr`；PDF 与 `--assertion` 是独立来源模式。prepare 生成哈希绑定来源包、Wiki 骨架、语义槽和 `agent-task-v1`；
+宿主只完成候选 Wiki 与语义槽。commit 持有 private 图写锁，独占创建 Raw，运行共享结构、locator 和图校验，
+一起提交原话，或二进制原件、同名 companion、必要的 source sidecar，以及 Wiki、图和 private 日志；普通异常补偿回滚，既有 Raw 不覆盖。
+图片非关键未决项保留限制，关键未决项阻断。事务使用本地 embedding 禁用上下文，不调用外部 OCR、embedding 或语义 API。
+所有产物及图锁保留在 private；公共图/缓存/队列哈希必须不变。成功重复提交返回既有回执；历史已完成的 PDF 事务缺少 companion 或绑定 sidecar 时，重复 commit 仅在归档 PDF 哈希与原事务分页提取逐字一致后幂等补齐，并更新 private 回执和日志，不重写 Wiki 或图；
+若进程强制终止留下 `committing`，须先检查 private 状态和备份，入口不自动覆盖或猜测恢复。
+此入口仅支持新建；已有 Wiki 的重摄入继续使用 `private_reingest.py`。
+
+纯文本来源可在 prepare 时显式传 `--source-type web|official-doc|user-assertion`；省略时保留 `user-assertion` 默认值，图片包固定为 `ocr`，不接受此覆盖。网页或古籍转录先在 private 暂存保真文本并保留来源 URL、读取时间及可用版本号，不把查询报告或摘要充作原文。来源类型在 prepare 时绑定，候选 Wiki 不得改写；后续校验与提交保持同一私有事务边界。
 
 
 ## 学术 raw 目录路径(own/others 分离)
@@ -678,7 +737,7 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 - **文件都有图中代表**：进入知识库的 Raw 文件和 Wiki page 都对应图节点；其他人物、概念、Hub 等对象可为页面节点或无页实体节点。
 - **Raw 文档包**：原件与同目录同 stem 的 locator companion 共同对应一个 `raw` 节点；例如 `paper.pdf` 与 MinerU `paper.md` 是一个 Raw 文档包，两个文件路径都解析到该节点。
 - **Wiki 直连 Raw**：每个 Wiki page 按 frontmatter `sources` 建 `Wiki → 来源 → Raw` 边。一个 Wiki 可有多个 Raw 来源，一个 Raw 也可被多个 Wiki 使用。
-- **locator 分层**：Markdown/TXT 使用标题或不可变行范围；文本型 PDF 可使用页码范围；其余格式由同目录 Markdown companion 提供 locator。论文 PDF 必须使用 MinerU `paper.md`。外部 `synology://` 路径在当前机器不可访问时单独报告，不视为 Raw 缺失。
+- **locator 分层**：Markdown/TXT 原件使用标题或不可变行范围；二进制来源默认由同目录 Markdown companion 提供 locator。分页 companion 可把 PDF `page-N` 映射到 `## Page N`，表格使用工作表/原始行列 locator，其他提取文本使用行或标题 locator。论文 PDF 必须使用 MinerU `paper.md`，新摄入同时生成 `paper.pdf.source.json` 的双哈希绑定。历史 PDF 缺少 companion 时可暂用原生页码读取；外部 `synology://` 路径在当前机器不可访问时单独报告，不视为 Raw 缺失。
 - **边 locator 可选**：`edges.source` 可记录 Wiki section 或 Raw locator，但不强制；只校验已填写 locator 是否可解析。Wiki section 的脚注负责事实回溯 Raw。
 - **存量对齐**：`edge_evidence` 与旧 `事实支撑` 边只作为迁移兼容输入，不再新增，也不参与完整性审计；`graph_repair.py --raw-links-only --apply` 同时补齐所有 Wiki/Raw 文档文件节点、同 stem aliases 与 `Wiki → 来源 → Raw` 直连。
 - **查询过滤**：`raw` 类型节点在一般语义候选中可默认过滤；需要来源时沿 Wiki 的 `来源` 边显式取得 Raw 文档包。
@@ -767,7 +826,7 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 
 **模型目录**：provider 当前可选模型记录在 `operations/config/llm-models.yaml`，仅用于选择与审计，不是运行时白名单；模型上下线不得阻断未使用该模型的摄入。
 
-**统一源类型上下文（v12）**：论文和通用文档继续使用 `ingest_common.CONTEXT_PROFILES` 选择全文或定向摘要；`paper` 用 `read_paper` section，`document` 用 Markdown 标题抽取。会议纪要通过事务内完整 `.txt` 一次读取，在同一上下文中完成预处理、Wiki 和 slots，长文件读取由脚本直接传路径/文本，不用 shell 切片。API 通用文档正文不超过 30,000 字符时由一次受限 Worker 同时产出 Wiki 与候选三元组，更长文档保留既有两阶段适配；Agent backend 只返回输入定位、输出协议和 validator。行政文档的 `department` 仅在 Raw 逐字出现完整部门名称时保留；负责人关系还须同一证据片段明确出现“负责人/负责”等职责措辞，校长讲话、主讲或发言身份不得推断为负责人。所有产物分别经过程序校验；Agent 错误回到原任务，API 语义硬错误至多定向重写一次，耗尽后转兼容 `agent_required`。
+**统一源类型上下文（v12）**：论文和通用文档继续使用 `ingest_common.CONTEXT_PROFILES` 选择全文或定向摘要；`paper` 用 `read_paper` section，`document` 用 Markdown 标题抽取。会议纪要通过事务内完整 `.txt` 与行级 evidence catalog 一次读取，在同一上下文中完成预处理、Wiki 正文和 typed MEETING_IR，长文件读取由脚本直接传路径/文本，不用 shell 切片；导航块与 semantic slots 随后由程序从 IR 投影。API 通用文档正文不超过 30,000 字符时由一次受限 Worker 同时产出 Wiki 与候选三元组，更长文档保留既有两阶段适配；Agent backend 只返回输入定位、输出协议和 validator。行政文档的 `department` 仅在 Raw 逐字出现完整部门名称时保留；负责人关系还须同一证据片段明确出现“负责人/负责”等职责措辞，校长讲话、主讲或发言身份不得推断为负责人。所有产物分别经过程序校验；Agent 错误回到原任务，API 语义硬错误至多定向重写一次，耗尽后转兼容 `agent_required`。
 
 **API Worker 成本轨迹**：`temp/llm-events/YYYY-MM-DD.jsonl` 是唯一 API 调用计数源。每次真实 HTTP 请求立即写一条 `execution-event-v1` / `llm_api_call`，用 `call_id` 关联同一逻辑调用的恢复尝试，并记录 `transaction_id`、operation、model、provider usage、latency、恢复类别以及 input/output hash 与长度。Agent task 与配置错误可留控制事件，但不计为 API 请求。事务中的 `bibliographic_worker`、`relationship_worker`、`semantic_repair_worker` 只说明 `api_called/cache_hit/skipped/skip_reason` 控制决策；日志不保存正文。
 
@@ -786,6 +845,8 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 **通用文档来源日期**：`ingest_document.py` 的 `date` 表示来源文档日期，Agent/API 共用确定性解析：依次读取原始文件名、正文明确标注为整理/编制/成文/签发/发布/更新的日期、`inbox/` 内由近到远的子文件夹名。文件名和文件夹名支持点、横线、下划线分隔的完整日期、紧凑 `YYYYMMDD` 和中文年月日，并校验日历合法性；正文日期同时校验数字边界，不得将 `2026-09-067` 等截断成合法日期；不读取 inbox 外祖先目录、文件时间戳或摄入日。嵌套来源的原始相对路径、文件名和文件夹名存入 `<原文件名>.source.json`，在暂存区生成后经 manifest 与原件一起原子落位 Raw，不能仅用 temp 事务作证据。页面 ID 使用同一日期结果；正文明确日期优先于目录日期。`conference-summary` 正文中的会议举办日期仍只作事件事实；缺少来源日期证据时由程序输出 `date: null` + `date_status: unknown`，即使模型草稿完全没有 `date` 键也必须补齐；保留 `created/updated` 为摄入时间，ID 使用 `undated-<slug>`。这一显式未知值通过 Schema/`ingest_check` 校验，但不得据此生成时态事实。通用文档语义协议仍仅含 `<<<WIKI>>>` 与 `<<<SLOTS>>>`，来源日期不交给 LLM；已完成事务不会自动迁移。
 
 **通用文档同名与重复**：标题匹配和文件名相同只形成候选；只有重新读取 Raw 原件并确认 SHA-256 完全相同，才能返回 `duplicate_found`。共享流程优先查派生指纹索引，再在对应 Raw 类型目录内定向检查同名文件（含独立子目录），不以文本归一化哈希代替原件身份。同名异文或任一 companion/来源 sidecar 冲突时，完整 Raw 包分配到 `<raw-type-dir>/<document-id>/`，目录已存在则用数字后缀避让，不改原文件名；路径在事务中持久化供重试复用，Wiki sources、locator、manifest 和回滚均指向同一分配目录，经原 finalizer 原子提交且不覆盖旧文件。
+
+**源指纹索引维护**：`cross-domain/source-fingerprints.db` 与 `private/source-fingerprints.db` 是按域物理隔离、可由 Raw 重建的派生缓存，不是事实源。公共 paper/meeting/document 在 Raw 与 Graph 校验通过后的共享收尾登记原始源实体；private create 只在私有提交边界更新私有索引。每次前置查重先按路径、大小和 mtime 增量协调，只为新增或变化项读取内容并计算 SHA-256，同时删除悬空记录；全量 `rebuild` 在算完全部记录后单事务替换。缓存失败记录 `fingerprint_register_failed`，不修改 Raw，也不回滚已验证的事实提交；normalized-text hash 只形成二次候选，不能独立确认重复。
 
 **双后端摄入执行层**：`INGEST_BACKEND=agent` 时，`ingest_inbox.py --run` 直接分发到底层确定性脚本并写 `temp/inbox-agent/` 审计；遇到语义工作返回 `prepared + agent-task-v1`，由当前宿主完成后继续原事务。`INGEST_BACKEND=api` 时才经 `dsh/agent_loop.py:IngestAgentLoop`、`ToolRegistry` 与 `IngestGuard` 分发，并写 `temp/inbox-dsh/` session log。两端共享底层 `ingest_*` 状态机、路径白名单、schema、validator 和提交/回滚，不共享控制循环；DSH 不直接写 Raw、Wiki 或 `graph.db`。事务分别持久化 `semantic_backend`、视觉路由 `image_backend` 与实际 `ocr_backend`；图片默认独立 API 转写和复核，无授权、失败或关键项未决只返回文字行动任务，显式 `IMAGE_OCR_BACKEND=agent` 才交给宿主看图。resume 必须保持原 semantic backend，不得为完成 OCR 另起 Agent backend 事务。
 

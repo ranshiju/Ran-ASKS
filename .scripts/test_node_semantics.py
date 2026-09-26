@@ -344,7 +344,10 @@ def test_query_actions_expose_structured_semantic_tools():
         conn.commit()
         conn.close()
         old_connect = qa.gl.connect
-        qa.gl.connect = lambda: old_connect(db_path)
+        def connect_fixture(path=None, *, read_only=False):
+            assert read_only, "query actions must use a read-only graph connection"
+            return old_connect(db_path, read_only=True)
+        qa.gl.connect = connect_fixture
         try:
             resolved = qa.execute("node_resolve", {"name": "MPS"})
         finally:

@@ -439,6 +439,10 @@ def extract_admin_date(filename: str, doc_text: str = "",
     date_str = _extract_name_date(source.stem)
     if date_str:
         return date_str
+    # A slide deck may quote papers and advertise unrelated dated events.
+    # Their dates (including labelled publication dates) do not date the file.
+    if source.suffix.lower() == ".pptx":
+        return _extract_source_directory_date(source)
     labeled = _extract_labeled_source_date(doc_text)
     if labeled:
         return labeled
@@ -648,9 +652,27 @@ def step_dedup_check(state: dict) -> tuple[bool, str]:
     source_hash = sha256_file(source_path)
     raw_root = (REPO / subproject / "raw").resolve()
     candidates = []
-    match = sf.lookup_exact(
-        source_path, db_path=REPO / "cross-domain/source-fingerprints.db", repo=REPO,
-    )
+    try:
+        sf.ensure_index(
+            db_path=REPO / "cross-domain/source-fingerprints.db",
+            roots=tuple(
+                REPO / domain / "raw"
+                for domain in ("academic", "admin", "teaching", "business")
+            ),
+            repo=REPO,
+        )
+        match = sf.lookup_exact(
+            source_path,
+            db_path=REPO / "cross-domain/source-fingerprints.db",
+            repo=REPO,
+            binary_sha256=source_hash,
+            size_bytes=source_size,
+        )
+    except Exception as exc:
+        match = None
+        state.setdefault("quality_warnings", []).append({
+            "issue": "fingerprint_index_unavailable", "detail": str(exc),
+        })
     if match:
         candidates.append(REPO / match["raw_path"])
     cfg = DOMAIN_CONFIG.get(subproject, DOMAIN_CONFIG["admin"])
@@ -845,29 +867,32 @@ def prepare_image_ocr(state: dict, source_path: Path, extract_dir: Path) -> tupl
 
 
 def prepare_pptx_review(state: dict, source_path: Path, extract_dir: Path) -> tuple[bool, str]:
-    """Shared preprocessing handoff; semantic backend is unchanged, no remote upload."""
+    """Shared preprocessing plus explicit vision API; semantic backend unchanged."""
     review_path = extract_dir / "pptx-review.json"
     try:
         manifest = pptx_document.prepare(source_path, extract_dir)
         if state.get("pptx_manifest_sha256") and state["pptx_manifest_sha256"] != sha256_file(extract_dir / "pptx-manifest.json"):
             raise pptx_document.PPTXError("PPTX manifest 在准备后变化")
         state["pptx_manifest_sha256"] = sha256_file(extract_dir / "pptx-manifest.json")
-        if not state.get("_awaiting_pptx_review"):
-            state["_awaiting_pptx_review"] = True
-            state["pre_handoff_status"] = "preprocess"
-            agent_task.prepare(
-                state, kind="pptx_review", transaction_id=state["transaction_id"],
-                inputs=[{"name": "original_pptx", "path": state["source"], "read": "reference"},
-                        {"name": "native_text", "path": str((extract_dir / "pptx-native.md").relative_to(REPO)), "read": "full"},
-                        {"name": "page_manifest", "path": str((extract_dir / "pptx-manifest.json").relative_to(REPO)), "read": "full"}]
-                       + [{"name": f"slide_{p['number']}", "path": str((extract_dir / "pptx-renders" / p["image"]).relative_to(REPO)), "read": "full"}
-                          for p in manifest["pages"]],
-                outputs=[{"name": "review", "path": str(review_path.relative_to(REPO)), "format": "json"}],
-                protocol=pptx_document.review_protocol(manifest),
-                issues=["逐页对照原生文本与页面图像；尚未完成内容保真复核"],
-                commands={"resume": resume_command(state)},
-            )
-            return False, "Agent PPTX review task prepared"
+        # Existing host-authored reviews remain historical, never relabelled API.
+        # New transactions only use the dedicated vision adapter.
+        if not review_path.exists():
+            import pptx_visual
+            result = pptx_document.prepare_api_review(
+                source_path, extract_dir, allow_remote=bool(state.get("allow_remote_ppt")),
+                retry_failed=bool(state.pop("retry_ppt_api", False)))
+            if result["status"] != "complete":
+                state["_awaiting_pptx_review"] = True
+                state["pre_handoff_status"] = "preprocess"
+                errors = [{"page": p["page"], "status": p["status"], "reason": p.get("reason", "")}
+                          for p in result["pages"] if p["status"] != "complete"]
+                agent_task.prepare(
+                    state, kind="pptx_api_action", transaction_id=state["transaction_id"],
+                    inputs=[{"name": "native_text", "path": str((extract_dir / "pptx-native.md").relative_to(REPO)), "read": "full"}],
+                    outputs=[{"name":"api_review", "path":str(review_path.relative_to(REPO)), "required":False, "producer":"pptx_visual API"}], protocol={"name": "pptx-api-action-v1", "visual_executor": "api",
+                    "resolution": "使用 --allow-remote-ppt 授权或显式重试；仅消费文字结果，不转交宿主看图。"},
+                    issues=errors, commands={"resume": resume_command(state) + " --allow-remote-ppt"})
+                return False, "PPTX API action required"
         text, receipt, warnings = pptx_document.validated(source_path, extract_dir)
         state["pptx"] = receipt
         for warning in warnings:
@@ -886,9 +911,11 @@ def prepare_pptx_review(state: dict, source_path: Path, extract_dir: Path) -> tu
 
 
 def _document_source_context(source_path: Path, receipt: dict | None = None,
-                             presentation: dict | None = None) -> dict:
+                             presentation: dict | None = None,
+                             companion: dict | None = None) -> dict:
     relative_source = _inbox_source_path(source_path)
-    if receipt is None and presentation is None and (relative_source is None or len(relative_source.parts) <= 1):
+    if (receipt is None and presentation is None and companion is None
+            and (relative_source is None or len(relative_source.parts) <= 1)):
         return {}
     context = {
         "schema": "document-source-context-v1",
@@ -915,7 +942,54 @@ def _document_source_context(source_path: Path, receipt: dict | None = None,
             "review_status": receipt["review_status"],
             "review": receipt.get("review"),
         }
+    if companion is not None:
+        context["companion"] = companion
     return context
+
+
+def _companion_record(state: dict, source_path: Path, companion_path: Path,
+                      receipt: dict | None, presentation: dict | None) -> dict:
+    suffix = source_path.suffix.lower()
+    generated_at = state.get("companion_generated_at")
+    if not generated_at:
+        generated_at = (receipt or {}).get("created") or datetime.now().astimezone().isoformat(timespec="seconds")
+        state["companion_generated_at"] = generated_at
+    if receipt is not None:
+        generator = {"name": "image_ocr", "version": receipt["prompt_version"],
+                     "backend": receipt["backend"], "model": receipt["model"]}
+        locator_scheme = "line"
+        method = "reviewed-ocr-transcription"
+        limitations = ["visual-layout-color-graphics-signatures-and-handwriting-require-original"]
+        review_status = receipt.get("review_status")
+    elif presentation is not None:
+        generator = {"name": "pptx_document", "version": presentation.get("schema", "1")}
+        locator_scheme = "slide-line"
+        method = "reviewed-native-presentation-extraction"
+        limitations = ["visual-layout-animation-and-embedded-media-require-original"]
+        review_status = presentation.get("review_status")
+    elif suffix in {".xls", ".xlsx"}:
+        generator = {"name": "ingest_document.extract_spreadsheet_text", "version": "1"}
+        locator_scheme = "table-row"
+        method = "native-spreadsheet-value-extraction"
+        limitations = ["rendered-format-and-formula-recalculation-require-original"]
+        review_status = None
+    elif suffix == ".pdf":
+        generator = {"name": "extractor", "version": "1"}
+        locator_scheme = "line"
+        method = "document-text-extraction"
+        limitations = ["layout-and-nontext-visuals-require-original"]
+        review_status = None
+    else:
+        generator = {"name": "ingest_document.extract_doc_text", "version": "1"}
+        locator_scheme = "line"
+        method = "native-document-text-extraction"
+        limitations = ["layout-and-embedded-media-require-original"]
+        review_status = None
+    return sl.make_companion_record(
+        source_path, companion_path, generator=generator, generated_at=generated_at,
+        locator_scheme=locator_scheme, method=method, limitations=limitations,
+        review_status=review_status,
+    )
 
 
 def step_preprocess(state: dict) -> tuple[bool, str]:
@@ -942,10 +1016,10 @@ def step_preprocess(state: dict) -> tuple[bool, str]:
         source_kind = detect_document_source_kind(state["source_filename"], doc_text)
     state["source_kind"] = source_kind
     native_kind = sl.native_locator_kind(source_path)
-    # 文档 prompt 始终用提取文本的 RAW#Lx。PDF 的原生 page locator 与该
-    # 行号空间不同，因此即使有文本层也必须保留 Markdown companion。
-    if native_kind == "section-line":
-        state["raw_locator_kind"] = native_kind
+    # 文档 prompt 始终用提取文本的 RAW#Lx。二进制原件统一保留 Markdown
+    # companion；PDF 原生 page locator 只用于历史包缺少 companion 时的查询回退。
+    if not sl.needs_locator_companion(source_path) and native_kind == "section-line":
+        state["raw_locator_kind"] = "section-line"
         state["locator_source_filename"] = state["source_filename"]
     else:
         companion_name = sl.locator_companion_name(state["source_filename"])
@@ -959,7 +1033,15 @@ def step_preprocess(state: dict) -> tuple[bool, str]:
     )
     receipt = (image_ocr.load_receipt(extract_dir / "image-ocr.json", source_path)
                if source_path.suffix.lower() in image_ocr.IMAGE_SUFFIXES else None)
-    context = _document_source_context(source_path, receipt, state.get("pptx"))
+    companion_record = None
+    if state["raw_locator_kind"] == "companion":
+        companion_record = _companion_record(
+            state, source_path, extract_dir / state["locator_source_filename"],
+            receipt, state.get("pptx"),
+        )
+        state["companion"] = companion_record
+    context = _document_source_context(
+        source_path, receipt, state.get("pptx"), companion_record)
     if context:
         context_name = state["source_filename"] + ".source.json"
         (extract_dir / context_name).write_text(
@@ -1742,12 +1824,30 @@ FINALIZE_CONFIG = {
     "allow_existing_raw_dir": True,
 }
 
+
+def _fingerprint_artifact(state: dict, repo: Path) -> dict:
+    raw_dir = repo / state["raw_dir"]
+    source_path = raw_dir / state["source_filename"]
+    locator_name = state.get("locator_source_filename")
+    text_path = raw_dir / locator_name if locator_name else None
+    if text_path is not None and not text_path.is_file():
+        text_path = None
+    if text_path is None and source_path.suffix.lower() in {".md", ".txt"}:
+        text_path = source_path
+    return {
+        "source_path": source_path,
+        "text_path": text_path,
+        "source_kind": source_path.suffix.lower().lstrip("."),
+    }
+
+
 FINALIZE_TAIL_CONFIG = {
     "doc_id_key": "admin_id",
     "get_log_path": lambda state, REPO: REPO / state.get("subproject", "admin") / "wiki" / "log.md",
     "get_index_path": lambda state, REPO: REPO / state.get("subproject", "admin") / "wiki" / "index.md",
     "index_section": None,
     "entry_prefix": "",
+    "fingerprint_artifact": _fingerprint_artifact,
     "index_header": "# 行政文档索引",
     "build_log_entry": lambda ctx: (
         "\n## [" + ctx["today"] + "] ingest | ingest_document.py 摄入 " + ctx["doc_id"] + "\n"
@@ -1772,6 +1872,19 @@ FINALIZE_TAIL_CONFIG = {
 
 def step_finalize(state: dict) -> tuple[bool, str]:
     source = REPO / state.get("source", "")
+    if state.get("raw_locator_kind") == "companion":
+        extract_dir = REPO / state["extract_dir"]
+        companion = extract_dir / state.get("locator_source_filename", "")
+        context_path = extract_dir / state.get("source_context_filename", "")
+        try:
+            context = json.loads(context_path.read_text(encoding="utf-8"))
+            if context.get("companion") != state.get("companion"):
+                return False, "companion sidecar 与事务绑定记录不一致"
+            binding = sl.companion_record_status(source, companion, state.get("companion"))
+            if binding["status"] != "valid":
+                return False, "companion 绑定失效: " + binding["reason"]
+        except (OSError, UnicodeError, KeyError, json.JSONDecodeError) as exc:
+            return False, f"companion sidecar 校验失败: {exc}"
     if source.suffix.lower() == ".pptx":
         import shutil
         extract_dir = REPO / state["extract_dir"]
@@ -1785,7 +1898,8 @@ def step_finalize(state: dict) -> tuple[bool, str]:
                 return False, "PPTX 原件/companion/sidecar 必须同源同 stem 配对"
             if (extract_dir / companion_name).read_text(encoding="utf-8") != text or (extract_dir / "doc.md").read_text(encoding="utf-8") != text:
                 return False, "PPTX companion 与已复核转写不一致"
-            if json.loads((extract_dir / context_name).read_text(encoding="utf-8")) != _document_source_context(source, presentation=receipt):
+            if json.loads((extract_dir / context_name).read_text(encoding="utf-8")) != _document_source_context(
+                    source, presentation=receipt, companion=state.get("companion")):
                 return False, "PPTX 来源 sidecar 与复核记录不一致"
             staged = extract_dir / source.name
             if not staged.exists():
@@ -1815,7 +1929,8 @@ def step_finalize(state: dict) -> tuple[bool, str]:
             if state.get("source_context_filename") != context_name:
                 return False, "图片缺少持久化来源 sidecar，请重新执行 preprocess"
             context = json.loads((extract_dir / context_name).read_text(encoding="utf-8"))
-            if context != _document_source_context(source, receipt):
+            if context != _document_source_context(
+                    source, receipt, companion=state.get("companion")):
                 return False, "图片来源 sidecar 与已校验 OCR 溯源不一致，拒绝落位"
             staged_source = extract_dir / source.name
             if not staged_source.exists():
@@ -1903,6 +2018,7 @@ def main() -> None:
                         help="来源种类；inbox 会议速记传 meeting，缺省由文档强标记判定")
     parser.add_argument("--resume", help="恢复已有事务 ID")
     parser.add_argument("--ocr-result", help="已有 image-ocr-v1 JSON 回执；校验源哈希后复用")
+    parser.add_argument("--allow-remote-ppt", action="store_true", help="显式授权本PPT的API内容识读/失败重试；不改变语义backend")
     parser.add_argument("--allow-remote-ocr", action="store_true",
                         help="显式授权图片上传 OCR API；不改变 Wiki/语义 backend")
     parser.add_argument("--entrypoint", choices=["direct", "inbox"], default="direct",
@@ -1959,6 +2075,13 @@ def main() -> None:
         }
     else:
         parser.error("需要 --file 或 --resume")
+    if args.allow_remote_ppt:
+        if Path(state.get("source", "")).suffix.lower() != ".pptx":
+            parser.error("--allow-remote-ppt 只适用于 PPTX")
+        state["allow_remote_ppt"] = True
+        state["retry_ppt_api"] = True
+        if agent_task.is_prepared(state) and state["agent_task"]["kind"] in {"pptx_review", "pptx_api_action"}:
+            inbox_state.transition(state, "preprocess", reason="explicit_ppt_api_input")
     if (args.ocr_result or args.allow_remote_ocr) \
             and Path(state.get("source", "")).suffix.lower() not in image_ocr.IMAGE_SUFFIXES:
         parser.error("OCR 参数只适用于图片来源")

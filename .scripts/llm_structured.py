@@ -8,7 +8,6 @@ API 调用按 fast/standard/deep/xdeep 档位控制 provider 推理强度；输�
 """
 from __future__ import annotations
 import json
-import os
 import re
 import time
 import hashlib
@@ -18,6 +17,7 @@ import uuid
 from pathlib import Path
 
 import agent_task
+import env_config
 import recovery_policy as rp
 
 REPO = Path(__file__).resolve().parent.parent
@@ -206,34 +206,27 @@ def reasoning_decision(config: dict[str, str], operation: str,
 
 def expand_env_references(values: dict[str, str]) -> dict[str, str]:
     """展开同一配置中的 `${NAME}`，避免复制 endpoint/key。"""
-    pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
-    expanded = dict(values)
-    for _ in range(len(values) + 1):
-        updated = {key: pattern.sub(lambda match: expanded.get(match.group(1), match.group(0)), value)
-                   for key, value in expanded.items()}
-        if updated == expanded:
-            return updated
-        expanded = updated
-    return expanded
+    return env_config.expand_references(values)
 
 def load_env() -> dict[str, str]:
-    values = {}
-    env_file = REPO / ".env"
-    if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, value = line.split("=", 1)
-                values[key.strip()] = value.strip()
     known = {
-        "QUERY_BACKEND", "INGEST_BACKEND", "LLM_API_BASE", "LLM_API_KEY", "LLM_MODEL",
+        "QUERY_BACKEND", "INGEST_BACKEND", "LLM_API_BASE", "LLM_API_PATH",
+        "LLM_API_KEY", "LLM_MODEL",
         "INGEST_KEYWORD_API_BASE", "INGEST_KEYWORD_API_KEY", "INGEST_KEYWORD_MODEL",
         "INGEST_REPAIR_API_BASE", "INGEST_REPAIR_API_KEY", "INGEST_REPAIR_MODEL",
         "INGEST_GENERATION_API_BASE", "INGEST_GENERATION_API_KEY", "INGEST_GENERATION_MODEL",
         "INGEST_PROPOSITION_API_BASE", "INGEST_PROPOSITION_API_KEY", "INGEST_PROPOSITION_MODEL",
         "SEMANTIC_RECOVERY_API_BASE", "SEMANTIC_RECOVERY_API_KEY", "SEMANTIC_RECOVERY_MODEL",
     }
-    values.update({key: value for key, value in os.environ.items() if key in known or key.startswith("LLM_REASONING_")})
-    return expand_env_references(values)
+    return env_config.load_env(
+        REPO / ".env", keys=known, prefixes=("LLM_REASONING_",)
+    )
+
+
+def _chat_endpoint(config: dict[str, str], base: str) -> str:
+    return env_config.join_api_url(
+        base, config.get("LLM_API_PATH", "") or "/v1/chat/completions"
+    )
 
 
 def reasoning_profile(config: dict[str, str], operation: str, requested: str | None = None,
@@ -452,7 +445,7 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
             }
             payload_data.update(attempt_reasoning)
             payload = json.dumps(payload_data).encode()
-            request = urllib.request.Request(profile["base"].rstrip("/") + "/v1/chat/completions", data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
+            request = urllib.request.Request(_chat_endpoint(config, profile["base"]), data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
             started = time.time()
             fast_fail = False
             try:
@@ -594,7 +587,7 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
             }
             payload_data.update(attempt_reasoning)
             payload = json.dumps(payload_data).encode()
-            request = urllib.request.Request(profile["base"].rstrip("/") + "/v1/chat/completions", data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
+            request = urllib.request.Request(_chat_endpoint(config, profile["base"]), data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
             started = time.time()
             fast_fail = False
             try:

@@ -38,6 +38,8 @@ from typing import Any, Callable, Iterable, Sequence
 
 import fitz
 import numpy as np
+
+import env_config
 from PIL import Image, ImageColor, ImageDraw
 
 try:
@@ -127,15 +129,7 @@ def _write_json_atomic(path: Path, value: Any) -> None:
 
 
 def _load_env() -> dict[str, str]:
-    values: dict[str, str] = {}
     source = REPO / ".env"
-    if source.is_file():
-        for raw_line in source.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            name, value = line.split("=", 1)
-            values[name.strip()] = value.strip().strip('"').strip("'")
     known = {
         "LLM_API_BASE",
         "LLM_API_KEY",
@@ -148,17 +142,7 @@ def _load_env() -> dict[str, str]:
         "VISUAL_RECONSTRUCTION_MODEL",
         "VISUAL_RECONSTRUCTION_FALLBACK_MODEL",
     }
-    values.update({name: value for name, value in os.environ.items() if name in known})
-    pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
-    for _ in range(len(values) + 1):
-        expanded = {
-            name: pattern.sub(lambda match: values.get(match.group(1), match.group(0)), value)
-            for name, value in values.items()
-        }
-        if expanded == values:
-            break
-        values = expanded
-    return values
+    return env_config.load_env(source, keys=known)
 
 
 def _sensitive_path(path: Path) -> bool:

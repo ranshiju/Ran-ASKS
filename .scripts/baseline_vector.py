@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
-"""baseline_vector.py — B2 向量RAG基线（GLM-Embedding-3 + 余弦相似度）
+"""baseline_vector.py — B2 向量RAG基线（embedding API + 余弦相似度）
 
-用 OpenAI 兼容 API 调用 GLM-Embedding-3 对全库 chunk 向量化，
+用 OpenAI 兼容 API 调用配置的 embedding 模型对全库 chunk 向量化，
 对问题 top-k 检索。模拟语义检索基线。
 """
 import json, re, sys, os, argparse, math, time
 from pathlib import Path
 import numpy as np
 
+import env_config
+
 REPO = Path(__file__).resolve().parent.parent
 
-# 加载 .env
-env_path = REPO / ".env"
-api_base = ""
-api_key = ""
-if env_path.exists():
-    for line in env_path.read_text().splitlines():
-        if line.startswith("LLM_API_BASE="): api_base = line.split("=",1)[1].strip()
-        if line.startswith("LLM_API_KEY="): api_key = line.split("=",1)[1].strip()
-
-EMBED_MODEL = "GLM-Embedding-3"
+_ENV = env_config.load_env(REPO / ".env", keys={
+    "EMBED_API_BASE", "EMBED_API_PATH", "EMBED_API_KEY", "EMBED_MODEL",
+    "LLM_API_BASE", "LLM_API_KEY",
+})
+api_base = _ENV.get("EMBED_API_BASE", "") or _ENV.get("LLM_API_BASE", "")
+api_key = _ENV.get("EMBED_API_KEY", "") or _ENV.get("LLM_API_KEY", "")
+api_endpoint = env_config.join_api_url(
+    api_base, _ENV.get("EMBED_API_PATH", "") or "/v1/embeddings"
+) if api_base else ""
+EMBED_MODEL = _ENV.get("EMBED_MODEL", "") or "embedding-3"
 CACHE_DIR = REPO / ".scripts" / "embed_cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
@@ -66,7 +68,7 @@ def get_embeddings(texts, batch_size=16):
         batch = texts[i:i+batch_size]
         payload = json.dumps({"model": EMBED_MODEL, "input": batch}).encode()
         req = urllib.request.Request(
-            f"{api_base}/v1/embeddings",
+            api_endpoint,
             data=payload,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         )
@@ -89,7 +91,7 @@ def get_query_embedding(text):
     import urllib.request
     payload = json.dumps({"model": EMBED_MODEL, "input": [text]}).encode()
     req = urllib.request.Request(
-        f"{api_base}/v1/embeddings",
+        api_endpoint,
         data=payload,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     )
@@ -147,7 +149,7 @@ def main():
             "id": q["id"], "question": q["question"],
             "primary_dim": q["primary_dim"], "domain": q["domain"],
             "retrieved": retrieved, "retrieval_tokens": total_tok,
-            "method": "Vector-RAG-GLM-Embedding-3"
+            "method": f"Vector-RAG-{EMBED_MODEL}"
         })
         print(f"  Q{qi+1}/{len(queries)}", file=sys.stderr)
     

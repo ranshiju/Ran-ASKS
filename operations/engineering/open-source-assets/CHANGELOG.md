@@ -7,6 +7,28 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-26
+
+### Version decision
+
+- MINOR: Add backward-compatible persistent Agent task handoff, physically isolated private ingestion/query, reusable native-slide tooling, governed presentation artwork, and explicit provider API paths while preserving existing public and frozen-artifact contracts.
+
+### Highlights
+
+- Added a persistent Agent task handoff that lets a later host inspect and
+  advance prepared ingestion transactions without replaying source analysis or
+  bypassing the original validators and commit boundary.
+- Added physically isolated private ingestion and query workflows whose Raw,
+  Wiki, graph, receipts, and indexes remain separate from the public domains;
+  the public template includes the reusable implementation, never private data.
+- Split native presentation handling into deterministic structure extraction,
+  source-bound visual reading, reusable slide/component libraries, and
+  governed editable artwork, while retaining explicit remote-call consent and
+  review receipts.
+- Unified provider API path configuration for chat and embedding endpoints and
+  strengthened evidence-bound meeting compilation, duplicate detection,
+  source locators, graph planning, and ingestion recovery.
+
 ## [0.7.0] - 2026-09-23
 
 ### Version decision

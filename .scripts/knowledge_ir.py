@@ -14,6 +14,19 @@ KNOWLEDGE_IR_SCHEMA = "knowledge-ir-v1"
 GRAPH_PLAN_SCHEMA = "graph-plan-v1"
 PROFILES = {"paper", "meeting", "document"}
 DOMAINS = {"academic", "admin", "teaching", "business", "private"}
+MEETING_COMPILER_V2 = "meeting-compiler-v2"
+PROPOSITION_OBJECT_PREDICATES = {"核心创新点", "局限性", "未来展望", "决策"}
+TASK_OBJECT_PREDICATES = {"待办"}
+DEICTIC_PAGE_ENDPOINTS = {"本会议", "本论文", "本文", "本文件", "本文档", "$meeting"}
+
+
+def relation_endpoint_kind(predicate: str, role: str) -> str:
+    """Return the shared semantic identity class for a relation endpoint."""
+    if role == "object" and predicate in PROPOSITION_OBJECT_PREDICATES:
+        return "proposition"
+    if role == "object" and predicate in TASK_OBJECT_PREDICATES:
+        return "task"
+    return "entity"
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -176,6 +189,7 @@ def build_knowledge_ir(
             "wiki_type": str(frontmatter.get("type") or ""),
             "sources": _as_string_list(frontmatter.get("sources")),
             "transaction_id": str(transaction_id or ""),
+            "compiler_protocol": str(frontmatter.get("compiler_protocol") or ""),
         },
         "relations": relation_rows,
         "structural_relations": structural_rows,
@@ -212,6 +226,10 @@ def validate_knowledge_ir(ir: Any) -> list[str]:
         errors.append("relations must be a list")
         relations = []
     seen_ids: set[str] = set()
+    strict_meeting = (
+        document.get("profile") == "meeting"
+        and document.get("compiler_protocol") == MEETING_COMPILER_V2
+    )
     for index, relation in enumerate(relations):
         if not isinstance(relation, dict):
             errors.append(f"relations[{index}] must be an object")
@@ -219,6 +237,11 @@ def validate_knowledge_ir(ir: Any) -> list[str]:
         for field in ("relation_id", "subject", "predicate", "object"):
             if not str(relation.get(field) or "").strip():
                 errors.append(f"relations[{index}].{field} is required")
+        if strict_meeting:
+            if relation.get("subject") in DEICTIC_PAGE_ENDPOINTS or relation.get("object") in DEICTIC_PAGE_ENDPOINTS:
+                errors.append(f"relations[{index}] has an unresolved meeting deictic endpoint")
+            if not str(relation.get("source") or "").strip():
+                errors.append(f"relations[{index}].source is required for meeting-compiler-v2")
         relation_id = str(relation.get("relation_id") or "")
         if relation_id in seen_ids:
             errors.append(f"relations[{index}].relation_id is duplicated")

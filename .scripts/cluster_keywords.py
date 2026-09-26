@@ -16,6 +16,8 @@ import numpy as np
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import pdist
 
+import env_config
+
 sys.path.insert(0, str(Path(__file__).parent))
 from embed_helper import embed_batch, cosine_sim
 
@@ -30,19 +32,17 @@ MERGE_THRESHOLD = 0.85        # 质心 cosine_sim > 此值 → 提议合并
 MERGE_SIZE_LIMIT = 100        # 合并后 hub keyword 数上限
 
 def _load_env():
-    env = {}
-    p = BASE / ".env"
-    if p.exists():
-        for line in p.read_text().splitlines():
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
-    return env
+    return env_config.load_env(BASE / ".env", keys={
+        "LLM_API_BASE", "LLM_API_PATH", "LLM_API_KEY", "LLM_MODEL",
+    }, prefixes=("LLM_REASONING_",))
 
 _ENV = _load_env()
 _API_BASE = _ENV.get("LLM_API_BASE", "")
 _API_KEY = _ENV.get("LLM_API_KEY", "")
 _MODEL = _ENV.get("LLM_MODEL", "")
+_API_ENDPOINT = env_config.join_api_url(
+    _API_BASE, _ENV.get("LLM_API_PATH", "") or "/v1/chat/completions"
+) if _API_BASE else ""
 
 def llm_name_cluster(keywords):
     """让 LLM 根据簇内 keywords 给一个简短中文主题名"""
@@ -67,7 +67,7 @@ def llm_name_cluster(keywords):
     last_err = None
     for attempt in range(2):
         req = urllib.request.Request(
-            f"{_API_BASE}/v1/chat/completions", data=payload,
+            _API_ENDPOINT, data=payload,
             headers={"Authorization": f"Bearer {_API_KEY}", "Content-Type": "application/json"}
         )
         try:

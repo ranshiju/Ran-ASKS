@@ -293,8 +293,9 @@ class PrivateIsolationTests(unittest.TestCase):
         if wal:
             conn.execute('PRAGMA journal_mode=WAL')
         eh._ensure_cache_schema(conn)
-        conn.execute('INSERT INTO embeddings VALUES (?,?,?,?)',
-                     ('SYNTHETIC PRIVATE CACHE MARKER', b'synthetic-vector', None, 1))
+        conn.execute('INSERT INTO embeddings VALUES (?,?,?,?,?)',
+                     (eh._cache_namespace(), 'SYNTHETIC PRIVATE CACHE MARKER',
+                      b'synthetic-vector', None, 1))
         conn.execute('INSERT INTO node_texts VALUES (?,?,?)',
                      ('private/wiki/synthetic', 'SYNTHETIC PRIVATE CACHE MARKER', 1))
         conn.commit()

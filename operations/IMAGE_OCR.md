@@ -22,11 +22,14 @@ IMAGE_OCR_ALLOW_REMOTE=false
 IMAGE_OCR_API_BASE=${LLM_API_BASE}
 IMAGE_OCR_API_KEY=${LLM_API_KEY}
 IMAGE_OCR_MODEL=GLM-5.3-Flash
+IMAGE_OCR_REVIEW_MODEL=GLM-5.3-FlashX
 IMAGE_OCR_FALLBACK_MODEL=GLM-4.6V
 IMAGE_OCR_REASONING_EFFORT=low
 IMAGE_OCR_FALLBACK_REASONING_EFFORT=default
 IMAGE_OCR_MAX_TOKENS=8192
 ```
+
+`IMAGE_OCR_REVIEW_MODEL` 独立控制 API 复核；未指定时复用 `VISUAL_QA_MODEL`，再缺省为 `GLM-5.3-FlashX`。转写模型保持独立，复核身份回执记录实际调用模型。
 
 这些配置均可省略：base/key 复用主 API，模型缺省 GLM-5.3-Flash；不复制密钥，也不改动主语义模型。
 `IMAGE_OCR_ALLOW_REMOTE=false` 保留逐次 `--allow-remote-ocr` 授权；显式设为 `true` 是本项目图片摄入的持续上传许可，覆盖转写和复核两步，不扩展至 PDF/PPT 或其他视觉工具。仅配置 endpoint/key 或 `INGEST_BACKEND=api` 不构成许可。独立 OCR CLI 仍须 `--allow-remote`，不读取摄入编排器的持续许可。

@@ -35,8 +35,12 @@ def db_for_path(path: Path, repo: Path = REPO) -> Path:
     try:
         rel = path.resolve().relative_to(repo.resolve())
     except ValueError:
-        return CROSS_DOMAIN_DB
-    return PRIVATE_DB if rel.parts and rel.parts[0] == "private" else CROSS_DOMAIN_DB
+        return repo / "cross-domain/source-fingerprints.db"
+    return (
+        repo / "private/source-fingerprints.db"
+        if rel.parts and rel.parts[0] == "private"
+        else repo / "cross-domain/source-fingerprints.db"
+    )
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -84,6 +88,61 @@ def _stored_path_exists(raw_path: str, repo: Path) -> bool:
     return path.is_file()
 
 
+def _text_path_for_source(source_path: Path) -> Path | None:
+    if source_path.name == "paper.pdf" and source_path.with_name("paper.md").is_file():
+        return source_path.with_name("paper.md")
+    if source_path.suffix.lower() in {".md", ".txt"}:
+        return source_path
+    companion = source_path.with_suffix(".md")
+    return companion if companion.is_file() else None
+
+
+def _fingerprint_record(
+    source_path: Path,
+    *,
+    raw_path: str | None = None,
+    text_path: Path | None = None,
+    source_kind: str = "",
+    repo: Path = REPO,
+) -> dict:
+    source_path = source_path.resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(source_path)
+    before = source_path.stat()
+    digest = sha256_file(source_path)
+    text_digest = normalized_text_sha256(text_path) if text_path and text_path.is_file() else ""
+    after = source_path.stat()
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise RuntimeError(f"source changed while hashing: {source_path}")
+    return {
+        "raw_path": raw_path or _stored_path(source_path, repo),
+        "binary_sha256": digest,
+        "size_bytes": after.st_size,
+        "mtime_ns": after.st_mtime_ns,
+        "text_sha256": text_digest,
+        "source_kind": source_kind or source_path.suffix.lower().lstrip("."),
+        "indexed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+
+def _upsert_records(conn: sqlite3.Connection, records: list[dict]) -> None:
+    conn.executemany(
+        """
+        INSERT INTO source_fingerprints
+            (raw_path,binary_sha256,size_bytes,mtime_ns,text_sha256,source_kind,indexed_at)
+        VALUES (:raw_path,:binary_sha256,:size_bytes,:mtime_ns,:text_sha256,:source_kind,:indexed_at)
+        ON CONFLICT(raw_path) DO UPDATE SET
+            binary_sha256=excluded.binary_sha256,
+            size_bytes=excluded.size_bytes,
+            mtime_ns=excluded.mtime_ns,
+            text_sha256=excluded.text_sha256,
+            source_kind=excluded.source_kind,
+            indexed_at=excluded.indexed_at
+        """,
+        records,
+    )
+
+
 def register_source(
     source_path: Path,
     *,
@@ -93,64 +152,44 @@ def register_source(
     db_path: Path | None = None,
     repo: Path = REPO,
 ) -> dict:
-    source_path = source_path.resolve()
-    if not source_path.is_file():
-        raise FileNotFoundError(source_path)
+    record = _fingerprint_record(
+        source_path,
+        raw_path=raw_path,
+        text_path=text_path,
+        source_kind=source_kind,
+        repo=repo,
+    )
     target_db = db_path or db_for_path(source_path, repo)
-    stat = source_path.stat()
-    digest = sha256_file(source_path)
-    text_digest = normalized_text_sha256(text_path) if text_path and text_path.is_file() else ""
-    stored = raw_path or _stored_path(source_path, repo)
-    indexed_at = datetime.now().astimezone().isoformat(timespec="seconds")
     conn = _connect(target_db)
     try:
-        conn.execute(
-            """
-            INSERT INTO source_fingerprints
-                (raw_path,binary_sha256,size_bytes,mtime_ns,text_sha256,source_kind,indexed_at)
-            VALUES (?,?,?,?,?,?,?)
-            ON CONFLICT(raw_path) DO UPDATE SET
-                binary_sha256=excluded.binary_sha256,
-                size_bytes=excluded.size_bytes,
-                mtime_ns=excluded.mtime_ns,
-                text_sha256=excluded.text_sha256,
-                source_kind=excluded.source_kind,
-                indexed_at=excluded.indexed_at
-            """,
-            (stored, digest, stat.st_size, stat.st_mtime_ns, text_digest, source_kind, indexed_at),
-        )
-        conn.commit()
+        with conn:
+            _upsert_records(conn, [record])
     finally:
         conn.close()
     return {
-        "raw_path": stored,
-        "binary_sha256": digest,
-        "size_bytes": stat.st_size,
-        "text_sha256": text_digest,
+        key: record[key]
+        for key in ("raw_path", "binary_sha256", "size_bytes", "text_sha256")
     }
 
 
-def lookup_exact(
-    source_path: Path,
+def lookup_digest(
+    binary_sha256: str,
+    size_bytes: int,
     *,
-    db_path: Path | None = None,
+    db_path: Path = CROSS_DOMAIN_DB,
     repo: Path = REPO,
 ) -> dict | None:
-    source_path = source_path.resolve()
-    if not source_path.is_file():
+    if not re.fullmatch(r"[0-9a-f]{64}", binary_sha256) or size_bytes < 0:
+        raise ValueError("invalid SHA-256 or size")
+    if not db_path.is_file():
         return None
-    target_db = db_path or db_for_path(source_path, repo)
-    if not target_db.is_file():
-        return None
-    size = source_path.stat().st_size
-    digest = sha256_file(source_path)
-    conn = _connect(target_db)
+    conn = _connect(db_path)
     try:
         rows = conn.execute(
             """SELECT * FROM source_fingerprints
                WHERE binary_sha256=? AND size_bytes=?
                ORDER BY length(raw_path), raw_path""",
-            (digest, size),
+            (binary_sha256, size_bytes),
         ).fetchall()
     finally:
         conn.close()
@@ -160,6 +199,27 @@ def lookup_exact(
             result["match"] = "binary_sha256"
             return result
     return None
+
+
+def lookup_exact(
+    source_path: Path,
+    *,
+    db_path: Path | None = None,
+    repo: Path = REPO,
+    binary_sha256: str | None = None,
+    size_bytes: int | None = None,
+) -> dict | None:
+    source_path = source_path.resolve()
+    if not source_path.is_file():
+        return None
+    target_db = db_path or db_for_path(source_path, repo)
+    if not target_db.is_file():
+        return None
+    size = source_path.stat().st_size
+    if size_bytes is not None and size_bytes != size:
+        return None
+    digest = binary_sha256 or sha256_file(source_path)
+    return lookup_digest(digest, size, db_path=target_db, repo=repo)
 
 
 def lookup_text_candidate(
@@ -192,7 +252,8 @@ def lookup_text_candidate(
 
 
 def _is_source_artifact(path: Path) -> bool:
-    if not path.is_file() or path.name in SIDECAR_NAMES or path.name.endswith(".bak"):
+    if (not path.is_file() or path.name.startswith(".")
+            or path.name in SIDECAR_NAMES or path.name.endswith(".bak")):
         return False
     if any(pattern.match(path.name) for pattern in SIDECAR_PATTERNS):
         return False
@@ -223,49 +284,110 @@ def rebuild(
     roots: tuple[Path, ...] = RAW_ROOTS,
     repo: Path = REPO,
 ) -> dict:
+    records = []
+    for source_path in _iter_source_artifacts(roots):
+        records.append(_fingerprint_record(
+            source_path,
+            text_path=_text_path_for_source(source_path),
+            repo=repo,
+        ))
     conn = _connect(db_path)
     try:
-        conn.execute("DELETE FROM source_fingerprints")
-        conn.commit()
+        with conn:
+            conn.execute("DELETE FROM source_fingerprints")
+            _upsert_records(conn, records)
     finally:
         conn.close()
-    indexed = 0
-    for source_path in _iter_source_artifacts(roots):
-        text_path = None
-        if source_path.name == "paper.pdf" and (source_path.parent / "paper.md").is_file():
-            text_path = source_path.parent / "paper.md"
-        elif source_path.suffix.lower() in {".md", ".txt"}:
-            text_path = source_path
-        register_source(
-            source_path,
-            text_path=text_path,
-            source_kind=source_path.suffix.lower().lstrip("."),
-            db_path=db_path,
+    return {"status": "rebuilt", "db": str(db_path), "indexed": len(records)}
+
+
+def reconcile(
+    *,
+    db_path: Path = CROSS_DOMAIN_DB,
+    roots: tuple[Path, ...] = RAW_ROOTS,
+    repo: Path = REPO,
+) -> dict:
+    """Incrementally align the rebuildable cache with current Raw source artifacts."""
+    if not db_path.is_file():
+        return rebuild(db_path=db_path, roots=roots, repo=repo)
+    current = {
+        _stored_path(path, repo): path
+        for path in _iter_source_artifacts(roots)
+    }
+    conn = _connect(db_path)
+    try:
+        rows = {
+            row["raw_path"]: dict(row)
+            for row in conn.execute(
+                "SELECT raw_path,size_bytes,mtime_ns FROM source_fingerprints"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    added = sorted(set(current) - set(rows))
+    removed = sorted(set(rows) - set(current))
+    updated = sorted(
+        raw_path for raw_path in set(current) & set(rows)
+        if (
+            current[raw_path].stat().st_size != rows[raw_path]["size_bytes"]
+            or current[raw_path].stat().st_mtime_ns != rows[raw_path]["mtime_ns"]
+        )
+    )
+    records = [
+        _fingerprint_record(
+            current[raw_path],
+            raw_path=raw_path,
+            text_path=_text_path_for_source(current[raw_path]),
             repo=repo,
         )
-        indexed += 1
-    return {"status": "rebuilt", "db": str(db_path), "indexed": indexed}
+        for raw_path in added + updated
+    ]
+    if records or removed:
+        conn = _connect(db_path)
+        try:
+            with conn:
+                _upsert_records(conn, records)
+                conn.executemany(
+                    "DELETE FROM source_fingerprints WHERE raw_path=?",
+                    [(raw_path,) for raw_path in removed],
+                )
+        finally:
+            conn.close()
+    return {
+        "status": "reconciled",
+        "db": str(db_path),
+        "indexed": len(current),
+        "added": len(added),
+        "updated": len(updated),
+        "removed": len(removed),
+        "unchanged": len(current) - len(added) - len(updated),
+    }
 
 
-def ensure_index(*, private: bool = False) -> dict | None:
-    db_path = PRIVATE_DB if private else CROSS_DOMAIN_DB
-    if db_path.is_file():
-        return None
-    roots = PRIVATE_RAW_ROOTS if private else RAW_ROOTS
-    return rebuild(db_path=db_path, roots=roots)
+def ensure_index(
+    *,
+    private: bool = False,
+    db_path: Path | None = None,
+    roots: tuple[Path, ...] | None = None,
+    repo: Path = REPO,
+) -> dict:
+    target_db = db_path or (PRIVATE_DB if private else CROSS_DOMAIN_DB)
+    target_roots = roots or (PRIVATE_RAW_ROOTS if private else RAW_ROOTS)
+    return reconcile(db_path=target_db, roots=target_roots, repo=repo)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="可重建的摄入源文件 SHA-256/文本指纹索引")
-    parser.add_argument("action", choices=("rebuild", "lookup", "register"))
+    parser.add_argument("action", choices=("rebuild", "reconcile", "lookup", "register"))
     parser.add_argument("path", nargs="?")
     parser.add_argument("--private", action="store_true")
     parser.add_argument("--text-path")
     args = parser.parse_args()
     db_path = PRIVATE_DB if args.private else CROSS_DOMAIN_DB
-    if args.action == "rebuild":
+    if args.action in {"rebuild", "reconcile"}:
         roots = PRIVATE_RAW_ROOTS if args.private else RAW_ROOTS
-        result = rebuild(db_path=db_path, roots=roots)
+        function = rebuild if args.action == "rebuild" else reconcile
+        result = function(db_path=db_path, roots=roots)
     else:
         if not args.path:
             parser.error("lookup/register 需要 path")

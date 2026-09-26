@@ -456,6 +456,7 @@ def test_bundled_soffice_font_environment(tmp: Path) -> None:
 
 
 def main() -> None:
+    assert visual_qa.DEFAULT_MODEL == "GLM-5.3-FlashX"
     test_page_selector()
     with tempfile.TemporaryDirectory(prefix="visual-qa-test-") as tmp_dir:
         tmp = Path(tmp_dir)

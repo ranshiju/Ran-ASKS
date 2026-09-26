@@ -215,7 +215,8 @@ def validate_state(state):
         require(isinstance(records, dict) and not set(records) - {'content', 'design', 'visual', 'preview'}, 'Invalid approval kind')
         for kind, event in records.items():
             fields(event, 'kind actor confirmation_source expected_revision approved_at snapshot_sha256 accepted_warnings'
-                   + (' verdict findings' if kind == 'visual' else ''))
+                   + (' verdict findings' if kind == 'visual' else '')
+                   + (' api_receipt' if kind == 'visual' and 'api_receipt' in event else ''))
             if kind == 'visual':
                 require(event['verdict'] in {'passed', 'failed'} and isinstance(event['findings'], list)
                         and all(isinstance(x, str) and x.strip() for x in event['findings']), 'Invalid visual review result')
@@ -529,7 +530,8 @@ class Store:
                     state['slides'][page].pop('build', None)
             elif op in ('approve-content', 'approve-design', 'review', 'lock', 'unlock'):
                 fields(payload, 'actor confirmation_source snapshot_sha256 accepted_warnings'
-                       + (' verdict findings' if op == 'review' else ''))
+                       + (' verdict findings' if op == 'review' else '')
+                       + (' api_receipt' if op == 'review' and 'api_receipt' in payload else ''))
                 text(payload['actor'])
                 text(payload['confirmation_source'])
                 require(isinstance(payload['accepted_warnings'], list), 'Expected accepted warnings list')
@@ -542,9 +544,12 @@ class Store:
                     require('content' in records and 'design' in slide, 'Content approval/design proposal required')
                 elif op == 'review':
                     require('build' in slide, 'Real rendered preview required')
+                    if 'api_receipt' in payload:
+                        import pptx_visual
+                        pptx_visual.validate_state_review(self, sid, payload)
                 elif op == 'lock':
                     require('visual' in records and records['visual']['verdict'] == 'passed',
-                            'Agent must inspect and pass actual preview first; failed review blocks locking')
+                            'Actual preview must pass visual inspection first; failed review blocks locking')
                     require(payload['accepted_warnings'] == slide['build']['warnings'], 'Acknowledge the exact build warnings')
                 elif op == 'unlock':
                     require(stage(state, sid) == 'locked', 'Slide is not locked')
@@ -643,11 +648,15 @@ def main(argv=None):
     init = sub.add_parser('init')
     init.add_argument('--project', required=True, help='Existing projects/<workspace>')
     init.add_argument('--plan', required=True)
-    for name in ('status', 'check', 'commit', 'prepare'):
+    for name in ('status', 'check', 'commit', 'prepare', 'review-api'):
         item = sub.add_parser(name)
         item.add_argument('--store', required=True)
         if name in ('check', 'commit'):
             item.add_argument('--request', required=True)
+        if name == 'review-api':
+            item.add_argument('--slide', required=True)
+            item.add_argument('--expected-revision', required=True)
+            item.add_argument('--allow-remote', action='store_true')
         if name == 'prepare':
             item.add_argument('--slide', required=True)
             item.add_argument('--kind', choices=['content', 'design'], required=True)
@@ -669,6 +678,9 @@ def main(argv=None):
                 result = store.summary()
             elif args.command == 'prepare':
                 result = store.prepare(args.slide, args.kind)
+            elif args.command == 'review-api':
+                import pptx_visual
+                result = pptx_visual.review_state(store,args.slide,args.expected_revision,args.allow_remote)
             else:
                 result = store.apply(load_json(args.request), dry_run=args.command == 'check')
         print(json.dumps(result, ensure_ascii=False, indent=2))

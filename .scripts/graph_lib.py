@@ -178,7 +178,7 @@ def traversal_families(profile="", families=None, contract=None):
 # 管道版本号：影响 wiki/图边输出的建设变更才 bump。
 # 纯改名/重构不 bump；skeleton 模板/建边逻辑/prompt 调整等影响已入库内容的 bump。
 # re_ingest --outdated 据此判断哪些论文需重新摄入。
-CURRENT_PIPELINE_VERSION = 16  # v16: resumable MinerU bundles and layout-aware bibliography candidates
+CURRENT_PIPELINE_VERSION = 17  # v17: evidence-bound meeting IR and locator-complete navigation
 
 RAW_DOCUMENT_SUFFIXES = {
     ".md", ".txt", ".pdf", ".doc", ".docx", ".ppt", ".pptx",
@@ -268,7 +268,10 @@ def graph_writer_lock(db_path=None):
 
     target = Path(db_path or GRAPH_DB).resolve()
     digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:16]
-    lock_dir = REPO / "temp" / "graph-writer"
+    lock_dir = (REPO / "private" / "outputs" / "graph-writer"
+                if private_graph_path(target) else REPO / "temp" / "graph-writer")
+    if private_graph_path(target) and not private_graph_path(lock_dir):
+        raise ValueError("private graph lock escapes private storage")
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / f"{target.name}-{digest}.lock"
     with lock_path.open("a+", encoding="utf-8") as handle:

@@ -39,6 +39,16 @@ def test_extract_title_from_md_skips_aps_rapid_communication_header():
     assert module.extract_title_from_md(md) == "Self-learning Monte Carlo method"
 
 
+def test_extract_title_from_md_skips_generic_journal_section_headers():
+    md = (
+        "# PERSPECTIVES\n\n"
+        "# New avenues for the large-scale harvesting of blue energy\n"
+    )
+    assert module.extract_title_from_md(md) == (
+        "New avenues for the large-scale harvesting of blue energy"
+    )
+
+
 def test_chinese_paper_id_uses_stable_unicode_components():
     pid = module.generate_paper_id(
         "# CCCF专题导言初排版\n\n张鹏\n",
@@ -853,6 +863,22 @@ Volker Karle, Maksym Serbyn, and Alexios A. Michailidis IST Austria, Am Campus 1
     assert "IST Austria" not in candidates["authors"]
     assert "Am Campus" not in candidates["authors"]
     assert "Alexios A. Michailidis IST Austria" not in candidates["authors"]
+
+
+def test_bibliographic_candidates_drop_metadata_only_truncated_author():
+    md = "# Paper title\n\nTakayoshi Sasaki\n"
+    candidates = module.build_bibliographic_candidates(
+        {"authors": ["Takayoshi Sasak"]}, md,
+    )
+    assert candidates["authors"] == ["Takayoshi Sasaki"]
+
+
+def test_bibliographic_candidates_preserve_explicit_prefix_like_authors():
+    md = "# Paper title\n\nAnn Li, Ann Liu\n"
+    candidates = module.build_bibliographic_candidates(
+        {"authors": ["Ann Li", "Ann Liu"]}, md,
+    )
+    assert candidates["authors"] == ["Ann Li", "Ann Liu"]
 
 
 def test_repeated_title_author_block_skips_review_article_label():
@@ -3436,8 +3462,8 @@ def test_exact_fingerprint_stops_before_pdf_metadata_and_mineru():
             module.extract_pdf_bibliography, module.extract_title_from_pdf,
         )
         module.REPO = repo
-        module.sf.ensure_index = lambda: None
-        module.sf.lookup_exact = lambda _path: {
+        module.sf.ensure_index = lambda **_kwargs: None
+        module.sf.lookup_exact = lambda _path, **_kwargs: {
             "raw_path": "academic/raw/references/existing/paper.pdf",
             "binary_sha256": "abc123",
             "size_bytes": 8,
@@ -4186,6 +4212,68 @@ def test_step_finalize_tail_no_skip_writes_index():
             ic.run = original_run
 
 
+def test_step_finalize_tail_registers_declared_source_fingerprint():
+    import ingest_common as ic
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        log_path = root / "academic/wiki/log.md"
+        index_path = root / "academic/wiki/index.md"
+        source = root / "academic/raw/conferences/demo.txt"
+        source.parent.mkdir(parents=True)
+        source.write_text("meeting source", encoding="utf-8")
+        config = {
+            "doc_id_key": "meeting_id",
+            "get_log_path": lambda state, REPO: log_path,
+            "get_index_path": lambda state, REPO: index_path,
+            "build_log_entry": lambda ctx: f"## ingest {ctx['doc_id']}\n",
+            "fingerprint_artifact": lambda state, REPO: {
+                "source_path": source, "text_path": source, "source_kind": "txt",
+            },
+        }
+        original_run = ic.run
+        try:
+            ic.run = lambda cmd, repo: ""
+            state = {"meeting_id": "demo", "wiki_path": "academic/wiki/conferences/demo",
+                     "graph_report": {"edges_added": 1}}
+            ok, msg = ic.step_finalize_tail(state, root, config)
+            assert ok, msg
+            assert state["source_fingerprint"]["raw_path"] == "academic/raw/conferences/demo.txt"
+            assert ic.sf.lookup_exact(
+                source, db_path=root / "cross-domain/source-fingerprints.db", repo=root,
+            )
+        finally:
+            ic.run = original_run
+
+
+def test_step_finalize_tail_fingerprint_failure_is_nonblocking():
+    import ingest_common as ic
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "academic/raw/conferences/demo.txt"
+        source.parent.mkdir(parents=True)
+        source.write_text("meeting source", encoding="utf-8")
+        config = {
+            "doc_id_key": "meeting_id",
+            "get_log_path": lambda state, REPO: root / "academic/wiki/log.md",
+            "get_index_path": lambda state, REPO: root / "academic/wiki/index.md",
+            "build_log_entry": lambda ctx: f"## ingest {ctx['doc_id']}\n",
+            "fingerprint_artifact": lambda state, REPO: {"source_path": source},
+        }
+        original_run, original_register = ic.run, ic.sf.register_source
+        try:
+            ic.run = lambda cmd, repo: ""
+            ic.sf.register_source = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("index unavailable"))
+            state = {"meeting_id": "demo", "wiki_path": "academic/wiki/conferences/demo",
+                     "graph_report": {"edges_added": 1}}
+            ok, msg = ic.step_finalize_tail(state, root, config)
+            assert ok, msg
+            assert state["quality_warnings"] == [{
+                "issue": "fingerprint_register_failed", "detail": "index unavailable",
+            }]
+        finally:
+            ic.run, ic.sf.register_source = original_run, original_register
+
+
 def test_step_finalize_tail_frontier_failure_is_nonblocking():
     """Frontier 后置候选捕获失败只记 warning，不得让事实摄入失败。"""
     import ingest_common as ic
@@ -4892,8 +4980,11 @@ def test_artifact_manifest_hash_covers_nested_bundle_and_workspace_detects_drift
         manifest = json.loads((extract_dir / "manifest.json").read_text(encoding="utf-8"))
         assert manifest["schema"] == "inbox-artifact-manifest-v2"
         assert {item["path"] for item in manifest["raw_artifacts"]} == {
-            "paper.pdf", "paper.md", "images/a.png", "mineru/layout.json",
+            "paper.pdf", "paper.md", "paper.pdf.source.json",
+            "images/a.png", "mineru/layout.json",
         }
+        assert module.sl.companion_binding_status(
+            extract_dir / "paper.pdf", extract_dir / "paper.md")["status"] == "valid"
         state.update({
             "status": "prepared",
             "agent_workspace": {

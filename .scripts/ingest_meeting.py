@@ -32,12 +32,16 @@ import trash_util
 import ingest_common as ic
 import ingest_pipeline
 import recovery_policy as rp
+import source_fingerprints as sf
+import wiki_locator as wl
 from meeting_compiler_contract import (
+    MEETING_IR_DELIMITER,
     PREPROCESS_DELIMITER,
     PROTOCOL_VERSION as MEETING_COMPILER_PROTOCOL,
     apply_transcript_replacements,
     parse_proposal_detailed,
     task_context_hash,
+    validate_meeting_ir,
 )
 from ingest_common import (validate_meta, extract_year_from_meta,
                            has_type_mismatch, has_year_mismatch,
@@ -56,16 +60,16 @@ RECOVERY_LIMITS = rp.normalize_limits({
 })
 PIPELINE_PLAN_AGENT = [
     {"step": "判断重复 + 候选准备", "needs_agent": False,
-     "desc": "dedup(查图+查raw) → speech_entity_resolver 只生成确定性人物候选，不修改原文"},
+     "desc": "dedup(公共 Raw 指纹精确匹配) → speech_entity_resolver 只生成确定性人物候选，不修改原文"},
     {"step": "会议编译", "needs_agent": True,
-     "desc": "当前宿主 Agent 执行 Meeting Compiler 任务，读取原文+人物候选，一次输出 <<<PREPROCESS>>> + <<<WIKI>>> + <<<SLOTS>>>"},
+     "desc": "当前宿主 Agent 执行 Meeting Compiler 任务，读取原文、证据目录和人物候选，一次输出 PREPROCESS + WIKI + MEETING_IR"},
     {"step": "更新 Graph + 校验 + 收尾", "needs_agent": False,
      "desc": "validate→落位→graph_ingest 建边→validate_graph→finalize_tail(log/index/派生同步)+清理，--resume 一次调用完成"},
 ]
 
 PIPELINE_PLAN_API = [
     {"step": "摄入会议纪要（代码+API 全自动）", "needs_agent": False,
-     "desc": "dedup→候选准备→Meeting Compiler(API 单次语义编译)→validate→落位→统一 IR/建图→图校验→收尾+清理"},
+     "desc": "精确指纹 dedup→候选准备→Meeting Compiler(API 单次语义编译)→validate→落位→统一 IR/建图→图校验→收尾+清理"},
 ]
 
 def pipeline_plan_for(mode: str) -> list[dict]:
@@ -182,36 +186,39 @@ def ensure_unique_meeting_id(meeting_id: str, subproject: str = "academic") -> s
 # ===== 3.1 dedup_check =====
 
 def step_dedup_check(state: dict) -> tuple[bool, str]:
-    """查 graph.db + raw 目录是否已摄入同一会议。"""
-    import graph_lib as gl
-    date_token = extract_meeting_date(state["source_filename"])
-    if not date_token:
-        return False, ""
-    date_part = date_token[-4:]
-    date_context = meeting_date_context(date_token)
-    subproject = state.get("subproject", "academic")
-    cfg = MEETING_DOMAINS.get(subproject, MEETING_DOMAINS["academic"])
-    conn = gl.connect()
-    # 图层按完整日期和来源域查重，避免跨年份、跨域的同月日误判。
-    path_prefix = f"{subproject}/wiki/{cfg['wiki_sub']}/%"
-    rows = conn.execute(
-        "SELECT path, title FROM nodes "
-        "WHERE type='conference-summary' AND date=? AND path LIKE ?",
-        (date_context["date"], path_prefix),
-    ).fetchall()
-    conn.close()
-    if rows:
-        state["dedup_result"] = [{"path": r[0], "title": r[1]} for r in rows]
-        state["dedup_title"] = rows[0][1]
-        return True, f"已摄入: {rows[0][0]}"
-    # 查 raw 目录（按来源域）
-    year = date_context["storage_year"]
-    raw_base = REPO / subproject / "raw" / cfg["raw_sub"] / year
-    if raw_base.exists():
-        for d in raw_base.iterdir():
-            if date_part in d.name:
-                state["dedup_result"] = [{"path": str(d.relative_to(REPO))}]
-                return True, f"已摄入(raw): {d.name}"
+    """仅以 Raw 源文件的二进制指纹确认重复。"""
+    state.pop("dedup_result", None)
+    state.pop("dedup_title", None)
+    source_path = REPO / state["source"]
+    try:
+        sf.ensure_index(
+            db_path=REPO / "cross-domain/source-fingerprints.db",
+            roots=tuple(
+                REPO / domain / "raw"
+                for domain in ("academic", "admin", "teaching", "business")
+            ),
+            repo=REPO,
+        )
+        fingerprint_match = sf.lookup_exact(
+            source_path,
+            db_path=REPO / "cross-domain/source-fingerprints.db",
+            repo=REPO,
+        )
+    except Exception as exc:
+        fingerprint_match = None
+        state.setdefault("quality_warnings", []).append({
+            "issue": "fingerprint_index_unavailable", "detail": str(exc),
+        })
+    if fingerprint_match:
+        state["source_fingerprint"] = {
+            key: fingerprint_match[key]
+            for key in ("binary_sha256", "size_bytes")
+        }
+        state["dedup_result"] = [{
+            "path": fingerprint_match["raw_path"],
+            "binary_sha256": fingerprint_match["binary_sha256"],
+        }]
+        return True, f"源文件 SHA-256 已存在: {fingerprint_match['raw_path']}"
     return False, ""
 
 
@@ -242,8 +249,8 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
         error_section = "\n\n[上次输出的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
     return f"""你是受限的 Meeting Compiler 语义执行单元。请在同一上下文中一次性完成：
 1. 判断必要的转写/人物纠错；
-2. 编译会议 wiki；
-3. 抽取语义槽。
+2. 编译会议叙事性 wiki 草稿；
+3. 抽取带证据绑定的结构化 MEETING_IR。
 
 [会议纪要原文，只读事实源]
 {source_text}
@@ -259,32 +266,26 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
 [要求]
 1. PREPROCESS 只列必要、证据明确的 exact replacements；original 必须是原文中的连续原串，replacement 不得含换行。没有可靠纠错就返回空数组。不要输出整份改写后的原文。
 2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved，不得猜测。
-3. Wiki 和 slots 必须基于同一组纠错与实体判断，禁止在两个产物中使用相互矛盾的人名或术语。
+3. Wiki 和 MEETING_IR 必须基于同一组纠错与实体判断，禁止使用相互矛盾的人名或术语。
 4. 撰写 conference-summary 类型 wiki 页面，含 frontmatter 和正文。
 5. frontmatter 必须包含: title, type: conference-summary, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: current, created（今日日期）, updated（今日日期）。
-6. 正文结构: # 标题 → > 日期+参与者行（用 [[authors/路径|姓名]] 格式，复用人物候选）→ ## Navigation（2-4 句导航概述）→ ## Content（按议题分子段，- 列表项）。
+6. 正文结构: # 标题 → ## Navigation（2-4 句导航概述）→ ## Content（按议题分子段，- 列表项）。参会者、议题、汇报、决策、待办由程序从 MEETING_IR 统一生成，不要在 wiki 草稿中另建这些结构化清单。
 7. Wiki 简写、纠错、去口语化，但忠实于原文，不编造。
-8. 三元组客体须为规范概念名/实体名：不含逗号、卷号页码、年份或描述性短语；核心词格式统一为「中文英文(缩写)」；无公认缩写则不写括号；无对应中文则只写英文，无对应英文则只写中文。
-9. 会议纪要主要用于学术灵感与构思，三元组提取数量和密度宜低：只提取会议明确讨论的核心议题与学术判断，不提取顺带提及的背景知识。
-10. 严格按 META → PREPROCESS → WIKI → SLOTS 的顺序输出，不要增加第四种产物或解释文字。
+8. 原文每个非空行前有程序分配的 [sNNNN] evidence_id。MEETING_IR 每个事实必须引用至少一个真实 evidence_id；不得编造路径、行号或 evidence_id。
+9. 议题使用规范学术概念名，格式优先「中文英文(缩写)」；决策保留完整判断，待办保留可执行动作，不把决策和待办压缩成关键词。
+10. attendees/reports/decisions/tasks/topics 各自独占对应事实。relations 只容纳议题间的涉及/紧密相关于或人物间的指导/师从/受指导于，不得重复参会、汇报、决策、待办或会议议题，不得使用“本会议”等指代词。
+11. 会议纪要主要用于学术灵感与构思，抽取密度宜低，只保留能支持发现、到达和后续行动的核心导航事实。
+12. 严格按 META → PREPROCESS → WIKI → MEETING_IR 的顺序输出，不要增加其他产物或解释文字。
 
-语义槽格式：
-参会者:
-<参会者 entity 路径，每行一个，复用上方人物映射>
-汇报者:
-<人名 entity | 汇报议题，每行一条。议题用规范学术概念名（中文英文缩写），如 cnu-ren-shengquan | 树状采样tree search sampling>
-决策:
-<决策或学术判断，每行一条。含行政决定与学术判断（实验结论、方法选择、理论判断），如 树状采样表现略优>
-待办:
-<任务 | 负责人 entity，每行一条。任务名用规范概念名，如 补充Agent对比实验 | cnu-ren-shengquan>
-三元组:
-<主体|谓词|客体，每行一条>
-主体用"本会议"代表这次会议；人物关系直接写人名/entity 路径作主体。
-会议→议题 建议谓词: 讨论（核心议题，兜底）/涉及（顺带提及）/规划（行动项/计划）
-议题→议题 建议谓词: 涉及（弱相关）/紧密相关于（强相关）
-人物→会议 谓词: 参会
-人物→人物 谓词: 指导/师从
-只使用以上谓词；未列出的谓词不要使用。汇报者、决策、待办是独立 section，不要重复写进三元组。
+MEETING_IR 是一个合法 JSON 对象，字段必须恰为：
+- protocol_version: "{MEETING_COMPILER_PROTOCOL}"
+- attendees: [{{"person":"canonical entity 路径","label":"姓名","evidence_ids":["s0001"]}}]
+- topics: [{{"label":"规范议题","predicate":"讨论|涉及|规划","evidence_ids":["s0002"]}}]
+- reports: [{{"person":"canonical entity 路径","person_label":"姓名","topic":"规范议题","evidence_ids":["s0003"]}}]
+- decisions: [{{"text":"完整决策或学术判断","evidence_ids":["s0004"]}}]
+- tasks: [{{"text":"完整待办","assignee":"canonical entity 路径","assignee_label":"姓名","evidence_ids":["s0005"]}}]
+- relations: [{{"subject":"规范概念或人物路径","predicate":"涉及|紧密相关于|指导|师从|受指导于","object":"规范概念或人物路径","evidence_ids":["s0006"]}}]
+没有内容的数组返回 []。
 
 [输出格式]
 PREPROCESS 中仅放一个合法 JSON 对象，之后直接接 <<<WIKI>>>；不添加 <<</PREPROCESS>>> 结束标签。
@@ -296,11 +297,123 @@ doc_type: meeting
 {PREPROCESS_DELIMITER}
 {{"protocol_version":"{MEETING_COMPILER_PROTOCOL}","transcript_replacements":[{{"original":"原文精确片段","replacement":"纠正后片段","reason":"原文或人物候选依据"}}],"entity_resolutions":[{{"mention":"原文称呼","canonical":"entity 路径或规范姓名；unresolved 时为空串","status":"resolved|unchanged|unresolved","reason":"判断依据"}}]}}
 <<<WIKI>>>
-（完整 wiki markdown，含 frontmatter）
-<<<SLOTS>>>
-（语义槽）"""
+（完整 wiki markdown 草稿，含 frontmatter、Navigation 与 Content）
+{MEETING_IR_DELIMITER}
+（一个合法 MEETING_IR JSON 对象）"""
 
-# ===== 3.3 write_wiki + semantic slots =====
+
+def build_evidence_catalog(source_text: str) -> list[dict]:
+    """Assign stable IDs to non-empty Raw lines without changing the source."""
+    return [
+        {"evidence_id": f"s{line_number:04d}", "line": line_number, "text": line.strip()}
+        for line_number, line in enumerate(source_text.splitlines(), start=1)
+        if line.strip()
+    ]
+
+
+def _write_evidence_catalog(state: dict, source_text: str) -> tuple[list[dict], Path]:
+    catalog = build_evidence_catalog(source_text)
+    path = REPO / state["extract_dir"] / "evidence-catalog.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    state["evidence_catalog"] = str(path.relative_to(REPO))
+    return catalog, path
+
+
+def _annotated_evidence_text(catalog: list[dict]) -> str:
+    return "\n".join(f"[{row['evidence_id']}] {row['text']}" for row in catalog)
+
+
+def compile_meeting_slots(meeting_ir: dict) -> str:
+    """Compile typed IR to the legacy semantic grammar consumed by graph_ingest."""
+    lines = ["参会者:"]
+    lines.extend(row["person"] for row in meeting_ir["attendees"])
+    lines.append("汇报者:")
+    lines.extend(f"{row['person']} | {row['topic']}" for row in meeting_ir["reports"])
+    lines.append("决策:")
+    lines.extend(row["text"] for row in meeting_ir["decisions"])
+    lines.append("待办:")
+    lines.extend(f"{row['text']} | {row['assignee']}" for row in meeting_ir["tasks"])
+    lines.append("三元组:")
+    lines.extend(
+        f"本会议 | {row['predicate']} | {row['label']}"
+        for row in meeting_ir["topics"]
+    )
+    lines.extend(
+        f"{row['subject']} | {row['predicate']} | {row['object']}"
+        for row in meeting_ir["relations"]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _wiki_person_link(person: str, label: str) -> str:
+    target = person.split("/wiki/", 1)[-1] if "/wiki/" in person else person
+    return f"[[{target}|{label}]]"
+
+
+def _evidence_refs(row: dict) -> str:
+    return "".join(f"[^meeting-{item}]" for item in row["evidence_ids"])
+
+
+def compile_meeting_navigation(markdown: str, meeting_ir: dict, *,
+                               raw_source: str, date: str,
+                               catalog: list[dict]) -> str:
+    """Project typed meeting facts into a cited, human-scannable Wiki block."""
+    frontmatter, body = _meeting_frontmatter(markdown)
+    frontmatter["compiler_protocol"] = MEETING_COMPILER_PROTOCOL
+    body = re.sub(
+        r"\n?<!-- meeting-navigation:start -->.*?<!-- meeting-navigation:end -->\n?",
+        "\n", body, flags=re.S,
+    )
+    attendee_links = [
+        _wiki_person_link(row["person"], row["label"])
+        for row in meeting_ir["attendees"]
+    ]
+    participant_line = f"> {date}"
+    if attendee_links:
+        participant_line += " · 参会者：" + "、".join(attendee_links)
+    h1 = re.search(r"(?m)^#\s+.+$", body)
+    if h1:
+        tail = body[h1.end():]
+        tail = re.sub(r"\A\s*\n>[^\n]*", "", tail, count=1)
+        body = body[:h1.end()] + "\n\n" + participant_line + tail
+
+    sections: list[str] = ["<!-- meeting-navigation:start -->", "## 会议导航"]
+    structured = [
+        ("参会者", meeting_ir["attendees"],
+         lambda row: _wiki_person_link(row["person"], row["label"])),
+        ("核心议题", meeting_ir["topics"],
+         lambda row: f"{row['predicate']}：{row['label']}"),
+        ("汇报", meeting_ir["reports"],
+         lambda row: f"{_wiki_person_link(row['person'], row['person_label'])}：{row['topic']}"),
+        ("决策", meeting_ir["decisions"], lambda row: row["text"]),
+        ("待办事项", meeting_ir["tasks"],
+         lambda row: f"{_wiki_person_link(row['assignee'], row['assignee_label'])}：{row['text']}"),
+        ("相关关系", meeting_ir["relations"],
+         lambda row: f"{row['subject']} · {row['predicate']} · {row['object']}"),
+    ]
+    used_evidence = []
+    for heading, rows, render in structured:
+        if not rows:
+            continue
+        sections.extend(["", f"### {heading}"])
+        for row in rows:
+            sections.append(f"- {render(row)}{_evidence_refs(row)}")
+            used_evidence.extend(row["evidence_ids"])
+    by_id = {row["evidence_id"]: row for row in catalog}
+    if used_evidence:
+        sections.append("")
+        for evidence_id in dict.fromkeys(used_evidence):
+            sections.append(
+                f"[^meeting-{evidence_id}]: {raw_source}#L{by_id[evidence_id]['line']}"
+            )
+    sections.append("<!-- meeting-navigation:end -->")
+    body = body.rstrip() + "\n\n" + "\n".join(sections) + "\n"
+    header = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).rstrip("\n")
+    return f"---\n{header}\n---\n{body.lstrip()}"
+
+
+# ===== 3.3 write_wiki + evidence-bound meeting IR =====
 
 
 def _load_entity_candidates(state: dict) -> tuple[dict, str]:
@@ -333,11 +446,13 @@ def _compiler_request(state: dict, source_text: str, entity_candidates: dict, *,
     for error in extra_errors or []:
         if str(error) not in errors:
             errors.append(str(error))
-    source_context = source_text
+    catalog, catalog_path = _write_evidence_catalog(state, source_text)
+    source_context = _annotated_evidence_text(catalog)
     if host_agent:
         source_context = (
-            f"请使用读取工具完整读取仓库内 `{state['source']}` 一次。"
-            "不要用 shell 头尾切片，不要修改该文件。"
+            f"请使用读取工具完整读取仓库内 `{state['source']}` 与 "
+            f"`{catalog_path.relative_to(REPO)}` 一次。"
+            "原文是事实源，目录提供 evidence_id；不要修改这些文件。"
         )
     prompt = build_agent_meeting_wiki_slots_prompt(
         source_context,
@@ -363,9 +478,13 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
         source_text, entity_candidates, meeting_id=state["meeting_id"],
         target_source_path=sources_path, errors=errors,
     )
+    _catalog, catalog_path = _write_evidence_catalog(state, source_text)
     inputs = [{
         "name": "meeting_transcript", "path": state["source"],
         "role": "authoritative_source", "read": "full",
+    }, {
+        "name": "evidence_catalog", "path": str(catalog_path.relative_to(REPO)),
+        "role": "deterministic_raw_line_handles", "read": "full",
     }]
     candidate_path = state.get("entity_candidates") or state.get("entity_resolution")
     if candidate_path:
@@ -385,12 +504,12 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
         }],
         protocol={
             "name": MEETING_COMPILER_PROTOCOL,
-            "order": ["META", "PREPROCESS", "WIKI", "SLOTS"],
+            "order": ["META", "PREPROCESS", "WIKI", "MEETING_IR"],
             "delimiters": {
                 "meta": ["<<<META>>>", "<<</META>>>"],
                 "preprocess": PREPROCESS_DELIMITER,
                 "wiki": "<<<WIKI>>>",
-                "semantics": "<<<SLOTS>>>",
+                "meeting_ir": MEETING_IR_DELIMITER,
             },
             "preprocess_schema": {
                 "protocol_version": MEETING_COMPILER_PROTOCOL,
@@ -398,9 +517,9 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
                 "entity_resolutions": ["mention", "canonical", "status", "reason"],
             },
             "wiki": {"required_sections": ["Navigation", "Content"]},
-            "semantics": {
-                "sections": ["参会者", "汇报者", "决策", "待办", "三元组"],
-                "subject": "本会议",
+            "meeting_ir": {
+                "sections": ["attendees", "topics", "reports", "decisions", "tasks", "relations"],
+                "evidence": "every item references evidence_catalog IDs",
             },
             "validator": "meeting compiler parser plus Wiki/semantic/graph validators",
         },
@@ -680,6 +799,32 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         wiki_content = bind_meeting_source(wiki_content, correct_source)
     except ValueError as exc:
         return False, str(exc)
+    meeting_ir = proposal.get("meeting_ir")
+    if meeting_ir is not None:
+        catalog, _catalog_path = _write_evidence_catalog(state, source_text)
+        ir_errors = validate_meeting_ir(
+            meeting_ir, {row["evidence_id"] for row in catalog},
+        )
+        if ir_errors:
+            state["compiler_errors"] = ir_errors
+            return False, "Meeting Compiler MEETING_IR 证据或 schema 校验失败: " + "; ".join(ir_errors[:5])
+        try:
+            wiki_content = compile_meeting_navigation(
+                wiki_content, meeting_ir, raw_source=correct_source,
+                date=state["date"], catalog=catalog,
+            )
+        except (KeyError, ValueError) as exc:
+            return False, f"MEETING_IR 投影失败: {exc}"
+        slots_content = compile_meeting_slots(meeting_ir)
+        meeting_ir_path = extract_dir / "meeting-ir.json"
+        meeting_ir_path.write_text(
+            json.dumps(meeting_ir, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+        )
+        state["meeting_ir"] = str(meeting_ir_path.relative_to(REPO))
+        state["meeting_ir_content"] = meeting_ir
+    else:
+        # Only old in-flight meeting-compiler-v1 tasks may take this compatibility path.
+        slots_content = proposal["semantic_slots"]
     corrected_path = extract_dir / "corrected.txt"
     corrected_path.write_text(corrected_text, encoding="utf-8")
     resolution = dict(entity_candidates)
@@ -698,7 +843,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     state["corrected_path"] = str(corrected_path.relative_to(REPO))
     state["entity_resolution"] = str(resolution_path.relative_to(REPO))
     state["wiki_content"] = wiki_content
-    state["slots_content"] = proposal["semantic_slots"]
+    state["slots_content"] = slots_content
     state["semantic_worker"] = "meeting-compiler-agent" if resumed_compiler else "meeting-compiler-api"
     if resumed_compiler:
         agent_task.mark_consumed(state)
@@ -737,6 +882,32 @@ def step_validate_wiki(state: dict) -> list[str]:
         errors.append("缺少 ## Navigation 段")
     if "## Content" not in wiki:
         errors.append("缺少 ## Content 段")
+    meeting_ir = state.get("meeting_ir_content")
+    if meeting_ir is not None:
+        if fm.get("compiler_protocol") != MEETING_COMPILER_PROTOCOL:
+            errors.append(f"compiler_protocol 应为 {MEETING_COMPILER_PROTOCOL}")
+        if "## 会议导航" not in wiki:
+            errors.append("缺少程序生成的 ## 会议导航 段")
+        expected_values = [
+            *(row["person"] for row in meeting_ir["attendees"]),
+            *(row["label"] for row in meeting_ir["topics"]),
+            *(row["topic"] for row in meeting_ir["reports"]),
+            *(row["text"] for row in meeting_ir["decisions"]),
+            *(row["text"] for row in meeting_ir["tasks"]),
+        ]
+        for value in expected_values:
+            visible = value.split("/wiki/", 1)[-1] if "/wiki/" in value else value
+            if visible not in wiki:
+                errors.append(f"MEETING_IR 项未投影到 Wiki: {value}")
+        wiki_path = REPO / state["extract_dir"] / "wiki.md"
+        if wiki_path.is_file() and state.get("raw_dir") and state.get("source_filename"):
+            raw_path = f"{state['raw_dir']}/{state['source_filename']}"
+            locator_errors = wl.validate_wiki_page(
+                wiki_path,
+                raw_overrides={raw_path: REPO / state["source"]},
+                require_citations=True,
+            )
+            errors.extend(f"会议导航来源无效: {error}" for error in locator_errors)
     return errors
 
 
@@ -809,12 +980,23 @@ FINALIZE_CONFIG = {
     "copy_source": True,
 }
 
+
+def _fingerprint_artifact(state: dict, repo: Path) -> dict:
+    source_path = repo / state["raw_dir"] / state["source_filename"]
+    return {
+        "source_path": source_path,
+        "text_path": source_path,
+        "source_kind": source_path.suffix.lower().lstrip("."),
+    }
+
+
 FINALIZE_TAIL_CONFIG = {
     "doc_id_key": "meeting_id",
     "get_log_path": lambda state, REPO: REPO / state.get("log_path", "academic/wiki/log.md"),
     "get_index_path": lambda state, REPO: REPO / state.get("index_path", "academic/wiki/index.md"),
     "index_section": "## 会议",
     "entry_prefix": "conferences/",
+    "fingerprint_artifact": _fingerprint_artifact,
     "build_log_entry": lambda ctx: (
         "\n## [" + ctx["today"] + "] ingest | ingest_meeting.py 摄入 " + ctx["doc_id"] + "\n"
         "- **来源与归档**：inbox 会议纪要经 speech_entity_resolver 纠错后落位至 `"

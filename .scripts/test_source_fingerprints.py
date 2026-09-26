@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("source_fingerprints.py")
@@ -27,6 +29,46 @@ def test_register_and_exact_lookup():
         match = sf.lookup_exact(incoming, db_path=db, repo=root)
         assert match["raw_path"] == "academic/raw/references/demo/paper.pdf"
         assert match["match"] == "binary_sha256"
+
+
+def test_lookup_exact_reuses_precomputed_digest():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        db = root / "fingerprints.db"
+        raw = root / "academic/raw/references/demo.pdf"
+        incoming = root / "inbox/demo.pdf"
+        raw.parent.mkdir(parents=True)
+        incoming.parent.mkdir()
+        raw.write_bytes(b"same-pdf")
+        incoming.write_bytes(b"same-pdf")
+        sf.register_source(raw, db_path=db, repo=root)
+        digest = hashlib.sha256(incoming.read_bytes()).hexdigest()
+        with patch.object(sf, "sha256_file", side_effect=AssertionError("must reuse digest")):
+            match = sf.lookup_exact(
+                incoming, db_path=db, repo=root,
+                binary_sha256=digest, size_bytes=incoming.stat().st_size,
+            )
+        assert match["raw_path"] == "academic/raw/references/demo.pdf"
+
+
+def test_default_databases_keep_public_and_private_physically_isolated():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        public = root / "academic/raw/references/public.txt"
+        private = root / "private/raw/notes/private.txt"
+        public.parent.mkdir(parents=True)
+        private.parent.mkdir(parents=True)
+        public.write_text("public", encoding="utf-8")
+        private.write_text("private", encoding="utf-8")
+        sf.register_source(public, repo=root)
+        sf.register_source(private, repo=root)
+        public_db = root / "cross-domain/source-fingerprints.db"
+        private_db = root / "private/source-fingerprints.db"
+        assert public_db.is_file() and private_db.is_file()
+        assert sf.lookup_exact(public, db_path=public_db, repo=root)["raw_path"].startswith("academic/raw/")
+        assert sf.lookup_exact(private, db_path=private_db, repo=root)["raw_path"].startswith("private/raw/")
+        assert sf.lookup_exact(public, db_path=private_db, repo=root) is None
+        assert sf.lookup_exact(private, db_path=public_db, repo=root) is None
 
 
 def test_text_hash_is_candidate_only():
@@ -118,12 +160,74 @@ def test_rebuild_does_not_modify_raw_and_skips_sidecars():
         companion.write_text("generated extraction", encoding="utf-8")
         standalone = package / "notes.md"
         standalone.write_text("original markdown", encoding="utf-8")
-        paths = (pdf, md, source, docx, companion, standalone)
+        hidden = package / ".DS_Store"
+        hidden.write_bytes(b"finder metadata")
+        paths = (pdf, md, source, docx, companion, standalone, hidden)
         before = {path: path.read_bytes() for path in paths}
         db = root / "fingerprints.db"
         result = sf.rebuild(db_path=db, roots=(root / "academic/raw",), repo=root)
         assert result["indexed"] == 3
         assert before == {path: path.read_bytes() for path in paths}
+
+
+def test_reconcile_adds_changes_removes_stale_and_skips_unchanged_hashing():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        raw_root = root / "academic/raw"
+        first = raw_root / "references/first.txt"
+        stale = raw_root / "references/stale.txt"
+        first.parent.mkdir(parents=True)
+        first.write_text("first", encoding="utf-8")
+        stale.write_text("stale", encoding="utf-8")
+        db = root / "fingerprints.db"
+        sf.rebuild(db_path=db, roots=(raw_root,), repo=root)
+        stale.unlink()
+        second = raw_root / "references/second.txt"
+        second.write_text("second", encoding="utf-8")
+
+        original_hash = sf.sha256_file
+        with patch.object(sf, "sha256_file", wraps=original_hash) as hashing:
+            result = sf.reconcile(db_path=db, roots=(raw_root,), repo=root)
+        assert result == {
+            "status": "reconciled", "db": str(db), "indexed": 2,
+            "added": 1, "updated": 0, "removed": 1, "unchanged": 1,
+        }
+        assert hashing.call_count == 1
+        assert sf.lookup_exact(second, db_path=db, repo=root)
+
+        with patch.object(sf, "sha256_file", side_effect=AssertionError("unchanged source rehashed")):
+            unchanged = sf.reconcile(db_path=db, roots=(raw_root,), repo=root)
+        assert unchanged["unchanged"] == 2
+        assert unchanged["added"] == unchanged["updated"] == unchanged["removed"] == 0
+
+
+def test_rebuild_failure_keeps_previous_index_visible():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        raw_root = root / "academic/raw"
+        first = raw_root / "references/first.txt"
+        second = raw_root / "references/second.txt"
+        first.parent.mkdir(parents=True)
+        first.write_text("first", encoding="utf-8")
+        db = root / "fingerprints.db"
+        sf.rebuild(db_path=db, roots=(raw_root,), repo=root)
+        second.write_text("second", encoding="utf-8")
+        original_record = sf._fingerprint_record
+
+        def fail_on_second(path, **kwargs):
+            if Path(path).name == "second.txt":
+                raise OSError("simulated read failure")
+            return original_record(path, **kwargs)
+
+        with patch.object(sf, "_fingerprint_record", side_effect=fail_on_second):
+            try:
+                sf.rebuild(db_path=db, roots=(raw_root,), repo=root)
+            except OSError as exc:
+                assert "simulated" in str(exc)
+            else:
+                raise AssertionError("rebuild should fail")
+        assert sf.lookup_exact(first, db_path=db, repo=root)
+        assert sf.lookup_exact(second, db_path=db, repo=root) is None
 
 
 def test_image_raw_package_indexes_only_original_and_preserves_standalone_json():

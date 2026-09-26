@@ -114,20 +114,27 @@ def _cached_vectors(texts: list[str]) -> dict[str, object]:
     """仅读取既有候选向量，避免一次 Agent 调用批量生成全图缓存。"""
     if not texts:
         return {}
-    from embed_helper import _get_embed_db
+    from embed_helper import _cache_namespace, _get_embed_db
     db_path = _get_embed_db()
     if not db_path.exists():
         return {}
     try:
         import numpy as np
         db = sqlite3.connect(db_path)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(embeddings)")}
+        if "namespace" not in columns:
+            db.close()
+            return {}
+        namespace = _cache_namespace()
         unique = list(dict.fromkeys(texts))
         found = {}
         for start in range(0, len(unique), 400):
             batch = unique[start:start + 400]
             placeholders = ",".join("?" for _ in batch)
             for text, blob in db.execute(
-                f"SELECT text,vector FROM embeddings WHERE text IN ({placeholders})", batch
+                f"SELECT text,vector FROM embeddings "
+                f"WHERE namespace=? AND text IN ({placeholders})",
+                [namespace] + batch,
             ):
                 vector = np.frombuffer(blob, dtype=np.float32)
                 if vector.size and np.isfinite(vector).all():

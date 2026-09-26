@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """来源定位解析与校验工具函数。"""
 from pathlib import Path
+import hashlib
 import json
 import re
 from urllib.parse import unquote
@@ -16,6 +17,7 @@ TABLE_LOCATOR_RE = re.compile(r"^table:([^:]+):([A-Z]+(?:,[A-Z]+)*):R([1-9]\d*)(
 TEXT_LOCATOR_SUFFIXES = {".md", ".txt", ".yaml", ".yml", ".json", ".jsonl", ".csv"}
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"})
 BINARY_SUFFIXES = {".pdf", ".docx", ".doc", ".pptx", ".xls", ".xlsx"} | IMAGE_SUFFIXES
+COMPANION_SCHEMA = "raw-companion-v1"
 FACT_PREDICATES = {
     "作者", "通讯作者", "发表于", "引用", "参会", "就读", "所属", "主讲",
     "指导", "师从", "受指导于", "任职于", "研究关键词", "研究基础",
@@ -107,7 +109,8 @@ def native_locator_kind(path):
     return None
 
 def needs_locator_companion(path):
-    return native_locator_kind(path) is None
+    """Whether managed ingest must preserve a Markdown reading projection."""
+    return Path(str(path)).suffix.lower() in BINARY_SUFFIXES
 
 def locator_companion_name(source_name):
     """Return the raw filename used for locators, preserving native text files."""
@@ -115,6 +118,127 @@ def locator_companion_name(source_name):
     if is_locator_compatible(source):
         return source.name
     return f"{source.stem}.md"
+
+
+def companion_sidecar_name(source_name):
+    return Path(str(source_name)).name + ".source.json"
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def make_companion_record_data(source, companion_name, companion_data, *, generator,
+                               generated_at, locator_scheme, method,
+                               limitations=None, review_status=None):
+    """Build binding metadata before a companion is committed to Raw."""
+    source = Path(source)
+    companion_name = Path(str(companion_name)).name
+    if not source.is_file():
+        raise ValueError("companion binding requires an existing source")
+    if source.stem != Path(companion_name).stem or Path(companion_name).suffix.lower() != ".md":
+        raise ValueError("companion must be same-stem Markdown")
+    if not isinstance(companion_data, bytes):
+        raise ValueError("companion_data must be bytes")
+    if not isinstance(generator, dict) or not generator.get("name") or not generator.get("version"):
+        raise ValueError("companion generator name and version are required")
+    if not str(generated_at or "").strip():
+        raise ValueError("companion generated_at is required")
+    record = {
+        "schema": COMPANION_SCHEMA,
+        "original": source.name,
+        "companion": companion_name,
+        "source_sha256": _sha256_file(source),
+        "companion_sha256": hashlib.sha256(companion_data).hexdigest(),
+        "generator": generator,
+        "generated_at": generated_at,
+        "locator_scheme": locator_scheme,
+        "fidelity": {
+            "method": method,
+            "limitations": list(limitations or []),
+        },
+    }
+    if review_status:
+        record["fidelity"]["review_status"] = review_status
+    return record
+
+
+def make_companion_record(source, companion, **kwargs):
+    """Build binding metadata for an existing original/companion pair."""
+    companion = Path(companion)
+    if not companion.is_file():
+        raise ValueError("companion binding requires an existing companion")
+    return make_companion_record_data(
+        source, companion.name, companion.read_bytes(), **kwargs)
+
+
+def _binding_hash_status(source, companion, record):
+    required = ("original", "companion", "source_sha256", "companion_sha256")
+    if any(not record.get(field) for field in required):
+        return {"status": "invalid", "reason": "binding_fields_missing"}
+    if record["original"] != source.name or record["companion"] != companion.name:
+        return {"status": "invalid", "reason": "binding_names_mismatch"}
+    try:
+        if _sha256_file(source) != record["source_sha256"]:
+            return {"status": "invalid", "reason": "source_hash_mismatch"}
+        if _sha256_file(companion) != record["companion_sha256"]:
+            return {"status": "invalid", "reason": "companion_hash_mismatch"}
+    except OSError:
+        return {"status": "invalid", "reason": "binding_file_missing"}
+    return {"status": "valid", "reason": "hash_bound"}
+
+
+def companion_record_status(source, companion, record):
+    source = Path(source)
+    companion = Path(companion)
+    if not isinstance(record, dict) or record.get("schema") != COMPANION_SCHEMA:
+        return {"status": "invalid", "reason": "binding_schema_invalid"}
+    return _binding_hash_status(source, companion, record)
+
+
+def companion_binding_status(source, companion):
+    """Return valid/legacy/invalid without exposing companion content."""
+    source = Path(source)
+    companion = Path(companion)
+    sidecar = source.with_name(companion_sidecar_name(source.name))
+    if not sidecar.is_file():
+        return {"status": "legacy", "reason": "sidecar_missing"}
+    try:
+        context = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {"status": "invalid", "reason": "sidecar_unreadable"}
+    record = context.get("companion") if isinstance(context, dict) else None
+    if record is None:
+        # Older reviewed image/PPTX sidecars already carry equivalent hashes.
+        legacy_record = context.get("ocr") or context.get("presentation") if isinstance(context, dict) else None
+        if not isinstance(legacy_record, dict) or not legacy_record.get("source_sha256"):
+            return {"status": "legacy", "reason": "binding_metadata_missing"}
+        record = {
+            "original": legacy_record.get("original"),
+            "companion": legacy_record.get("companion"),
+            "source_sha256": legacy_record.get("source_sha256"),
+            "companion_sha256": legacy_record.get("text_sha256"),
+        }
+    else:
+        return companion_record_status(source, companion, record)
+    return _binding_hash_status(source, companion, record)
+
+
+def companion_binding_for_target(target):
+    """Return binding status when the requested Raw path has a companion."""
+    target = Path(target)
+    original = original_for_companion(target)
+    if original is not None:
+        return companion_binding_status(original, target)
+    if target.suffix.lower() in BINARY_SUFFIXES:
+        companion = target.with_name(locator_companion_name(target.name))
+        if companion.is_file():
+            return companion_binding_status(target, companion)
+    return None
 
 
 def original_for_companion(path):
@@ -128,6 +252,24 @@ def original_for_companion(path):
         if target.with_suffix(suffix).is_file()
     ]
     return originals[0] if len(originals) == 1 else None
+
+
+def pdf_companion_page_text(text, locator):
+    """Read PDF page locators from a `## Page N` Markdown projection."""
+    requested = page_range(locator)
+    if not requested:
+        return None
+    matches = list(re.finditer(r"^#{1,6}\s+Page\s+(\d+)\s*$", text, re.M | re.I))
+    pages = {}
+    for index, match in enumerate(matches):
+        page_number = int(match.group(1))
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        pages[page_number] = text[match.end():end].strip()
+    start, end = requested
+    if any(page_number not in pages for page_number in range(start, end + 1)):
+        return None
+    excerpt = "\n\n".join(pages[page_number] for page_number in range(start, end + 1)).strip()
+    return excerpt or None
 
 
 def explicit_anchor_block(text, locator):
@@ -230,6 +372,9 @@ def locator_status(locator, target):
     if target.suffix.lower() in BINARY_SUFFIXES:
         return "unverifiable" if valid_locator(locator, target) else "missing"
     text = target.read_text(encoding="utf-8", errors="replace")
+    original = original_for_companion(target)
+    if original is not None and original.suffix.lower() == ".pdf" and page_range(locator):
+        return "present" if pdf_companion_page_text(text, locator) is not None else "missing"
     if locator.startswith("table:"):
         return "present" if table_locator_text(text, locator) is not None else "missing"
     if locator == "全篇":
@@ -274,6 +419,9 @@ def read_locator_text(target, locator):
     if target.suffix.lower() in BINARY_SUFFIXES:
         return None
     text = target.read_text(encoding="utf-8", errors="replace")
+    original = original_for_companion(target)
+    if original is not None and original.suffix.lower() == ".pdf" and page_range(locator):
+        return pdf_companion_page_text(text, locator)
     if locator and locator.startswith("table:"):
         return table_locator_text(text, locator)
     if not locator or locator == "全篇":
@@ -318,21 +466,25 @@ def evidence_targets(target, locator):
     """Return ``(citation source, read target)`` for one Raw locator.
 
     A managed Markdown companion is a reading projection, not a replacement
-    fact source. Native text/page locators stay on the original; otherwise an
-    exact same-stem companion may provide the excerpt while citations retain
-    the unique original path.
+    fact source. Managed binary companions are preferred for reading while
+    citations retain the unique original path. Native PDF page extraction is
+    only a compatibility fallback when no matching companion is available.
     """
     target = Path(target)
     original = original_for_companion(target)
     if original is not None:
-        return original, target
+        binding = companion_binding_status(original, target)
+        return (original, target) if binding["status"] != "invalid" else (original, original)
     if target.suffix.lower() not in BINARY_SUFFIXES:
         return target, target
+    companion = target.with_name(locator_companion_name(target.name))
+    binding = companion_binding_status(target, companion) if companion.is_file() else None
+    if (companion.is_file() and binding["status"] != "invalid"
+            and locator_status(locator, companion) == "present"
+            and read_locator_text(companion, locator) is not None):
+        return target, companion
     if locator_status(locator, target) == "present" and read_locator_text(target, locator) is not None:
         return target, target
-    companion = target.with_name(locator_companion_name(target.name))
-    if companion.is_file() and locator_status(locator, companion) == "present":
-        return target, companion
     return target, target
 
 def classify_predicate(predicate):

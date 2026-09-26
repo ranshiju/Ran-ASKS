@@ -20,10 +20,18 @@ from dsh.meeting_compiler_agent import (
     parse_proposal_detailed,
     task_context_hash,
 )
+from meeting_compiler_contract import validate_meeting_ir
 
 
 def _output(replacements=None) -> str:
     replacements = replacements or []
+    meeting_ir = {
+        "protocol_version": PROTOCOL_VERSION,
+        "attendees": [{"person": "academic/wiki/authors/cnu-test", "label": "测试人",
+                       "evidence_ids": ["s0001"]}],
+        "topics": [{"label": "测试议题", "predicate": "讨论", "evidence_ids": ["s0001"]}],
+        "reports": [], "decisions": [], "tasks": [], "relations": [],
+    }
     return f'''<<<PREPROCESS>>>
 {{"protocol_version":"{PROTOCOL_VERSION}","transcript_replacements":{replacements!r},"entity_resolutions":[]}}
 <<<WIKI>>>
@@ -35,11 +43,8 @@ id: meeting-test
 摘要
 ## Content
 正文
-<<<SLOTS>>>
-参会者:
-cnu-test
-三元组:
-本会议 | 讨论 | 测试议题
+<<<MEETING_IR>>>
+{json.dumps(meeting_ir, ensure_ascii=False)}
 '''.replace("'", '"')
 
 
@@ -68,7 +73,7 @@ def test_single_call_returns_typed_proposal():
     assert result.status == "compiled"
     assert result.proposal["protocol_version"] == PROTOCOL_VERSION
     assert result.proposal["wiki_markdown"].startswith("---")
-    assert "三元组:" in result.proposal["semantic_slots"]
+    assert result.proposal["meeting_ir"]["topics"][0]["label"] == "测试议题"
     assert len(calls) == 1
     assert calls[0][1]["operation"] == "ingest_meeting_compile"
     assert result.trace()["models"] == ["test-model"]
@@ -85,7 +90,7 @@ def test_agent_backend_returns_same_task_handoff():
 
 
 def test_parser_rejects_missing_or_invalid_sections():
-    proposal, error = parse_proposal("<<<WIKI>>>\ntext\n<<<SLOTS>>>\n三元组:\n")
+    proposal, error = parse_proposal("<<<WIKI>>>\ntext\n<<<MEETING_IR>>>\n{}\n")
     assert proposal is None
     assert "PREPROCESS" in error
     bad = _output().replace(PROTOCOL_VERSION, "wrong", 1)
@@ -113,6 +118,21 @@ def test_replacements_are_exact_and_non_cascading():
         assert "overlapping" in str(exc)
     else:
         raise AssertionError("overlapping replacements must fail")
+
+
+def test_meeting_ir_requires_evidence_and_keeps_typed_predicates_out_of_relations():
+    proposal, error = parse_proposal(_output())
+    assert proposal, error
+    meeting_ir = proposal["meeting_ir"]
+    meeting_ir["topics"][0]["evidence_ids"] = []
+    assert any("evidence_ids" in issue for issue in validate_meeting_ir(meeting_ir))
+    meeting_ir["topics"][0]["evidence_ids"] = ["s0001"]
+    meeting_ir["relations"] = [{
+        "subject": "academic/wiki/authors/cnu-test", "predicate": "参会",
+        "object": "本会议", "evidence_ids": ["s0001"],
+    }]
+    issues = validate_meeting_ir(meeting_ir)
+    assert any("typed meeting section" in issue or "deictic" in issue for issue in issues)
 
 
 def test_json_diagnostics_preserve_exact_error_and_response():
@@ -193,6 +213,7 @@ def main():
     test_agent_backend_returns_same_task_handoff()
     test_parser_rejects_missing_or_invalid_sections()
     test_replacements_are_exact_and_non_cascading()
+    test_meeting_ir_requires_evidence_and_keeps_typed_predicates_out_of_relations()
     test_json_diagnostics_preserve_exact_error_and_response()
     test_retry_messages_inject_output_and_use_error_specific_scope()
     print("meeting compiler agent tests: PASS")

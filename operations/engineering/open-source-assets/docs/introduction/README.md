@@ -47,6 +47,16 @@ engineering-analysis hardening. This update does not change a frozen paper
 artifact; the PDF retains its reviewed earlier pages and appends the same
 engineering update.
 
+The 2026-09-26 `v0.8.0` addendum covers persistent Agent-task handoff for
+prepared ingestion transactions, physically isolated private ingestion and
+query, separate structural and visual processing for native presentations,
+reusable slide components, governed editable artwork, and explicit provider API
+paths. These are backward-compatible workflow and configuration capabilities,
+so they receive a MINOR increment. The public tree contains generic isolation
+code and synthetic tests, not private knowledge. The update changes no frozen
+paper artifact; the PDF retains its reviewed earlier pages and appends the same
+engineering update.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -90,6 +100,12 @@ Markdown 增加带日期的工程补充；PDF 保留之前已审阅的版式，�
 包含匿名简历模板包，不包含个人记录或生成的实际简历版本；同时记录 PDF 提取、
 摄入恢复、图校验和工程影响分析的兼容性强化。本次更新不改变冻结论文产物，PDF
 保留此前已审阅页面，并附加同一工程更新内容。
+
+2026年9月26日的 `v0.8.0` 补充说明为已准备的摄入事务增加跨宿主 Agent 持久接力，
+加入物理隔离的 private 摄入与查询，分离原生演示文稿的结构提取与视觉识读，并增加
+可复用幻灯片组件、受管可编辑图稿和显式服务商 API 路径。上述内容是向后兼容的工作流
+与配置能力，因此按 MINOR 升版。公开树只包含通用隔离实现和合成测试，不包含私有知识；
+本次更新不改变冻结论文产物，PDF 保留此前已审阅页面，并附加同一工程更新内容。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

@@ -284,6 +284,7 @@ def build_ingest_tools() -> list[ToolDefinition]:
                 "entrypoint": {"type": "string", "enum": ["inbox"],
                                "description": "统一摄入入口标记"},
                 "ocr_result": {"type": "string", "description": "显式指定的源绑定 OCR JSON 回执"},
+                "allow_remote_ppt": {"type": "boolean", "description": "调用方显式授权本PPTX的API内容识读；默认false"},
                 "allow_remote_ocr": {"type": "boolean", "description": "调用方显式授权图片上传；默认 false"}},
                 "required": ["file"]},
             execute_fn=lambda args: _ingest_call(["ingest_document.py", "--file", args.get("file", "")]
@@ -291,6 +292,7 @@ def build_ingest_tools() -> list[ToolDefinition]:
                 + (["--document-type", args["document_type"]] if args.get("document_type") else [])
                 + (["--source-kind", args["source_kind"]] if args.get("source_kind") else [])
                 + (["--ocr-result", args["ocr_result"]] if args.get("ocr_result") else [])
+                + (["--allow-remote-ppt"] if args.get("allow_remote_ppt") is True else [])
                 + (["--allow-remote-ocr"] if args.get("allow_remote_ocr") is True else [])
                 + (["--entrypoint", args["entrypoint"]] if args.get("entrypoint") else [])),
         ),
@@ -300,11 +302,13 @@ def build_ingest_tools() -> list[ToolDefinition]:
             input_schema={"type": "object", "properties": {
                 "txn": {"type": "string", "description": "事务 ID"},
                 "ocr_result": {"type": "string", "description": "可选的源绑定 OCR JSON 回执"},
+                "allow_remote_ppt": {"type": "boolean", "description": "调用方显式授权本PPTX的API内容识读；默认false"},
                 "allow_remote_ocr": {"type": "boolean", "description": "显式授权图片上传 OCR API"}},
                 "required": ["txn"]},
             execute_fn=lambda args: _ingest_call([
                 "ingest_document.py", "--resume", args.get("txn", "")]
                 + (["--ocr-result", args["ocr_result"]] if args.get("ocr_result") else [])
+                + (["--allow-remote-ppt"] if args.get("allow_remote_ppt") is True else [])
                 + (["--allow-remote-ocr"] if args.get("allow_remote_ocr") is True else [])),
         ),
         ToolDefinition(

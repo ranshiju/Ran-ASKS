@@ -6,6 +6,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("ingest_document.py")
@@ -310,6 +311,49 @@ def test_parse_semantic_text_teaching():
     finally:
         if wiki_file.exists():
             wiki_file.unlink()
+
+
+def test_teaching_prerequisites_are_verified_deterministic_edges():
+    SCRIPT_GI = Path(__file__).with_name("graph_ingest.py")
+    spec_gi = importlib.util.spec_from_file_location("graph_ingest_test_prerequisites", SCRIPT_GI)
+    gi = importlib.util.module_from_spec(spec_gi)
+    assert spec_gi.loader is not None
+    spec_gi.loader.exec_module(gi)
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        target = repo / "teaching/wiki/topics/linear-algebra.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("---\ntitle: Linear algebra\ntype: topic\n---\n", encoding="utf-8")
+        old_repo = gi.gl.REPO
+        gi.gl.REPO = repo
+        try:
+            page = "teaching/wiki/courses/quantum"
+            edges = gi.extract_teaching_prerequisite_edges(page, {
+                "prerequisites": ["[[topics/linear-algebra]]", "[[topics/linear-algebra]]"],
+            })
+            assert edges == [{
+                "subject": page,
+                "predicate": "前置",
+                "object": "teaching/wiki/topics/linear-algebra",
+                "subject_is_canonical": True,
+                "object_is_canonical": True,
+            }]
+            for invalid in (
+                "topics/linear-algebra",
+                "[[admin/wiki/policies/example]]",
+                "[[topics/missing]]",
+                "[[topics/linear-algebra|线性代数]]",
+            ):
+                try:
+                    gi.extract_teaching_prerequisite_edges(page, {
+                        "prerequisites": [invalid],
+                    })
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"invalid prerequisite accepted: {invalid}")
+        finally:
+            gi.gl.REPO = old_repo
 
 
 def test_parse_semantic_text_business():
@@ -712,12 +756,15 @@ def test_document_dedup_revalidates_indexed_raw_and_rejects_outside_paths():
             "subproject": "academic", "document_type": "conference-summary",
         }
         with patch.object(module, "REPO", repo):
-            with patch.object(Path, "rglob", side_effect=AssertionError("verified index hit must not scan Raw")):
+            with patch.object(module.sf, "ensure_index", return_value={}), patch.object(
+                Path, "rglob", side_effect=AssertionError("verified index hit must not scan Raw")
+            ):
                 assert module.step_dedup_check(state)[0] is True
             stored.write_bytes(b"old-event")
-            assert module.step_dedup_check(state) == (False, "")
-            with patch.object(module.sf, "lookup_exact", return_value={"raw_path": state["source"]}):
+            with patch.object(module.sf, "ensure_index", return_value={}):
                 assert module.step_dedup_check(state) == (False, "")
+                with patch.object(module.sf, "lookup_exact", return_value={"raw_path": state["source"]}):
+                    assert module.step_dedup_check(state) == (False, "")
 
 
 def test_raw_allocation_checks_entire_bundle_and_reuses_reserved_path():
@@ -1085,6 +1132,7 @@ def main():
     test_validate_wiki_business()
     test_validate_wiki_teaching_bad_type()
     test_parse_semantic_text_teaching()
+    test_teaching_prerequisites_are_verified_deterministic_edges()
     test_parse_semantic_text_business()
     test_admin_wrapper_compat()
     test_agent_mode_wiki_roundtrip()
@@ -1157,7 +1205,12 @@ def test_preprocess_binary_creates_raw_companion():
         assert companion.read_text(encoding="utf-8") == "# Policy\n\nExact text.\n"
         assert state["raw_locator_kind"] == "companion"
         assert state["locator_source_filename"] == "policy.md"
-        assert module._manifest_raw_files(state) == ["policy.docx", "policy.md"]
+        assert module._manifest_raw_files(state) == [
+            "policy.docx", "policy.md", "policy.docx.source.json"]
+        context = json.loads((module.REPO / state["extract_dir"]
+                              / "policy.docx.source.json").read_text())
+        assert context["companion"]["source_sha256"] == module.sha256_file(
+            module.REPO / state["source"])
     finally:
         module.extract_doc_text = original_extract
         shutil.rmtree(root, ignore_errors=True)
@@ -1232,7 +1285,8 @@ def test_preprocess_text_pdf_creates_line_locator_companion():
         assert ok, msg
         assert state["raw_locator_kind"] == "companion"
         assert state["locator_source_filename"] == "report.md"
-        assert module._manifest_raw_files(state) == ["report.pdf", "report.md"]
+        assert module._manifest_raw_files(state) == [
+            "report.pdf", "report.md", "report.pdf.source.json"]
         companion = module.REPO / state["extract_dir"] / "report.md"
         assert companion.read_text(encoding="utf-8") == "native pdf text\n"
     finally:
@@ -1587,9 +1641,13 @@ def test_spreadsheet_preprocess_keeps_original_and_companion():
         with patch.object(module, "REPO", repo):
             success, message = module.step_preprocess(state)
             assert success, message
-            assert module._manifest_raw_files(state) == ["台账.xls", "台账.md"]
+            assert module._manifest_raw_files(state) == [
+                "台账.xls", "台账.md", "台账.xls.source.json"]
         assert state["locator_source_filename"] == "台账.md"
         assert (repo / state["extract_dir"] / "台账.md").read_text() == module.extract_doc_text(source)
+        context = json.loads((repo / state["extract_dir"] / "台账.xls.source.json").read_text())
+        assert context["companion"]["schema"] == "raw-companion-v1"
+        assert context["companion"]["locator_scheme"] == "table-row"
         assert source.read_bytes() == before
 
 

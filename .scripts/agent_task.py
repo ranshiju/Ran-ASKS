@@ -1,30 +1,35 @@
 #!/usr/bin/env python3
-"""Prompt-free task manifests for work performed by the current host Agent."""
+"""Prompt-free task manifests and a portable host control contract."""
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
+import shlex
+import subprocess
+import sys
 from pathlib import Path, PurePosixPath
+
+import env_config
 
 
 SCHEMA_VERSION = "agent-task-v1"
+CONTROL_VERSION = "agent-task-control-v1"
+CONTEXT_INLINE_BYTES = 4096
+CONTEXT_TOTAL_BYTES = 16384
 VALID_BACKENDS = frozenset({"agent", "api"})
+ALLOWED_COMMAND_ENV = frozenset({
+    "INGEST_BACKEND", "QUERY_BACKEND", "RESEARCH_BACKEND",
+})
 REPO = Path(__file__).resolve().parent.parent
 
 
 def _configured_value(variable: str, default: str) -> str:
     """Read one non-secret setting with process environment precedence."""
-    if variable in os.environ:
-        return os.environ[variable]
-    env_file = REPO / ".env"
-    value = default
-    if env_file.is_file():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            if "=" not in line or line.lstrip().startswith("#"):
-                continue
-            key, configured = line.split("=", 1)
-            if key.strip() == variable:
-                value = configured.strip()
-    return value
+    return env_config.load_env(
+        REPO / ".env", keys={variable}
+    ).get(variable, default)
 
 
 def backend(variable: str, default: str = "agent") -> str:
@@ -91,6 +96,19 @@ def _artifacts(values: list[dict], *, output: bool) -> list[dict]:
     return normalized
 
 
+def _control_contract(commands: dict[str, str]) -> dict:
+    """Describe the host loop without duplicating content-specific instructions."""
+    return {
+        "version": CONTROL_VERSION,
+        "loop": ["inspect", "write_outputs", "advance"],
+        "allowed_actions": sorted(commands),
+        "write_scope": "declared_outputs_only",
+        "validation_authority": "declared_managed_commands",
+        "transaction_policy": "same_transaction_until_terminal",
+        "terminal_workflow_statuses": ["completed", "failed"],
+    }
+
+
 def make_task(*, kind: str, transaction_id: str, inputs: list[dict],
               outputs: list[dict], protocol: dict, issues: list | None = None,
               commands: dict | None = None, context: dict | None = None) -> dict:
@@ -115,6 +133,7 @@ def make_task(*, kind: str, transaction_id: str, inputs: list[dict],
         "protocol": dict(protocol),
         "issues": list(issues or []),
         "commands": command_map,
+        "control": _control_contract(command_map),
         "context": dict(context or {}),
     }
 
@@ -174,4 +193,131 @@ def payload(state: dict) -> dict:
     task = state.get("agent_task") or {}
     if task.get("schema") != SCHEMA_VERSION:
         raise ValueError("state 缺少 agent-task-v1")
-    return dict(task)
+    result = dict(task)
+    result.setdefault("control", _control_contract(result.get("commands") or {}))
+    return result
+
+
+def workflow_status(state: dict) -> str:
+    """Project content-specific internal stages onto the portable host states."""
+    status = str(state.get("status") or "")
+    if status in {"completed", "duplicate_found"}:
+        return "completed"
+    if status in {"failed", "validation_error", "type_mismatch", "superseded"}:
+        return "failed"
+    if status in {"ready_to_commit", "graph_ready", "finalized"}:
+        return "ready_to_commit"
+    return "awaiting_agent"
+
+
+def _compact_marker(value, encoded: bytes) -> dict:
+    return {
+        "compacted": True,
+        "type": type(value).__name__,
+        "bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def _compact_context(context: dict) -> dict:
+    """Bound inspect output while leaving the persisted task untouched."""
+    compacted = {}
+    for key, value in context.items():
+        encoded = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        compacted[key] = (
+            value if len(encoded) <= CONTEXT_INLINE_BYTES
+            else _compact_marker(value, encoded)
+        )
+    encoded = json.dumps(
+        compacted, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    if len(encoded) <= CONTEXT_TOTAL_BYTES:
+        return compacted
+    original = json.dumps(
+        context, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    marker = _compact_marker(context, original)
+    marker["key_count"] = len(context)
+    return marker
+
+
+def control_view(state: dict, repo: Path = REPO) -> dict:
+    """Return the stable host-facing view for one persisted Agent task."""
+    task = payload(state)
+    status = workflow_status(state)
+    missing = [] if status in {"completed", "failed"} else missing_outputs(state, repo)
+    task["context"] = _compact_context(task.get("context") or {})
+    commands = task.get("commands") or {}
+    if status in {"completed", "failed"}:
+        next_action = "none"
+    elif missing:
+        next_action = "write_outputs"
+    elif status == "ready_to_commit" and "commit" in commands:
+        next_action = "commit"
+    elif any(name in commands for name in ("check", "resume", "commit")):
+        next_action = "advance"
+    elif "read" in commands:
+        next_action = "read"
+    else:
+        next_action = "unsupported"
+    return {
+        "schema": SCHEMA_VERSION,
+        "control_version": CONTROL_VERSION,
+        "transaction_id": task["transaction_id"],
+        "kind": task["kind"],
+        "workflow_status": status,
+        "internal_status": str(state.get("status") or ""),
+        "next_action": next_action,
+        "missing_outputs": missing,
+        "task": task,
+    }
+
+
+def _managed_command(command: str, repo: Path) -> tuple[list[str], dict[str, str]]:
+    """Parse one declared action without invoking a shell or accepting arbitrary code."""
+    try:
+        parts = shlex.split(str(command or ""))
+    except ValueError as exc:
+        raise ValueError(f"Agent task command 无法解析: {exc}") from None
+    overrides: dict[str, str] = {}
+    while parts and re.fullmatch(r"[A-Z_][A-Z0-9_]*=.*", parts[0]):
+        name, value = parts.pop(0).split("=", 1)
+        if name not in ALLOWED_COMMAND_ENV or value not in VALID_BACKENDS:
+            raise ValueError(f"Agent task command 不允许环境覆盖: {name}")
+        overrides[name] = value
+    if len(parts) < 2 or Path(parts[0]).name not in {"python", "python3"}:
+        raise ValueError("Agent task command 必须调用 Python 受管脚本")
+    script = Path(parts[1])
+    resolved = script.resolve() if script.is_absolute() else (repo / script).resolve()
+    scripts_root = (repo / ".scripts").resolve()
+    try:
+        resolved.relative_to(scripts_root)
+    except ValueError as exc:
+        raise ValueError("Agent task command 只能调用仓库 .scripts 下入口") from exc
+    if resolved.suffix != ".py" or not resolved.is_file():
+        raise ValueError(f"Agent task command 入口不存在: {resolved}")
+    return [sys.executable, str(resolved), *parts[2:]], overrides
+
+
+def run_action(state: dict, action: str, repo: Path = REPO) -> dict:
+    """Execute one declared managed action and capture its machine-readable output."""
+    task = payload(state)
+    commands = task.get("commands") or {}
+    if action not in commands:
+        raise ValueError(f"Agent task 未声明 action: {action}")
+    argv, overrides = _managed_command(commands[action], repo)
+    env = os.environ.copy()
+    env.update(overrides)
+    result = subprocess.run(
+        argv, cwd=repo, env=env, text=True, capture_output=True,
+    )
+    return {
+        "action": action,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "command": [str(Path(argv[1]).relative_to(repo.resolve())), *argv[2:]],
+        "environment_overrides": sorted(overrides),
+    }

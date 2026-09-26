@@ -20,13 +20,17 @@ from pathlib import Path
 
 import yaml
 
+import env_config
+
 REPO = Path(__file__).resolve().parent.parent
-api_base = api_key = ""
-env = REPO / ".env"
-if env.exists():
-    for line in env.read_text().splitlines():
-        if line.startswith("LLM_API_BASE="): api_base = line.split("=",1)[1].strip()
-        if line.startswith("LLM_API_KEY="): api_key = line.split("=",1)[1].strip()
+_ENV = env_config.load_env(
+    REPO / ".env", keys={"LLM_API_BASE", "LLM_API_PATH", "LLM_API_KEY"}
+)
+api_base = _ENV.get("LLM_API_BASE", "")
+api_key = _ENV.get("LLM_API_KEY", "")
+api_endpoint = env_config.join_api_url(
+    api_base, _ENV.get("LLM_API_PATH", "") or "/v1/chat/completions"
+) if api_base else ""
 
 import tiktoken
 ENC = tiktoken.get_encoding("o200k_base")
@@ -183,7 +187,7 @@ def read_section_content(page_path, section_spec, max_chars=3000):
 
 def llm_call(model, messages, max_tokens=1000):
     payload = json.dumps({"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.1}).encode()
-    req = urllib.request.Request(f"{api_base}/v1/chat/completions", data=payload,
+    req = urllib.request.Request(api_endpoint, data=payload,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=90) as resp:

@@ -29,7 +29,8 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("profile: create", result.stderr)
         for text in ("当前阶段：1B", "presentation_runtime.py doctor", "presentation_runtime.py smoke",
-                     "当前不提供 API adapter", "私有来源的敏感性", "presentation_state.py", "整套 PPTX 最终组装"):
+                     "视觉工作交给独立", "私有来源的敏感性", "presentation_state.py", "整套 PPTX 最终组装",
+                     "## 第一页（标题页）制作流程"):
             self.assertIn(text, result.stdout)
         self.assertNotIn("## 持久状态与权威", result.stdout)
         self.assertNotIn("## 最小协议与批准", result.stdout)

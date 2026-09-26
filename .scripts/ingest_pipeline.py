@@ -54,6 +54,7 @@ def _revisionable_protocol_error(message: str) -> bool:
     text = str(message or "").lower()
     return any(marker in text for marker in (
         "缺少 <<<", "missing <<<", "invalid preprocess json",
+        "invalid meeting compiler preprocess proposal",
         "invalid meeting-compiler-v1 preprocess proposal",
     ))
 

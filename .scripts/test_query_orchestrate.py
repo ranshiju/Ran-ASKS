@@ -236,6 +236,50 @@ def test_companion_read_allows_original_file_citation():
         assert module._check_citations([original_source], session.read_sources)["ok"] is True
 
 
+def test_math_entity_terms_preserve_notation_without_bare_variable_noise():
+    actions = module.actions
+    assert actions._query_entity_terms("z*是什么")[0] == "z*"
+    assert actions._query_entity_terms("|z|怎么算")[0] == "|z|"
+    assert actions._query_entity_terms("Arg z")[:2] == ["Arg z", "Arg"]
+    assert "z" not in actions._query_entity_terms("Arg z")
+
+
+def test_math_alias_reaches_graph_exact_channel():
+    actions = module.actions
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    actions.gl.init_schema(conn)
+    page = "teaching/wiki/topics/complex-argument"
+    actions.gl.ensure_node(conn, page, "复数的辐角", "page")
+    actions.gl.ensure_node(conn, "complex-argument", "复数辐角", "entity")
+    actions.gl.insert_aliases(conn, "complex-argument", ["Arg z"])
+    conn.execute(
+        "INSERT INTO edges(subject,predicate,object) VALUES(?,?,?)",
+        (page, "涵盖", "complex-argument"),
+    )
+    conn.commit()
+    old_connect = actions._connect
+    old_wiki_recall = actions.wiki_recall
+    old_semantic_search = actions.ns.semantic_search
+    old_capsule = actions._section_capsule
+    actions._connect = lambda: conn
+    actions.wiki_recall = lambda *_args: ('{"candidates": []}', 0)
+    actions.ns.semantic_search = lambda *_args, **_kwargs: {"candidates": []}
+    actions._section_capsule = lambda *_args: {}
+    try:
+        text, _tokens = actions.hybrid_recall.__wrapped__(
+            "Arg z是什么", "relation", "teaching", "8"
+        )
+    finally:
+        actions._connect = old_connect
+        actions.wiki_recall = old_wiki_recall
+        actions.ns.semantic_search = old_semantic_search
+        actions._section_capsule = old_capsule
+    result = json.loads(text)
+    assert result["candidates"][0]["path"] == page
+    assert result["candidates"][0]["signals"][0]["channel"] == "graph_exact"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+import env_config
+
 try:
     import fitz  # PyMuPDF
 except ImportError:  # pragma: no cover - reported at use site
@@ -42,7 +44,7 @@ except ImportError:  # pragma: no cover - reported at use site
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_RECEIPT_ROOT = REPO / "temp" / "visual-qa"
 MODEL_CATALOG = REPO / "operations" / "config" / "llm-models.yaml"
-DEFAULT_MODEL = "GLM-5.3-Flash"
+DEFAULT_MODEL = "GLM-5.3-FlashX"
 DEFAULT_FALLBACK_MODEL = "GLM-4.6V"
 REASONING_EFFORTS = {"default", "low", "high"}
 SUPPORTED_IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
@@ -64,15 +66,7 @@ def load_visual_env(env_file: Path | None = None) -> dict[str, str]:
     Process environment values override the file.  The function returns values
     without mutating ``os.environ`` so API secrets stay local to the caller.
     """
-    values: dict[str, str] = {}
     source = env_file or (REPO / ".env")
-    if source.is_file():
-        for raw_line in source.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            name, value = line.split("=", 1)
-            values[name.strip()] = value.strip().strip('"').strip("'")
     known = {
         "LLM_API_BASE", "LLM_API_KEY",
         "VISUAL_QA_API_BASE", "VISUAL_QA_API_KEY",
@@ -80,17 +74,7 @@ def load_visual_env(env_file: Path | None = None) -> dict[str, str]:
         "VISUAL_QA_REASONING_EFFORT", "VISUAL_QA_FALLBACK_REASONING_EFFORT",
         "VISUAL_QA_MAX_TOKENS",
     }
-    values.update({name: value for name, value in os.environ.items() if name in known})
-    pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
-    for _ in range(len(values) + 1):
-        expanded = {
-            name: pattern.sub(lambda match: values.get(match.group(1), match.group(0)), value)
-            for name, value in values.items()
-        }
-        if expanded == values:
-            break
-        values = expanded
-    return values
+    return env_config.load_env(source, keys=known)
 
 
 @dataclass(frozen=True)
@@ -618,20 +602,18 @@ def _chat_completions_url(api_base: str) -> str:
     return base + "/v1/chat/completions"
 
 
-def _call_vision_api(model: str, image_path: Path, prompt: str,
+def call_json_vision(model: str, image_paths: list[Path], prompt: str,
                      config: RemoteConfig) -> dict[str, Any]:
-    mime = "image/png"
-    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    """Shared transport; caller owns explicit authorization and its result schema."""
+    content_items = [{"type": "text", "text": prompt}]
+    for image_path in image_paths:
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        content_items.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded}"}})
     payload = {
         "model": model,
         "messages": [{
             "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {
-                    "url": f"data:{mime};base64,{encoded}",
-                }},
-            ],
+            "content": content_items,
         }],
         "temperature": 0,
         "max_tokens": config.max_tokens,
@@ -668,7 +650,12 @@ def _call_vision_api(model: str, image_path: Path, prompt: str,
             str(part.get("text", "")) if isinstance(part, dict) else str(part)
             for part in content
         )
-    return _normalize_vision_result(_extract_json(str(content)))
+    return {"result": _extract_json(str(content)), "usage": envelope.get("usage", {})}
+
+
+def _call_vision_api(model: str, image_path: Path, prompt: str,
+                     config: RemoteConfig) -> dict[str, Any]:
+    return _normalize_vision_result(call_json_vision(model, [image_path], prompt, config)["result"])
 
 
 def _read_context(context_path: Path | None) -> tuple[str, str]:

@@ -102,6 +102,17 @@ def test_env_reference_expansion_reuses_primary_credentials():
     assert expanded["INGEST_KEYWORD_API_KEY"] == "secret"
 
 
+def test_chat_endpoint_path_is_configurable_without_duplicate_v1():
+    assert llm_structured._chat_endpoint(
+        {}, "https://api.example/v1"
+    ) == "https://api.example/v1/chat/completions"
+    assert llm_structured._chat_endpoint({
+        "LLM_API_PATH": "/chat/completions",
+    }, "https://open.bigmodel.cn/api/paas/v4") == (
+        "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    )
+
+
 def test_specialist_profiles_precede_primary_when_complete():
     config = {
         "LLM_API_BASE": "primary-base", "LLM_API_KEY": "primary-key", "LLM_MODEL": "DeepSeek-V3.2",

@@ -28,7 +28,7 @@ class ImageOCRTests(unittest.TestCase):
         self.source.parent.mkdir()
         Image.new("RGB", (80, 40), "white").save(self.source)
         self.config = {"base": "https://example.invalid/v1", "key": "secret-key",
-                       "model": "GLM-4.6V", "fallback_model": "", "backend": "api", "allow_remote": "false"}
+                       "model": "GLM-4.6V", "review_model": "GLM-5.3-FlashX", "fallback_model": "", "backend": "api", "allow_remote": "false"}
         self.load_config = ocr.load_config
         config_patch = patch.object(ocr, "load_config", return_value=self.config)
         config_patch.start()
@@ -540,7 +540,9 @@ class ImageOCRTests(unittest.TestCase):
         with patch.object(ocr, "call_api", return_value=json.dumps(self.review_proposal())) as call:
             receipt = ocr.review_image(self.source, self.unreviewed_receipt(), allow_remote=True)
         self.assertEqual(receipt["review_status"], "api-reviewed")
-        self.assertEqual(receipt["review"]["reviewer"], self.config["model"])
+        self.assertEqual(receipt["review"]["reviewer"], self.config["review_model"])
+        self.assertEqual(call.call_args.args[2], "GLM-5.3-FlashX")
+        self.assertEqual(self.config["model"], "GLM-4.6V")
         self.assertEqual(receipt["review"]["source_sha256"], receipt["source"]["sha256"])
         self.assertEqual(receipt["review"]["text_sha256"], receipt["text_sha256"])
         self.assertIn("L5:", call.call_args.kwargs["prompt"])
@@ -592,7 +594,7 @@ class ImageOCRTests(unittest.TestCase):
                 self.assertNotIn("agent_task", state)
                 recognize.assert_called_once()
                 review.assert_called_once()
-                self.assertEqual(state["ocr"]["review_attempts"][0]["model"], self.config["model"])
+                self.assertEqual(state["ocr"]["review_attempts"][0]["model"], self.config["review_model"])
 
     def test_api_confirmation_is_text_only_and_resume_does_not_repeat_paid_review(self):
         state = {**self.state(), "allow_remote_ocr": True}

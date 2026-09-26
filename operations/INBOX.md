@@ -57,7 +57,7 @@
    - PDF：`extractor.py --external-pdf <inbox文件绝对路径> --paper <tmp-id> --papers-dir temp/inbox-extract` → `paper.pdf` + `paper.md`
    - `.txt` 会议纪要：直接是文本（仍传 `source-kind=meeting` 派发会议预处理与建边规则）
    - `.docx/.doc`：`ingest_document.py` 提取文本入临时区；强会议速记标记同时记录 `source_kind=meeting`
-   - `.pptx`：`ingest_document.py` 经 shared `pptx_document.py` 原生逐页提取，并复用既有本地页面渲染；返回 `pptx_review` Agent task。宿主完成源绑定逐页复核后原事务 resume，保持 semantic backend。原件、同名 Markdown、复核来源 sidecar 同事务归档，页图/PDF 不入 Raw；语义边界见 INGEST「演示文稿（PPTX）」。
+   - `.pptx`：`ingest_document.py` 经 shared `pptx_document.py` 原生逐页提取，并复用既有本地页面渲染；新流程使用独立视觉 API，`--allow-remote-ppt` 授权所选文件的内容识读；未完成时返回纯文字 `pptx_api_action`，主 Agent 不看图。API 完成源绑定逐页复核后原事务 resume，保持 semantic backend。原件、同名 Markdown、复核来源 sidecar 同事务归档，页图/PDF 不入 Raw；语义边界见 INGEST「演示文稿（PPTX）」。
    - `.xls/.xlsx`：`ingest_document.py` 使用 xlrd/openpyxl 忠实提取各工作表、原始行号、空值、隐藏状态与合并范围；原件和同名 Markdown companion 同事务落位。xls 读取保存值，公式表达式仍查原件；xlsx 同时保留公式及缓存值，不执行重算。语义组织遵循 `INGEST.md`「表格型清单与台账」。
    - `.md`：直接读
 4. **有界分类 + 单遍语义生成**：边界分类器最多读取 8,000 字符，只返回类型复核；放行后语义 Worker 读取所需上下文并产出：
@@ -78,7 +78,7 @@
    - 三件任一缺失 → **不清空 inbox**，定位问题修复后重验；不得传 `--cleanup` 或删除 inbox 原始文件
    - 全部齐全 → 记录回执路径后进入步骤 6
    - 成功后由统一收尾维护依次处理缩写、人物页和 Hub；直接 `--resume` 成功也必须走同一入口，并把包含完整 `graph_report`、事务号和质量状态的报告写入 `cross-domain/ingest-reports/resume-<txn>.json`。若 inbox 仍有普通待摄入文件或非空 `facts-pending.md`，入口返回 `maintenance.status=deferred`，由最后一个完成项执行一次全局维护，禁止每篇重复扫描。文件终态见 `status`/`file_status`，维护终态见 `maintenance.status`，完整回执写 `temp/inbox-maintenance/`。类型化缩写与 Hub canonical 候选由主 Agent 批量处理，不能用维护 handoff 覆盖文件成功终态；缩写摘要须区分唯一 token 与 occurrence，Agent 决策应用后同步闭环对应 maintenance receipt。Hub membership 的 profile/Scope/prototype embedding 必须汇总去重后批量请求；路由 margin 不足或子方向特异性不足时写带 `route-apply --transaction-id` 模板的 `hub-route-review`，已有子 Hub 的超限父 Hub写带 Scope readiness/blockers 及 `define-scope`/`redistribute` 动作的 `hub-auto-redistribute`。120 秒维护超时只返回可重试 `deferred`。
-7. 清理：普通成功项在校验通过后删除临时区并清空对应 inbox 原件（保留 `facts-pending.md` 和 `.gitkeep`）。源指纹精确重复项须在既有路径仍位于受管 `raw/` 且 inbox/Raw 双方 SHA-256 复核一致后，写 `temp/inbox-duplicate-receipts/` 回执并移入可恢复废纸篓；复核失败不得删除。清理仅限事务拥有的副本与提取临时物；对话原件和 `inbox/.source-retention/` 持久保护标记均不在清理范围，不能因其为隐藏目录而递归删除。成功/失败阶段写入 `temp/inbox-state/<transaction-id>.json`，以便恢复。
+7. 清理：普通成功项在校验通过后删除临时区并清空对应 inbox 原件（保留 `facts-pending.md` 和 `.gitkeep`）。查重前先增量协调可重建源指纹索引；paper/meeting/document 成功提交后由共享收尾登记原始 Raw 源实体，索引缺项或悬空项在下次协调修复。源指纹精确重复项须在既有路径仍位于受管 `raw/` 且 inbox/Raw 双方 SHA-256 复核一致后，写 `temp/inbox-duplicate-receipts/` 回执并移入可恢复废纸篓；复核失败不得删除。清理仅限事务拥有的副本与提取临时物；对话原件和 `inbox/.source-retention/` 持久保护标记均不在清理范围，不能因其为隐藏目录而递归删除。成功/失败阶段写入 `temp/inbox-state/<transaction-id>.json`，以便恢复。
 
 **事务入口（批量/非标准场景）**：`.scripts/inbox_ingest.py plan` → 每项 `prepare` → `complete`。仅用于 `ingest_paper.py`/`ingest_document.py` 未覆盖的批量或非标准场景；常规单篇摄入走 playbook 代码驱动脚本。
 
