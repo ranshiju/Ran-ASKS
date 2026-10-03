@@ -87,13 +87,18 @@ class Delivery:
     def _root(self, name):
         return ps.safe_path(self.store.root, name)
 
-    def _current(self, expected, *, locked=False):
+    def _current(self, expected, *, locked=False, ready=False):
         state = self.store.read()
         ps.require(state['session']['revision_id'] == ps.identifier(expected), 'Revision conflict; reload before retrying')
         ps.require(not self.store.source_issues(state), 'Source version changed or unavailable; refresh explicitly')
         if locked:
             missing = [sid for sid in state['slides'] if ps.stage(state, sid) != 'locked']
             ps.require(not missing, f'User-approved locked previews required: {missing}')
+        if ready:
+            missing = [sid for sid, slide in state['slides'].items()
+                       if 'build' not in slide or state['session']['approval_records'][sid].get('visual', {}).get('verdict') != 'passed']
+            ps.require(not missing, f'Built slides with passed production visual review required: {missing}')
+        if locked or ready:
             current = render.fingerprint()
             for sid, slide in state['slides'].items():
                 ps.require(slide['build']['renderer'] == current, 'Renderer/font dependencies changed; unlock and rebuild')
@@ -137,16 +142,23 @@ class Delivery:
         return {'status': 'committed', 'output_id': receipt['id'], 'kind': receipt['kind'],
                 'source_policy': 'local_only', 'receipt': str(folder / 'receipt.json'),
                 'artifacts': {k: str(folder / v) for k, v in receipt.get('artifacts', {}).items()},
-                'assistance': receipt['assistance'], 'user_approval': 'not_requested'}
+                'assistance': receipt['assistance'], 'user_approval': 'not_requested',
+                **{k: receipt[k] for k in ('production_mode', 'unaccepted_slides') if k in receipt}}
 
-    def export(self, expected_revision):
+    def export(self, expected_revision, *, mode='pagewise', instruction=None):
+        ps.require(mode in {'pagewise', 'auto', 'discuss-auto'}, 'Unknown production mode')
+        if mode != 'pagewise':
+            ps.text(instruction, 4000)
         with self.store.locked():
-            state = self._current(expected_revision, locked=True)
+            state = self._current(expected_revision, locked=mode == 'pagewise', ready=mode != 'pagewise')
             items = [deepcopy(state['slides'][sid]) for sid in state['session']['slide_order']]
             # Never read single-slide PPTX binaries as assembly input.
             items = [{k: x[k] for k in ('content', 'design', 'ir')} for x in items]
             return self._render_output(state, items, uuid.uuid4().hex,
-                                       {'kind': 'export', 'assistance': _unchecked()})
+                                       {'kind': 'export', 'assistance': _unchecked(),
+                                        'production_mode': mode, 'generation_instruction': instruction,
+                                        'unaccepted_slides': [sid for sid in state['session']['slide_order']
+                                                              if ps.stage(state, sid) != 'locked']})
 
     def status(self):
         with self.store.locked():
@@ -414,6 +426,9 @@ def main(argv=None):
         command.add_argument('--store', required=True)
         if name in ('export', 'prepare'):
             command.add_argument('--expected-revision', required=True)
+        if name == 'export':
+            command.add_argument('--mode', choices=['pagewise', 'auto', 'discuss-auto'], default='pagewise')
+            command.add_argument('--instruction', help='Actual user authorization for whole-deck generation')
         if name == 'prepare':
             command.add_argument('--kind', choices=KINDS, required=True)
             command.add_argument('--slides', nargs='+', required=True, help='Stable slide IDs, not guessed page numbers')
@@ -428,7 +443,7 @@ def main(argv=None):
     try:
         delivery = Delivery(ps.Store(args.store))
         if args.command == 'export':
-            result = delivery.export(args.expected_revision)
+            result = delivery.export(args.expected_revision, mode=args.mode, instruction=args.instruction)
         elif args.command == 'status':
             result = delivery.status()
         elif args.command == 'prepare':

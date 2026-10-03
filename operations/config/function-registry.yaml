@@ -1,7 +1,7 @@
 schema: function-registry-v1
 version: 1
 purpose: >-
-  WikiGraph 运行时功能目录。统一管理用户功能、Agent 工具、固定管线、状态操作与 API worker；
+  WikiGraph 运行时功能目录。统一管理用户功能、Agent 工具、固定管线、工作状态操作与 API worker；
   不保存工作状态，不替代工程元图，也不把固定管线改造成动态 DSH 工作流。
 
 adapters:
@@ -23,7 +23,7 @@ adapters:
 states:
   workspace:
     title: 持续工作区
-    summary: 项目事项、提案、记忆和可重建投影的持续工作状态。
+    summary: 项目事项、提案、记忆和可重建投影的工作状态。
     authority: projects/<path>/workspace.yaml + .workspace/items + .workspace/memories
     route_tasks: []
   research:
@@ -33,14 +33,14 @@ states:
     route_tasks: [research]
   frontier:
     title: 研究前沿
-    summary: 开放问题、部分答案、残余缺口、思路和验证轨迹的持续状态。
+    summary: 开放问题、部分答案、残余缺口、思路和验证轨迹的工作状态。
     authority: academic/frontier/questions + academic/frontier/trajectories
     route_tasks: [frontier]
 
 functions:
   system.function_catalog:
     title: 功能目录
-    summary: 列出、查看和按调用者、后端、状态解析 canonical 功能。
+    summary: 列出、查看和按调用者、后端、工作状态解析 canonical 功能。
     kind: tool
     audience: [user, agent]
     control_owners: [code]
@@ -190,6 +190,42 @@ functions:
       route_capabilities:
         write: [general, academic]
       executor: host_agent
+
+  artifact.slide_library:
+    title: PPT模板管理与复用
+    summary: 检索、核验和收藏页面组件，区分直接使用与套用填充，保留来源版本并生成独立单页实例。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, temp, project]
+    maturity: preview
+    states: [workspace, research]
+    bindings:
+      route_capabilities:
+        slide-library: [general]
+      wg: [slide-library]
+      cli: [.scripts/slide_library.py]
+      implementations: [.scripts/slide_reuse.py]
+    protocols: [slide-library-component-v1, slide-library-component-v2, slide-reuse-instance-v1]
+
+  knowledge.visualize:
+    title: 知识图可视化
+    summary: 只读选择主题、节点邻域和关系，生成有界有向图及可回溯的本地来源清单。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent, sub_agent, pipeline]
+    backends: [agent]
+    effects: [read, temp, project]
+    maturity: preview
+    bindings:
+      route_capabilities:
+        graph-visualize: [general]
+      wg: [graph-visualize]
+      cli: [.scripts/graph_visualize.py]
+    protocols: [graph-visualization-v1]
 
   artifact.cv:
     title: 简历制作与维护

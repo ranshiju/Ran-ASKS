@@ -1775,7 +1775,7 @@ def upsert_page_node(conn, page_path, fm=None, page_file=None):
 
 # ===== Raw 文档包节点 + Wiki 来源边 =====
 
-def ensure_raw_support_edge(conn, page_path, fm=None):
+def ensure_raw_support_edge(conn, page_path, fm=None, repo=None):
     """从 Wiki sources 机械建 Raw 文档包节点和 ``Wiki → 来源 → Raw`` 边。
 
     sources 如 ["academic/raw/works/papers/2010-ltrg/paper.md"]
@@ -1783,6 +1783,7 @@ def ensure_raw_support_edge(conn, page_path, fm=None):
     → 原件 paper.pdf 与 locator companion paper.md 通过同词干归为一个节点
     → 建 ``page --来源--> raw``；locator 只在 source 自带 ``#...`` 时可选记录。
     """
+    repo = Path(repo) if repo is not None else gl.REPO
     fm = fm if fm is not None else gl.read_frontmatter(page_path)
     sources = gl.parse_list_field(fm, "sources")
     if not sources:
@@ -1799,10 +1800,10 @@ def ensure_raw_support_edge(conn, page_path, fm=None):
         # Every same-stem file path resolves to this Raw package node via aliases.
         qualified_source_file = gl.raw_file_path(src, page_path)
         aliases = [qualified_source_file]
-        source_target = gl.REPO / qualified_source_file
+        source_target = repo / qualified_source_file
         if source_target.parent.is_dir():
             aliases.extend(
-                str(candidate.relative_to(gl.REPO))
+                str(candidate.relative_to(repo))
                 for candidate in source_target.parent.glob(f"{source_target.stem}.*")
                 if candidate.is_file()
             )

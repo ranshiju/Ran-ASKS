@@ -94,6 +94,57 @@ class DeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ps.StateError, 'Revision conflict'):
             self.delivery.export(old)
 
+    def reviewed_deck(self):
+        for sid in ['s1', 's2', 's3']:
+            self.ready(sid)
+            self.apply('build', sid)
+            self.apply('review', sid, approval(self.store, sid, 'visual'))
+
+    def test_whole_deck_modes_preserve_unaccepted_previews_and_authorization(self):
+        self.reviewed_deck()
+        before = self.store.read()
+        with patch.object(self.delivery, 'prepare', side_effect=AssertionError('optional checks must stay explicit')):
+            for mode in ('auto', 'discuss-auto'):
+                output = self.delivery.export(self.rev(), mode=mode, instruction=DECLARATION)
+                self.assertEqual(output['production_mode'], mode)
+                self.assertEqual(output['unaccepted_slides'], ['s1', 's2', 's3'])
+                self.assertEqual(output['user_approval'], 'not_requested')
+                self.assertEqual(output['assistance'], pd._unchecked())
+                receipt, _ = self.delivery._output(output['output_id'])
+                self.assertEqual(receipt['generation_instruction'], DECLARATION)
+        self.assertEqual(self.store.read(), before)
+        self.assertEqual(self.delivery.status()['outputs'][0]['unaccepted_slides'], ['s1', 's2', 's3'])
+        with self.assertRaisesRegex(ps.StateError, 'locked previews'):
+            self.delivery.export(self.rev())
+
+    def test_whole_deck_requires_instruction_build_review_and_fresh_dependencies(self):
+        with self.assertRaises(ps.StateError):
+            self.delivery.export(self.rev(), mode='auto')
+        with self.assertRaises(ps.StateError):
+            self.delivery.export(self.rev(), mode='unknown', instruction=DECLARATION)
+        with self.assertRaisesRegex(ps.StateError, 'Built slides'):
+            self.delivery.export(self.rev(), mode='auto', instruction=DECLARATION)
+        self.reviewed_deck()
+        failed = approval(self.store, 's2', 'visual')
+        failed.update(verdict='failed', findings=['TEST-ONLY crop'])
+        self.apply('review', 's2', failed)
+        with self.assertRaisesRegex(ps.StateError, 's2'):
+            self.delivery.export(self.rev(), mode='auto', instruction=DECLARATION)
+        self.apply('review', 's2', approval(self.store, 's2', 'visual'))
+        with patch.object(render, 'fingerprint', return_value={'changed':True}):
+            with self.assertRaisesRegex(ps.StateError, 'dependencies changed'):
+                self.delivery.export(self.rev(), mode='discuss-auto', instruction=DECLARATION)
+        self.assertEqual(self.assembler.call_count, 0)
+
+    def test_whole_deck_preserves_partial_acceptance(self):
+        self.reviewed_deck()
+        warnings = self.store.read()['slides']['s1']['build']['warnings']
+        self.apply('lock', 's1', approval(self.store, 's1', 'preview', warnings))
+        output = self.delivery.export(self.rev(), mode='auto', instruction=DECLARATION)
+        self.assertEqual(output['unaccepted_slides'], ['s2', 's3'])
+        self.assertEqual(ps.stage(self.store.read(), 's1'), 'locked')
+        self.assertEqual(ps.stage(self.store.read(), 's2'), 'preview_review')
+
     def test_export_default_does_not_prepare_optional_tasks_and_survives_temp_removal(self):
         with patch.object(self.delivery, 'prepare', side_effect=AssertionError('must not run')):
             output = self.exported()
@@ -291,7 +342,7 @@ class DeliveryTests(unittest.TestCase):
             self.assertIn(pd.LABELS[kind], proc.stdout)
             self.assertNotIn('## 阶段1A 命令与数据协议', proc.stdout)
         scripts = self.repo / '.scripts'; scripts.mkdir()
-        for name in ('presentation_state.py', 'presentation_render.py', 'presentation_delivery.py', 'agent_task.py'):
+        for name in ('presentation_state.py', 'presentation_render.py', 'presentation_delivery.py', 'agent_task.py', 'env_config.py'):
             shutil.copy2(REPO / '.scripts' / name, scripts / name)
         proc = subprocess.run([sys.executable, str(scripts / 'presentation_delivery.py'), 'status', '--store', str(self.store.root)],
                               capture_output=True, text=True)
@@ -348,8 +399,15 @@ class RealDeliveryTests(unittest.TestCase):
                 store.apply(request(store, 'build', sid, {}))
                 # Explicitly TEST-ONLY state fixtures; not a real user or Agent visual acceptance.
                 store.apply(request(store, 'review', sid, approval(store, sid, 'visual')))
+            delivery = pd.Delivery(store)
+            automatic = delivery.export(store.read()['session']['revision_id'], mode='auto', instruction=DECLARATION)
+            self.assertEqual(automatic['unaccepted_slides'], ['s1', 's2', 's3'])
+            from pptx import Presentation
+            self.assertEqual(len(Presentation(automatic['artifacts']['pptx']).slides), 3)
+            self.assertTrue(all(ps.stage(store.read(), sid) == 'preview_review' for sid in ['s1','s2','s3']))
+            for sid in ['s1', 's2', 's3']:
                 store.apply(request(store, 'lock', sid, approval(store, sid, 'preview', store.read()['slides'][sid]['build']['warnings'])))
-            delivery = pd.Delivery(store); rev = store.read()['session']['revision_id']
+            rev = store.read()['session']['revision_id']
             output = delivery.export(rev)
             self.assertEqual(output['assistance'], pd._unchecked())
             from pptx import Presentation

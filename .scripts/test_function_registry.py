@@ -24,7 +24,7 @@ def test_registry_and_runtime_have_exact_coverage():
     data = registry.load_registry()
     assert registry.validate_registry(data) == []
     assert registry.validate_runtime(data) == []
-    assert len(data["functions"]) == 24
+    assert len(data["functions"]) == 26
     assert set(data["states"]) == {"workspace", "research", "frontier"}
     assert len(registry.observed_dsh_tools()) == 38
 
@@ -96,6 +96,23 @@ def test_fixed_pipelines_remain_code_owned():
     assert "dsh" not in presentation["bindings"]
 
 
+def test_library_and_visualization_are_functions_with_discoverable_entries():
+    data = registry.load_registry()
+    for key, entry in [('artifact.slide_library','slide-library'),('knowledge.visualize','graph-visualize')]:
+        record = data['functions'][key]
+        assert record['kind'] == 'function'
+        assert record['maturity'] == 'preview'
+        assert record['bindings']['wg'] == [entry]
+        assert record['bindings']['route_capabilities'] == {entry:['general']}
+        assert 'raw' not in record['effects'] and 'graph' not in record['effects']
+    assert set(data['states']) == {'workspace','research','frontier'}
+    proc = subprocess.run([sys.executable,str(SCRIPTS/'wg.py'),'slide-library','show',
+                           '--template','temp/nonexistent-template-test-only'],
+                          cwd=REPO,capture_output=True,text=True,check=True)
+    result = json.loads(proc.stdout)
+    assert result['ok'] is False and result['status'] == 'error'
+
+
 def test_runtime_drift_is_reported():
     data = deepcopy(registry.load_registry())
     data["functions"]["knowledge.query"]["bindings"]["dsh"].remove("graph_search")
@@ -108,7 +125,7 @@ def test_route_and_wg_use_registry_discovery():
         [sys.executable, str(SCRIPTS / "route.py"), "--list"],
         cwd=REPO, capture_output=True, text=True, check=True,
     ).stdout
-    assert "持续状态:" in route and "可路由任务:" in route and "按需能力:" in route
+    assert "工作状态:" in route and "可路由任务:" in route and "按需能力:" in route
     assert "task/state" not in route
 
     proc = subprocess.run(

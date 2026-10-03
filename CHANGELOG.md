@@ -7,6 +7,35 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-03
+
+### Version decision / 版本判断
+
+- MINOR: Add backward-compatible knowledge graph visualization, governed slide-library reuse, expanded presentation generation modes, and stronger evidence-bound meeting ingestion and maintenance recovery.
+- MINOR（中文）：新增向后兼容的知识图可视化、受管幻灯片模板复用、扩展演示文稿生成模式，并强化证据绑定的会议摄入与维护恢复。
+
+### Highlights
+
+- Added bounded, source-aware knowledge graph visualization through
+  `wg.py graph-visualize`, with topic, neighborhood, and relation filters plus
+  local provenance output.
+- Added governed reusable slide-template management through
+  `wg.py slide-library`, distinguishing direct reuse from parameterized
+  adaptation while preserving source and version receipts.
+- Expanded native presentation production modes and strengthened
+  evidence-bound meeting compilation, final-decision handling,
+  student-guidance projection, people-page provenance, and recoverable
+  maintenance publication.
+
+### 主要更新
+
+- 新增通过 `wg.py graph-visualize` 使用的有界、来源感知知识图可视化，支持主题、
+  邻域和关系筛选，并输出本地 provenance。
+- 新增通过 `wg.py slide-library` 使用的受管幻灯片模板管理，区分直接复用与参数化
+  适配，同时保留来源和版本回执。
+- 扩展原生演示文稿生产模式，并强化证据绑定的会议编译、最终决议处理、学生指导
+  投影、人物页 provenance 与可恢复的维护发布。
+
 ## [0.10.0] - 2026-09-26
 
 ### Version decision / 版本判断

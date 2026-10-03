@@ -122,7 +122,7 @@ def build_document_delta(
         for raw_path in raw_packages
     ]
 
-    strict_navigation = str((frontmatter or {}).get("compiler_protocol") or "") == kir.MEETING_COMPILER_V2
+    strict_navigation = str((frontmatter or {}).get("compiler_protocol") or "") in kir.MEETING_COMPILER_PROTOCOLS
     cleaned_triples = []
     seen = set()
     for edge in triples or []:
@@ -137,7 +137,7 @@ def build_document_delta(
         cleaned_triples.append(cleaned)
         if strict_navigation and not cleaned.get("source"):
             hard_errors.append(
-                f"meeting-compiler-v2 语义边缺来源定位: {cleaned['subject']} | "
+                f"typed meeting compiler 语义边缺来源定位: {cleaned['subject']} | "
                 f"{cleaned['predicate']} | {cleaned['object']}"
             )
 

@@ -638,7 +638,7 @@ def test_query_probes_cover_anchor_raw_and_two_hop_boundary():
     assert probes["boundary_path_success"] == 1.0
 
 
-def test_meeting_v2_resolves_deictics_requires_sources_and_scopes_actions():
+def test_current_meeting_protocol_resolves_deictics_requires_sources_and_scopes_actions():
     conn = make_db()
     page = "academic/wiki/conferences/0903-example"
     person = "academic/wiki/authors/example"
@@ -646,7 +646,7 @@ def test_meeting_v2_resolves_deictics_requires_sources_and_scopes_actions():
     fm = {
         "title": "Example Meeting",
         "type": "conference-summary",
-        "compiler_protocol": "meeting-compiler-v2",
+        "compiler_protocol": "meeting-compiler-v3",
         "sources": ["academic/raw/conferences/2026/0903-example/source.txt"],
     }
     triples = [

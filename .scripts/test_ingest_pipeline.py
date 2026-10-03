@@ -1312,6 +1312,44 @@ def test_cleanup_waits_for_completion_and_retries_without_replaying_ingest():
                 assert "cleanup_error" not in state
 
 
+def test_post_commit_projection_is_required_and_resumable():
+    from unittest.mock import patch
+
+    calls = []
+    state = {
+        "transaction_id": "projection-test", "status": "validate_graph", "errors": [],
+        "semantic_path": "temp/semantic.txt", "graph_report": {"edges_added": 1},
+    }
+    fail_once = {"value": True}
+
+    def project(_state):
+        calls.append("projection")
+        if fail_once["value"]:
+            fail_once["value"] = False
+            return False, "projection failed"
+        return True, ""
+
+    spec = {
+        "script_name": "test.py",
+        "steps": {
+            "validate_semantics": lambda _state: ([], []),
+            "validate_graph": lambda _state: [],
+            "post_commit_projection": project,
+            "finalize_tail": lambda _state: (calls.append("tail") or True, ""),
+        },
+    }
+    with patch.object(ingest_pipeline, "_save"), \
+            patch.object(ingest_pipeline.ic, "validate_before_commit", return_value=[]), \
+            patch.object(ingest_pipeline.ic, "validate_completion", return_value=[]):
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+        assert result["status"] == "failed"
+        assert result["resume_from"] == "post_commit_projection"
+        assert calls == ["projection"] and "tail" not in calls
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+        assert result["status"] == "completed"
+        assert calls == ["projection", "projection", "tail"]
+
+
 def test_resolve_bare_name_normalized_match():
     """归一化匹配:同一概念不同写法应解析到同一节点（解决碎片化）。"""
     canonical = "矩阵乘积态matrix product state(MPS)"
@@ -1520,6 +1558,33 @@ def test_update_graph_failure_rolls_back_and_exposes_resume_point():
     assert result["status"] == "failed"
     assert result["resume_from"] == "finalize"
     assert "raw companion" in result["errors"][1]
+
+
+def test_update_graph_failure_without_rollback_exposes_graph_retry_point():
+    state = {
+        "transaction_id": "meeting-graph-failure",
+        "status": "update_graph",
+        "errors": [],
+    }
+    spec = {
+        "script_name": "test_driver.py",
+        "steps": {
+            "validate_semantics": lambda _state: ([], []),
+            "update_graph": lambda _state: (False, "provider model unavailable"),
+        },
+    }
+    original_save = ingest_pipeline._save
+    original_validate = ingest_pipeline.ic.validate_before_commit
+    try:
+        ingest_pipeline._save = lambda _state: None
+        ingest_pipeline.ic.validate_before_commit = lambda *_args, **_kwargs: []
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+    finally:
+        ingest_pipeline._save = original_save
+        ingest_pipeline.ic.validate_before_commit = original_validate
+    assert result["status"] == "failed"
+    assert result["resume_from"] == "graph_ready"
+    assert "reingest" not in result
 
 
 def test_graph_validation_failure_exposes_clean_graph_retry_point():
@@ -2059,6 +2124,7 @@ def main():
     test_step_update_graph_fails_on_non_json_output()
     test_validate_completion_blocks_stale_errors_and_empty_graph()
     test_cleanup_waits_for_completion_and_retries_without_replaying_ingest()
+    test_post_commit_projection_is_required_and_resumable()
     test_resolve_bare_name_normalized_match()
     test_ensure_keyword_connectivity()
     test_locator_aware_page_adds_optional_wiki_section_locator_only()
@@ -2071,6 +2137,7 @@ def main():
     test_sync_keyword_appends_to_hub_dedup()
     test_resolve_abbreviation_todo_finds_full_name_node()
     test_update_graph_failure_rolls_back_and_exposes_resume_point()
+    test_update_graph_failure_without_rollback_exposes_graph_retry_point()
     test_graph_validation_failure_exposes_clean_graph_retry_point()
     test_wiki_validation_retry_budget_hands_off_without_third_full_rewrite()
     test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff()

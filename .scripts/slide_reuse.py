@@ -236,12 +236,21 @@ def usage_md(name, profile, receipt):
     return '\n'.join(lines)
 
 
-def new_output(path):
+def new_output(path, *, allow_page=False, page_count=None):
     raw = Path(path).absolute()
     require(not any(p.is_symlink() for p in [raw, *raw.parents]), 'Symlink output is not allowed')
     path = raw.resolve()
-    require(path.is_relative_to((library.REPO/'temp').resolve()) and not path.exists(),
-            'Output must be a new directory under repository temp')
+    in_temp = path.is_relative_to((library.REPO/'temp').resolve())
+    page_output = False
+    if allow_page and path.is_relative_to((library.REPO/'projects').resolve()):
+        for parent in path.parents:
+            if parent == library.REPO/'projects': break
+            if (parent/'workspace.yaml').is_file():
+                parts = path.relative_to(parent).parts
+                page_output = len(parts) >= 2 and parts[0] == 'drafts' and page_count == 1
+                break
+    require((in_temp or page_output) and not path.exists(),
+            'Output must be new: temp, or a managed workspace drafts/page directory for one slide')
     path.parent.mkdir(parents=True, exist_ok=True)
     return path, Path(tempfile.mkdtemp(prefix='.reuse-', dir=path.parent))
 
@@ -318,7 +327,8 @@ def fill(component, values, target):
     receipt = library.verify_bundle(component)
     template_digest = library.vision.digest(component/'receipt.json')
     require(receipt.get('reuse_kind') == 'adaptable', 'Fill requires an adaptable template')
-    profile = validate_profile(read_json(component/'reuse.json'), structure.extract(component/'component.pptx'))
+    data = structure.extract(component/'component.pptx')
+    profile = validate_profile(read_json(component/'reuse.json'), data)
     require(isinstance(values, dict) and set(values) == {s['id'] for s in profile['slots']}, 'Provide every slot, no unknown fields')
     checked, inputs = {}, {}
     for slot in profile['slots']:
@@ -334,7 +344,7 @@ def fill(component, values, target):
                     'Use a public workspace image; private needs an isolated workflow')
             checked[slot['id']] = str(image)
             inputs[slot['id']] = {'path': str(image.relative_to(library.REPO)), 'sha256': library.vision.digest(image)}
-    target, pending = new_output(target)
+    target, pending = new_output(target, allow_page=True, page_count=len(data['pages']))
     try:
         transform(component/'component.pptx', pending/'component.pptx', profile, checked)
         render_artifacts(pending)
@@ -344,7 +354,8 @@ def fill(component, values, target):
             require(library.vision.digest(library.REPO/item['path']) == item['sha256'], 'Image changed during fill')
         library.vision.write(pending/'instance.json', {
             'schema': 'slide-reuse-instance-v1', 'template': str(component.relative_to(library.REPO)),
-            'template_receipt_sha256': template_digest,
+            'template_receipt_sha256': template_digest, 'kind': 'adaptable',
+            'source': receipt['source'], 'source_sha256': receipt['source_sha256'],
             'values': values, 'image_inputs': inputs,
             'files': {p.name: library.vision.digest(p) for p in pending.iterdir() if p.is_file()},
             'visual_review': 'not_executed', 'user_approval': 'not_requested'})
@@ -352,4 +363,36 @@ def fill(component, values, target):
         return {'status': 'filled', 'directory': str(target), 'pptx': str(target/'component.pptx')}
     except BaseException:
         shutil.rmtree(pending, ignore_errors=True)
+        raise
+
+
+def instantiate(component, values, target):
+    """Create a traceable instance of either a direct or adaptable component."""
+    component = Path(component).absolute()
+    safe_input(component/'receipt.json')
+    receipt = library.verify_bundle(component)
+    if receipt.get('reuse_kind') == 'adaptable':
+        return fill(component, values, target)
+    require(receipt.get('reuse_kind') == 'direct', 'Classify the component before reuse')
+    require(isinstance(values, dict) and not values, 'Direct components use their original content')
+    data = structure.extract(component/'component.pptx')
+    validate_profile(read_json(component/'reuse.json'), data)
+    template_digest = library.vision.digest(component/'receipt.json')
+    target, pending = new_output(target, allow_page=True, page_count=len(data['pages']))
+    try:
+        shutil.copyfile(component/'component.pptx', pending/'component.pptx')
+        render_artifacts(pending)
+        library.verify_bundle(component)
+        require(library.vision.digest(component/'receipt.json') == template_digest, 'Template changed during use')
+        library.vision.write(pending/'instance.json', {
+            'schema':'slide-reuse-instance-v1', 'kind':'direct',
+            'template':str(component.relative_to(library.REPO)),
+            'template_receipt_sha256':template_digest, 'source':receipt['source'],
+            'source_sha256':receipt['source_sha256'], 'values':{},
+            'files':{p.name:library.vision.digest(p) for p in pending.iterdir() if p.is_file()},
+            'visual_review':'not_executed', 'user_approval':'not_requested'})
+        os.rename(pending,target)
+        return {'status':'instantiated','directory':str(target),'pptx':str(target/'component.pptx')}
+    except BaseException:
+        shutil.rmtree(pending,ignore_errors=True)
         raise

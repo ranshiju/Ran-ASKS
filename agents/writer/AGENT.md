@@ -1,6 +1,6 @@
 # 写作智能体（Writer Agent）
 
-> 本文件定义独立 Writer Agent 实例的能力范围。通用 `write` 能力及其 academic profile 由 `operations/WRITE.md` 定义，可被 `research` 等持续工作状态按需组合。
+> 本文件定义独立 Writer Agent 实例的能力范围。通用 `write` 能力及其 academic profile 由 `operations/WRITE.md` 定义，可被 `research` 等工作状态按需组合。
 
 ## 定位
 

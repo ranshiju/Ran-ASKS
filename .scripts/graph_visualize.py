@@ -1,388 +1,259 @@
 #!/usr/bin/env python3
-"""graph_visualize.py — graph.db 可视化
-
-布局在 Python(networkx spring layout)端完成,支持两种输出:
-  - PNG(matplotlib 静态图,默认)
-  - HTML(canvas 交互图,--html):坐标由 Python 预算,浏览器零物理模拟
-
-用法:
-  graph_visualize.py                          # 全图 PNG
-  graph_visualize.py --html                   # 全图交互 HTML
-  graph_visualize.py --html -o out.html --open
-  graph_visualize.py --node <path> --radius 1 # 自我中心图
-  graph_visualize.py --sim                    # 含相似边(默认排除)
-  graph_visualize.py --types page,people      # 仅含指定节点类型
-  graph_visualize.py --dpi 200                # PNG 分辨率
-"""
+"""Bounded, read-only graph visualization with directed edges and source navigation."""
 import argparse
+import hashlib
 import json
+import os
 import sys
+import sqlite3
+from collections import deque
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / ".scripts"))
+sys.path.insert(0, str(REPO / '.scripts'))
 import graph_lib as gl
 
-SIMILAR_PRED = "相似"
-TYPE_COLOR = {
-    "page": "#5b8ff9",
-    "hub": "#f5222d",
-    "people": "#5ad8a6",
-    "raw": "#f6a623",
-    "entity": "#6e7681",
-}
-TYPE_ORDER = ["page", "hub", "people", "raw", "entity"]
-TYPE_INDEX = {t: i for i, t in enumerate(TYPE_ORDER)}
+COLORS = {'page':'#3979bc','hub':'#c5424a','people':'#23956b','raw':'#c58627',
+          'entity':'#677588','timeline-summary':'#8b65ab'}
+
+
+def require(value, message):
+    if not value:
+        raise ValueError(message)
+
+
+def parser(*, add_help=True):
+    p = argparse.ArgumentParser(description=__doc__, add_help=add_help)
+    p.add_argument('-o', '--output')
+    p.add_argument('--html', action='store_true', help='Generate interactive local HTML')
+    p.add_argument('--graph', choices=['main','private'], default='main')
+    group = p.add_mutually_exclusive_group()
+    group.add_argument('--node', help='Exact node path')
+    group.add_argument('--query', help='Literal topic keyword in node title/path; multiple terms use AND')
+    p.add_argument('--radius', type=int, default=1)
+    p.add_argument('--max-nodes', type=int, default=80)
+    p.add_argument('--max-edges', type=int, default=200)
+    p.add_argument('--predicates', help='Comma separated exact relation types')
+    p.add_argument('--types', help='Comma separated exact node types')
+    p.add_argument('--sim', action='store_true', help='Include similarity navigation edges')
+    p.add_argument('--dpi', type=int, default=150)
+    p.add_argument('--open', action='store_true')
+    return p
 
 
 def build_graph(conn, args):
+    """Filter, choose seeds, traverse, then cap; preserve each directed database edge."""
     import networkx as nx
-
-    include_sim = args.sim
-    type_filter = set(args.types.split(",")) if args.types else None
-
-    all_nodes = list(conn.execute(
-        "SELECT path, title, type FROM nodes ORDER BY path"
-    ))
-    if type_filter:
-        all_nodes = [r for r in all_nodes if r["type"] in type_filter]
-    idx = {r["path"]: i for i, r in enumerate(all_nodes)}
-
-    preds = [r[0] for r in conn.execute(
-        "SELECT DISTINCT predicate FROM edges ORDER BY predicate"
-    )]
-    pid = {p: i for i, p in enumerate(preds)}
-    sim_idx = pid.get(SIMILAR_PRED, -1)
-
-    G = nx.Graph()
-    for r in all_nodes:
-        G.add_node(idx[r["path"]],
-                   title=r["title"] or r["path"].split("/")[-1],
-                   type=r["type"])
-
-    for r in conn.execute("SELECT subject, predicate, object FROM edges"):
-        si = idx.get(r["subject"])
-        oi = idx.get(r["object"])
-        if si is None or oi is None:
-            continue
-        is_sim = (pid[r["predicate"]] == sim_idx)
-        if is_sim and not include_sim:
-            continue
-        G.add_edge(si, oi, pred=r["predicate"])
-
+    require(0 <= args.radius <= 4, 'radius must be 0..4')
+    require(1 <= args.max_nodes <= 300, 'max-nodes must be 1..300')
+    require(1 <= args.max_edges <= 1200, 'max-edges must be 1..1200')
+    types = {s.strip() for s in (args.types or '').split(',') if s.strip()}
+    predicates = {s.strip() for s in (args.predicates or '').split(',') if s.strip()}
+    rows = {r['path']:dict(r) for r in conn.execute('SELECT path,title,type FROM nodes ORDER BY path')
+            if not types or r['type'] in types}
+    edges = [dict(r) for r in conn.execute('SELECT id,subject,predicate,object,source,confidence FROM edges ORDER BY id')
+             if r['subject'] in rows and r['object'] in rows
+             and (args.sim or r['predicate'] != '相似')
+             and (not predicates or r['predicate'] in predicates)]
+    adj = {n:set() for n in rows}
+    for e in edges:
+        adj[e['subject']].add(e['object']); adj[e['object']].add(e['subject'])
     if args.node:
-        if not gl.node_exists(conn, args.node):
-            print(f"节点不存在: {args.node}", file=sys.stderr)
-            sys.exit(1)
-        seed = idx.get(args.node)
-        if seed is None:
-            print(f"种子不在范围内: {args.node}", file=sys.stderr)
-            sys.exit(1)
-        ego = nx.ego_graph(G, seed, radius=args.radius)
-        G = ego
-
-    G.remove_nodes_from(list(nx.isolates(G)))
-    return G
-
-
-def compute_layout(G, seed=42):
-    import networkx as nx
-    import numpy as np
-    N = G.number_of_nodes()
-    deg = dict(G.degree())
-    print(f"节点 {N} · 边 {G.number_of_edges()} · 布局计算中(spring layout)...")
-    pos = nx.spring_layout(G, k=1.5 / max(1, np.sqrt(N)), iterations=100, seed=seed)
-    return pos, deg
-
-
-def render_png(G, pos, deg, out_path, args):
-    import matplotlib
-    matplotlib.use("Agg")
-    import networkx as nx
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    N = G.number_of_nodes()
-    E = G.number_of_edges()
-
-    node_sizes = [max(3, 3 + np.sqrt(deg.get(n, 0)) * 2) for n in G.nodes()]
-    node_colors = [TYPE_COLOR.get(G.nodes[n].get("type", "entity"), "#888")
-                   for n in G.nodes()]
-    edge_colors = ["#8b949e"] * len(G.edges())
-
-    fig, ax = plt.subplots(1, 1, figsize=(24, 16), dpi=args.dpi)
-    fig.patch.set_facecolor("#ffffff")
-    ax.set_facecolor("#ffffff")
-
-    print("渲染边...")
-    nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors,
-                          width=0.2, alpha=0.15)
-    print("渲染节点...")
-    nx.draw_networkx_nodes(G, pos, ax=ax, node_size=node_sizes,
-                           node_color=node_colors, alpha=0.8,
-                           linewidths=0.3, edgecolors="#24292f")
-
-    ax.axis("off")
-    ax.set_title(f"WikiGraph · {N} nodes · {E} edges",
-                color="#0969da", fontsize=14, pad=12)
-
-    from matplotlib.lines import Line2D
-    legend_handles = []
-    for t in TYPE_ORDER:
-        cnt = sum(1 for n in G.nodes() if G.nodes[n].get("type") == t)
-        if cnt > 0:
-            legend_handles.append(Line2D([0], [0], marker='o', color='w',
-                                        markerfacecolor=TYPE_COLOR[t],
-                                        markersize=8, label=f"{t} ({cnt})"))
-    ax.legend(handles=legend_handles, loc="lower left",
-              facecolor="#f6f8fa", edgecolor="#d0d7de",
-              labelcolor="#24292f", fontsize=9)
-
-    plt.tight_layout()
-    out = Path(out_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, facecolor=fig.get_facecolor(), bbox_inches="tight")
-    plt.close(fig)
-    print(f"✅ 已生成: {out} ({out.stat().st_size // 1024} KB)")
-
-
-HTML_TEMPLATE = r"""<!DOCTYPE html>
-<html lang="zh">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WikiGraph 可视化</title>
-<style>
-*{margin:0;box-sizing:border-box}
-html,body{height:100%;background:#ffffff;overflow:hidden;
-  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#24292f}
-#cv{display:block;cursor:grab}
-#cv:active{cursor:grabbing}
-#tip{position:fixed;pointer-events:none;background:#ffffff;border:1px solid #d0d7de;
-  border-radius:6px;padding:5px 9px;font-size:12px;line-height:1.5;display:none;z-index:10;
-  max-width:340px;word-break:break-all;box-shadow:0 4px 12px rgba(0,0,0,.15)}
-#bar{position:fixed;top:10px;left:10px;background:rgba(255,255,255,.92);border:1px solid #d0d7de;
-  border-radius:8px;padding:8px 14px;font-size:13px}
-#bar b{color:#0969da}
-#leg{position:fixed;bottom:10px;left:10px;background:rgba(255,255,255,.92);border:1px solid #d0d7de;
-  border-radius:8px;padding:8px 14px;font-size:12px}
-#leg .row{display:flex;align-items:center;gap:6px;margin:2px 0}
-.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0}
-#hint{position:fixed;bottom:10px;right:10px;font-size:11px;color:#57606a;
-  background:rgba(255,255,255,.8);padding:4px 8px;border-radius:6px}
-#zoom{position:fixed;top:10px;right:10px;display:flex;flex-direction:column;gap:4px}
-#zoom button{width:34px;height:34px;border:1px solid #d0d7de;background:rgba(255,255,255,.92);
-  color:#24292f;border-radius:6px;font-size:18px;cursor:pointer}
-#zoom button:hover{background:#eaeef2}
-</style>
-</head>
-<body>
-<canvas id="cv"></canvas>
-<div id="tip"></div>
-<div id="bar"><b>WikiGraph</b> · <span id="cnt"></span></div>
-<div id="leg"></div>
-<div id="hint">滚轮缩放 · 拖拽平移 · 双击重置 · 悬停查看</div>
-<div id="zoom"><button id="zin">+</button><button id="zout">-</button><button id="zres">o</button></div>
-<script>
-var DATA = /*__DATA__*/{};
-(function(){
-  var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
-  var tip=document.getElementById('tip');
-  var nodes=DATA.nodes,edges=DATA.edges,colors=DATA.colors,titles=DATA.titles;
-  var W,H,DPR;
-  var view={x:0,y:0,s:1};
-  var hover=-1;
-
-  function resize(){
-    DPR=window.devicePixelRatio||1;
-    W=window.innerWidth;H=window.innerHeight;
-    cv.width=W*DPR;cv.height=H*DPR;
-    cv.style.width=W+'px';cv.style.height=H+'px';
-    ctx.setTransform(DPR,0,0,DPR,0,0);
-  }
-  function fit(){
-    var minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
-    for(var i=0;i<nodes.length;i++){
-      var n=nodes[i];
-      if(n[0]<minx)minx=n[0];if(n[0]>maxx)maxx=n[0];
-      if(n[1]<miny)miny=n[1];if(n[1]>maxy)maxy=n[1];
-    }
-    var dx=Math.max(1e-6,maxx-minx),dy=Math.max(1e-6,maxy-miny);
-    var pad=50;
-    var sx=(W-2*pad)/dx,sy=(H-2*pad)/dy;
-    view.s=Math.min(sx,sy);
-    view.x=(W-dx*view.s)/2-minx*view.s;
-    view.y=(H-dy*view.s)/2-miny*view.s;
-    draw();
-  }
-  function nodeR(d){return 1.2+Math.sqrt(Math.max(0,d))*0.7;}
-  function draw(){
-    ctx.fillStyle='#ffffff';
-    ctx.fillRect(0,0,W,H);
-    var s=view.s,ox=view.x,oy=view.y;
-    ctx.strokeStyle='rgba(36,41,47,0.25)';
-    ctx.lineWidth=0.7;
-    ctx.beginPath();
-    for(var i=0;i<edges.length;i++){
-      var e=edges[i];
-      var ns=nodes[e[0]],nt=nodes[e[1]];
-      ctx.moveTo(ox+ns[0]*s,oy+ns[1]*s);
-      ctx.lineTo(ox+nt[0]*s,oy+nt[1]*s);
-    }
-    ctx.stroke();
-    var pad=30;
-    for(var i=0;i<nodes.length;i++){
-      var n=nodes[i];
-      var sx=ox+n[0]*s,sy=oy+n[1]*s;
-      if(sx<-pad||sx>W+pad||sy<-pad||sy>H+pad)continue;
-      ctx.fillStyle=colors[n[2]];
-      ctx.beginPath();
-      ctx.arc(sx,sy,nodeR(n[3]),0,6.283);
-      ctx.fill();
-    }
-    if(hover>=0){
-      var n=nodes[hover];
-      var sx=ox+n[0]*s,sy=oy+n[1]*s;
-      ctx.strokeStyle='#0969da';
-      ctx.lineWidth=2;
-      ctx.beginPath();
-      ctx.arc(sx,sy,nodeR(n[3])+3,0,6.283);
-      ctx.stroke();
-    }
-  }
-  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-  var drag=false,lx,ly;
-  cv.addEventListener('mousedown',function(e){drag=true;lx=e.clientX;ly=e.clientY;});
-  window.addEventListener('mouseup',function(){drag=false;});
-  window.addEventListener('mousemove',function(e){
-    if(drag){
-      view.x+=e.clientX-lx;view.y+=e.clientY-ly;
-      lx=e.clientX;ly=e.clientY;draw();tip.style.display='none';hover=-1;return;
-    }
-    var r=cv.getBoundingClientRect();
-    var mx=e.clientX-r.left,my=e.clientY-r.top;
-    var best=-1,bd=1e9;
-    var ss=view.s,ox=view.x,oy=view.y;
-    for(var i=0;i<nodes.length;i++){
-      var n=nodes[i];
-      var dx=mx-(ox+n[0]*ss),dy=my-(oy+n[1]*ss);
-      var d2=dx*dx+dy*dy;
-      var rr=nodeR(n[3])+3;if(rr*rr<d2)continue;
-      if(d2<bd){bd=d2;best=i;}
-    }
-    if(best!==hover){hover=best;draw();}
-    if(best>=0){
-      var n=nodes[best];
-      tip.style.display='block';
-      tip.style.left=Math.min(e.clientX+14,window.innerWidth-360)+'px';
-      tip.style.top=(e.clientY+14)+'px';
-      tip.innerHTML='<b style="color:'+colors[n[2]]+'">'+esc(titles[best])+'</b>'+
-        '<br>'+DATA.types[n[2]]+' &middot; 度 '+n[3];
-    }else{tip.style.display='none';}
-  });
-  cv.addEventListener('wheel',function(e){
-    e.preventDefault();
-    var r=cv.getBoundingClientRect();
-    var mx=e.clientX-r.left,my=e.clientY-r.top;
-    var f=e.deltaY<0?1.2:1/1.2;
-    view.x=mx-(mx-view.x)*f;
-    view.y=my-(my-view.y)*f;
-    view.s*=f;draw();
-  },{passive:false});
-  cv.addEventListener('dblclick',fit);
-  function zc(f){view.x=W/2-(W/2-view.x)*f;view.y=H/2-(H/2-view.y)*f;view.s*=f;draw();}
-  document.getElementById('zin').onclick=function(){zc(1.3);};
-  document.getElementById('zout').onclick=function(){zc(1/1.3);};
-  document.getElementById('zres').onclick=fit;
-  window.addEventListener('resize',function(){resize();draw();});
-  var leg=document.getElementById('leg');var h='';
-  for(var i=0;i<DATA.legend.length;i++){
-    var l=DATA.legend[i];
-    h+='<div class="row"><span class="dot" style="background:'+l.color+'"></span>'+
-       l.type+' ('+l.count+')</div>';
-  }
-  leg.innerHTML=h;
-  document.getElementById('cnt').textContent=DATA.meta.n+' 节点 · '+DATA.meta.e+' 边';
-  resize();fit();
-})();
-</script>
-</body>
-</html>
-"""
-
-
-def render_html(G, pos, deg, out_path, args):
-    nodes = list(G.nodes())
-    idmap = {n: i for i, n in enumerate(nodes)}
-    node_arr = []
-    title_arr = []
-    type_counts = {}
-    for n in nodes:
-        nd = G.nodes[n]
-        t = nd.get("type", "entity")
-        ti = TYPE_INDEX.get(t, len(TYPE_ORDER) - 1)
-        title = (nd.get("title") or str(n))[:80]
-        x, y = pos[n]
-        node_arr.append([round(float(x), 5), round(float(y), 5), ti, deg.get(n, 0)])
-        title_arr.append(title)
-        type_counts[t] = type_counts.get(t, 0) + 1
-    edge_arr = [[idmap[s], idmap[t]] for s, t in G.edges()]
-    legend = [{"type": t, "color": TYPE_COLOR[t], "count": type_counts[t]}
-              for t in TYPE_ORDER if t in type_counts]
-    data = {
-        "nodes": node_arr,
-        "titles": title_arr,
-        "edges": edge_arr,
-        "colors": [TYPE_COLOR[t] for t in TYPE_ORDER],
-        "types": TYPE_ORDER,
-        "legend": legend,
-        "meta": {"n": len(nodes), "e": len(edge_arr)},
-    }
-    json_str = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    json_str = json_str.replace("<", "\\u003c")
-    html = HTML_TEMPLATE.replace("/*__DATA__*/{}", json_str, 1)
-    out = Path(out_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html, encoding="utf-8")
-    print(f"✅ 已生成: {out} ({out.stat().st_size // 1024} KB)")
-
-
-def main():
-    ap = argparse.ArgumentParser(description="graph.db 可视化")
-    ap.add_argument("-o", "--output", default=None, help="输出路径(默认按模式)")
-    ap.add_argument("--html", action="store_true", help="输出交互 HTML(canvas)")
-    ap.add_argument("--graph", default="main", choices=["main", "private"])
-    ap.add_argument("--node", help="自我中心图种子")
-    ap.add_argument("--radius", type=int, default=1, help="ego 半径")
-    ap.add_argument("--sim", action="store_true", help="含相似边")
-    ap.add_argument("--types", help="类型过滤(page,hub,people,raw,entity)")
-    ap.add_argument("--dpi", type=int, default=150, help="PNG 分辨率(默认 150)")
-    ap.add_argument("--open", action="store_true", help="生成后打开")
-    args = ap.parse_args()
-
-    if args.output is None:
-        args.output = "temp/graph-visual.html" if args.html else "temp/graph-visual.png"
-
-    db_path = gl.PRIVATE_GRAPH_DB if args.graph == "private" else gl.GRAPH_DB
-    if not Path(db_path).exists():
-        print(f"图数据库不存在: {db_path}", file=sys.stderr)
-        sys.exit(1)
-    conn = gl.connect(db_path)
-
-    G = build_graph(conn, args)
-    pos, deg = compute_layout(G)
-
-    if args.html:
-        render_html(G, pos, deg, args.output, args)
+        require(args.node in rows, 'Node missing or excluded by type filter: '+args.node)
+        matches = [args.node]
+    elif args.query is not None:
+        terms = args.query.casefold().split()
+        require(terms, 'Provide a nonempty topic keyword')
+        matches = [n for n,r in rows.items() if all(t in (n+' '+(r['title'] or '')).casefold() for t in terms)]
+        require(matches, 'No nodes match the topic keyword')
     else:
-        render_png(G, pos, deg, args.output, args)
+        matches = []
+    seeds = matches[:min(10,args.max_nodes)]
+    if seeds:
+        distance = {s:0 for s in seeds}; queue = deque(seeds)
+        while queue:
+            n = queue.popleft()
+            if distance[n] == args.radius: continue
+            for other in sorted(adj[n]):
+                if other not in distance:
+                    distance[other] = distance[n]+1; queue.append(other)
+        candidates = sorted(distance, key=lambda n:(distance[n],-len(adj[n]),n))
+    else:
+        candidates = sorted(rows, key=lambda n:(-len(adj[n]),n))
+    chosen = candidates[:args.max_nodes]; selected = set(chosen)
+    available_edges = [e for e in edges if e['subject'] in selected and e['object'] in selected]
+    displayed = available_edges[:args.max_edges]
+    graph = nx.MultiDiGraph()
+    for n in chosen: graph.add_node(n, **rows[n])
+    has_evidence = conn.execute("SELECT 1 FROM sqlite_master WHERE name='edge_evidence' AND type='table'").fetchone()
+    for e in displayed:
+        sources = [e['source']] if e['source'] else []
+        if has_evidence:
+            sources += [r[0] for r in conn.execute('SELECT source FROM edge_evidence WHERE edge_id=? ORDER BY source',(e['id'],)) if r[0]]
+        graph.add_edge(e['subject'],e['object'],key=e['id'], **e, sources=sorted(set(sources)))
+    graph.graph['selection'] = {'query':args.query,'node':args.node,'radius':args.radius,
+        'types':sorted(types),'predicates':sorted(predicates),'include_similarity':args.sim,
+        'matched_seeds':len(matches),'seeds':seeds,'omitted_seeds':len(matches)-len(seeds),
+        'eligible_nodes':len(candidates),'shown_nodes':len(chosen),
+        'omitted_nodes':len(candidates)-len(chosen),'eligible_edges_between_shown_nodes':len(available_edges),
+        'shown_edges':len(displayed),'omitted_edges_between_shown_nodes':len(available_edges)-len(displayed),
+        'max_nodes':args.max_nodes,'max_edges':args.max_edges,
+        'truncated':len(matches)>len(seeds) or len(candidates)>len(chosen) or len(available_edges)>len(displayed)}
+    return graph
 
-    conn.close()
 
+def source_link(locator, output, scope):
+    """Resolve only local knowledge files in the selected physical domain."""
+    text = str(locator or ''); path, _, anchor = text.partition('#')
+    raw = Path(path)
+    if raw.is_absolute(): return {'locator':text,'href':None}
+    roots = [REPO/'private/raw',REPO/'private/wiki'] if scope=='private' else [REPO/d/k for d in ('academic','admin','teaching','business') for k in ('raw','wiki')]
+    for candidate in (REPO/raw, Path(str(REPO/raw)+'.md')):
+        target = candidate.resolve()
+        if target.is_file() and any(target.is_relative_to(root) for root in roots):
+            href = quote(os.path.relpath(target, output.parent),safe='/')
+            if anchor: href += '#'+quote(anchor,safe='-_:')
+            return {'locator':text,'href':href}
+    return {'locator':text,'href':None}
+
+
+def payload(graph, positions, output, scope):
+    nodes = []
+    for n,d in graph.nodes(data=True):
+        nodes.append({'id':n,'title':d['title'] or n,'type':d['type'],'color':COLORS.get(d['type'],'#677588'),
+            'x':round(float(positions[n][0])*450+500,3),'y':round(float(positions[n][1])*340+380,3),
+            'link':source_link(n,output,scope)})
+    edges = []
+    for s,t,k,d in graph.edges(keys=True,data=True):
+        edges.append({'id':k,'subject':s,'object':t,'predicate':d['predicate'],'confidence':d['confidence'],
+            'sources':[source_link(v,output,scope) for v in d['sources']]})
+    return {'schema':'graph-visualization-v1','scope':scope,'selection':graph.graph['selection'],
+            'nodes':nodes,'edges':edges,'legend':COLORS,
+            'interpretation':'Navigation relationships; verify factual claims against Raw sources.'}
+
+
+HTML = '''<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>知识图可视化</title><style>
+body{margin:0;background:#f5f8fc;color:#24344a;font:15px system-ui}header{padding:16px 24px;background:white;border-bottom:1px solid #dce4ef}h1{font-size:23px;margin:0 0 8px}main{display:flex;height:calc(100vh - 155px)}svg{width:70%;background:white;touch-action:none;cursor:grab}aside{width:30%;overflow:auto;padding:18px;box-sizing:border-box}select,button{padding:6px;margin:4px}p{line-height:1.5}a{color:#2865a7;overflow-wrap:anywhere}.edge{stroke:#a3b1c3;fill:none;stroke-width:1.5}.node{cursor:pointer}.label{font-size:13px;fill:#24344a}li{margin-bottom:12px;overflow-wrap:anywhere}#notice{color:#88551b}small{color:#65768b}</style>
+<header><h1>知识图可视化</h1><div id="summary"></div><div id="notice"></div><label>关系 <select id="relation"><option value="">全部</option></select></label><label>节点 <select id="node"><option value="">选择查看来源</option></select></label><button id="reset">重置视图</button><small>箭头表示关系方向 · 滚轮缩放 · 拖动平移 · 点击节点查看来源</small></header>
+<main><svg id="view" viewBox="0 0 1000 760"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8798ae"/></marker></defs><g id="edges"></g><g id="nodes"></g></svg><aside><div id="legend"></div><h2 id="title">节点与来源</h2><div id="detail">选择节点后查看文件位置、关系及证据地址。图中的联系用于导航，事实结论请回溯 Raw。</div></aside></main>
+<script>const DATA=__DATA__;
+const NS='http://www.w3.org/2000/svg',el=id=>document.getElementById(id),byId=new Map(DATA.nodes.map(n=>[n.id,n]));
+function svg(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,v);parent.append(e);return e;}
+function link(obj,parent){const e=document.createElement(obj.href?'a':'span');e.textContent=obj.locator;if(obj.href){e.href=obj.href;e.target='_blank';e.rel='noopener';}parent.append(e);}
+function detail(id){const n=byId.get(id);if(!n)return;el('title').textContent=n.title;el('node').value=id;const box=el('detail');box.replaceChildren();link(n.link,box);const list=document.createElement('ul');box.append(list);for(const e of DATA.edges.filter(e=>e.subject===id||e.object===id)){const row=document.createElement('li');row.textContent=byId.get(e.subject).title+' → '+e.predicate+' → '+byId.get(e.object).title+(e.confidence?' ['+e.confidence+']':'');list.append(row);for(const s of e.sources){row.append(document.createElement('br'));link(s,row);}if(!e.sources.length){row.append(document.createElement('br'),'未记录证据地址');}}}
+for(const t of [...new Set(DATA.edges.map(e=>e.predicate))].sort()){const o=document.createElement('option');o.value=t;o.textContent=t;el('relation').append(o);}
+for(const n of DATA.nodes){const o=document.createElement('option');o.value=n.id;o.textContent=n.title;el('node').append(o);}
+el('node').onchange=e=>detail(e.target.value);
+function draw(){el('edges').replaceChildren();el('nodes').replaceChildren();const filter=el('relation').value,counts=new Map();for(const e of DATA.edges){if(filter&&filter!==e.predicate)continue;const s=byId.get(e.subject),t=byId.get(e.object),key=[s.id,t.id].sort().join('|'),i=counts.get(key)||0;counts.set(key,i+1);const dx=t.x-s.x,dy=t.y-s.y,len=Math.hypot(dx,dy)||1,off=18+18*i;let d;if(s.id===t.id)d=`M ${s.x} ${s.y-8} C ${s.x-40-off} ${s.y-65-off},${s.x+40+off} ${s.y-65-off},${s.x+8} ${s.y}`;else d=`M ${s.x+dx/len*9} ${s.y+dy/len*9} Q ${(s.x+t.x)/2-dy/len*off} ${(s.y+t.y)/2+dx/len*off} ${t.x-dx/len*11} ${t.y-dy/len*11}`;const p=svg('path',{d,class:'edge','marker-end':'url(#arrow)'},el('edges'));svg('title',{},p).textContent=s.title+' → '+e.predicate+' → '+t.title;}
+for(const n of DATA.nodes){const g=svg('g',{class:'node'},el('nodes'));svg('circle',{cx:n.x,cy:n.y,r:8,fill:n.color},g);svg('text',{x:n.x+12,y:n.y+4,class:'label'},g).textContent=n.title.length>20?n.title.slice(0,20)+'…':n.title;svg('title',{},g).textContent=n.title;g.onclick=()=>detail(n.id);}}
+el('relation').onchange=draw;const m=DATA.selection;el('summary').textContent=m.shown_nodes+' 节点 · '+m.shown_edges+' 条有向关系'+(m.query?' · 关键词：'+m.query:'');el('notice').textContent=m.truncated?'已按上限截取：省略匹配种子 '+m.omitted_seeds+'，候选节点 '+m.omitted_nodes+'，所示节点间关系 '+m.omitted_edges_between_shown_nodes:'当前选择范围完整显示';
+for(const[type,color]of Object.entries(DATA.legend)){if(!DATA.nodes.some(n=>n.type===type))continue;const p=document.createElement('span');p.textContent='● '+type+'  ';p.style.color=color;el('legend').append(p);}
+let vb=[0,0,1000,760],drag=null;const view=el('view'),update=()=>view.setAttribute('viewBox',vb.join(' '));view.onwheel=e=>{e.preventDefault();const f=e.deltaY>0?1.15:1/1.15;vb=[vb[0]+vb[2]*(1-f)/2,vb[1]+vb[3]*(1-f)/2,vb[2]*f,vb[3]*f];update();};view.onpointerdown=e=>{drag=[e.clientX,e.clientY,...vb];view.setPointerCapture(e.pointerId);};view.onpointermove=e=>{if(!drag)return;vb[0]=drag[2]-(e.clientX-drag[0])*vb[2]/view.clientWidth;vb[1]=drag[3]-(e.clientY-drag[1])*vb[3]/view.clientHeight;update();};view.onpointerup=()=>drag=null;el('reset').onclick=()=>{vb=[0,0,1000,760];update();};draw();
+</script></html>'''
+
+
+def render_png(graph, positions, output, args):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import FancyArrowPatch
+    fig,ax=plt.subplots(figsize=(14,10),dpi=args.dpi)
+    try:
+        for font in ('Hiragino Sans GB','Noto Sans CJK SC','Arial Unicode MS'):
+            from matplotlib.font_manager import findfont,FontProperties
+            try: findfont(FontProperties(family=font),fallback_to_default=False)
+            except ValueError: continue
+            plt.rcParams['font.sans-serif']=[font];break
+        counts={}
+        for s,t,k,d in graph.edges(keys=True,data=True):
+            pair=tuple(sorted((s,t)));i=counts.get(pair,0);counts[pair]=i+1
+            start, end = positions[s], positions[t]
+            rad = 0.14+0.13*i
+            if s == t:
+                start = (start[0]-.03, start[1]+.02)
+                end = (end[0]+.03, end[1]+.02)
+                rad = -3-i
+            arrow=FancyArrowPatch(start,end,connectionstyle=f'arc3,rad={rad}',
+                arrowstyle='-|>',mutation_scale=12,shrinkA=9,shrinkB=9,color='#8798ae',alpha=.65)
+            ax.add_patch(arrow)
+            dx,dy=end[0]-start[0],end[1]-start[1]
+            ax.text((start[0]+end[0])/2+dy*rad/2, (start[1]+end[1])/2-dx*rad/2,
+                    d['predicate'],fontsize=6,color='#516177',ha='center')
+        if graph:
+            nx.draw_networkx_nodes(graph,positions,ax=ax,node_color=[COLORS.get(graph.nodes[n]['type'],'#677588') for n in graph],node_size=90)
+            nx.draw_networkx_labels(graph,positions,ax=ax,labels={n:graph.nodes[n]['title'] or n for n in graph},font_size=8,font_family=plt.rcParams['font.sans-serif'][0])
+        ax.legend(handles=[Line2D([],[],marker='o',linestyle='',color=c,label=t) for t,c in COLORS.items() if any(d['type']==t for _,d in graph.nodes(data=True))])
+        ax.set_title(f'WikiGraph · {len(graph)} nodes · {graph.number_of_edges()} directed edges'+(' · truncated' if graph.graph['selection']['truncated'] else ''))
+        ax.margins(.2);ax.axis('off');fig.tight_layout();fig.savefig(output,bbox_inches='tight')
+    finally: plt.close(fig)
+
+
+def output_path(args):
+    suffix='.html' if args.html else '.png'
+    root=REPO/('private/temp' if args.graph=='private' else 'temp')
+    raw=Path(args.output).absolute() if args.output else root/('graph-'+datetime.now().strftime('%Y%m%dT%H%M%S%f')+suffix)
+    require(not any(p.is_symlink() for p in [raw,*raw.parents]),'Symlink output is not allowed')
+    path=raw.resolve()
+    allowed=path.is_relative_to(root.resolve())
+    if args.graph=='main':
+        allowed=allowed or (path.is_relative_to((REPO/'projects').resolve()) and 'outputs' in path.relative_to(REPO/'projects').parts[:-1])
+    require(allowed,'Output must stay in temp/project outputs; private output stays in private/temp')
+    require(path.suffix==suffix,'Output suffix does not match selected format')
+    require(not path.exists() and not path.with_suffix('.json').exists(),'Output exists; choose a new name')
+    return path
+
+
+def run(args):
+    import networkx as nx
+    require(50<=args.dpi<=300,'dpi must be 50..300')
+    output=output_path(args)
+    db=Path(gl.PRIVATE_GRAPH_DB if args.graph=='private' else gl.GRAPH_DB)
+    conn=gl.connect(db,read_only=True)
+    try:
+        conn.execute('BEGIN')
+        graph=build_graph(conn,args)
+    finally: conn.close()
+    positions=nx.spring_layout(graph,seed=42,iterations=80)
+    data=payload(graph,positions,output,args.graph)
+    data['database']=str(db.relative_to(REPO)) if db.is_relative_to(REPO) else str(db)
+    output.parent.mkdir(parents=True,exist_ok=True)
+    created_output = created_manifest = False
+    try:
+        if args.html:
+            with output.open('x',encoding='utf-8') as f:
+                created_output = True
+                f.write(HTML.replace('__DATA__',json.dumps(data,ensure_ascii=False).replace('<','\\u003c')))
+        else:
+            with output.open('xb'):
+                created_output = True
+            render_png(graph,positions,output,args)
+        data['artifact_sha256']=hashlib.sha256(output.read_bytes()).hexdigest()
+        with output.with_suffix('.json').open('x',encoding='utf-8') as f:
+            created_manifest = True
+            json.dump(data,f,ensure_ascii=False,indent=2)
+    except BaseException:
+        if created_output: output.unlink(missing_ok=True)
+        if created_manifest: output.with_suffix('.json').unlink(missing_ok=True)
+        raise
     if args.open:
-        import subprocess
-        subprocess.run(["open", args.output], check=False)
+        import webbrowser
+        webbrowser.open(output.as_uri())
+    return {'status':'rendered','artifact':str(output),'manifest':str(output.with_suffix('.json')),
+            'selection':data['selection'],'sources':[data['database']]}
 
 
-if __name__ == "__main__":
-    main()
+def main(argv=None):
+    args=parser().parse_args(argv)
+    try:
+        result=run(args);code=0
+    except (ValueError,OSError,ImportError,sqlite3.Error) as exc:
+        result={'status':'error','error':str(exc)};code=2
+    print(json.dumps(result,ensure_ascii=False,indent=2));return code
+
+
+if __name__=='__main__':raise SystemExit(main())

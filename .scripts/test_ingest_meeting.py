@@ -19,6 +19,7 @@ if str(REPO / ".scripts") not in sys.path:
 import ingest_meeting as meeting
 import graph_ingest
 import llm_structured
+import repair_meeting_identity as meeting_repair
 from meeting_compiler_contract import PROTOCOL_VERSION
 
 
@@ -99,6 +100,7 @@ updated: 2026-09-03
             "tasks": [{"text": "验证知识库方案", "assignee": "cnu-ren-shengquan",
                        "assignee_label": "任胜泉", "evidence_ids": ["s0001"]}],
             "relations": [],
+            "person_updates": [],
         },
     }
 
@@ -182,7 +184,7 @@ def test_api_path_uses_one_compiler_for_all_semantic_outputs():
         assert resolution["compiler_entity_resolutions"][0]["canonical"] == "cnu-ren-shengquan"
         assert state["raw_dir"] in (work / "wiki.md").read_text(encoding="utf-8")
         rendered = (work / "wiki.md").read_text(encoding="utf-8")
-        assert "## 会议导航" in rendered and "### 待办事项" in rendered
+        assert "### 会议导航" in rendered and "#### 待办事项" in rendered
         assert "[^meeting-s0001]:" in rendered and "#L1" in rendered
         assert (work / "meeting-ir.json").is_file()
         fm, _body = meeting._meeting_frontmatter(rendered)
@@ -223,6 +225,70 @@ def test_meeting_ir_rejects_unbound_evidence_before_staging():
         assert not (work / "meeting-ir.json").exists()
         assert not (work / "wiki.md").exists()
     finally:
+        shutil.rmtree(work)
+
+
+def test_meeting_ir_rejects_superseded_and_final_decision_in_one_row():
+    proposal = _proposal()
+    proposal["meeting_ir"]["decisions"] = [{
+        "text": "先冻结 Encoder；后导师纠正为全量放开训练",
+        "evidence_ids": ["s0001"],
+    }]
+    errors = meeting.validate_meeting_ir(proposal["meeting_ir"], {"s0001"})
+    assert any("superseded proposal" in error for error in errors)
+
+
+def test_meeting_projection_patch_requires_one_exact_decision_match():
+    original = _proposal()["meeting_ir"]
+    old_text = original["decisions"][0]["text"]
+    patch_value = {
+        "schema": "meeting-ir-repair-patch-v1",
+        "replace_decisions": [{
+            "old_text": old_text,
+            "new_text": "采用经复核的知识库方案",
+            "evidence_ids": ["s0001"],
+        }],
+    }
+    repaired = meeting_repair._apply_meeting_ir_patch(original, patch_value)
+    assert repaired["decisions"][0]["text"] == "采用经复核的知识库方案"
+    assert original["decisions"][0]["text"] == old_text
+    patch_value["replace_decisions"][0]["old_text"] = "不存在的决策"
+    try:
+        meeting_repair._apply_meeting_ir_patch(original, patch_value)
+    except ValueError as exc:
+        assert "matched=0" in str(exc)
+    else:
+        raise AssertionError("non-matching meeting repair patch was accepted")
+
+
+def test_unresolved_entities_become_quality_warnings():
+    work = _workspace()
+    original_runner = meeting.run_api_meeting_compiler
+    original_mode = meeting.ingest_mode
+    try:
+        state = _state(work)
+        proposal = _proposal()
+        proposal["preprocess"]["entity_resolutions"].append({
+            "mention": "同音姓名", "canonical": "", "status": "unresolved",
+            "reason": "候选不足",
+        })
+        result = SimpleNamespace(
+            status="compiled", reason="proposal_ready", proposal=proposal,
+            trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "compiled"},
+        )
+        meeting.run_api_meeting_compiler = lambda _fields: result
+        meeting.ingest_mode = lambda: "api"
+        ok, error = meeting.step_write_wiki(state)
+        assert ok, error
+        assert state["quality_status"] == "degraded"
+        assert state["quality_warnings"] == [{
+            "issue": "meeting_entity_unresolved",
+            "mention": "同音姓名",
+            "reason": "候选不足",
+        }]
+    finally:
+        meeting.run_api_meeting_compiler = original_runner
+        meeting.ingest_mode = original_mode
         shutil.rmtree(work)
 
 
@@ -445,6 +511,25 @@ def test_prompt_requires_one_coherent_protocol():
     assert "<<<MEETING_IR>>>" in prompt
     assert PROTOCOL_VERSION in prompt
     assert "只读事实源" in prompt
+    assert "person_updates" in prompt
+    assert "已有学生研究记录目录" in prompt
+    assert "避免重复叙述" in prompt
+
+
+def test_person_updates_are_projected_into_cited_meeting_navigation():
+    proposal = _proposal()
+    proposal["meeting_ir"]["person_updates"] = [{
+        "person": "cnu-test", "person_label": "测试生", "kind": "progress",
+        "text": "已完成最小实验", "evidence_ids": ["s0001"],
+    }]
+    rendered = meeting.compile_meeting_navigation(
+        proposal["wiki_markdown"], proposal["meeting_ir"],
+        raw_source="academic/raw/conferences/test.txt", date="2026-09-03",
+        catalog=[{"evidence_id": "s0001", "line": 1, "text": "测试"}],
+    )
+    assert "### 学生指导更新" in rendered
+    assert "测试生·进展：已完成最小实验" in rendered
+    assert "[^meeting-s0001]: academic/raw/conferences/test.txt#L1" in rendered
 
 
 def test_meeting_compiler_uses_ingest_generation_profile():
@@ -748,7 +833,7 @@ def test_source_binding_rebases_all_yaml_styles_in_both_backends():
                 fm, _ = meeting._meeting_frontmatter(state["wiki_content"])
                 assert fm["sources"] == [expected], (backend, form, fm)
                 assert "### 知识库\n- 任胜泉讨论知识库。" in state["wiki_content"]
-                assert "## 会议导航" in state["wiki_content"]
+                assert "### 会议导航" in state["wiki_content"]
                 assert "验证知识库方案" in state["wiki_content"]
                 assert meeting.step_validate_wiki(state) == []
                 assert (work / "wiki.md").read_text() == state["wiki_content"]
@@ -789,6 +874,9 @@ def main():
     test_preprocess_only_builds_candidates()
     test_api_path_uses_one_compiler_for_all_semantic_outputs()
     test_meeting_ir_rejects_unbound_evidence_before_staging()
+    test_meeting_ir_rejects_superseded_and_final_decision_in_one_row()
+    test_meeting_projection_patch_requires_one_exact_decision_match()
+    test_unresolved_entities_become_quality_warnings()
     test_agent_path_prepares_task_without_entering_api_adapter()
     test_date_context_preserves_explicit_year_and_marks_mmdd_inference()
     test_dedup_same_date_different_meeting_continues()
@@ -799,6 +887,7 @@ def main():
     test_agent_task_roundtrip_consumes_same_protocol()
     test_exhausted_revision_handoff_uses_full_protocol_without_inline_source()
     test_prompt_requires_one_coherent_protocol()
+    test_person_updates_are_projected_into_cited_meeting_navigation()
     test_meeting_compiler_uses_ingest_generation_profile()
     test_semantic_retry_returns_to_same_compiler()
     test_wiki_retry_exhaustion_hands_off_full_compiler_protocol()

@@ -34,7 +34,7 @@ python3 .scripts/playbook_dispatch.py '指令关键词'
 
 - `query` 从 `--query-stage start` 开始；候选定位后用 `evidence`，有明确缺口才用 `continue`，交付前用 `answer`。
 - `ingest` 显式给出 `--subproject academic|admin|teaching|business|private`、`--mode create|update|batch`、`--content paper|other` 和 `--source-kind ordinary|meeting`；`create` 再给单个 `--stage 1|2|3`。首次预热后直接调用受管功能入口；仅手动旧流程或程序任务明确要求时再加载完整当前 stage 卡。`source-kind` 由内容语义决定，扩展名不构成会议来源判据。
-- `research` 等 task 表示持续状态；实际落笔按需加载 `write` capability，不切换研究状态。`wg.py` 暴露可组合的结构化执行工具。
+- `research` 等 task 表示工作状态；实际落笔按需加载 `write` capability，不切换研究状态。`wg.py` 暴露可组合的结构化执行工具。
 
 ## 使用任务
 

@@ -21,7 +21,7 @@ LLM 判断指令类型后,调本脚本截取对应规范 section,拼成 prompt�
   route.py --capability write --capability-profile academic # research 状态内按需加载论文落笔能力
   route.py --capability cv --capability-profile general # workspace 状态内加载简历制作与维护契约
   route.py --capability presentation --capability-profile create # PPT 创作契约与当前可执行入口
-  route.py --list           # 分类列出持续状态、路由任务与按需能力
+  route.py --list           # 分类列出工作状态、路由任务与按需能力
 
 ingest 参数说明:
   --mode   create(默认)/update/batch
@@ -237,9 +237,11 @@ ROUTES = {
     },
 }
 
-# 能力是工作状态内按需加载的规范包；它不创建或切换持续状态。
+# 能力是工作状态内按需加载的规范包；它不创建或切换工作状态。
 # 顶层 --task write 继续作为 general profile 的兼容入口。
 CAPABILITY_ROUTES = {
+    "slide-library": {"general": [("operations/SLIDE_LIBRARY.md", None)]},
+    "graph-visualize": {"general": [("operations/GRAPH_VISUALIZE.md", None)]},
     "cv": {
         "general": [
             ("operations/CV.md", ["功能边界", "工作主记录", "用户入口", "更新流程", "DOCX 与版本", "校验与交付"]),
@@ -247,7 +249,7 @@ CAPABILITY_ROUTES = {
     },
     "presentation": {
         "create": [
-            ("operations/PRESENTATION.md", ["入口与成熟度", "当前可执行动作", "创作边界", "逐页制作与确认纪律", "学术论文报告的叙事与风格", "第一页（标题页）制作流程"]),
+            ("operations/PRESENTATION.md", ["入口与成熟度", "单篇论文制作方式选择", "当前可执行动作", "创作边界", "逐页制作与确认纪律", "学术论文报告的叙事与风格", "第一页（标题页）制作流程"]),
         ],
         "form-check": [("operations/PRESENTATION.md", ["PPT形式检查入口"])],
         "evidence-check": [("operations/PRESENTATION.md", ["PPT证据核查入口"])],
@@ -587,7 +589,7 @@ def main():
     ap = argparse.ArgumentParser(description="按 task 分发规范 prompt")
     ap.add_argument("--task", help="任务类型(ingest/query/lint/sync/write/scan/inbox/hub/build/research/frontier)")
     ap.add_argument("--capability", choices=sorted(CAPABILITY_ROUTES),
-                    help="在当前持续状态内按需加载的能力")
+                    help="在当前工作状态内按需加载的能力")
     ap.add_argument("--capability-profile", default="general",
                     help="能力 profile（write: general/academic；presentation: create/form-check/evidence-check/citation-redact）")
     ap.add_argument("--subproject", help="ingest 目标域或 query 范围；private 使用隔离图及本地 Agent，不继承公共 API backend")

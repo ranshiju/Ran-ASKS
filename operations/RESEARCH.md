@@ -15,7 +15,7 @@
 ### 与其他 task 的边界
 
 - **不路由 ingest**：研究内容是工作过程，不进 raw/wiki/graph。若用户要求把研究产出摄入知识库，切换到 ingest task。
-- **research 是持续状态，write 是按需能力**：研究笔记和论文文稿仍属于本工作流；真正开始起草、改写或润色时，在当前状态内调用 academic write profile，不切换研究上下文。正式公文/讲稿可从顶层直接调用通用 write profile。
+- **research 是工作状态，write 是按需能力**：研究笔记和论文文稿仍属于本工作流；真正开始起草、改写或润色时，在当前状态内调用 academic write profile，不切换研究上下文。正式公文/讲稿可从顶层直接调用通用 write profile。
 - **不路由 build**：改 `.scripts/` 或 `operations/` 是建设，走 build。
 
 ## 进入研究项目

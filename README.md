@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current release: v0.10.0
+> Current release: v0.11.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -171,6 +171,25 @@ consent. Chat and embedding endpoints can also set `LLM_API_PATH` and
 require code changes. See the [ingestion contract](operations/INGEST.md),
 [presentation contract](operations/PRESENTATION.md), and
 [query contract](operations/QUERY.md).
+
+## Graph visualization, reusable slide templates, and safer meeting maintenance
+
+`wg.py graph-visualize` creates bounded, read-only graph views with topic,
+neighborhood, and relation filters. Its local provenance JSON records the
+selected nodes, edges, and source locators; the visualization remains a
+navigation aid rather than factual evidence. Public and private graph stores
+remain physically isolated.
+
+`wg.py slide-library` manages reusable presentation templates with explicit
+direct-reuse and parameterized-adaptation modes. Every reusable item retains
+source and version receipts, while generated work stays in the selected project
+workspace for review and delivery.
+
+Meeting compilation now keeps only the final active decision state, nests Raw
+citation navigation under Content, and persists unresolved entity mentions as
+quality warnings instead of inventing identities. Transactional repair validates
+the planned Wiki and graph changes before publication and rolls back on failure.
+Generated people pages likewise require real Raw support and graph validation.
 
 ## Reproducible public releases
 

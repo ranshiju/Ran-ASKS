@@ -15,7 +15,8 @@ spec 字段：
   finalize_tail_failure  "warn"（失败仍 completed）/ "hard"（失败→failed）
   steps                  dict：dedup_check/preprocess/write_wiki/validate_wiki/
                          write_slots/validate_semantics/repair_slots/finalize/
-                         update_graph/validate_graph/finalize_tail；统一语义 Worker
+                         update_graph/validate_graph/finalize_tail；统一语义 Worker。
+                         可另提供 post_commit_projection，在图校验后、完成态前执行
                          可另提供 prepare_unified_handoff(state, errors, handoff_reason)
 
 step 签名约定：
@@ -24,6 +25,7 @@ step 签名约定：
   write_slots(state)->(bool,str); validate_semantics(state)->(hard,warnings)
   repair_slots(state,warnings)->(bool,str); finalize(state)->(bool,str)
   update_graph(state)->(bool,str); validate_graph(state)->list[str]
+  post_commit_projection(state)->(bool,str)
   finalize_tail(state)->(bool,str)
 """
 from __future__ import annotations
@@ -56,6 +58,8 @@ def _revisionable_protocol_error(message: str) -> bool:
         "缺少 <<<", "missing <<<", "invalid preprocess json",
         "invalid meeting compiler preprocess proposal",
         "invalid meeting-compiler-v1 preprocess proposal",
+        "invalid meeting ir json", "invalid meeting-compiler-v2 meeting ir",
+        "invalid meeting-compiler-v3 meeting ir", "meeting compiler meeting_ir",
     ))
 
 
@@ -81,7 +85,7 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         inbox_state.transition(
             state, resume_target, reason="consume_agent_task",
             allowed_targets={"preprocess", "write_wiki", "write_slots", "finalize", "update_graph",
-                             "validate_graph", "finalize_tail", "graph_ready"},
+                             "validate_graph", "post_commit_projection", "finalize_tail", "graph_ready"},
         )
         state["errors"] = []
         _save(state)
@@ -149,7 +153,8 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                 return state
             resume_status = state.get("pre_handoff_status", "")
             resume_target = resume_status if resume_status in {
-                "finalize", "update_graph", "validate_graph", "finalize_tail", "graph_ready"
+                "finalize", "update_graph", "validate_graph", "post_commit_projection",
+                "finalize_tail", "graph_ready"
             } else "finalize"
             inbox_state.transition(state, resume_target, reason="resume_after_semantic_validation")
             state.pop("agent_required", None)
@@ -164,7 +169,9 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         _save(state)
 
     # 恢复或手工修复后，落位前全量复验（resume 安全网）
-    if state["status"] in {"finalize", "update_graph", "validate_graph", "finalize_tail", "graph_ready"}:
+    if state["status"] in {
+            "finalize", "update_graph", "validate_graph", "post_commit_projection",
+            "finalize_tail", "graph_ready"}:
         validation_errors = ic.validate_before_commit(
             state, steps["validate_semantics"], spec.get("non_blocking_issues", ()),
             spec.get("record_semantic_warnings"),
@@ -461,6 +468,7 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                 state["reingest"] = True
                 state["errors"] = [msg]
             else:
+                state["resume_from"] = "graph_ready"
                 state["errors"] = [msg]
             _save(state)
             return state
@@ -489,12 +497,31 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             _save(state)
             return state
         progress("PASS", flush=True)
+        state["status"] = (
+            "post_commit_projection"
+            if steps.get("post_commit_projection") else "finalize_tail"
+        )
+        _save(state)
+
+    # 3.9 optional same-transaction post-commit projection
+    if state["status"] == "post_commit_projection":
+        progress("[3.9] 同步项目投影...", flush=True, end=" ")
+        projection_ok, projection_msg = steps["post_commit_projection"](state)
+        if not projection_ok:
+            progress(f"失败: {projection_msg}", flush=True)
+            state["status"] = "failed"
+            state["resume_from"] = "post_commit_projection"
+            state["errors"] = [projection_msg]
+            _save(state)
+            return state
+        progress("完成", flush=True)
+        state["errors"] = []
         state["status"] = "finalize_tail"
         _save(state)
 
-    # 3.9 finalize_tail
+    # 3.10 finalize_tail
     if state["status"] == "finalize_tail":
-        progress("[3.9] 收尾（log/index/派生同步）...", flush=True, end=" ")
+        progress("[3.10] 收尾（log/index/派生同步）...", flush=True, end=" ")
         tail_ok, tail_msg = steps["finalize_tail"](state)
         if not tail_ok:
             if spec.get("finalize_tail_failure") == "hard":

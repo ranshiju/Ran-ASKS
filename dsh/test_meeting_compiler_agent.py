@@ -31,6 +31,7 @@ def _output(replacements=None) -> str:
                        "evidence_ids": ["s0001"]}],
         "topics": [{"label": "测试议题", "predicate": "讨论", "evidence_ids": ["s0001"]}],
         "reports": [], "decisions": [], "tasks": [], "relations": [],
+        "person_updates": [],
     }
     return f'''<<<PREPROCESS>>>
 {{"protocol_version":"{PROTOCOL_VERSION}","transcript_replacements":{replacements!r},"entity_resolutions":[]}}
@@ -97,6 +98,16 @@ def test_parser_rejects_missing_or_invalid_sections():
     proposal, error = parse_proposal(bad)
     assert proposal is None
     assert "invalid" in error
+
+
+def test_legacy_v2_meeting_ir_normalizes_to_current_protocol():
+    legacy = _output().replace(PROTOCOL_VERSION, "meeting-compiler-v2")
+    legacy = legacy.replace(', "person_updates": []', "")
+    proposal, error = parse_proposal(legacy)
+    assert proposal, error
+    assert proposal["protocol_version"] == PROTOCOL_VERSION
+    assert proposal["meeting_ir"]["protocol_version"] == PROTOCOL_VERSION
+    assert proposal["meeting_ir"]["person_updates"] == []
 
 
 def test_replacements_are_exact_and_non_cascading():
@@ -212,6 +223,7 @@ def main():
     test_single_call_returns_typed_proposal()
     test_agent_backend_returns_same_task_handoff()
     test_parser_rejects_missing_or_invalid_sections()
+    test_legacy_v2_meeting_ir_normalizes_to_current_protocol()
     test_replacements_are_exact_and_non_cascading()
     test_meeting_ir_requires_evidence_and_keeps_typed_predicates_out_of_relations()
     test_json_diagnostics_preserve_exact_error_and_response()

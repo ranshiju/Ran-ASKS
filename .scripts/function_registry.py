@@ -184,7 +184,7 @@ def validate_registry(data: dict[str, Any] | None = None) -> list[str]:
                 raise RegistryError(f"{label}.maturity 非法: {record.get('maturity')}")
             for state_id in _string_list(record.get("states", []), f"{label}.states"):
                 if state_id not in states:
-                    raise RegistryError(f"{label}.states 引用未知状态: {state_id}")
+                    raise RegistryError(f"{label}.states 引用未知工作状态: {state_id}")
             if record["kind"] == "worker":
                 if "user" in audience or backends != ["api"]:
                     raise RegistryError(f"{label} worker 必须是 agent audience 且仅 api backend")
@@ -212,7 +212,7 @@ def validate_registry(data: dict[str, Any] | None = None) -> list[str]:
         route_aliases = _binding_owners(data, "route_task_aliases")
         overlap = sorted((set(route_tasks) | set(route_aliases)) & set(state_route_tasks))
         if overlap:
-            raise RegistryError(f"route task 同时归属状态与功能: {overlap}")
+            raise RegistryError(f"route task 同时归属工作状态与功能: {overlap}")
         _binding_owners(data, "wg")
         dsh_owners = _binding_owners(data, "dsh")
         _route_profiles(data)
@@ -421,9 +421,9 @@ def resolve(function_id: str, *, caller: str, backend: str, state: str = "",
         raise RegistryError(f"{function_id} 不支持 {backend} backend")
     allowed_states = record.get("states") or []
     if state and state not in data["states"]:
-        raise RegistryError(f"未知状态: {state}")
+        raise RegistryError(f"未知工作状态: {state}")
     if state and allowed_states and state not in allowed_states:
-        raise RegistryError(f"{function_id} 不允许在 {state} 状态调用")
+        raise RegistryError(f"{function_id} 不允许在 {state} 工作状态调用")
     bindings = deepcopy(record["bindings"])
     if backend == "agent":
         bindings.pop("dsh", None)
@@ -441,7 +441,7 @@ def resolve(function_id: str, *, caller: str, backend: str, state: str = "",
 
 def render_route_listing(data: dict[str, Any] | None = None) -> str:
     data = data or load_registry()
-    lines = ["持续状态:"]
+    lines = ["工作状态:"]
     for state_id, state in data["states"].items():
         tasks = state.get("route_tasks") or []
         suffix = f" route={','.join(tasks)}" if tasks else ""
@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     resolve_parser.add_argument("function_id")
     resolve_parser.add_argument("--caller", required=True, choices=sorted(VALID_CALLERS))
     resolve_parser.add_argument("--backend", required=True, choices=sorted(VALID_BACKENDS))
-    resolve_parser.add_argument("--state", default="")
+    resolve_parser.add_argument("--state", default="", help="工作状态类型 ID")
     resolve_parser.add_argument("--format", choices=("yaml", "json"), default="yaml")
 
     validate_parser = sub.add_parser("validate")
@@ -523,7 +523,7 @@ def main(argv: list[str] | None = None) -> int:
                 for error in errors:
                     print(f"- {error}")
             else:
-                print(f"功能注册表有效: {len(data['functions'])} 功能, {len(data['states'])} 状态")
+                print(f"功能注册表有效: {len(data['functions'])} 功能, {len(data['states'])} 工作状态")
             return 1 if errors else 0
     except (OSError, RegistryError, yaml.YAMLError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

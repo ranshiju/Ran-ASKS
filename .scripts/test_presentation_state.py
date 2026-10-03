@@ -399,7 +399,7 @@ class StateTests(unittest.TestCase):
     def test_real_cli_init_prepare_check_commit_status_and_invalid_json(self):
         scripts = self.repo / '.scripts'
         scripts.mkdir()
-        for name in ('presentation_state.py', 'presentation_render.py', 'agent_task.py'):
+        for name in ('presentation_state.py', 'presentation_render.py', 'agent_task.py', 'env_config.py'):
             shutil.copyfile(REPO / '.scripts' / name, scripts / name)
         def cli(*args, expected=0):
             proc = subprocess.run([sys.executable, '-B', str(scripts / 'presentation_state.py'), *args],

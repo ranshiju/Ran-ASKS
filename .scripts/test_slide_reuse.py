@@ -111,6 +111,38 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual(receipt['visual_review'], 'not_executed')
         self.assertEqual(receipt['user_approval'], 'not_requested')
 
+    def test_use_and_show_provenance_in_single_page_workspace(self):
+        workspace = self.repo/'projects/report'
+        workspace.mkdir(parents=True);(workspace/'workspace.yaml').write_text('schema: workspace-v1\n')
+        direct = self.typed('direct')
+        before = (direct/'component.pptx').read_bytes()
+        info = lib.show(direct)
+        self.assertEqual(info['kind'], 'direct')
+        self.assertEqual(info['source_pages'], [1])
+        output = workspace/'drafts/page01'
+        reuse.instantiate(direct, {}, output)
+        self.assertEqual((output/'component.pptx').read_bytes(), before)
+        self.assertEqual(reuse.read_json(output/'instance.json')['source_sha256'], info['source_sha256'])
+        with self.assertRaises(ValueError): reuse.instantiate(direct, {}, output)
+        adaptable = self.typed()
+        self.assertEqual(lib.show(adaptable)['profile']['slots'][0]['max_chars'], 40)
+        photo = self.repo/'temp/use.png'; Image.new('RGB',(10,10)).save(photo)
+        reuse.instantiate(adaptable, {'title':'Report', 'figure':str(photo)}, workspace/'drafts/page02')
+        self.assertEqual(st.extract(workspace/'drafts/page02/component.pptx')['pages'][0]['objects'][0]['text'], 'Report')
+        self.assertEqual((direct/'component.pptx').read_bytes(), before)
+
+    def test_project_output_rejects_unmanaged_root_and_multiple_pages(self):
+        direct = self.typed('direct')
+        for output in [self.repo/'projects/unmanaged/drafts/page', self.repo/'academic/raw/page']:
+            with self.assertRaises(ValueError): reuse.instantiate(direct, {}, output)
+            self.assertFalse(output.exists())
+        workspace=self.repo/'projects/report';workspace.mkdir(parents=True)
+        (workspace/'workspace.yaml').write_text('schema: workspace-v1\n')
+        for output,count in [(workspace/'drafts',1),(workspace/'outputs/page',1),(workspace/'drafts/page',2)]:
+            with self.assertRaises(ValueError): reuse.new_output(output,allow_page=True,page_count=count)
+        with self.assertRaises(ValueError):reuse.instantiate(direct, {'unexpected':'x'}, self.repo/'temp/invalid')
+        self.assertFalse((self.repo/'temp/invalid').exists())
+
     def test_invalid_profiles_reject_missing_duplicate_or_unsupported_slots(self):
         data = st.extract(self.base/'component.pptx')
         variants = []

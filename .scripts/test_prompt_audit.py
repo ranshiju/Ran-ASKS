@@ -713,7 +713,7 @@ def test_task_specific_execution_guidance_is_dispatched():
 
 def test_state_capability_tool_dispatch_is_explicit():
     listing = run("python3", ".scripts/route.py", "--list").stdout
-    assert "持续状态:" in listing
+    assert "工作状态:" in listing
     assert "research: 研究工作 route=research" in listing
     assert "可路由任务:" in listing
     assert "按需能力:" in listing
@@ -723,7 +723,7 @@ def test_state_capability_tool_dispatch_is_explicit():
     assert "task/state" not in listing
 
     research = run("python3", ".scripts/route.py", "--task", "research").stdout
-    assert "research 是持续状态，write 是按需能力" in research
+    assert "research 是工作状态，write 是按需能力" in research
     assert "--capability write --capability-profile academic" in research
 
     academic_write = run(

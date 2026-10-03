@@ -14,7 +14,7 @@ KNOWLEDGE_IR_SCHEMA = "knowledge-ir-v1"
 GRAPH_PLAN_SCHEMA = "graph-plan-v1"
 PROFILES = {"paper", "meeting", "document"}
 DOMAINS = {"academic", "admin", "teaching", "business", "private"}
-MEETING_COMPILER_V2 = "meeting-compiler-v2"
+MEETING_COMPILER_PROTOCOLS = {"meeting-compiler-v2", "meeting-compiler-v3"}
 PROPOSITION_OBJECT_PREDICATES = {"核心创新点", "局限性", "未来展望", "决策"}
 TASK_OBJECT_PREDICATES = {"待办"}
 DEICTIC_PAGE_ENDPOINTS = {"本会议", "本论文", "本文", "本文件", "本文档", "$meeting"}
@@ -228,7 +228,7 @@ def validate_knowledge_ir(ir: Any) -> list[str]:
     seen_ids: set[str] = set()
     strict_meeting = (
         document.get("profile") == "meeting"
-        and document.get("compiler_protocol") == MEETING_COMPILER_V2
+        and document.get("compiler_protocol") in MEETING_COMPILER_PROTOCOLS
     )
     for index, relation in enumerate(relations):
         if not isinstance(relation, dict):
@@ -241,7 +241,7 @@ def validate_knowledge_ir(ir: Any) -> list[str]:
             if relation.get("subject") in DEICTIC_PAGE_ENDPOINTS or relation.get("object") in DEICTIC_PAGE_ENDPOINTS:
                 errors.append(f"relations[{index}] has an unresolved meeting deictic endpoint")
             if not str(relation.get("source") or "").strip():
-                errors.append(f"relations[{index}].source is required for meeting-compiler-v2")
+                errors.append(f"relations[{index}].source is required for typed meeting compiler protocols")
         relation_id = str(relation.get("relation_id") or "")
         if relation_id in seen_ids:
             errors.append(f"relations[{index}].relation_id is duplicated")

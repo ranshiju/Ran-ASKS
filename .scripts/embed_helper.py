@@ -8,7 +8,7 @@
   probs, picked = softmax_sample(sims, T=0.5, top_k=10)  # 采样
 """
 import hashlib
-import json, sys, urllib.request, time
+import json, sys, urllib.error, urllib.request, time
 from pathlib import Path
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -103,13 +103,24 @@ _ENV = _load_env()
 _API_BASE = _ENV.get("EMBED_API_BASE", "") or _ENV.get("LLM_API_BASE", "")
 _API_KEY = _ENV.get("EMBED_API_KEY", "") or _ENV.get("LLM_API_KEY", "")
 _API_PATH = _ENV.get("EMBED_API_PATH", "") or "/v1/embeddings"
-_MODEL = _ENV.get("EMBED_MODEL", "") or "embedding-3"
+DEFAULT_MODEL = "GLM-Embedding-3"
+_MODEL = _ENV.get("EMBED_MODEL", "") or DEFAULT_MODEL
 
 
 def _embedding_endpoint():
     if not _API_BASE:
         raise RuntimeError("embedding API 未配置 EMBED_API_BASE/LLM_API_BASE")
     return env_config.join_api_url(_API_BASE, _API_PATH)
+
+
+def _provider_error_detail(exc: Exception) -> str:
+    if not isinstance(exc, urllib.error.HTTPError):
+        return str(exc)
+    try:
+        body = exc.read(2000).decode("utf-8", errors="replace").strip()
+    except Exception:
+        body = ""
+    return f"HTTP {exc.code}: {body}" if body else str(exc)
 
 
 def _cache_namespace():
@@ -151,7 +162,7 @@ def embed_batch(texts, batch_size=64, timeout=60):
                 last_err = None
                 break
             except Exception as e:
-                last_err = e
+                last_err = _provider_error_detail(e)
                 if attempt == 0:
                     print(f"[embed_batch] batch {i} fail: {e}, 重试一次...", file=sys.stderr)
                     time.sleep(1)

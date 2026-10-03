@@ -259,6 +259,24 @@ def search(query, kind=None):
                                  'kind':entry_kind,'pptx':str(p.parent/'component.pptx' if receipt else p.with_suffix('.pptx'))})
     return sorted(results,key=lambda r:-r['score'])[:30]
 
+def show(component):
+    """Inspect a verified template's provenance, replacement slots and limits."""
+    import slide_reuse
+    component = Path(component).absolute()
+    slide_reuse.safe_input(component/'receipt.json')
+    receipt = verify_bundle(component)
+    profile = None
+    if receipt.get('reuse_kind') in {'direct', 'adaptable'}:
+        profile = slide_reuse.validate_profile(slide_reuse.read_json(component/'reuse.json'),
+                                              st.extract(component/'component.pptx'))
+    return {'status':'ready', 'template':str(component),
+            'kind':receipt.get('reuse_kind','unclassified'),
+            'source':receipt['source'], 'source_sha256':receipt['source_sha256'],
+            'source_pages':receipt['pages'], 'template_receipt_sha256':vision.digest(component/'receipt.json'),
+            'profile':profile, 'pptx':str(component/'component.pptx'),
+            'description':str(component/'component.md'), 'structure':str(component/'structure.json'),
+            'layout_analysis':receipt.get('layout_analysis','not_executed')}
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='command',required=True)
     p=sub.add_parser('extract');p.add_argument('--source',required=True);p.add_argument('--pages',required=True);p.add_argument('--output',required=True);p.add_argument('--name',required=True);p.add_argument('--layout-report')
@@ -266,6 +284,8 @@ def main():
     p=sub.add_parser('search');p.add_argument('query',nargs='?',default='');p.add_argument('--kind',choices=['direct','adaptable','unclassified'])
     p=sub.add_parser('prepare-reuse');p.add_argument('--component',required=True);p.add_argument('--profile',required=True);p.add_argument('--output',required=True);p.add_argument('--name',required=True)
     p=sub.add_parser('fill');p.add_argument('--template',required=True);p.add_argument('--values',required=True);p.add_argument('--output',required=True)
+    p=sub.add_parser('show');p.add_argument('--template',required=True)
+    p=sub.add_parser('use');p.add_argument('--template',required=True);p.add_argument('--values');p.add_argument('--output',required=True)
     p=sub.add_parser('reindex')
     a=parser.parse_args()
     try:
@@ -275,6 +295,10 @@ def main():
         elif a.command=='prepare-reuse':
             import slide_reuse
             r=slide_reuse.prepare(a.component,slide_reuse.read_json(a.profile),a.output,a.name)
+        elif a.command=='show':r=show(a.template)
+        elif a.command=='use':
+            import slide_reuse
+            r=slide_reuse.instantiate(a.template,slide_reuse.read_json(a.values) if a.values else {},a.output)
         elif a.command=='fill':
             import slide_reuse
             r=slide_reuse.fill(a.template,slide_reuse.read_json(a.values),a.output)

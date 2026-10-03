@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import tempfile
 import sqlite3
+import io
+import urllib.error
 from pathlib import Path
 
 import env_config
@@ -104,9 +106,23 @@ def test_embedding_cache_migrates_and_isolates_models() -> None:
             embed_helper.configure_cache(None)
 
 
+def test_embedding_default_and_provider_error_detail() -> None:
+    import embed_helper
+
+    assert embed_helper.DEFAULT_MODEL == "GLM-Embedding-3"
+    error = urllib.error.HTTPError(
+        "https://api.example/v1/embeddings", 400, "Bad Request", {},
+        io.BytesIO(b'{"error":{"message":"model not found: bad-model"}}'),
+    )
+    detail = embed_helper._provider_error_detail(error)
+    assert "HTTP 400" in detail
+    assert "model not found: bad-model" in detail
+
+
 if __name__ == "__main__":
     test_dotenv_syntax_and_comments()
     test_precedence_and_expansion()
     test_api_url_join()
     test_embedding_cache_migrates_and_isolates_models()
+    test_embedding_default_and_provider_error_detail()
     print("test_env_config: ok")

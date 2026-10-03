@@ -88,6 +88,14 @@ designates no official domain distribution, and this release does not promise a
 plugin API or Extension Contract. The Markdown and appended PDF page contain
 the same governance update; frozen paper artifacts remain unchanged.
 
+The 2026-10-03 `v0.11.0` update adds bounded, read-only knowledge graph
+visualization, governed slide-template reuse, expanded presentation production
+modes, and stronger evidence-bound meeting ingestion and maintenance recovery.
+Raw remains the factual authority; visualization remains navigation rather than
+evidence, and reusable slide receipts do not imply automatic visual approval.
+The Markdown and appended PDF page contain the same update; frozen paper
+artifacts remain unchanged.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -161,6 +169,11 @@ ASKS-Compatible 身份和后续明确授予 Reference Distribution 的公开治�
 当前 GitHub 贡献须回灌受管源仓库后重新发布。Ran-ASKS 目前没有指定官方领域发行版，
 本次更新也不承诺插件 API 或 Extension Contract。Markdown 与 PDF 新增页包含同一
 治理说明，冻结论文产物保持不变。
+
+2026年10月3日的 `v0.11.0` 更新新增有界、只读的知识图可视化、受管幻灯片模板复用、
+扩展的演示文稿生产模式，以及更可靠的证据绑定会议摄入与维护恢复。Raw 仍是事实权威；
+可视化只用于导航，模板复用回执也不代表自动通过视觉审阅。Markdown 与 PDF 新增页
+包含同一更新，冻结论文产物保持不变。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

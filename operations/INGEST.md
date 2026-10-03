@@ -90,15 +90,16 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
 
 1. **Raw 不可修改**：原始 ASR 文本是事实源。`corrected.txt`、`entity-resolution.json`、Wiki 和 semantic 都是可重建派生物，先写事务临时目录；任何纠错不得覆盖 Raw。
 2. **程序只准备候选**：`speech_entity_resolver.py <raw.txt> --output <entity-candidates.json>` 从 `graph.db` 的 people、aliases 和人物关系生成 exact/review 候选，不使用 `--apply` 提前形成最终纠错文本。可用 `--candidate-file` 缩小本次局部召回；索引按人物知识指纹增量刷新。
-3. **一个 specialist 一次理解全文**：程序先把 Raw 非空行编成稳定的 `sNNNN` evidence catalog；`dsh/meeting_compiler_agent.py` 接收只读原文、证据目录、人物候选、程序生成的 meeting ID/目标 sources 和 validator 错误，在同一上下文中返回 `meeting-compiler-v2`：
+3. **一个 specialist 一次理解全文**：程序先把 Raw 非空行编成稳定的 `sNNNN` evidence catalog，并列出 `projects/学生指导/students/` 中已有研究记录；`dsh/meeting_compiler_agent.py` 接收只读原文、证据目录、人物候选、学生记录候选、程序生成的 meeting ID/目标 sources 和 validator 错误，在同一上下文中返回 `meeting-compiler-v3`：
    - `<<<PREPROCESS>>>`：仅包含原文精确片段替换和人物 resolved/unchanged/unresolved 决策；证据不足必须 unresolved。
-   - `<<<WIKI>>>`：conference-summary Wiki 草稿，参与者、术语和正文与同轮纠错决策一致。
-   - `<<<MEETING_IR>>>`：参会者、议题、汇报、决策、待办和受限扩展关系；每项必须引用 evidence ID，不得用“本会议”等指代端点，也不得在自由关系中重复 typed predicate。
-4. **程序编译派生物**：所有 replacement 必须命中原文，按一次非级联替换生成 staged `corrected.txt`；候选目录与 specialist 决策合并为 `entity-resolution.json`。程序从同一 MEETING_IR 确定性生成 Wiki `会议导航` 与 semantic slots：概念保持全局可解析，决策和待办生成页面作用域 proposition/task，不进入全局 keyword 池。重叠、重复、无命中、无证据或协议不完整均拒绝，不静默降级。
-5. **产物与导航校验**：MEETING_IR、Wiki、semantic、knowledge IR 和 graph plan 逐层校验集合一致；v2 核心语义边必须 100% 具备 Wiki section locator，并经脚注抵达精确 Raw 行号。任一硬错误带精确错误回到同一个 Meeting Compiler 做一次定向修订；warning 继续走局部确定性修复。
+   - `<<<WIKI>>>`：conference-summary Wiki 草稿，Navigation 和 Content 以发现、到达与必要背景为主，不重复结构化清单。
+   - `<<<MEETING_IR>>>`：参会者、议题、汇报、决策、待办、受限扩展关系和 `person_updates`；每项必须引用 evidence ID。`person_updates` 只能指向候选目录中的已有学生记录，类别限进展、下一步、阻塞、决定、里程碑与方向变化。
+4. **程序编译派生物**：所有 replacement 必须命中原文，按一次非级联替换生成 staged `corrected.txt`；候选目录与 specialist 决策合并为 `entity-resolution.json`。程序从同一 MEETING_IR 确定性生成 `## Content` 内的 `### 会议导航`、`学生指导更新` 证据块与 semantic slots，使默认 `read-section #content` 能直接返回精确 Raw 引用。概念保持全局可解析，决策和待办生成页面作用域 proposition/task，不进入全局 keyword 池；`decisions` 只允许最终仍有效的决定，禁止把已否定提案与后续纠正合并成同一决策。重叠、重复、无命中、无证据、相互冲突的决策或协议不完整均拒绝，不静默降级。
+5. **产物与导航校验**：MEETING_IR、Wiki、semantic、knowledge IR 和 graph plan 逐层校验集合一致；typed Meeting Compiler 核心语义边必须 100% 具备 Wiki section locator，并经脚注抵达精确 Raw 行号。任一硬错误带精确错误回到同一个 Meeting Compiler 做一次定向修订；warning 继续走局部确定性修复。
 6. **后端与恢复**：`INGEST_BACKEND=agent` 时脚本返回 `prepared + agent-task-v1`，当前宿主直接读取任务列出的原文、候选和协议，写入同一暂存输出后执行 resume；校验失败只更新原任务的 issues。`INGEST_BACKEND=api` 时程序通过 DSH 调用一次 Meeting Compiler；rejected、协议解析失败或预算耗尽保留 trace，并进入兼容 `agent_required`。两端共用同一事务与 validator，不把长原文复制进任务清单。文件名中的 `YYYYMMDD` 是权威年份；仅 `MMDD` 或无日期时才允许用摄入年推断，并在事务与 Wiki 中写 `date_inferred`。Compiler 提供非空 title 后，程序在落位前重算最终 meeting ID、Raw/Wiki 路径和 sources。
 7. **统一落图**：校验后的 semantic 经 `knowledge-ir-v1` → 绑定 IR SHA-256 的 `graph-plan-v1` → 唯一 writer `graph_ingest.py`。Meeting Compiler 不写 Raw、Wiki 或 `graph.db`，也不自报 IR 的确定性字段。
-8. **置信与回溯**：会议人物关系继续按 speech-recognition 来源处理；Wiki `sources` 始终指向原始 Raw，不指向 corrected。导航质量以可到达、关系类型正确、IR/Wiki/Graph 一致和精确 Raw locator 覆盖为硬门，不以固定新节点比例代替语义判断。事实回答必须回溯 Raw，不能把纠错审计或 DSH session log 当事实源。
+8. **学生记录同事务投影**：Raw/Wiki 落位与 Graph 校验通过后，同一 ingest transaction 必须执行 `student_guidance_projection.py`。它只幂等更新已匹配的学生页 `## 会议更新` 受管块，同步 `notes/status.md` 的最新进展、下一步和日期。投影失败时整体状态不得进入 `completed`；保留原 transaction ID 从 `post_commit_projection` 幂等恢复，不重跑知识库提交。未匹配人物不自动建档，出席、能力/态度评价、隐私和推测内容不投影。
+9. **置信与回溯**：会议人物关系继续按 speech-recognition 来源处理；Wiki `sources` 始终指向原始 Raw，不指向 corrected。无法唯一解析的人物/实体不强行绑定，作为 `meeting_entity_unresolved` 质量告警进入事务与报告。导航质量以可到达、关系类型正确、IR/Wiki/Graph 一致和精确 Raw locator 覆盖为硬门，不以固定新节点比例代替语义判断。事实回答必须回溯 Raw，学生记录仍是项目进度视图，不能替代 Raw/Wiki/Graph 或把纠错审计、DSH session log 当事实源。
 
 已有历史 `corrected.md` 保留不动、不回填、不删除，也不作为新流程输入。人物页/别名变化只影响下一次候选召回；历史会议仅在明确重摄入时更新。
 
@@ -173,7 +174,7 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
    - **命题裸缩写消解（`resolve_abbreviations.py`，2026-08-06）**：命题 path/title 中的概念须用 keyword id 表示。裸缩写双层校验（均限本知识库，不上网）：①图层 `resolve_bare_name` 查 alias 表 + keyword 节点，命中则已建立关联；②raw 层 `extract_abbreviations` 提取命题源页 raw 关键段的缩写定义。两层均 miss → warning（知识库内无全称可溯，需人工判断是否新建概念）。`--list` 列出待消解项，`--apply` 批量消解 raw 有定义的缩写（建 keyword 节点 + 更新命题 path + 建包含边）。待办 occurrence 按 warning 的 `field=subject|object` 绑定真实端点，页面自身的 canonical path 仅作内部 ID，不进入缩写待办；去重键包含 page/field/端点/token/locator。非阻断后置：摄入照常跑完，agent 看 warning 后定期批量处理。
    - **可选边定位**：知识边的 `source`/locator 可使用 `wiki/page#heading-slug` 或 Raw locator，也可为空；不得因缺失而报错或告警。事实下钻优先读相邻 Wiki section，再沿该节脚注精确读取 Raw。Markdown/TXT Raw 使用标题、不可变行范围，或事实块同行/紧随其后的 Kramdown 显式 ID（如 `{: #fact-example-20260905}`）；`read-raw` 只返回该锚点绑定的事实块。文本型 PDF 可使用页码范围；论文一律使用 MinerU `paper.md`。`#全篇` 仅是旧式文件级 provenance，不是可向 LLM 返回全文的读取指令。结构性 `包含/相似` 属程序派生，confidence=`推断`。
    - **稀疏导航连通性**：Graph 只保存检索导航关键边。命题中被确定性匹配的概念不得因“保证可达”被自动提升为 `论文→研究关键词→概念`；论文经 proposition/`包含` 已可导航。未直连概念只进摄入报告 `navigation_connectivity_candidates`，不写事实边。
-   - **无 page 人物**：程序仅将作者/通讯作者/参会/指导/师从/所属/任职于等人物关系产生的无页 entity 标记 `entity_subtype: person`；数量由 `.scripts/person_entity_audit.py` 审计，软上限 2000、预警线 1600。高影响人物由 `ingest_common.detect_people_page_candidates` 在每次 ingest/query 后自动检测，达标者写入 `cross-domain/people-pending.jsonl`（标准：≥6 篇论文作者 / ≥4 篇通讯作者 / ≥3 次会议提及 / ≥2 种人物关系类别，排除所属/任职与占位符）。达标者由 `build_people_pages.py` 自动建极简 people page 并迁移 graph node path，无需人工干预；slug 冲突（同名不同人）跳过留待人工。
+   - **无 page 人物**：程序仅将作者/通讯作者/参会/指导/师从/所属/任职于等人物关系产生的无页 entity 标记 `entity_subtype: person`；数量由 `.scripts/person_entity_audit.py` 审计，软上限 2000、预警线 1600。高影响人物由 `ingest_common.detect_people_page_candidates` 在每次 ingest/query 后自动检测，达标者写入 `cross-domain/people-pending.jsonl`（标准：≥6 篇论文作者 / ≥4 篇通讯作者 / ≥3 次会议提及 / ≥2 种人物关系类别，排除所属/任职与占位符）。达标者由 `build_people_pages.py` 自动建来源感知的检索辅助页并迁移 graph node path：仅使用相关论文/会议 Wiki 已绑定且真实存在的 Raw sources，会议型人物使用 `speech-recognition/low`，不写成论文作者；没有 Raw 来源时不建页。程序同步 `Wiki → 来源 → Raw` 边、规范化相关 Wiki 人物链接，并对全部新增/重链页面运行 `ingest_check --graph`；ERROR 使 maintenance 失败。无法 ASCII 化的姓名使用基于完整姓名的稳定哈希 slug，已有目标文件必须先核对 frontmatter `title`，标题不一致或缺失时按 slug 冲突跳过留待人工。
    - **Hub 页**：通过语义三元组建立 hub↔page 边（谓词由页面与 hub 名的语义关系定，如`涉及`/`主要研究`）
    - 关系类型见下方「通用图边约束」及按域派发的关系规则
    - **edge confidence**：每条带 `[可追溯]/[推断]/[存疑]`（默认 `[可追溯]`，推断显式标）；`[SR]` 标记从本页 `source_type` 派生
@@ -311,6 +312,8 @@ N 篇编码完成后一次性执行巩固阶段（步骤 4-10）：
 8. **Topic Hub 维护**：同创建模式步骤 9，更新涉及主题的 Hub 页摘要和导航
 9. 追加 `wiki/log.md`，记录 `update | base_name (旧版本 → 新版本)`
 10. **收尾校验同创建模式步骤 11-13**：`ingest_check`（不省）→ `ingest_build` 派生同步 → 自检。更新同样改了 frontmatter/triples/section，确定性壳不因更新而降级
+
+已完成会议事务若发现人物被错误解析，或 Wiki/MEETING_IR 投影保留了被后文推翻的旧结论，使用 `repair_meeting_identity.py` 依据原 Raw、evidence-bound MEETING_IR 和既有学生候选目录执行 `plan-only → apply`。身份修复提交 exact mention、canonical entity 与学生更新；投影修复提交位于 `temp/meeting-repair/` 的 Wiki draft，以及完整 IR 或只精确替换一个旧决策的 `meeting-ir-repair-patch-v1`。该入口先验证 evidence、IR/Wiki 与回滚式 Graph plan，应用时事务化更新会议 Wiki、`entity-resolution.json`、MEETING_IR、semantic、Knowledge IR、Graph plan、Graph 来源边、学生指导投影与 `conflict-fix` 日志，最终执行 `ingest_check --graph`；失败恢复备份。不得直接手改 Raw 目录中的派生文件或裸改数据库。
 
 ---
 

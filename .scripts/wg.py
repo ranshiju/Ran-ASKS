@@ -460,6 +460,31 @@ def cmd_workspace(args):
                     error="" if ok else "workspace doctor reported errors")
 
 
+def cmd_library_or_graph(args):
+    """Expose deterministic functions through the standard WG result envelope."""
+    if args.cmd == 'slide-library':
+        script, forwarded = 'slide_library.py', args.library_args
+    else:
+        script, forwarded = 'graph_visualize.py', []
+        for field in ('output','graph','node','query','radius','max_nodes','max_edges','predicates','types','dpi'):
+            value = getattr(args, field, None)
+            if value is not None:
+                forwarded.extend(['--'+field.replace('_','-'), str(value)])
+        forwarded.extend('--'+field for field in ('html','sim','open') if getattr(args,field,False))
+    rc,out,err = run_script([sys.executable,str(SCRIPTS/script),*forwarded])
+    try:
+        result = json.loads(out)
+    except json.JSONDecodeError:
+        return envelope(args.cmd, None, status='error', error=(err or out or 'No JSON result').strip()[:500])
+    failed = rc != 0 or (isinstance(result,dict) and result.get('status') == 'error')
+    sources = []
+    if isinstance(result,dict):
+        sources = list(result.get('sources', []))
+        sources.extend(result[k] for k in ('source','manifest') if isinstance(result.get(k),str))
+    return envelope(args.cmd,result,sources=sources,status='error' if failed else 'ok',ok=not failed,
+                    error=(result.get('error') or err.strip())[:500] if failed and isinstance(result,dict) else '')
+
+
 def cmd_cv(args):
     """Thin wrapper around the deterministic CV workspace function."""
     command = [sys.executable, str(SCRIPTS / "cv.py"), *args.cv_args]
@@ -683,7 +708,15 @@ def build_parser():
     fp.add_argument("--no-answer", action="store_true")
     fp.set_defaults(func=cmd_frontier)
 
-    p = sub.add_parser("functions", help="统一功能、状态和调用策略目录")
+    p = sub.add_parser('slide-library', help='PPT模板管理与复用')
+    p.add_argument('library_args', nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_library_or_graph)
+    import graph_visualize
+    p = sub.add_parser('graph-visualize', parents=[graph_visualize.parser(add_help=False)],
+                       help='按主题或节点生成有向知识图及来源清单')
+    p.set_defaults(func=cmd_library_or_graph)
+
+    p = sub.add_parser("functions", help="统一功能、工作状态和调用策略目录")
     functions_sub = p.add_subparsers(dest="functions_cmd", required=True)
 
     fp = functions_sub.add_parser("list", help="列出功能")
@@ -696,11 +729,11 @@ def build_parser():
     fp.add_argument("function_id")
     fp.set_defaults(func=cmd_functions)
 
-    fp = functions_sub.add_parser("resolve", help="按调用者、后端和状态解析可用入口")
+    fp = functions_sub.add_parser("resolve", help="按调用者、后端和工作状态解析可用入口")
     fp.add_argument("function_id")
     fp.add_argument("--caller", required=True, choices=sorted(fr.VALID_CALLERS))
     fp.add_argument("--backend", required=True, choices=sorted(fr.VALID_BACKENDS))
-    fp.add_argument("--state", default="")
+    fp.add_argument("--state", default="", help="工作状态类型 ID")
     fp.set_defaults(func=cmd_functions)
 
     fp = functions_sub.add_parser("validate", help="校验功能注册表")

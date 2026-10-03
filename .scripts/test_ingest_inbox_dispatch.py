@@ -913,6 +913,14 @@ def test_auto_resolve_abbr_key_contract():
     try:
         with tempfile.TemporaryDirectory() as tmp:
             module.REPO = Path(tmp)
+            todo = module.REPO / "cross-domain/abbreviation-todo.jsonl"
+            todo.parent.mkdir(parents=True)
+            todo.write_text(json.dumps({
+                "schema_version": "abbreviation-todo-v2",
+                "token": "CONFLICTBANK", "page": "academic/wiki/papers/x",
+                "subject": "x", "predicate": "包含", "object": "CONFLICTBANK",
+                "field": "object",
+            }) + "\n", encoding="utf-8")
             module.ic.lightweight_abbr_resolve = lambda _repo: {
                 "status": "completed", "resolved": 0, "remaining": 1, "details": [],
             }
@@ -922,6 +930,9 @@ def test_auto_resolve_abbr_key_contract():
                     "warning_count": 1,
                     "candidates": [{
                         "token": "CONFLICTBANK", "suggested_kind": "canonical_name",
+                        "allowed_kinds": ["canonical_name", "ambiguous"],
+                    }, {
+                        "token": "STALE", "suggested_kind": "ambiguous",
                         "allowed_kinds": ["canonical_name", "ambiguous"],
                     }],
                 }),
@@ -935,6 +946,7 @@ def test_auto_resolve_abbr_key_contract():
             review = module.REPO / summary["review_file"]
             payload = json.loads(review.read_text(encoding="utf-8"))
             assert payload["candidates"][0]["token"] == "CONFLICTBANK"
+            assert all(item["token"] != "STALE" for item in payload["candidates"])
             assert payload["candidate_token_count"] == 1
             assert review.name == "session-unsafe.json"
     finally:
@@ -1212,7 +1224,34 @@ def test_maintenance_error_does_not_override_completed_file_status():
             assert compact["maintenance"]["status"] == "error"
     finally:
         (module.REPO, module._auto_resolve_abbreviations,
-         module.ic.detect_people_page_candidates, module._auto_create_hubs) = originals
+        module.ic.detect_people_page_candidates, module._auto_create_hubs) = originals
+
+
+def test_people_maintenance_validates_created_and_relinked_pages():
+    completed = module.subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="汇总: 2 文件, ERROR=0, WARN=0\n", stderr="",
+    )
+    with patch.object(module.subprocess, "run", return_value=completed) as run:
+        report = module._validate_people_artifacts({"details": [{
+            "page_path": "academic/wiki/authors/person-test",
+            "updated_link_pages": ["academic/wiki/conferences/meeting-test"],
+        }]})
+    assert report["status"] == "completed"
+    command = run.call_args.args[0]
+    assert "academic/wiki/authors/person-test.md" in command
+    assert "academic/wiki/conferences/meeting-test.md" in command
+
+
+def test_people_maintenance_surfaces_validation_failure():
+    completed = module.subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="ERROR=1\n", stderr="",
+    )
+    with patch.object(module.subprocess, "run", return_value=completed):
+        report = module._validate_people_artifacts({"details": [{
+            "page_path": "academic/wiki/authors/person-test",
+        }]})
+    assert report["status"] == "error"
+    assert report["returncode"] == 1
 
 
 def test_maintenance_rejects_incomplete_completed_result_envelope():
@@ -1571,9 +1610,11 @@ def test_maintenance_publication_recovers_write_failures():
                 original_write = module._write_json_atomic
                 writes = []
                 def injected_write(path, value):
-                    writes.append(value["maintenance"]["publication"]["status"])
-                    if scenario == "initial_report" or scenario == "final_report" and len(writes) >= 2:
-                        raise OSError("simulated report write failure")
+                    if Path(path).resolve() == report_path.resolve():
+                        writes.append(value["maintenance"]["publication"]["status"])
+                        if (scenario == "initial_report"
+                                or scenario == "final_report" and len(writes) >= 2):
+                            raise OSError("simulated report write failure")
                     return original_write(path, value)
                 def injected_save(transaction_id, state):
                     if scenario == "interruption" and transaction_id == "txn-second":
@@ -1608,7 +1649,10 @@ def test_maintenance_publication_recovers_write_failures():
                     assert persisted["maintenance"]["publication"]["status"] == expected
                     compact = module.reconcile_maintenance_report(report_path)
                     assert compact["maintenance"]["status"] == "completed"
-                assert json.loads((root / receipt_rel).read_text()) == receipt
+                bound_receipt = json.loads((root / receipt_rel).read_text())
+                assert bound_receipt["status"] == receipt["status"]
+                assert bound_receipt["report_path"] == str(report_path.relative_to(root))
+                assert bound_receipt["publication"]["status"] == "completed"
                 for item in files:
                     state = inbox_state.load(item["transaction_id"])
                     assert state["status"] == "completed"
@@ -1655,6 +1699,8 @@ def main():
     test_hub_timeout_is_deferred_and_retryable()
     test_zero_success_skips_global_post_ingest_scans()
     test_maintenance_error_does_not_override_completed_file_status()
+    test_people_maintenance_validates_created_and_relinked_pages()
+    test_people_maintenance_surfaces_validation_failure()
     test_maintenance_rejects_incomplete_completed_result_envelope()
     test_abbreviation_decisions_require_exact_pending_tokens_and_atomic_todo()
     test_abbreviation_decisions_close_only_matching_maintenance_action()

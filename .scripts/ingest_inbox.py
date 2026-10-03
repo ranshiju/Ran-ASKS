@@ -1201,12 +1201,35 @@ def _auto_resolve_abbreviations(session_id: str) -> dict:
 
     base_after = ic.lightweight_abbr_resolve(REPO)
     errors.extend(base_after.get("errors", []))
-    candidates = resolver_report.get("candidates", [])
+    current_entries, current_errors = ic._read_abbreviation_todo(todo_path)
+    errors.extend(current_errors)
+    current_tokens = {
+        str(entry.get("token") or entry.get("value") or "").strip()
+        for entry in current_entries
+        if str(entry.get("token") or entry.get("value") or "").strip()
+    }
+    candidates = [
+        item for item in resolver_report.get("candidates", [])
+        if str(item.get("token") or "").strip() in current_tokens
+    ]
     review_file = ""
+    decision_file = ""
+    next_command = ""
     if candidates:
         review_path = (
             REPO / "temp" / "abbreviation-review" /
             f"{_safe_session_id(session_id)}.json"
+        )
+        decision_path = review_path.with_name(review_path.stem + "-decisions.json")
+        decision_file = str(decision_path.relative_to(REPO))
+        receipt_file = str(
+            (REPO / "temp" / "inbox-maintenance" /
+             f"{_safe_session_id(session_id)}.json").relative_to(REPO)
+        )
+        next_command = (
+            "python3 .scripts/resolve_abbreviations.py "
+            f"--apply-decisions {decision_file} "
+            f"--maintenance-receipt {receipt_file} --json"
         )
         try:
             _write_json_atomic(review_path, {
@@ -1221,6 +1244,15 @@ def _auto_resolve_abbreviations(session_id: str) -> dict:
                     len(item.get("occurrences", [])) for item in candidates
                 ),
                 "candidates": candidates,
+                "decision_file": decision_file,
+                "decision_schema": {
+                    "decisions": [{
+                        "token": "candidate token",
+                        "resolution_kind": "one allowed_resolution_kinds value",
+                        "full_name": "required for alias_to_full_name",
+                    }],
+                },
+                "next_command": next_command,
             })
             review_file = str(review_path.relative_to(REPO))
         except Exception as exc:
@@ -1240,6 +1272,8 @@ def _auto_resolve_abbreviations(session_id: str) -> dict:
     if review_file:
         summary.update({
             "review_file": review_file,
+            "decision_file": decision_file,
+            "next_command": next_command,
             "next_action": "agent_review_abbreviation_candidates",
         })
     if errors:
@@ -1427,6 +1461,29 @@ def compact_maintenance(envelope: dict) -> dict:
     return compact
 
 
+def _validate_people_artifacts(auto_built: dict) -> dict:
+    artifacts = set()
+    for detail in auto_built.get("details", []) if isinstance(auto_built, dict) else []:
+        page_path = str(detail.get("page_path") or "").strip()
+        if page_path:
+            artifacts.add(page_path + ".md")
+        for page in detail.get("updated_link_pages", []) or []:
+            artifacts.add(str(page).removesuffix(".md") + ".md")
+    if not artifacts:
+        return {"status": "no_action", "files": []}
+    command = [
+        sys.executable, str(REPO / ".scripts" / "ingest_check.py"), "--graph",
+        *sorted(artifacts),
+    ]
+    completed = subprocess.run(command, cwd=REPO, text=True, capture_output=True)
+    return {
+        "status": "completed" if completed.returncode == 0 else "error",
+        "files": sorted(artifacts),
+        "returncode": completed.returncode,
+        "output": (completed.stdout or completed.stderr)[-4000:],
+    }
+
+
 def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
     """Run and persist the unified post-ingest maintenance transaction."""
     safe_session = _safe_session_id(session_id)
@@ -1497,6 +1554,16 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
         try:
             from build_people_pages import build_pending_people
             people_summary["auto_built"] = build_pending_people()
+            people_summary["validation"] = _validate_people_artifacts(
+                people_summary["auto_built"]
+            )
+            if people_summary["validation"]["status"] == "error":
+                people_summary["status"] = "error"
+                people_summary["errors"] = [
+                    "post-maintenance people artifacts failed ingest_check --graph"
+                ]
+            else:
+                people_summary.setdefault("status", "completed")
         except Exception as exc:
             people_summary["auto_built"] = {"error": str(exc)}
     except Exception as exc:
@@ -1523,6 +1590,7 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
                 "review_file", "candidates_file", "split_candidates_file",
                 "redistribution_candidates_file",
                 "route_review_file",
+                "decision_file", "next_command",
             ):
                 if summary.get(key):
                     action[key] = summary[key]
@@ -1576,6 +1644,7 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
     updates = []
     report_rel = str(report_path.relative_to(repo))
     checkpoint_written = False
+    receipt_path = None
     try:
         if maintenance.get("receipt_path"):
             receipt_path = (repo / maintenance["receipt_path"]).resolve()
@@ -1583,7 +1652,11 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             if not isinstance(receipt, dict):
                 raise ValueError("maintenance receipt must be an object")
-            maintenance = {**receipt, "receipt_path": str(receipt_path.relative_to(repo))}
+            maintenance = {
+                **receipt,
+                "receipt_path": str(receipt_path.relative_to(repo)),
+                "report_path": report_rel,
+            }
             linked = compact_maintenance({**maintenance, "publication": {"status": "completed"}})
             linked["report_path"] = report_rel
             for item in report.get("files", []):
@@ -1608,10 +1681,16 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
         }
         _write_json_atomic(report_path, report)
         checkpoint_written = True
+        if receipt_path is not None:
+            _write_json_atomic(receipt_path, {
+                **maintenance, "publication": {"status": "pending"},
+            })
         for transaction_id, state in updates:
             inbox_state.save(transaction_id, state)
         report["maintenance"] = {**maintenance, "publication": {"status": "completed"}}
         _write_json_atomic(report_path, report)
+        if receipt_path is not None:
+            _write_json_atomic(receipt_path, report["maintenance"])
         return True
     except (OSError, ValueError) as exc:
         report["maintenance"] = {

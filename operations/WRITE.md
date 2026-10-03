@@ -1,6 +1,6 @@
 # Write（写作）操作规范
 
-> `write` 是按需调用的**落笔能力**：使用可回溯事实与当前工作上下文生成文稿。它可以服务于独立办公写作，也可以作为 `research` 等持续工作状态中的组合能力；写作产物不自动成为知识库事实。智能体能力定义见 `agents/writer/AGENT.md`，其流程须与本规范一致。
+> `write` 是按需调用的**落笔能力**：使用可回溯事实与当前工作上下文生成文稿。它可以服务于独立办公写作，也可以作为 `research` 等工作状态中的组合能力；写作产物不自动成为知识库事实。智能体能力定义见 `agents/writer/AGENT.md`，其流程须与本规范一致。
 
 ---
 
@@ -14,7 +14,7 @@
 
 明确要求逐页协作制作原生可编辑 PPT 时，在当前状态内另加载 `python3 .scripts/route.py --capability presentation --capability-profile create`，其成熟度与当前可执行动作以 `operations/PRESENTATION.md` 为准；当前阶段1B已提供单页状态、整套导出与三个独立按需辅助入口，真实用户验收尚待完成。仅写 PPT 文字提纲或讲稿仍用本规范，图片/PDF 重建沿用独立重建能力。
 
-研究论文仍以 `research` 作为持续工作状态。Agent 真正开始起草、改写或润色论文正文时，在该状态内调用 `write` 的 academic profile；讨论研究问题、核对数据和运行实验时继续保持 `research`，无需加载写作能力。
+研究论文仍以 `research` 作为工作状态。Agent 真正开始起草、改写或润色论文正文时，在该状态内调用 `write` 的 academic profile；讨论研究问题、核对数据和运行实验时继续保持 `research`，无需加载写作能力。
 
 先判定工作模式，而非机械依赖单个触发词：
 

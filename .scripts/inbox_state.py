@@ -23,18 +23,18 @@ KNOWN_STATUSES = frozenset({
     "bibliographic_review_required", "agent_required", "type_mismatch",
     "classification_required", "finalize", "propositions", "propositions_done",
     "prepared", "finalized", "graph_ready", "update_graph", "validate_graph",
-    "finalize_tail", "completed", "duplicate_found", "failed", "validation_error",
+    "post_commit_projection", "finalize_tail", "completed", "duplicate_found", "failed", "validation_error",
     "superseded",
 })
 RESUME_TRANSITIONS = {
-    "failed": frozenset({"finalize", "graph_ready"}),
+    "failed": frozenset({"finalize", "graph_ready", "post_commit_projection"}),
     "agent_required": frozenset({
         "write_wiki", "write_slots", "finalize", "propositions", "graph_ready",
-        "update_graph", "validate_graph", "finalize_tail", "bibliographic_review_required",
+        "update_graph", "validate_graph", "post_commit_projection", "finalize_tail", "bibliographic_review_required",
     }),
     "prepared": frozenset({
         "preprocess", "write_wiki", "write_slots", "finalize", "propositions", "graph_ready",
-        "update_graph", "validate_graph", "finalize_tail", "bibliographic_review_required",
+        "update_graph", "validate_graph", "post_commit_projection", "finalize_tail", "bibliographic_review_required",
     }),
     "bibliographic_review_required": frozenset({"write_wiki", "agent_required"}),
 }
