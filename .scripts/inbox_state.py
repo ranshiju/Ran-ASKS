@@ -15,6 +15,8 @@ REPO = Path(__file__).resolve().parent.parent
 STATE_PROTOCOL_VERSION = "ingest-state-v1"
 RUNTIME_SUMMARY_VERSION = "ingest-runtime-summary-v1"
 RESULT_PROTOCOL_VERSION = "ingest-result-v1"
+OPERATION_VIEW_VERSION = "ingest-operation-view-v1"
+VERIFICATION_RECEIPT_VERSION = "verification-receipt-v1"
 PUBLIC_WORKFLOW_STATUSES = frozenset({
     "awaiting_agent", "ready_to_commit", "completed", "failed",
 })
@@ -37,6 +39,42 @@ RESUME_TRANSITIONS = {
         "update_graph", "validate_graph", "post_commit_projection", "finalize_tail", "bibliographic_review_required",
     }),
     "bibliographic_review_required": frozenset({"write_wiki", "agent_required"}),
+}
+FORWARD_TRANSITIONS = {
+    "init": frozenset({"dedup_check", "preprocess", "extract", "prepared",
+                       "agent_required", "duplicate_found", "failed"}),
+    "dedup_check": frozenset({"preprocess", "extract", "prepared", "agent_required",
+                              "duplicate_found", "failed"}),
+    "preprocess": frozenset({"extract", "write_wiki", "prepared", "agent_required",
+                             "duplicate_found", "failed"}),
+    "extract": frozenset({"write_wiki", "bibliographic_review_required", "prepared",
+                          "agent_required", "duplicate_found", "failed", "superseded"}),
+    "write_wiki": frozenset({"write_slots", "finalize", "prepared", "agent_required",
+                              "type_mismatch", "duplicate_found", "failed"}),
+    "write_slots": frozenset({"write_wiki", "finalize", "prepared", "agent_required",
+                               "failed"}),
+    "bibliographic_review_required": frozenset({"write_wiki", "prepared",
+                                                 "agent_required", "failed"}),
+    "agent_required": RESUME_TRANSITIONS["agent_required"] | frozenset({
+        "prepared", "failed", "superseded",
+    }),
+    "classification_required": frozenset({"preprocess", "prepared", "agent_required", "failed"}),
+    "finalize": frozenset({"finalized", "propositions", "graph_ready", "update_graph", "failed"}),
+    "propositions": frozenset({"propositions_done", "prepared", "agent_required", "failed"}),
+    "propositions_done": frozenset({"graph_ready", "failed"}),
+    "prepared": RESUME_TRANSITIONS["prepared"] | frozenset({
+        "agent_required", "failed", "superseded",
+    }),
+    "finalized": frozenset({"graph_ready", "update_graph", "failed"}),
+    "graph_ready": frozenset({"update_graph", "validate_graph", "completed", "failed"}),
+    "update_graph": frozenset({"validate_graph", "failed"}),
+    "validate_graph": frozenset({"post_commit_projection", "finalize_tail", "completed", "failed"}),
+    "post_commit_projection": frozenset({"finalize_tail", "failed"}),
+    "finalize_tail": frozenset({"completed", "failed"}),
+    "failed": RESUME_TRANSITIONS["failed"] | frozenset({"prepared", "agent_required"}),
+    "validation_error": frozenset({
+        "prepared", "agent_required", "failed", "superseded",
+    }),
 }
 
 
@@ -75,6 +113,146 @@ def transition(state: dict, target: str, *, reason: str,
         "to": target,
         "reason": str(reason or "")[:160],
     }
+
+
+def advance(state: dict, target: str, *, reason: str) -> None:
+    """Advance one declared forward stage without granting recovery overrides."""
+    source = validate_status(state)
+    transition(
+        state, target, reason=reason,
+        allowed_targets=FORWARD_TRANSITIONS.get(source, frozenset()),
+    )
+
+
+def _transition_allowed(source: str, target: str) -> bool:
+    if source == target:
+        return True
+    return (
+        target in FORWARD_TRANSITIONS.get(source, frozenset())
+        or target in RESUME_TRANSITIONS.get(source, frozenset())
+    )
+
+
+def _canonical_hash(value: object) -> str:
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _path_digest(repo: Path, value: str) -> dict:
+    relative = Path(str(value or ""))
+    if not value or relative.is_absolute() or ".." in relative.parts:
+        return {"path": str(value or ""), "exists": False, "sha256": "", "kind": "invalid"}
+    path = (repo / relative).resolve()
+    try:
+        path.relative_to(repo.resolve())
+    except ValueError:
+        return {"path": relative.as_posix(), "exists": False, "sha256": "", "kind": "invalid"}
+    if path.is_file():
+        return {
+            "path": relative.as_posix(), "exists": True,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "kind": "file",
+        }
+    if path.is_dir():
+        rows = []
+        for child in sorted(item for item in path.rglob("*") if item.is_file()):
+            rows.append({
+                "path": child.relative_to(path).as_posix(),
+                "sha256": hashlib.sha256(child.read_bytes()).hexdigest(),
+            })
+        return {
+            "path": relative.as_posix(), "exists": True,
+            "sha256": _canonical_hash(rows), "kind": "directory", "files": len(rows),
+        }
+    return {"path": relative.as_posix(), "exists": False, "sha256": "", "kind": "missing"}
+
+
+def _artifact_digest(repo: Path, key: str, value: str) -> dict:
+    relative = Path(str(value or ""))
+    if key == "wiki_path" and not relative.suffix and not (repo / relative).exists():
+        markdown_path = relative.with_suffix(".md")
+        if (repo / markdown_path).is_file():
+            value = markdown_path.as_posix()
+    return _path_digest(repo, value)
+
+
+def build_verification_receipt(state: dict, repo: Path | None = None) -> dict:
+    """Bind one terminal outcome to its stable state and declared final artifacts."""
+    repo = Path(repo or REPO)
+    internal_status = validate_status(state)
+    workflow_status = public_workflow_status(state)
+    artifact_keys = ("raw_dir", "wiki_path", "receipt_path", "report_path")
+    artifacts = {
+        key: _artifact_digest(repo, key, str(state.get(key) or ""))
+        for key in artifact_keys if state.get(key)
+    }
+    receipt_values = {
+        key: value for key, value in state.items()
+        if "receipt" in key and key != "verification_receipt" and value
+    }
+    workspace_receipt = (state.get("agent_workspace") or {}).get("validation_receipt")
+    if workspace_receipt:
+        receipt_values["agent_workspace.validation_receipt"] = workspace_receipt
+    terminal = internal_status in {"completed", "duplicate_found"}
+    transition_trace = [
+        {
+            "from": event.get("from"),
+            "to": event.get("to"),
+            "transition": event.get("transition"),
+        }
+        for event in ((state.get("telemetry") or {}).get("events") or [])
+        if isinstance(event, dict)
+    ]
+    checks = {
+        "known_status": internal_status in KNOWN_STATUSES,
+        "terminal_outcome": terminal,
+        "no_errors": not bool(state.get("errors")),
+        "artifact_integrity": all(item["exists"] for item in artifacts.values()),
+    }
+    body = {
+        "schema": VERIFICATION_RECEIPT_VERSION,
+        "status": "PASS" if all(checks.values()) else (
+            "FAILED" if workflow_status == "failed" else "INCOMPLETE"
+        ),
+        "transaction_id": str(state.get("transaction_id") or ""),
+        "state_protocol": STATE_PROTOCOL_VERSION,
+        "workflow_status": workflow_status,
+        "internal_status": internal_status,
+        "outcome": "committed" if internal_status == "completed" else (
+            "duplicate" if internal_status == "duplicate_found" else "uncommitted"
+        ),
+        "committed": internal_status == "completed",
+        "checks": checks,
+        "state_sha256": _canonical_hash({
+            "transaction_id": state.get("transaction_id"),
+            "status": internal_status,
+            "source": state.get("source"),
+            "source_hash": (state.get("telemetry") or {}).get("source_hash"),
+            "raw_dir": state.get("raw_dir"),
+            "wiki_path": state.get("wiki_path"),
+            "pipeline_script": state.get("pipeline_script"),
+            "semantic_backend": state.get("semantic_backend"),
+        }),
+        "transitions_sha256": _canonical_hash(transition_trace),
+        "artifacts": artifacts,
+        "validator_receipts_sha256": _canonical_hash(receipt_values),
+    }
+    body["receipt_hash"] = _canonical_hash(body)
+    return body
+
+
+def verify_receipt(state: dict, repo: Path | None = None) -> dict:
+    """Recompute the final receipt; stale or tampered receipts fail closed."""
+    current = build_verification_receipt(state, repo)
+    stored = state.get("verification_receipt")
+    if current["status"] != "PASS":
+        return current
+    if not isinstance(stored, dict) or stored.get("schema") != VERIFICATION_RECEIPT_VERSION:
+        return {**current, "status": "INCOMPLETE", "error": "verification receipt missing"}
+    if stored.get("receipt_hash") != current.get("receipt_hash"):
+        return {**current, "status": "FAILED", "error": "verification receipt mismatch"}
+    return current
 
 
 def classify_failure(state: dict) -> dict | None:
@@ -231,6 +409,7 @@ def output_payload(state: dict, payload: dict) -> dict:
         result["transaction_id"] = transaction_id
         result["transaction_ids"] = [transaction_id]
         result["state_ref"] = f"temp/inbox-state/{transaction_id}.json"
+        result["runtime_status_ref"] = f"temp/inbox-state/{transaction_id}.status.md"
     next_actions = result.get("next_actions")
     if not next_actions and result.get("next_action"):
         next_actions = {"resume": result["next_action"]}
@@ -238,11 +417,60 @@ def output_payload(state: dict, payload: dict) -> dict:
         next_actions = result["agent_task"].get("commands")
     if next_actions:
         result["next_actions"] = next_actions
+    if state.get("verification_receipt"):
+        result["verification_receipt"] = state["verification_receipt"]
     failure = ((state.get("telemetry") or {}).get("current_failure")
                or classify_failure(state))
     if failure:
         result["failure_disposition"] = failure
     return result
+
+
+def operation_view(state: dict, repo: Path | None = None) -> dict:
+    """Return a read-only, content-agnostic view of one persisted ingest run."""
+    status = validate_status(state)
+    workflow_status = public_workflow_status(state)
+    task = state.get("agent_task") if isinstance(state.get("agent_task"), dict) else {}
+    commands = dict(task.get("commands") or {})
+    if workflow_status in {"completed", "failed"}:
+        next_action = "none"
+    elif task.get("schema") == "agent-task-v1":
+        next_action = "write_outputs"
+        if all(
+            not item.get("required", True)
+            or ((Path(repo or REPO) / str(item.get("path") or "")).is_file()
+                and (Path(repo or REPO) / str(item.get("path") or "")).stat().st_size > 0)
+            for item in task.get("outputs") or []
+        ):
+            next_action = "advance"
+    elif state.get("next_action"):
+        next_action = str(state["next_action"])
+    elif status == "graph_ready":
+        next_action = "commit"
+    else:
+        next_action = "resume"
+    view = {
+        "schema": OPERATION_VIEW_VERSION,
+        "transaction_id": str(state.get("transaction_id") or ""),
+        "workflow_status": workflow_status,
+        "internal_status": status,
+        "terminal": workflow_status in {"completed", "failed"},
+        "committed": status == "completed",
+        "state_ref": f"temp/inbox-state/{state.get('transaction_id', '')}.json",
+        "runtime_status_ref": (
+            f"temp/inbox-state/{state.get('transaction_id', '')}.status.md"
+        ),
+        "next_action": next_action,
+        "allowed_actions": sorted(commands),
+        "artifact_refs": _artifact_refs(state, {}),
+    }
+    failure = ((state.get("telemetry") or {}).get("current_failure")
+               or classify_failure(state))
+    if failure:
+        view["failure_disposition"] = failure
+    if state.get("verification_receipt"):
+        view["verification_receipt"] = state["verification_receipt"]
+    return view
 
 
 def batch_output_payload(*, items: list[dict], status: str, phase: str,
@@ -291,8 +519,7 @@ def batch_output_payload(*, items: list[dict], status: str, phase: str,
         "workflow_status": workflow_status,
         "terminal": workflow_status in {"completed", "failed"},
         "committed": bool(normalized) and all(
-            item.get("committed") or item.get("internal_status") == "duplicate_found"
-            for item in normalized
+            bool(item.get("committed")) for item in normalized
         ),
         "transaction_ids": transaction_ids,
         "artifact_refs": {},
@@ -306,6 +533,71 @@ def batch_output_payload(*, items: list[dict], status: str, phase: str,
 
 def state_path(transaction_id: str) -> Path:
     return REPO / "temp" / "inbox-state" / f"{transaction_id}.json"
+
+
+def runtime_status_path(transaction_id: str) -> Path:
+    return REPO / "temp" / "inbox-state" / f"{transaction_id}.status.md"
+
+
+def _runtime_status_document(state: dict) -> str:
+    """Render a bounded, overwrite-only progress view for low-frequency inspection."""
+    status = str(state.get("status") or "unknown")
+    errors = state.get("errors") or []
+    if isinstance(errors, str):
+        errors = [errors]
+    if status in {"completed", "duplicate_found", "superseded"}:
+        signal, next_check = "done", 0
+    elif errors or status in {
+            "failed", "validation_error", "type_mismatch", "classification_required",
+            "bibliographic_review_required", "agent_required", "prepared"}:
+        signal, next_check = "attention", 0
+    else:
+        signal, next_check = "running", 60
+    stage_events = {
+        "extract": "PDF extraction running (MinerU when configured)",
+        "write_wiki": "Wiki drafting or validation running",
+        "write_slots": "Semantic extraction or validation running",
+        "update_graph": "Graph update running",
+        "validate_graph": "Graph validation running",
+        "completed": "Ingest completed",
+        "duplicate_found": "Exact duplicate closed without a new commit",
+        "superseded": "Transaction superseded by a completed same-source transaction",
+    }
+    event = str(
+        errors[-1] if errors else state.get("next_action")
+        or stage_events.get(status) or status
+    )
+    event = " ".join(event.split())[:120]
+    transaction_id = str(state.get("transaction_id") or "")
+    log_ref = f"temp/inbox-state/{transaction_id}.log"
+    state_ref = f"temp/inbox-state/{transaction_id}.json"
+    return (
+        "# Ingest runtime status\n\n"
+        f"- transaction: `{transaction_id}`\n"
+        f"- signal: `{signal}`\n"
+        f"- stage: `{status}`\n"
+        f"- updated_at: `{state.get('updated_at', '')}`\n"
+        f"- event: {event}\n"
+        f"- next_check_after_seconds: `{next_check}`\n"
+        f"- details: `{state_ref}`; log: `{log_ref}`\n"
+    )
+
+
+def _write_runtime_status(state: dict) -> Path:
+    path = runtime_status_path(str(state.get("transaction_id") or ""))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _runtime_status_document(state)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    finally:
+        if os.path.exists(temp_name):
+            os.remove(temp_name)
+    return path
 
 
 def _source_hash(state: dict) -> str | None:
@@ -388,9 +680,39 @@ def load(transaction_id: str) -> dict | None:
 def save(transaction_id: str, state: dict) -> Path:
     validate_status(state)
     state["transaction_id"] = transaction_id
+    path = state_path(transaction_id)
+    previous_status = ""
+    if path.is_file():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"cannot validate previous ingest state: {exc}") from exc
+        previous_status = validate_status(previous)
+    current_status = str(state["status"])
+    pending = state.get("_pending_transition")
+    if previous_status and previous_status != current_status:
+        if not _transition_allowed(previous_status, current_status):
+            raise ValueError(
+                f"illegal persisted ingest transition: {previous_status} -> {current_status}"
+            )
+        if isinstance(pending, dict):
+            if pending.get("from") != previous_status or pending.get("to") != current_status:
+                raise ValueError(
+                    f"ingest transition receipt mismatch: {previous_status} -> {current_status}"
+                )
+        else:
+            state["_pending_transition"] = {
+                "protocol_version": STATE_PROTOCOL_VERSION,
+                "from": previous_status,
+                "to": current_status,
+                "reason": "persisted_forward_transition",
+            }
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
     _record_telemetry(state)
-    path = state_path(transaction_id)
+    if current_status in {"completed", "duplicate_found"}:
+        state["verification_receipt"] = build_verification_receipt(state)
+    else:
+        state.pop("verification_receipt", None)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
@@ -411,7 +733,60 @@ def save(transaction_id: str, state: dict) -> Path:
     finally:
         if os.path.exists(temp_name):
             os.remove(temp_name)
+    try:
+        _write_runtime_status(state)
+    except OSError:
+        # Observability must not invalidate an already durable ingest state.
+        pass
     return path
+
+
+def find_resumable_transaction(source: str, pipeline_script: str, *,
+                               semantic_backend: str = "") -> dict | None:
+    """Find the only compatible uncommitted transaction for an inbox source.
+
+    Source path alone is not an identity: the live file hash, pipeline owner and
+    (once selected) semantic backend must agree. Multiple matches fail closed so
+    the caller cannot choose an arbitrary branch of transaction history.
+    """
+    relative = Path(str(source or ""))
+    if (not source or relative.is_absolute() or ".." in relative.parts
+            or not pipeline_script):
+        raise ValueError("invalid source transaction lookup")
+    source_path = (REPO / relative).resolve()
+    try:
+        source_path.relative_to(REPO.resolve())
+    except ValueError as exc:
+        raise ValueError("source transaction lookup escapes repository") from exc
+    if not source_path.is_file():
+        return None
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    states_root = REPO / "temp" / "inbox-state"
+    matches = []
+    terminal = {"completed", "duplicate_found", "superseded"}
+    for path in sorted(states_root.glob("*.json")) if states_root.is_dir() else []:
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            status = validate_status(state)
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        if status in terminal:
+            continue
+        if state.get("source") != relative.as_posix():
+            continue
+        if state.get("pipeline_script") != pipeline_script:
+            continue
+        recorded_backend = str(state.get("semantic_backend") or "")
+        if semantic_backend and recorded_backend and recorded_backend != semantic_backend:
+            continue
+        recorded_hash = str((state.get("telemetry") or {}).get("source_hash") or "")
+        if not recorded_hash or recorded_hash != source_hash:
+            continue
+        matches.append(state)
+    if len(matches) > 1:
+        ids = ", ".join(str(item.get("transaction_id") or "") for item in matches)
+        raise ValueError(f"ambiguous same-source transactions: {ids}")
+    return matches[0] if matches else None
 
 
 def supersede_transaction(transaction_id: str, completed_by: str) -> dict:
@@ -426,7 +801,8 @@ def supersede_transaction(transaction_id: str, completed_by: str) -> dict:
     replacement = load(completed_by)
     if stale is None or replacement is None:
         raise ValueError("supersede requires two existing transactions")
-    if stale.get("status") not in {"prepared", "agent_required", "validation_error"}:
+    if stale.get("status") not in {
+            "extract", "prepared", "agent_required", "validation_error"}:
         raise ValueError("only an uncommitted review transaction may be superseded")
     if replacement.get("status") not in {"completed", "duplicate_found"}:
         raise ValueError("replacement transaction is not complete")
@@ -434,8 +810,12 @@ def supersede_transaction(transaction_id: str, completed_by: str) -> dict:
         raise ValueError("supersede transactions do not reference the same source")
     stale_hash = str((stale.get("telemetry") or {}).get("source_hash") or "")
     replacement_hash = str((replacement.get("telemetry") or {}).get("source_hash") or "")
-    if stale_hash and replacement_hash and stale_hash != replacement_hash:
+    if not stale_hash or not replacement_hash:
+        raise ValueError("supersede requires non-empty source hashes")
+    if stale_hash != replacement_hash:
         raise ValueError("supersede transactions have different source hashes")
+    if (stale.get("verification_receipt") or {}).get("committed"):
+        raise ValueError("committed transaction cannot be superseded")
     transition(
         stale, "superseded", reason=f"completed_by:{completed_by}",
         allowed_targets={"superseded"},

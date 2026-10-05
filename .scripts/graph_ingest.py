@@ -1936,6 +1936,8 @@ def _is_proposition_slot(name, triple, key):
         # 谓词本身已定义语义角色（局限性/创新点/展望 = 论断），直接判 proposition
         # 不走 has_predicate_structure（只认中文触发词，漏 NP-hard 等英文谓词含义）
         return True
+    if pred in CONCEPT_KW_PREDICATES and key == "object":
+        return False
     # 会议决策谓词的 object 是论断（会议说了什么），作 proposition 节点
     if pred == "决策" and key == "object":
         return True
@@ -1984,6 +1986,7 @@ def _build_subgraph(triples, page_path):
         # 描述性短语审计（非阻断）：结构性谓词+命题谓词跳过
         # ADR-003: 命题谓词(核心创新点/局限性/未来展望/决策)的 object 本身是论断,跳过
         if pred not in STRUCTURAL_PREDICATES and pred not in PROPOSITION_PREDICATES \
+                and pred not in CONCEPT_KW_PREDICATES \
                 and pred not in TITLE_OBJECT_PREDICATES and pred != "决策" \
                 and is_descriptive_phrase(obj_raw):
             warns.append({"subject": t.get("subject", ""), "predicate": pred,

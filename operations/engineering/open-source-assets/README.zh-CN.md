@@ -71,6 +71,41 @@ Wiki 与图是并列的编译界面。Wiki 在来源资料和结构化导航之�
 边和 Hub 表达不断演化的知识结构，使人在结构中移动更加容易。事实性回答最终
 仍回到保留的来源记录。
 
+### ASKS 与检索的关系
+
+ASKS 不替代检索，而是治理检索前后的知识生命周期：保存证据、保留可修订解释、
+维护导航与研究状态，并把成果发布为可复用产物。
+
+| 关注点 | 检索系统通常提供 | Ran-ASKS 增加的能力 |
+| --- | --- | --- |
+| 寻找上下文 | 排序后的片段或记录 | 持久 Wiki 与图导航界面 |
+| 证据 | 检索文本和引用 | 回到保留来源的稳定 locator |
+| 修订 | 重新索引或生成 | 显式、受管的解释与状态更新 |
+| Agent 工作 | 请求或会话执行 | 类型化接力、校验、事务和回滚 |
+
+### 安装与首次成功体验
+
+支持基线为 Python 3.12 与 [`uv`](https://docs.astral.sh/uv/)。默认环境保持精简，
+不会调用模型或网络：
+
+```bash
+git clone https://github.com/ranshiju/Ran-ASKS.git
+cd Ran-ASKS
+uv sync --frozen
+uv run ran-asks doctor
+uv run ran-asks demo
+```
+
+synthetic demo 从临时 Graph 导航边进入 Wiki 解释，再回到精确 Raw 摘录，不写生产
+知识库。参与开发时使用 `uv sync --frozen --extra release` 和
+`uv run ran-asks test foundation`。`pdf`、`office`、`analysis`、`visual` 等能力
+extra 避免把无关解析与渲染依赖装入 Core 环境。
+
+已持久化的摄入事务可通过 `wg.py task status`、`next` 和 `verify` 只读查看。最终回执
+绑定协议状态、转换轨迹、validator 回执和声明产物哈希，但不声称 Wiki 解释一定被来源
+语义蕴含。foundation 测试还会运行离线合成的弱模型治理试卷，覆盖畸形输出、缺失证据、
+提示注入和 fallback 轨迹完整性。
+
 ## 图片文档与带复核的摄入
 
 单帧文字型图片现在通过可复用、绑定原图哈希的 OCR 工具处理。原图与同名 Markdown
@@ -88,8 +123,9 @@ Agent 模式由当前宿主控制流程，API 模式由程序控制，两者共�
 操作入口及状态含义见[图片 OCR 与复核契约](operations/IMAGE_OCR.md)和
 [收件箱流程](operations/INBOX.md)。
 
-2026年9月8日更新将 `main` 的能力边界提升至 `v0.5.0`，不创建新标签或 Release，
-也不改变冻结论文产物。以后每批实际公开更新由 Agent 按功能与兼容性自动判断
+2026年9月8日更新曾将 `main` 的能力边界提升至 `v0.5.0`，当时未创建标签或 Release，
+也未改变冻结论文产物。从 `v0.12.0` 起，每个已发布 public-tree 版本都有不可变 Git
+标签；GitHub Release 只用于明确的里程碑或论文归档。每批实际公开更新由 Agent 按功能与兼容性自动判断
 PATCH／MINOR／MAJOR，不按文件数或行数排号；脚本记录依据、同步 Changelog，
 发布校验拒绝同版本或倒退更新。同批次重建不重复升版，详见
 [发布规范](operations/engineering/open-source-release.md)。公开仓库只包含通用实现
@@ -181,8 +217,9 @@ Agent 模式准备好的摄入事务现在可以用同一个 transaction ID 跨�
 与 payload 哈希写入 `RELEASE_PROVENANCE.json`，然后在保留公开仓库 Git 元数据的
 前提下事务性安装；安装失败会恢复旧树。
 
-发布前还会核对远端 URL、分支以及 ahead／behind 状态。推送必须显式授权，且在完成后
-对照远端 commit，不使用 force push，也不自动创建标签或 GitHub Release。GitHub Actions
+发布前还会核对远端 URL、分支以及 ahead／behind 状态。推送必须显式授权；分支与不可变
+版本标签原子推送并对照远端 commit，不使用 force push。GitHub Release 仍是独立的里程碑
+或论文归档动作。GitHub Actions
 会在 pull request 和 `main` 上重复执行发布边界、工程图、回归和冻结论文产物校验。
 中文介绍 PDF 还会逐页检查可提取文本、缺字标记和非空渲染。从本版本起，Changelog
 更新内容和语义版本判断同时使用英文与中文。
@@ -206,8 +243,8 @@ Ran-ASKS 维护者负责。
 
 ## 论文与代码版本
 
-`main` 分支持续开发，因此仓库可能比论文更新得更快。每个与论文对应的实现
-版本都会保存为不可变的 Git 标签和 GitHub Release。
+`main` 分支持续开发，因此仓库可能比论文更新得更快。从 `v0.12.0` 起，每个公开版本
+都有不可变 Git 标签；与论文对应的实现另外创建 GitHub Release 和冻结产物边界。
 
 | 论文版本 | Ran-ASKS 版本 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
@@ -305,16 +342,10 @@ python3 paper-artifacts/v0.2.1/verify.py
 才能被准确理解时调用；普通文字编辑和编译不会自动触发。参见
 `operations/VISUAL_QA.md` 和 `operations/VISUAL_TO_EDITABLE_PPT.md`。
 
-## 快速开始
+## 使用真实材料
 
-```bash
-git clone https://github.com/ranshiju/Ran-ASKS.git
-cd Ran-ASKS
-cp .env.example .env
-python3 .scripts/engineering_graph.py validate
-```
-
-只有需要模型的工作流才需要在 `.env` 中配置模型后端。摄入编排由独立的
+只有所选工作流需要模型或远程提取后端时，才把 `.env.example` 复制为 `.env`。
+摄入编排由独立的
 `INGEST_BACKEND` 选择；API 摄入还可以通过 `INGEST_GENERATION_*` 和
 `INGEST_PROPOSITION_*` 分别设置生成模型与命题抽取模型，未设置时复用主 LLM。
 可选漫画生成使用 `COMIC_IMAGE_*`、已登记图片模型，并要求每次真实调用显式传入
@@ -354,12 +385,14 @@ ASKS 是论文讨论的完整科学知识系统。部分内部路径和文档仍
 
 ## 验证
 
-修改后可以运行以下重点检查：
+修改 Core 后运行稳定的 foundation profile：
 
 ```bash
-python3 .scripts/test_prompt_audit.py
-python3 .scripts/engineering_graph.py validate
+uv run ran-asks test foundation
 ```
+
+`uv run ran-asks test release` 复现公开 CI 门禁，`uv run ran-asks test all` 发现全部
+确定性 Python 回归。日常建设任务仍由工程影响分析选择最小相关测试集合。
 
 公开版本构建与隐私审计参见
 `operations/engineering/open-source-release.md`。

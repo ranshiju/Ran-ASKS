@@ -93,7 +93,7 @@ BIBLIOGRAPHIC_VALIDATOR_VERSION = "candidate-id-validator-v2"
 WIKI_VALIDATOR_VERSION = "paper-wiki-validator-v1"
 SEMANTIC_VALIDATOR_VERSION = "paper-semantic-validator-v3"
 GRAPH_PREFLIGHT_VALIDATOR_VERSION = "graph-plan-preflight-v1"
-BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v6"
+BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v7"
 API_WORKSPACE_OPERATION = "ingest_paper_workspace"
 BIBLIOGRAPHIC_AUTHOR_SHAPE_EXAMPLE = (
     '"authors": {"accepted_ids": [], "rejected_ids": [], "proposed": [], '
@@ -165,6 +165,10 @@ def _workspace_managed_by_agent(state: dict) -> bool:
         workspace.get("protocol_version") == AGENT_WORKSPACE_PROTOCOL
         and str(workspace.get("execution_backend") or "agent") == "agent"
     )
+
+
+def _has_paper_workspace(state: dict) -> bool:
+    return (state.get("agent_workspace") or {}).get("protocol_version") == AGENT_WORKSPACE_PROTOCOL
 
 
 def is_valid_predicate_candidate(predicate: str) -> bool:
@@ -1118,7 +1122,8 @@ def _layout_venue_candidates(blocks: list[dict], doi: str = "", year: str = "") 
         r"\b(?:Proceedings|Findings)\s+of\s+.+?(?=,\s*(?:pages?|pp\.?|vol\.?|volume)\b|$)",
         r"\bPhysical\s+Review\s+(?:Letters|[A-E]|X|Research|Applied)\b",
         r"\b(?:Nature|Science|Cell)(?:\s+[A-Z][A-Za-z-]+){0,4}\b",
-        r"\bJournal\s+of\s+[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,8}\b",
+        r"\bJournal\s+of\s+[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,8}"
+        r"(?::\s*[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,8})?\b",
         r"\b(?:IEEE|ACM)\s+(?:Transactions|Journal|Proceedings|Conference)\b[^\n,;]{0,100}",
     )
     for block in blocks:
@@ -1138,8 +1143,20 @@ def _layout_venue_candidates(blocks: list[dict], doi: str = "", year: str = "") 
     return found
 
 
+def _layout_doi_candidates(blocks: list[dict]) -> list[dict]:
+    found = []
+    seen = set()
+    for block in blocks:
+        doi = extract_doi(str(block.get("text") or ""))
+        key = doi.casefold()
+        if doi and key not in seen:
+            seen.add(key)
+            found.append({"value": doi, "evidence": block["evidence"]})
+    return found
+
+
 def _layout_bibliographic_candidates(blocks: list[dict], title: str = "") -> dict:
-    result = {"authors": [], "affiliations": [], "dates": [], "venues": []}
+    result = {"authors": [], "affiliations": [], "dates": [], "venues": [], "dois": []}
     if not blocks:
         return result
     title_key = _bibliographic_text_key(title)
@@ -1193,6 +1210,8 @@ def _layout_bibliographic_candidates(blocks: list[dict], title: str = "") -> dic
     result["affiliations"] = list({
         (item["value"], item["evidence"]): item for item in result["affiliations"]
     }.values())
+    result["dois"] = _layout_doi_candidates(blocks)
+    result["venues"] = _layout_venue_candidates(blocks)
     return result
 
 
@@ -1515,6 +1534,11 @@ def load_bibliographic_metadata(raw_dir: Path) -> dict:
             merged[key] = value
     if detected.get("evidence") and not review_locked:
         merged["evidence"] = detected["evidence"]
+    # Locked scalars remain authoritative until the bibliography gate decides again,
+    # but deterministic PDF evidence must follow the current candidate provider.
+    for key in ("front_matter_blocks", "layout_candidates"):
+        if detected.get(key):
+            merged[key] = detected[key]
     if detected.get("first_page_evidence"):
         merged["first_page_evidence"] = detected["first_page_evidence"]
     return merged
@@ -1629,6 +1653,18 @@ def bibliographic_quality_warnings(bibliography: dict, md_text: str) -> list[dic
 
 
 def _sync_quality_status(state: dict) -> str:
+    history = state.setdefault("quality_warning_history", [])
+    seen = {
+        json.dumps(item, ensure_ascii=False, sort_keys=True)
+        for item in history if isinstance(item, dict)
+    }
+    for warning in state.get("quality_warnings", []):
+        if not isinstance(warning, dict):
+            continue
+        key = json.dumps(warning, ensure_ascii=False, sort_keys=True)
+        if key not in seen:
+            history.append(dict(warning))
+            seen.add(key)
     status = "degraded" if state.get("quality_warnings") else "complete"
     state["quality_status"] = status
     return status
@@ -1750,6 +1786,7 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
     identity_region = bibliographic_identity_region(md_text)
     layout_dates = list(layout.get("dates") or [])
     layout_venues = list(layout.get("venues") or [])
+    layout_dois = list(layout.get("dois") or [])
     return {
         "doc_type": "paper",
         "title": _unique_nonempty([
@@ -1769,7 +1806,11 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
             + _acm_reference_venue_candidates(md_text)
             + _first_page_venue_candidates(first_page_evidence)
         ),
-        "doi": _unique_nonempty([bibliography.get("doi"), extract_doi(identity_region)]),
+        "doi": _unique_nonempty(
+            [bibliography.get("doi")]
+            + [item.get("value") for item in layout_dois]
+            + [extract_doi(identity_region)]
+        ),
         "arxiv_id": _unique_nonempty(
             [bibliography.get("arxiv_id"), extract_arxiv_id(identity_region)]
         ),
@@ -1785,6 +1826,7 @@ def build_bibliographic_candidates(bibliography: dict | None, md_text: str) -> d
                 for item in layout_dates
             ],
             "venue": layout_venues,
+            "doi": layout_dois,
         },
         "excluded_affiliations": list(layout.get("affiliations") or []),
     }
@@ -1928,6 +1970,7 @@ def _candidate_evidence(value: str, field: str, bibliography: dict, md_text: str
             if str(evidence).startswith("pdf_layout_front_matter"):
                 layout_field = {
                     "authors": "authors", "year": "dates", "venue": "venues",
+                    "doi": "dois",
                 }.get(field)
                 layout_items = (
                     (bibliography.get("layout_candidates") or {}).get(layout_field, [])
@@ -1941,7 +1984,9 @@ def _candidate_evidence(value: str, field: str, bibliography: dict, md_text: str
                         return exact
             return str(evidence)
         return "pdf_metadata"
-    layout_field = {"authors": "authors", "year": "dates", "venue": "venues"}.get(field)
+    layout_field = {
+        "authors": "authors", "year": "dates", "venue": "venues", "doi": "dois",
+    }.get(field)
     if layout_field:
         for item in (bibliography.get("layout_candidates") or {}).get(layout_field) or []:
             if str(item.get("value") or "").strip() == value:
@@ -4051,6 +4096,7 @@ def execute_api_paper_workspace(
         "draft_path": str(review_path.relative_to(REPO)),
     }
     state["status"] = "prepared"
+    inbox_state.save(state["transaction_id"], state)
     prompt = build_api_paper_workspace_prompt(
         paper_md.read_text(encoding="utf-8"),
         paper_md,
@@ -4228,9 +4274,53 @@ def refresh_agent_workspace_handoff(
     return True
 
 
+def _refresh_managed_workspace_bundle_baseline(state: dict) -> dict | None:
+    """Rebind legacy workspaces after the managed bibliography manifest rewrite."""
+    workspace = state.get("agent_workspace") or {}
+    if (state.get("status") not in {"prepared", "agent_required"}
+            or workspace.get("protocol_version") != AGENT_WORKSPACE_PROTOCOL
+            or workspace.get("status") != "awaiting_output"):
+        return None
+    output_path = REPO / str(workspace.get("output_path") or "")
+    state_bundle = str(state.get("artifact_bundle_sha256") or "")
+    workspace_bundle = str(workspace.get("artifact_bundle_sha256") or "")
+    if (not output_path.is_file() or not state_bundle or not workspace_bundle
+            or state_bundle == workspace_bundle):
+        return None
+    extract_dir = REPO / str(state.get("extract_dir") or "")
+    try:
+        current_bundle = _current_artifact_bundle_sha256(extract_dir)
+        source = yaml.safe_load(
+            (extract_dir / "source.yaml").read_text(encoding="utf-8")
+        ) or {}
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
+        return None
+    if (current_bundle != state_bundle
+            or source.get("bibliographic") != state.get("bibliographic_meta")):
+        return None
+    workspace["artifact_bundle_sha256"] = state_bundle
+    state["agent_workspace"] = workspace
+    entry = {
+        "refreshed_at": datetime.now().isoformat(timespec="seconds"),
+        "reason": "managed_bibliographic_manifest_rebase",
+        "from_artifact_bundle_sha256": workspace_bundle,
+        "to_artifact_bundle_sha256": state_bundle,
+    }
+    state.setdefault("workspace_refresh_history", []).append(entry)
+    state["errors"] = []
+    return entry
+
+
 def explicit_agent_workspace_refresh(state: dict) -> dict:
     """Archive stale unsubmitted output and refresh the same typed workspace."""
     transaction_id = str(state.get("transaction_id") or "")
+    managed_rebase = _refresh_managed_workspace_bundle_baseline(state)
+    if managed_rebase:
+        inbox_state.save(transaction_id, state)
+        payload = read_agent_workspace(state)
+        payload["refreshed"] = True
+        payload["refresh_receipt"] = managed_rebase
+        return payload
     previous_errors = list(state.get("errors") or [])
     if not refresh_agent_workspace_handoff(state, archive_existing_output=True):
         diagnostics = list(state.get("errors") or ["workspace refresh 不适用于当前事务"])
@@ -4365,7 +4455,9 @@ def resume_agent_workspace(
         return False
     persist_bibliographic_metadata(paper_md.parent, state.get("bibliographic_meta"))
     if (paper_md.parent / "paper.pdf").is_file():
-        _write_paper_artifact_manifest(state, paper_md.parent)
+        workspace["artifact_bundle_sha256"] = _write_paper_artifact_manifest(
+            state, paper_md.parent,
+        )
     combined_path = REPO / state["extract_dir"] / "agent-wiki-slots.txt"
     materialized_wiki = state.get("wiki_content", "") if repair_scope == "slots" else wiki
     combined_path.write_text(
@@ -4591,6 +4683,7 @@ def agent_workspace_commit_payload(state: dict) -> dict:
         "graph_report": state.get("graph_report"),
         "quality_status": state.get("quality_status") or _sync_quality_status(state),
         "quality_warnings": state.get("quality_warnings", []),
+        "quality_warning_history": state.get("quality_warning_history", []),
     })
 
 
@@ -4778,6 +4871,17 @@ def reopen_agent_workspace(state: dict, stage: str, errors: list[str]) -> None:
     if repair_scope != "slots":
         state["wiki_content"] = ""
     state["slots_content"] = ""
+
+
+def handoff_after_semantic_recovery(
+    state: dict, errors: list[str], recovery_message: str,
+) -> None:
+    """Keep workspace-backed repairs on their single declared output artifact."""
+    if _has_paper_workspace(state):
+        reopen_agent_workspace(state, "语义结构", errors)
+    else:
+        ic.stop_for_semantic_errors(state, errors, _resume_cmd(state))
+    state["semantic_recovery_message"] = recovery_message
 
 
 def record_legacy_paper_meta(state: dict, text: str) -> None:
@@ -5391,7 +5495,8 @@ def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
                     "reason": "主体含逗号/句号等标点，应为规范概念名/实体名",
                     "is_triple": is_triple,
                 })
-            if (obj and pred not in graph_ingest.PROPOSITION_PREDICATES
+            if (obj and pred not in (graph_ingest.PROPOSITION_PREDICATES
+                                     | graph_ingest.CONCEPT_KW_PREDICATES)
                     and is_clearly_descriptive(obj)):
                 slot_warnings.append({
                     "section": source_section or find_slot_section(pred, sem_text, obj),
@@ -5816,6 +5921,7 @@ def _refresh_completed_derived_quality(state: dict) -> bool:
     before = json.dumps({
         "quality_status": state.get("quality_status"),
         "quality_warnings": state.get("quality_warnings", []),
+        "quality_warning_history": state.get("quality_warning_history", []),
     }, ensure_ascii=False, sort_keys=True)
     _record_bibliographic_quality_warnings(
         state, paper_md.read_text(encoding="utf-8"),
@@ -5824,6 +5930,7 @@ def _refresh_completed_derived_quality(state: dict) -> bool:
     after = json.dumps({
         "quality_status": state.get("quality_status"),
         "quality_warnings": state.get("quality_warnings", []),
+        "quality_warning_history": state.get("quality_warning_history", []),
     }, ensure_ascii=False, sort_keys=True)
     if before != after:
         inbox_state.save(state["transaction_id"], state)
@@ -5843,6 +5950,10 @@ def step_update_graph(state: dict) -> tuple[bool, str]:
 def resume_after_semantic_fix(state: dict) -> bool:
     """Load a hand-fixed semantic file and resume from commit validation."""
     if state.get("status") != "agent_required":
+        return False
+    workspace = state.get("agent_workspace") or {}
+    if (workspace.get("protocol_version") == AGENT_WORKSPACE_PROTOCOL
+            and workspace.get("status") == "awaiting_output"):
         return False
     if (state.get("_awaiting_agent_wiki_slots") or state.get("_awaiting_agent_slots")
             or (state.get("bibliographic_review") or {}).get("status") == "agent_required"
@@ -6216,8 +6327,7 @@ def run_prepare(state: dict) -> dict:
                 inbox_state.save(state["transaction_id"], state)
                 break
             progress(f"  ↳ 语义槽结构错误 {len(sem_hard)} 个，停止重复生成并交接修复", flush=True)
-            ic.stop_for_semantic_errors(state, sem_hard, _resume_cmd(state))
-            state["semantic_recovery_message"] = recovery_msg
+            handoff_after_semantic_recovery(state, sem_hard, recovery_msg)
             inbox_state.save(state["transaction_id"], state)
             return state
     # 落位
@@ -6234,6 +6344,9 @@ def run_prepare(state: dict) -> dict:
             record_agent_workspace_validation(state, graph_preflight)
             inbox_state.save(state["transaction_id"], state)
             progress("通过（live graph 已回滚）", flush=True)
+        if state.get("reingest") and state["status"] == "finalize":
+            state["status"] = "propositions"
+            inbox_state.save(state["transaction_id"], state)
         # 3.6c 子图构建：保留完整命题；概念链接由 graph_ingest 唯一精确匹配。
         step_extract_propositions(state)
         inbox_state.save(state["transaction_id"], state)
@@ -6327,6 +6440,7 @@ def _batch_item_payload(state: dict) -> dict:
         "semantic_repair_worker": state.get("semantic_repair_worker"),
         "quality_status": state.get("quality_status") or _sync_quality_status(state),
         "quality_warnings": state.get("quality_warnings", []),
+        "quality_warning_history": state.get("quality_warning_history", []),
         "execution_backend": (
             (state.get("agent_workspace") or {}).get("execution_backend")
             or state.get("execution_backend")
@@ -6707,6 +6821,7 @@ def _run_phase(state: dict, verbose: bool, fn) -> dict:
     try:
         state = fn(state)
     except Exception as exc:
+        state.pop("_pending_transition", None)
         state["status"] = "failed"
         state["errors"] = [f"未预期异常: {type(exc).__name__}: {exc}"]
         inbox_state.save(state["transaction_id"], state)
@@ -6759,6 +6874,7 @@ def print_result(state: dict) -> None:
             "semantic_repair_worker": state.get("semantic_repair_worker"),
             "quality_status": state.get("quality_status") or _sync_quality_status(state),
             "quality_warnings": state.get("quality_warnings", []),
+            "quality_warning_history": state.get("quality_warning_history", []),
             "transaction_id": state["transaction_id"],
             "execution_backend": (
                 (state.get("agent_workspace") or {}).get("execution_backend")

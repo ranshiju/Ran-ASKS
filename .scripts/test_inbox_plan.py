@@ -62,10 +62,29 @@ def test_empty_facts_pending_is_not_a_fact_ingest():
         assert plan["items"][0]["fact_entries"] == 0
 
 
+def test_hidden_control_and_system_entries_are_not_planned():
+    with tempfile.TemporaryDirectory() as directory:
+        inbox = Path(directory) / "inbox"
+        inbox.mkdir()
+        (inbox / ".gitkeep").write_text("", encoding="utf-8")
+        (inbox / ".DS_Store").write_bytes(b"metadata")
+        (inbox / ".temporary-upload").write_bytes(b"partial")
+        (inbox / "paper.pdf").write_bytes(b"pdf")
+        old_repo = module.REPO
+        module.REPO = Path(directory)
+        try:
+            plan = module.build_plan(inbox)
+        finally:
+            module.REPO = old_repo
+        assert [item["path"] for item in plan["items"]] == ["inbox/paper.pdf"]
+        assert plan["routing"]["batch_eligible"] is False
+
+
 def main():
     test_one_pdf_is_create_not_batch()
     test_three_pdfs_are_batch_eligible()
     test_empty_facts_pending_is_not_a_fact_ingest()
+    test_hidden_control_and_system_entries_are_not_planned()
     print("inbox plan regression: PASS")
 
 

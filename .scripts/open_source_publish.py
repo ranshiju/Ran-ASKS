@@ -113,9 +113,11 @@ def assert_release_diff(destination: Path, staging: Path) -> set[str]:
     missing = required - changed
     if missing:
         raise PublishError("reader documentation is not synchronized: " + ", ".join(sorted(missing)))
-    ignored = release.git_ignored_files(destination, release.actual_files(staging))
+    ignored = release.prospective_git_ignored_files(
+        staging, release.actual_files(staging),
+    )
     if ignored:
-        raise PublishError("destination .gitignore hides release files: " + ", ".join(ignored))
+        raise PublishError("release .gitignore hides release files: " + ", ".join(ignored))
     return changed
 
 
@@ -161,6 +163,35 @@ def remote_commit(repository: Path, remote: str, branch: str) -> str:
     return fields[0]
 
 
+def version_tag(version: str) -> str:
+    if not release.VERSION_PATTERN.fullmatch(version):
+        raise PublishError(f"invalid release version: {version}")
+    return f"v{version}"
+
+
+def local_ref_exists(repository: Path, ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", ref], cwd=repository,
+        text=True, capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def remote_tag_commit(repository: Path, remote: str, tag: str) -> str:
+    output = git(repository, "ls-remote", remote, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
+    rows = [line.split() for line in output.splitlines() if line.strip()]
+    peeled = next((fields[0] for fields in rows if len(fields) == 2 and fields[1].endswith("^{}")), "")
+    direct = next((fields[0] for fields in rows if len(fields) == 2 and not fields[1].endswith("^{}")), "")
+    return peeled or direct
+
+
+def assert_tag_available(repository: Path, remote: str, tag: str) -> None:
+    if local_ref_exists(repository, f"refs/tags/{tag}"):
+        raise PublishError(f"release tag already exists locally: {tag}")
+    if remote_tag_commit(repository, remote, tag):
+        raise PublishError(f"release tag already exists on {remote}: {tag}")
+
+
 def publish(*, destination: Path, source_ref: str, remote: str, branch: str,
             expected_remote_url: str, message: str, push: bool, dry_run: bool) -> dict:
     destination = destination.resolve()
@@ -183,6 +214,8 @@ def publish(*, destination: Path, source_ref: str, remote: str, branch: str,
             "version": (staging / "VERSION").read_text(encoding="utf-8").strip(),
             "changed_paths": sorted(changed),
         }
+        plan["tag"] = version_tag(plan["version"])
+        assert_tag_available(destination, remote, plan["tag"])
         if dry_run:
             return plan
         release.install_release_tree(staging, destination)
@@ -196,13 +229,21 @@ def publish(*, destination: Path, source_ref: str, remote: str, branch: str,
     verify_public_tree(destination, include_regressions=False)
     commit = git(destination, "rev-parse", "HEAD")
     plan["commit"] = commit
+    run(["git", "tag", "-a", plan["tag"], "-m", f"Ran-ASKS {plan['tag']}", commit], cwd=destination)
     if push:
-        run(["git", "push", remote, f"HEAD:{branch}"], cwd=destination, capture=False)
+        run(
+            ["git", "push", "--atomic", remote, f"HEAD:{branch}", f"refs/tags/{plan['tag']}"],
+            cwd=destination, capture=False,
+        )
         confirmed = remote_commit(destination, remote, branch)
         if confirmed != commit:
             raise PublishError(f"remote confirmation mismatch: local={commit} remote={confirmed}")
+        confirmed_tag = remote_tag_commit(destination, remote, plan["tag"])
+        if confirmed_tag != commit:
+            raise PublishError(f"remote tag confirmation mismatch: local={commit} remote={confirmed_tag}")
         plan["status"] = "pushed"
         plan["remote_commit"] = confirmed
+        plan["remote_tag_commit"] = confirmed_tag
     return plan
 
 

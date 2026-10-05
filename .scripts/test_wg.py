@@ -169,6 +169,61 @@ def test_task_inspect_reports_missing_outputs_without_running_action():
     assert result["result"]["next_action"] == "write_outputs"
 
 
+def test_task_status_and_next_are_read_only_for_any_ingest_transaction():
+    state = {"status": "preprocess", "transaction_id": "txn", "errors": []}
+    original_load = module.inbox_state.load
+    module.inbox_state.load = lambda _txn: state
+    try:
+        status_args = type("A", (), {
+            "transaction_id": "txn", "task_action": "status", "task_command": "read",
+        })()
+        status = capture_call(module.cmd_task, status_args)
+        next_args = type("A", (), {
+            "transaction_id": "txn", "task_action": "next", "task_command": "read",
+        })()
+        next_result = capture_call(module.cmd_task, next_args)
+    finally:
+        module.inbox_state.load = original_load
+    assert status["result"]["schema"] == "ingest-operation-view-v1"
+    assert status["result"]["internal_status"] == "preprocess"
+    assert next_result["result"] == {
+        "schema": "ingest-next-action-v1",
+        "transaction_id": "txn",
+        "workflow_status": "awaiting_agent",
+        "internal_status": "preprocess",
+        "next_action": "resume",
+        "allowed_actions": [],
+        "artifact_refs": {},
+    }
+    assert state == {"status": "preprocess", "transaction_id": "txn", "errors": []}
+
+
+def test_task_verify_reports_pass_incomplete_and_mismatch():
+    original_load = module.inbox_state.load
+    original_verify = module.inbox_state.verify_receipt
+    try:
+        module.inbox_state.load = lambda _txn: {
+            "status": "completed", "transaction_id": "txn", "errors": [],
+        }
+        for receipt_status, expected_outer, expected_ok in (
+            ("PASS", "ok", True),
+            ("INCOMPLETE", "empty", False),
+            ("FAILED", "error", False),
+        ):
+            module.inbox_state.verify_receipt = lambda *_args, value=receipt_status: {
+                "schema": "verification-receipt-v1", "status": value,
+            }
+            args = type("A", (), {
+                "transaction_id": "txn", "task_action": "verify", "task_command": "read",
+            })()
+            result = capture_call(module.cmd_task, args)
+            assert result["status"] == expected_outer
+            assert result["ok"] is expected_ok
+    finally:
+        module.inbox_state.load = original_load
+        module.inbox_state.verify_receipt = original_verify
+
+
 def test_task_advance_checks_before_commit():
     state = {"status": "prepared", "transaction_id": "txn", "agent_task": {
         "schema": "agent-task-v1", "status": "prepared", "kind": "demo",
@@ -855,6 +910,12 @@ def main():
     test_collect_sources_empty()
     test_collect_sources_skips_missing_source()
     test_parser_has_all_subcommands()
+    test_task_inspect_reports_missing_outputs_without_running_action()
+    test_task_status_and_next_are_read_only_for_any_ingest_transaction()
+    test_task_verify_reports_pass_incomplete_and_mismatch()
+    test_task_advance_checks_before_commit()
+    test_task_advance_stops_after_rejected_check()
+    test_task_advance_requires_declared_outputs_before_running_action()
     test_cv_wrapper_preserves_json_and_failure_status()
     test_ingest_wrapper_routes_external_file_and_resume_through_inbox()
     test_parser_defaults()

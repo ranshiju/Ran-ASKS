@@ -490,15 +490,34 @@ def check_bibliographic_consistency(path, fm):
             break
     expected_year = published_year or str(bibliography.get("year") or "").strip()
     expected_venue = str(bibliography.get("venue") or "").strip()
-    if not expected_venue:
-        expected_venue = _aps_venue_from_doi(bibliography.get("doi"), expected_year)
+    venue_candidates = [expected_venue] if expected_venue else []
+    for item in (bibliography.get("layout_candidates") or {}).get("venues") or []:
+        if isinstance(item, dict) and str(item.get("value") or "").strip():
+            venue_candidates.append(str(item["value"]).strip())
+    # Older archived providers may have truncated layout_candidates while retaining
+    # the complete, immutable layout block. Exact normalized equality is evidence;
+    # substring or fuzzy matching is intentionally not accepted here.
+    wiki_venue_key = _venue_key(fm.get("venue"))
+    for block in bibliography.get("front_matter_blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        block_text = str(block.get("text") or "").strip()
+        if block_text and wiki_venue_key and _venue_key(block_text) == wiki_venue_key:
+            venue_candidates.append(block_text)
+    if not venue_candidates:
+        aps_venue = _aps_venue_from_doi(bibliography.get("doi"), expected_year)
+        if aps_venue:
+            venue_candidates.append(aps_venue)
+    venue_candidates = list(dict.fromkeys(venue_candidates))
     errors = []
     if re.fullmatch(r"(?:19|20)\d{2}", expected_year) and str(fm.get("date") or "") != expected_year:
         errors.append(
             f"bibliographic: wiki date={fm.get('date')} 与 published year={expected_year} 冲突")
-    if expected_venue and _venue_key(fm.get("venue")) != _venue_key(expected_venue):
+    if venue_candidates and wiki_venue_key not in {
+            _venue_key(candidate) for candidate in venue_candidates}:
         errors.append(
-            f"bibliographic: wiki venue='{fm.get('venue', '')}' 与 DOI/近端证据 '{expected_venue}' 冲突")
+            f"bibliographic: wiki venue='{fm.get('venue', '')}' 与 DOI/近端证据 "
+            f"'{venue_candidates[0]}' 冲突")
     return errors
 
 

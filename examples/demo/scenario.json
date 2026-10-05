@@ -1,0 +1,16 @@
+{
+  "schema": "ran-asks-demo-v1",
+  "question": "Why did Experiment B stop early?",
+  "answer": "Run B stopped after the chamber exceeded its safety threshold because the cooling fan cable had been disconnected.",
+  "page": "examples/demo/wiki/experiment-b",
+  "source_locator": "examples/demo/sources/experiment-notes.md#L7-L10",
+  "evidence_contains": [
+    "exceeded the 35 C safety threshold",
+    "cooling fan cable had been disconnected",
+    "stopped Run B at 14:20"
+  ],
+  "files": {
+    "sources/experiment-notes.md": "04050bbbc4fe51db839c08f32d61db8c2455e8d0b30c709d9c8a81787eaed3de",
+    "wiki/experiment-b.md": "29d1738bacf13ce758091a17cea5d87d76c362003fe4af5644e364a8d383796b"
+  }
+}

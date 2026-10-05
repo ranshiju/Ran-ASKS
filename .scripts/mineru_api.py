@@ -31,12 +31,21 @@ MAX_ARCHIVE_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024
 MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024
 RETRY_ATTEMPTS = 3
 RETRY_MAX_DELAY = 30.0
+REMOTE_JOB_RETRY_LIMIT = 1
 AUTH_CODES = {"A0202", "A0211", 401, 403}
 QUOTA_CODES = {-60017, -60018, -60019}
 INPUT_CODES = {-60005, -60006, -60012, -60013, -60014}
 UNSUPPORTED_CODES = {-60007, -60008}
 RETRYABLE_API_CODES = {-10001, -60001, -60009, -60020}
 RETRYABLE_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
+RETRYABLE_REMOTE_MESSAGE_MARKERS = (
+    "try again later",
+    "please retry",
+    "temporarily unavailable",
+    "temporary failure",
+    "稍后重试",
+    "请重试",
+)
 STATE_LABELS = {
     "waiting-file": "等待文件上传",
     "pending": "排队中",
@@ -71,6 +80,10 @@ class MinerUInputError(MinerUError):
 
 class MinerUTransientError(MinerUError):
     """A bounded retryable transport or service failure."""
+
+
+class MinerURetryableRemoteError(MinerUTransientError):
+    """An accepted remote job failed with an explicit retryable signal."""
 
 
 class MinerURemoteError(MinerUError):
@@ -131,6 +144,24 @@ def _error_for(operation: str, status: int, payload: dict[str, Any]) -> MinerUEr
     if status in RETRYABLE_HTTP_STATUSES or code in RETRYABLE_API_CODES:
         return MinerUTransientError(message, code=code, retryable=True)
     return MinerUError(message, code=code)
+
+
+def _is_retryable_remote_failure(code: Any, message: str) -> bool:
+    if code in RETRYABLE_API_CODES:
+        return True
+    if code not in (None, ""):
+        return False
+    normalized = message.casefold()
+    return any(marker in normalized for marker in RETRYABLE_REMOTE_MESSAGE_MARKERS)
+
+
+def _remote_failure_error(item: dict[str, Any]) -> MinerUError:
+    code = item.get("err_code") or item.get("code")
+    detail = str(item.get("err_msg") or item.get("message") or "未知错误")
+    message = f"MinerU 解析失败: {detail}"
+    if _is_retryable_remote_failure(code, detail):
+        return MinerURetryableRemoteError(message, code=code, retryable=True)
+    return MinerURemoteError(message, code=code)
 
 
 def _request_json(response: Any, operation: str) -> dict[str, Any]:
@@ -358,10 +389,7 @@ def poll_result(
             if state == "done":
                 return item
             if state == "failed":
-                code = item.get("err_code") or item.get("code")
-                raise MinerURemoteError(
-                    f"MinerU 解析失败: {item.get('err_msg', '未知错误')}", code=code
-                )
+                raise _remote_failure_error(item)
             progressed = marker != previous_progress
             previous_progress = marker
             current_interval = max(float(interval_sec), 0.0) if progressed else min(
@@ -585,11 +613,65 @@ def extract_pdf_bundle_with_mineru(
         })
         _atomic_write_json(checkpoint_path, checkpoint)
 
-    if checkpoint.get("status") == "remote_failed":
-        raise MinerURemoteError(
-            f"MinerU 任务已终态失败，batch_id={checkpoint.get('batch_id')}: "
-            f"{checkpoint.get('error', '未知错误')}"
+    def schedule_remote_retry(exc: MinerURetryableRemoteError) -> bool:
+        remote_failures = int(retry_state.get("remote_job", 0)) + 1
+        retry_state["remote_job"] = remote_failures
+        failed_batches = list(checkpoint.get("failed_batches") or [])
+        failed_batches.append({
+            "batch_id": checkpoint.get("batch_id"),
+            "error": str(exc),
+            "error_code": exc.code,
+            "failed_at": checkpoint.get("updated_at") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        })
+        if remote_failures > REMOTE_JOB_RETRY_LIMIT:
+            save(
+                status="remote_failed",
+                error=str(exc),
+                error_code=exc.code,
+                remote_retry_exhausted=True,
+                failed_batches=failed_batches,
+            )
+            return False
+        logger.warning(
+            "  MinerU 远端任务返回可重试失败；创建替代 batch (%d/%d)",
+            remote_failures,
+            REMOTE_JOB_RETRY_LIMIT,
         )
+        save(
+            status="retry_pending",
+            batch_id=None,
+            upload_url=None,
+            uploaded=False,
+            zip_url=None,
+            remote_result=None,
+            error=None,
+            error_code=None,
+            remote_retry_exhausted=False,
+            failed_batches=failed_batches,
+        )
+        return True
+
+    if checkpoint.get("status") == "remote_failed":
+        stored_error = str(checkpoint.get("error") or "未知错误")
+        stored_code = checkpoint.get("error_code")
+        if (
+            not checkpoint.get("remote_retry_exhausted")
+            and _is_retryable_remote_failure(stored_code, stored_error)
+        ):
+            retryable = MinerURetryableRemoteError(
+                stored_error, code=stored_code, retryable=True
+            )
+            if not schedule_remote_retry(retryable):
+                raise MinerURemoteError(
+                    f"MinerU 可重试远端失败已耗尽替代 batch: {stored_error}",
+                    code=stored_code,
+                )
+        else:
+            raise MinerURemoteError(
+                f"MinerU 任务已终态失败，batch_id={checkpoint.get('batch_id')}: "
+                f"{stored_error}",
+                code=stored_code,
+            )
     if checkpoint.get("status") == "complete":
         markdown_rel = checkpoint.get("markdown_path")
         markdown_path = job_dir / str(markdown_rel or "")
@@ -692,6 +774,26 @@ def extract_pdf_bundle_with_mineru(
         return MinerUExtraction(
             content, markdown_path, markdown_path.parent, images, sidecars, meta, checkpoint_path
         )
+    except MinerURetryableRemoteError as exc:
+        if schedule_remote_retry(exc):
+            return extract_pdf_bundle_with_mineru(
+                pdf_path,
+                token,
+                work_dir=work_dir,
+                model_version=model_version,
+                base_url=base_url,
+                timeout_sec=timeout_sec,
+                interval_sec=interval_sec,
+                request_timeout_sec=request_timeout_sec,
+                keep_archive=keep_archive,
+                language=language,
+                is_ocr=is_ocr,
+                enable_formula=enable_formula,
+                enable_table=enable_table,
+            )
+        raise MinerURemoteError(
+            f"MinerU 可重试远端失败已耗尽替代 batch: {exc}", code=exc.code
+        ) from exc
     except MinerURemoteError as exc:
         save(status="remote_failed", error=str(exc), error_code=exc.code)
         raise

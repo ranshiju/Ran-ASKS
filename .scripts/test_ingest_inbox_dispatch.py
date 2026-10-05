@@ -352,6 +352,86 @@ def test_api_run_uses_dsh_loop_without_direct_dispatch():
             sys.modules["dsh.agent_loop"] = old_agent_loop
 
 
+def test_api_run_resumes_unique_same_source_transaction():
+    originals = (
+        module.REPO, module.INBOX, module.inbox_state.REPO,
+        module.sf.ensure_index, module.sf.lookup_exact,
+        module.agent_task.ingest_backend, module.subprocess.run,
+        module.run_post_ingest_maintenance, sys.argv,
+    )
+    old_agent_loop = sys.modules.get("dsh.agent_loop")
+    calls = []
+
+    class FakeSessionLog:
+        session_id = "resume-session"
+
+        @staticmethod
+        def append(*_args):
+            return None
+
+        @staticmethod
+        def to_jsonl():
+            return ""
+
+    class FakeLoop:
+        def __init__(self, mode):
+            self.session_log = FakeSessionLog()
+            self.last_structured = None
+
+        def execute(self, tool_name, tool_args):
+            calls.append((tool_name, tool_args))
+            self.last_structured = {
+                "status": "completed", "transaction_id": "existing-txn",
+                "admin_id": "notice",
+            }
+            return json.dumps(self.last_structured)
+
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            source = inbox / "notice.md"
+            source.write_text("Routine administrative notice.\n", encoding="utf-8")
+            module.REPO = root
+            module.INBOX = inbox
+            module.inbox_state.REPO = root
+            module.inbox_state.save("existing-txn", {
+                "status": "extract", "source": "inbox/notice.md",
+                "pipeline_script": "ingest_document.py", "semantic_backend": "api",
+                "errors": [],
+            })
+            module.sf.ensure_index = lambda: None
+            module.sf.lookup_exact = lambda _path: None
+            module.agent_task.ingest_backend = lambda: "api"
+            module.subprocess.run = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("same-source API resume must use the DSH resume tool")
+            )
+            module.run_post_ingest_maintenance = lambda *_args: {"status": "no_action"}
+            fake_module = types.ModuleType("dsh.agent_loop")
+            fake_module.IngestAgentLoop = FakeLoop
+            sys.modules["dsh.agent_loop"] = fake_module
+            sys.argv = ["ingest_inbox.py", "--run", "--subproject", "admin"]
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                module.main()
+            payload = json.loads(stdout.getvalue().splitlines()[-1])
+            report = json.loads((root / payload["report_path"]).read_text(encoding="utf-8"))
+            assert calls == [("ingest_document_resume", {"txn": "existing-txn"})]
+            assert report["files"][0]["resumed_transaction"] == "existing-txn"
+    finally:
+        (
+            module.REPO, module.INBOX, module.inbox_state.REPO,
+            module.sf.ensure_index, module.sf.lookup_exact,
+            module.agent_task.ingest_backend, module.subprocess.run,
+            module.run_post_ingest_maintenance, sys.argv,
+        ) = originals
+        if old_agent_loop is None:
+            sys.modules.pop("dsh.agent_loop", None)
+        else:
+            sys.modules["dsh.agent_loop"] = old_agent_loop
+
+
 def test_agent_low_confidence_classification_is_one_batch_task():
     originals = (
         module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
@@ -510,6 +590,9 @@ def test_duplicate_only_report_has_duplicate_terminal_status():
     assert compact["status"] == "duplicate_found"
     assert compact["duplicates"] == 1
     assert compact["failed"] == 0
+    assert compact["terminal"] is True
+    assert compact["committed"] is False
+    assert compact["counts"]["committed"] == 0
 
 
 def test_dsi_tool_routes_file_types():
@@ -975,12 +1058,16 @@ def test_compact_summary_excludes_graph_diagnostics_and_returns_report_path():
     assert "graph_report" not in compact["files"][0]
     assert compact["backend"] == "api"
     warnings = [{"issue": "ambiguous", "detail": "long" * 100, "candidates": ["large"]}] * 8
-    warned = {**report, "files": [{**report["files"][0], "quality_warnings": warnings}]}
+    warned = {**report, "files": [{
+        **report["files"][0], "quality_warnings": warnings,
+        "quality_warning_history": [*warnings, {"issue": "resolved"}],
+    }]}
     warning_summary = module._compact_summary(warned, report_path)["files"][0]
     assert warning_summary["quality_warning_count"] == 8
     assert len(warning_summary["quality_warnings"]) == 5
     assert len(warning_summary["quality_warnings"][0]["detail"]) == 240
     assert "candidates" not in warning_summary["quality_warnings"][0]
+    assert warning_summary["quality_warning_history_count"] == 9
     blocked = {**report, "completed": 0, "failed": 0, "awaiting_agent": 1,
                "pending": 1,
                "files": [{"file": "b.pdf", "status": "agent_required", "reason": "agent 接管"}]}
@@ -1663,6 +1750,31 @@ def test_maintenance_publication_recovers_write_failures():
                 assert json.loads(report_path.read_text()) == repaired
 
 
+def test_maintenance_separates_warning_history_from_unresolved_quality():
+    record = {
+        "quality_status": "degraded",
+        "quality_warnings": [
+            {"issue": "semantic_bare_abbreviation", "detail": "RIND"},
+            {"issue": "graph_navigation_ambiguous", "detail": "1 mention"},
+        ],
+        "semantic_warnings": [{"issue": "bare_abbreviation", "line": "RIND"}],
+    }
+    maintenance = {"components": {"abbreviations": {
+        "status": "completed", "remaining_occurrences": 0,
+    }}}
+    module._reconcile_quality_after_maintenance(record, maintenance)
+    assert record["quality_status"] == "degraded"
+    assert record["quality_warnings"] == [
+        {"issue": "graph_navigation_ambiguous", "detail": "1 mention"},
+    ]
+    assert {warning["issue"] for warning in record["quality_warning_history"]} == {
+        "semantic_bare_abbreviation", "graph_navigation_ambiguous",
+    }
+    assert record["semantic_warnings"] == []
+    module._reconcile_quality_after_maintenance(record, maintenance)
+    assert len(record["quality_warning_history"]) == 2
+
+
 def main():
     test_extract_last_json_ignores_domain_status()
     test_managed_external_file_staging_and_inbox_boundary()
@@ -1676,6 +1788,7 @@ def main():
     test_agent_run_directly_dispatches_without_importing_dsh()
     test_agent_run_directly_dispatches_without_importing_dsh(fail_publication=True)
     test_api_run_uses_dsh_loop_without_direct_dispatch()
+    test_api_run_resumes_unique_same_source_transaction()
     test_agent_low_confidence_classification_is_one_batch_task()
     test_exact_duplicate_cleanup_reverifies_and_writes_receipt()
     test_exact_duplicate_cleanup_refuses_sha_mismatch()
@@ -1711,6 +1824,7 @@ def main():
     test_maintenance_publication_rejects_mismatched_state_before_writing()
     test_maintenance_publication_recovers_write_failures()
     test_paper_batch_keeps_preclassified_fingerprint_results()
+    test_maintenance_separates_warning_history_from_unresolved_quality()
     print("ingest_inbox dispatch regression: PASS")
 
 

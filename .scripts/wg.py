@@ -31,6 +31,9 @@ workspace_state.py / research_memory.py / query_actions.py / source_locator.py�
   wg.py ingest <file> --subproject admin [--allow-remote-ocr]
   wg.py ingest --resume <transaction-id>
   wg.py task inspect <transaction-id>
+  wg.py task status <transaction-id>
+  wg.py task next <transaction-id>
+  wg.py task verify <transaction-id>
   wg.py task advance <transaction-id>
   wg.py task run <transaction-id> --task-command check|commit|resume|refresh|read
   wg.py abbr <term>
@@ -105,7 +108,7 @@ def extract_last_json(text: str) -> dict:
 
 
 def query_graph_json(cmd: str, pos_args: list[str], opts: list[str] | None = None) -> dict:
-    args = ["python3", str(SCRIPTS / "query_graph.py"), cmd, *pos_args, "--json",
+    args = [sys.executable, str(SCRIPTS / "query_graph.py"), cmd, *pos_args, "--json",
             "--db", str(qa.query_db_path())]
     if opts:
         args.extend(opts)
@@ -253,7 +256,7 @@ def cmd_read_raw(args):
 
 
 def cmd_recall(args):
-    rc, out, err = run_script(["python3", str(SCRIPTS / "research_memory.py"),
+    rc, out, err = run_script([sys.executable, str(SCRIPTS / "research_memory.py"),
                                "recall", args.project])
     if rc != 0:
         return envelope("recall", None, status="error",
@@ -270,7 +273,7 @@ def cmd_ingest(args):
                         error="必须且只能提供一个 file、--stdin 或 --resume")
     if keep_source and not args.file:
         return envelope("ingest", None, status="error", error="--keep-source 只能用于文件附件")
-    command = ["python3", str(SCRIPTS / "ingest_inbox.py"), "--run"]
+    command = [sys.executable, str(SCRIPTS / "ingest_inbox.py"), "--run"]
     input_options = {}
     if args.resume:
         command.extend(["--resume", args.resume])
@@ -349,6 +352,37 @@ def cmd_task(args):
             f"task.{args.task_action}", None, status="error",
             error=f"事务不存在: {args.transaction_id}",
         )
+    if args.task_action == "status":
+        return envelope("task.status", inbox_state.operation_view(state, REPO))
+    if args.task_action == "verify":
+        receipt = inbox_state.verify_receipt(state, REPO)
+        if receipt["status"] == "PASS":
+            return envelope("task.verify", receipt)
+        return envelope(
+            "task.verify", receipt,
+            status="empty" if receipt["status"] == "INCOMPLETE" else "error",
+            ok=False,
+            error=str(receipt.get("error") or "事务尚未形成可验证的最终回执"),
+        )
+    if args.task_action == "next":
+        operation = inbox_state.operation_view(state, REPO)
+        result = {
+            "schema": "ingest-next-action-v1",
+            "transaction_id": operation["transaction_id"],
+            "workflow_status": operation["workflow_status"],
+            "internal_status": operation["internal_status"],
+            "next_action": operation["next_action"],
+            "allowed_actions": operation["allowed_actions"],
+            "artifact_refs": operation["artifact_refs"],
+        }
+        if isinstance(state.get("agent_task"), dict):
+            try:
+                control = agent_task.control_view(state, REPO)
+            except ValueError as exc:
+                return envelope("task.next", result, status="error", error=str(exc))
+            result["next_action"] = control["next_action"]
+            result["missing_outputs"] = control["missing_outputs"]
+        return envelope("task.next", result)
     try:
         view = agent_task.control_view(state, REPO)
     except ValueError as exc:
@@ -420,7 +454,7 @@ def cmd_remember(args):
         content = sys.stdin.read()
     else:
         content = args.content or ""
-    cmd = ["python3", str(SCRIPTS / "research_memory.py"), "add",
+    cmd = [sys.executable, str(SCRIPTS / "research_memory.py"), "add",
            args.project, "--title", args.title, "--intent", args.intent]
     if content:
         cmd += ["--content", content]
@@ -436,7 +470,7 @@ def cmd_remember(args):
 
 def cmd_workspace(args):
     """Generic workspace-state thin wrapper; the target script owns its schema."""
-    command = ["python3", str(SCRIPTS / "workspace_state.py"), *args.workspace_args]
+    command = [sys.executable, str(SCRIPTS / "workspace_state.py"), *args.workspace_args]
     rc, out, err = run_script(command)
     if rc != 0:
         try:
@@ -504,7 +538,7 @@ def cmd_cv(args):
 
 def cmd_frontier(args):
     """Frontier 薄包；主逻辑和准入契约只定义在 frontier.py。"""
-    cmd = ["python3", str(SCRIPTS / "frontier.py"), args.frontier_cmd]
+    cmd = [sys.executable, str(SCRIPTS / "frontier.py"), args.frontier_cmd]
     if args.frontier_cmd == "ask":
         cmd += ["--question", args.question, "--topk", str(args.topk)]
         if args.no_ai:
@@ -641,8 +675,11 @@ def build_parser():
                    help="显式授权单张图片上传 GLM OCR API")
     p.set_defaults(func=cmd_ingest)
 
-    p = sub.add_parser("task", help="跨 Agent 的受管任务 inspect/advance/action 入口")
-    p.add_argument("task_action", choices=("inspect", "advance", "run"))
+    p = sub.add_parser("task", help="摄入事务只读状态/校验与跨 Agent 受管推进入口")
+    p.add_argument(
+        "task_action",
+        choices=("inspect", "status", "next", "verify", "advance", "run"),
+    )
     p.add_argument("transaction_id")
     p.add_argument("--task-command", default="read",
                    choices=("read", "check", "commit", "resume", "refresh"),

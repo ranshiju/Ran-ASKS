@@ -278,6 +278,12 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
         extract_dir.mkdir(parents=True)
         paper = extract_dir / "paper.md"
         paper.write_text("# Test Paper\n\nAlice Example\n\n2026\n", encoding="utf-8")
+        (extract_dir / "paper.pdf").write_bytes(b"pdf")
+        (extract_dir / "source.yaml").write_text(
+            "external_path: inbox/test-paper.pdf\n", encoding="utf-8",
+        )
+        manifest_state = {"source": "inbox/test-paper.pdf"}
+        initial_bundle = module._write_paper_artifact_manifest(manifest_state, extract_dir)
         candidates = {
             "title": ["Test Paper"], "authors": ["Alice Example"], "year": ["2026"],
             "venue": ["npj Quantum Information"], "doi": [], "arxiv_id": [],
@@ -324,6 +330,7 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
             "agent_workspace": {
                 "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
                 "paper_md_sha256": module._file_sha256(paper),
+                "artifact_bundle_sha256": initial_bundle,
                 "output_path": str(output.relative_to(root)),
             },
         }
@@ -337,6 +344,10 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
     assert state["bibliographic_meta"]["venue"] == "npj Quantum Information"
     assert state["_awaiting_agent_wiki_slots"] is True
     assert state["agent_workspace"]["status"] == "submitted"
+    assert state["artifact_bundle_sha256"] != initial_bundle
+    assert state["agent_workspace"]["artifact_bundle_sha256"] == state[
+        "artifact_bundle_sha256"
+    ]
 
 
 def test_agent_workspace_bibliography_defers_without_api_call():
@@ -2018,6 +2029,55 @@ def test_load_bibliographic_metadata_reuses_archived_source_yaml():
     assert result["venue"] == "NAACL-HLT 2018"
 
 
+def test_load_bibliographic_metadata_refreshes_derived_candidates_for_locked_record():
+    with tempfile.TemporaryDirectory() as directory:
+        raw_dir = Path(directory)
+        (raw_dir / "paper.pdf").write_bytes(b"pdf")
+        (raw_dir / "source.yaml").write_text(
+            "bibliographic:\n"
+            "  venue: Journal of Physics\n"
+            "  doi: ''\n"
+            "  review:\n"
+            "    locked: true\n"
+            "  layout_candidates:\n"
+            "    venues:\n"
+            "    - value: Journal of Physics\n"
+            "      evidence: old-layout\n",
+            encoding="utf-8",
+        )
+        original_extract = module.extract_pdf_bibliography
+        module.extract_pdf_bibliography = lambda _path: {
+            "venue": "Journal of Physics: Condensed Matter",
+            "doi": "10.1088/0953-8984/19/8/083202",
+            "front_matter_blocks": [{"text": "fresh layout"}],
+            "layout_candidates": {
+                "venues": [{
+                    "value": "Journal of Physics: Condensed Matter",
+                    "evidence": "pdf_layout_front_matter.page1.block1",
+                }],
+                "dois": [{
+                    "value": "10.1088/0953-8984/19/8/083202",
+                    "evidence": "pdf_layout_front_matter.page2.block2",
+                }],
+            },
+            "first_page_evidence": ["fresh evidence"],
+        }
+        try:
+            result = module.load_bibliographic_metadata(raw_dir)
+        finally:
+            module.extract_pdf_bibliography = original_extract
+    assert result["venue"] == "Journal of Physics"
+    assert result["doi"] == "10.1088/0953-8984/19/8/083202"
+    assert result["layout_candidates"]["venues"][0]["value"] == (
+        "Journal of Physics: Condensed Matter"
+    )
+    assert result["layout_candidates"]["dois"][0]["evidence"] == (
+        "pdf_layout_front_matter.page2.block2"
+    )
+    assert result["front_matter_blocks"] == [{"text": "fresh layout"}]
+    assert result["first_page_evidence"] == ["fresh evidence"]
+
+
 def test_inbox_pdf_paths_are_sorted_and_pdf_only():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -2520,6 +2580,82 @@ def test_api_initial_paper_workspace_uses_one_combined_model_call():
     )
 
 
+def test_api_workspace_persists_prepared_checkpoint_before_worker_call():
+    events = []
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract_dir = root / "temp" / "api-checkpoint"
+        extract_dir.mkdir(parents=True)
+        paper_md = extract_dir / "paper.md"
+        paper_md.write_text("# Stable Paper\n", encoding="utf-8")
+        (extract_dir / "paper.pdf").write_bytes(b"pdf")
+        state = {
+            "status": "extract",
+            "transaction_id": "api-checkpoint",
+            "extract_dir": "temp/api-checkpoint",
+            "errors": [],
+        }
+        review = {
+            "catalog": {}, "review": {}, "decision": None,
+            "candidates": {}, "input_hash": "input", "worker": {},
+        }
+        originals = module.REPO, module.call_text, module.inbox_state.save
+
+        def fake_save(transaction_id, current):
+            events.append(("save", transaction_id, current["status"],
+                           current["agent_workspace"]["status"]))
+
+        def fake_call(*_args, **_kwargs):
+            events.append(("call",))
+            return {"ok": False, "status": "agent_required", "prompt": "repair"}
+
+        try:
+            module.REPO = root
+            module.inbox_state.save = fake_save
+            module.call_text = fake_call
+            success, _message = module.execute_api_paper_workspace(
+                state,
+                review,
+                paper_md,
+                skeleton_bundle=(extract_dir / "skeleton.md", "# Skeleton\n", "raw-placeholder"),
+            )
+        finally:
+            module.REPO, module.call_text, module.inbox_state.save = originals
+
+    assert not success
+    assert events[:2] == [
+        ("save", "api-checkpoint", "prepared", "awaiting_output"),
+        ("call",),
+    ]
+
+
+def test_run_phase_discards_stale_transition_receipt_when_recording_failure():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        original_repo = module.inbox_state.REPO
+        module.inbox_state.REPO = root
+        state = {"transaction_id": "phase-failure", "status": "extract", "errors": []}
+        module.inbox_state.save(state["transaction_id"], state)
+
+        def fail_after_unpersisted_transition(current):
+            current["status"] = "write_wiki"
+            current["_pending_transition"] = {
+                "from": "prepared", "to": "write_wiki", "reason": "stale",
+            }
+            raise RuntimeError("boom")
+
+        try:
+            result = module._run_phase(state, True, fail_after_unpersisted_transition)
+            persisted = module.inbox_state.load(state["transaction_id"])
+        finally:
+            module.inbox_state.REPO = original_repo
+
+    assert result["status"] == "failed"
+    assert persisted["status"] == "failed"
+    assert persisted["telemetry"]["events"][-1]["transition"]["from"] == "extract"
+    assert persisted["telemetry"]["events"][-1]["transition"]["to"] == "failed"
+
+
 def test_slots_reopen_preserves_validated_bibliography_and_wiki():
     state = {
         "transaction_id": "targeted-repair", "status": "write_wiki",
@@ -2548,6 +2684,47 @@ def test_slots_reopen_preserves_validated_bibliography_and_wiki():
     assert state["bibliographic_review"]["status"] == "ok"
     assert state["wiki_content"].endswith("Validated Wiki\n")
     assert state["slots_content"] == ""
+
+
+def test_api_semantic_handoff_reuses_single_workspace_output():
+    state = {
+        "transaction_id": "api-semantic-repair",
+        "status": "write_wiki",
+        "semantic_path": "temp/api-semantic-repair-semantic.txt",
+        "bibliographic_review": {"status": "ok"},
+        "wiki_content": "# Validated Wiki\n",
+        "slots_content": "三元组:\ninvalid\n",
+        "agent_workspace": {
+            "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+            "execution_backend": "api",
+            "status": "submitted",
+            "output_path": "temp/api-semantic-repair/agent-workspace.txt",
+        },
+    }
+    module.handoff_after_semantic_recovery(
+        state, ["invalid triple"], "manual semantic decision",
+    )
+    assert state["status"] == "agent_required"
+    assert state["agent_write_to"] == "temp/api-semantic-repair/agent-workspace.txt"
+    assert state["agent_workspace"]["repair_scope"] == "slots"
+    assert state["wiki_content"] == "# Validated Wiki\n"
+    assert state["semantic_recovery_message"] == "manual semantic decision"
+
+
+def test_semantic_bundle_reuses_unambiguous_canonical_abbreviation():
+    semantic = (
+        "三元组:\n"
+        "本论文 | 对比方法 | 时间相关密度矩阵重正化群TDMRG(TDMRG)\n"
+        "TDMRG | 扩展 | 自适应基态方法\n"
+        "概念说明:\n"
+        "时间相关密度矩阵重正化群TDMRG(TDMRG) | 本文采用的精确方法。\n"
+    )
+    result = module.ic.canonicalize_semantic_abbreviations(semantic)
+    assert (
+        "时间相关密度矩阵重正化群TDMRG(TDMRG) | 扩展 | 自适应基态方法"
+        in result
+    )
+    assert "\nTDMRG | 扩展 |" not in result
 
 
 def test_build_slots_retry_prompt_includes_previous_output_and_exact_count():
@@ -2721,6 +2898,19 @@ def test_proposition_abbreviation_is_not_a_keyword_format_warning():
 def test_descriptive_object_matches_graph_rule():
     assert module.is_clearly_descriptive("矩阵乘积态matrix product state(MPS)表示")
     assert not module.is_clearly_descriptive("自洽方程")
+
+
+def test_concept_predicate_role_overrides_descriptive_phrase_heuristic():
+    import graph_ingest
+    triple = {
+        "subject": "academic/wiki/papers/demo",
+        "predicate": "核心方法",
+        "object": "P-表示采样P-representation sampling",
+    }
+    assert not graph_ingest._is_proposition_slot(triple["object"], triple, "object")
+    normalized, warnings = graph_ingest._build_subgraph([triple], triple["subject"])
+    assert normalized == [triple]
+    assert not [warning for warning in warnings if warning["issue"] == "descriptive_phrase"]
 
 
 def test_stop_for_semantic_errors_preserves_resume_context():
@@ -3026,6 +3216,33 @@ def test_resume_after_semantic_fix_loads_disk_content():
     assert state["slots_content"] == "三元组:\n本论文 | 研究关键词 | 修正概念\n"
     assert not state["agent_required"]
     assert state["errors"] == []
+
+
+def test_resume_after_semantic_fix_defers_to_awaiting_workspace():
+    with tempfile.TemporaryDirectory() as directory:
+        semantic_path = Path(directory) / "semantic.txt"
+        semantic_path.write_text("三元组:\n本论文 | 核心方法 | 修正概念\n", encoding="utf-8")
+        original_repo = module.REPO
+        try:
+            module.REPO = Path(directory)
+            state = {
+                "status": "agent_required",
+                "semantic_path": "semantic.txt",
+                "pre_handoff_status": "extract",
+                "slots_content": "过期内容",
+                "agent_required": True,
+                "errors": ["workspace repair pending"],
+                "agent_workspace": {
+                    "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                    "status": "awaiting_output",
+                },
+            }
+            assert module.resume_after_semantic_fix(state) is False
+        finally:
+            module.REPO = original_repo
+    assert state["status"] == "agent_required"
+    assert state["slots_content"] == "过期内容"
+    assert state["errors"] == ["workspace repair pending"]
 
 
 def test_handoff_to_agent_records_pre_handoff_status():
@@ -3745,6 +3962,9 @@ def test_nonblocking_semantic_warning_persists_quality_status():
     assert [warning["issue"] for warning in state["quality_warnings"]] == [
         "bibliographic_authors_incomplete"
     ]
+    assert {warning["issue"] for warning in state["quality_warning_history"]} == {
+        "bibliographic_authors_incomplete", "semantic_bare_abbreviation",
+    }
 
 
 def test_validate_before_commit_records_nonblocking_semantic_warning():
@@ -4347,6 +4567,35 @@ def test_reingest_state_has_reingest_flag():
     assert state["bibliographic_meta"] == {}
 
 
+def test_reingest_prepare_persists_declared_proposition_transition():
+    state = {"transaction_id": "txn-reingest-transition", "status": "finalize", "reingest": True}
+    saved_statuses = []
+    originals = (
+        module.inbox_state.save,
+        module.step_extract_propositions,
+        module.record_predicate_candidates,
+        module.agent_workspace_hash_errors,
+        module.ic.validate_before_commit,
+    )
+    try:
+        module.inbox_state.save = lambda _txn, current: saved_statuses.append(current["status"])
+        module.step_extract_propositions = lambda _state: (True, "")
+        module.record_predicate_candidates = lambda _state: None
+        module.agent_workspace_hash_errors = lambda *_args, **_kwargs: []
+        module.ic.validate_before_commit = lambda *_args, **_kwargs: []
+        result = module.run_prepare(state)
+    finally:
+        (
+            module.inbox_state.save,
+            module.step_extract_propositions,
+            module.record_predicate_candidates,
+            module.agent_workspace_hash_errors,
+            module.ic.validate_before_commit,
+        ) = originals
+    assert result["status"] == "propositions_done"
+    assert saved_statuses == ["propositions", "propositions", "propositions_done"]
+
+
 def test_reingest_state_copies_archived_pdf_for_agent_workspace():
     import re_ingest as ri
     with tempfile.TemporaryDirectory() as directory:
@@ -4813,6 +5062,7 @@ def test_reingest_restores_wiki_when_graph_update_fails():
             "transaction_id": "txn", "paper_id": "demo",
             "wiki_path": "academic/wiki/papers/demo",
             "extract_dir": "temp/reingest-extract/txn",
+            "status": "propositions_done",
         }
         original_repo = ri.REPO
         original_update = ri.ic.step_update_graph
@@ -4831,6 +5081,53 @@ def test_reingest_restores_wiki_when_graph_update_fails():
     assert result["wiki_restored"] is True
     assert result["errors"] == ["simulated graph failure"]
     assert wiki_after == "old wiki\n"
+
+
+def test_reingest_commit_persists_declared_forward_stages():
+    import re_ingest as ri
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki_path = root / "academic/wiki/papers/demo.md"
+        wiki_path.parent.mkdir(parents=True)
+        wiki_path.write_text("old wiki\n", encoding="utf-8")
+        extract_dir = root / "temp/reingest-extract/txn"
+        extract_dir.mkdir(parents=True)
+        (extract_dir / "wiki.md").write_text("new wiki\n", encoding="utf-8")
+        state = {
+            "transaction_id": "txn", "paper_id": "demo",
+            "wiki_path": "academic/wiki/papers/demo",
+            "extract_dir": "temp/reingest-extract/txn",
+            "status": "propositions_done", "errors": [],
+        }
+        saved_statuses = []
+        originals = (
+            ri.REPO, ri.ic.step_update_graph, ri.ic.step_validate_graph,
+            ri.ic.step_finalize_tail, ri.ip._record_graph_quality_warnings,
+            ri.inbox_state.save,
+        )
+        try:
+            ri.REPO = root
+
+            def update_graph(current, *_args, **_kwargs):
+                current["graph_report"] = {"edges_added": 1, "edges_removed": 1}
+                return True, ""
+
+            ri.ic.step_update_graph = update_graph
+            ri.ic.step_validate_graph = lambda *_args, **_kwargs: []
+            ri.ic.step_finalize_tail = lambda *_args, **_kwargs: (True, "")
+            ri.ip._record_graph_quality_warnings = lambda _state: None
+            ri.inbox_state.save = lambda _txn, current: saved_statuses.append(current["status"])
+            result = ri.commit_wiki_and_graph(state)
+        finally:
+            (
+                ri.REPO, ri.ic.step_update_graph, ri.ic.step_validate_graph,
+                ri.ic.step_finalize_tail, ri.ip._record_graph_quality_warnings,
+                ri.inbox_state.save,
+            ) = originals
+    assert result["status"] == "completed"
+    assert saved_statuses == [
+        "graph_ready", "update_graph", "validate_graph", "finalize_tail", "completed",
+    ]
 
 
 def test_reingest_current_raw_skips_generation_without_force():
@@ -4885,6 +5182,14 @@ def test_pdf_layout_candidates_separate_authors_affiliations_and_date_kinds():
             "text": "Received 12 May 2022; revised 3 June 2023; published online 4 July 2024",
             "evidence": "pdf_layout_front_matter.page1.block4",
         },
+        {
+            "page": 2, "block": 1, "relative_bbox": [0.1, 0.08, 0.9, 0.14],
+            "text": (
+                "Journal of Physics: Condensed Matter\n"
+                "doi:10.1088/0953-8984/19/8/083202"
+            ),
+            "evidence": "pdf_layout_front_matter.page2.block1",
+        },
     ]
     layout = module._layout_bibliographic_candidates(blocks, "Stable Layout Paper")
     assert [item["value"] for item in layout["authors"]] == [
@@ -4898,6 +5203,14 @@ def test_pdf_layout_candidates_separate_authors_affiliations_and_date_kinds():
         ("2022", "received"),
         ("2023", "revised"),
     ]
+    assert layout["venues"] == [{
+        "value": "Journal of Physics: Condensed Matter",
+        "evidence": "pdf_layout_front_matter.page2.block1",
+    }]
+    assert layout["dois"] == [{
+        "value": "10.1088/0953-8984/19/8/083202",
+        "evidence": "pdf_layout_front_matter.page2.block1",
+    }]
 
 
 def test_pdf_layout_catalog_keeps_typed_candidate_only_evidence():
@@ -4921,6 +5234,10 @@ def test_pdf_layout_catalog_keeps_typed_candidate_only_evidence():
                 "value": "Journal of Stable Results",
                 "evidence": "pdf_layout_front_matter.page1.block5",
             }],
+            "dois": [{
+                "value": "10.1234/stable",
+                "evidence": "pdf_layout_front_matter.page1.block6",
+            }],
         },
     }
     md_text = "# Stable Layout Paper\n\nAlice Example\n"
@@ -4930,6 +5247,8 @@ def test_pdf_layout_catalog_keeps_typed_candidate_only_evidence():
     )
     assert catalog["fields"]["authors"][0]["provider"] == "pdf_layout_front_matter"
     assert catalog["fields"]["venue"][0]["evidence"].endswith("block5")
+    assert catalog["fields"]["doi"][0]["provider"] == "pdf_layout_front_matter"
+    assert catalog["fields"]["doi"][0]["evidence"].endswith("block6")
     assert catalog["fields"]["year"][0]["kind"] == "published_online"
     assert catalog["excluded_affiliations"][0]["authority"] == "excluded_candidate"
     decision = _candidate_id_decision(catalog)
@@ -5002,6 +5321,54 @@ def test_artifact_manifest_hash_covers_nested_bundle_and_workspace_detects_drift
         finally:
             module.REPO = original_repo
         assert state["errors"] == ["Agent workspace 输入论文文档包在交接后发生变化"]
+
+
+def test_managed_workspace_bundle_rebase_requires_matching_state_and_bibliography():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract_dir = root / "temp/inbox-extract/txn"
+        extract_dir.mkdir(parents=True)
+        (extract_dir / "paper.pdf").write_bytes(b"pdf")
+        (extract_dir / "paper.md").write_text("# Demo\n", encoding="utf-8")
+        bibliography = {
+            "title": "Demo", "authors": ["Alice Example"], "year": "2026",
+            "venue": "Example Journal",
+        }
+        (extract_dir / "source.yaml").write_text(
+            module.yaml.safe_dump({"bibliographic": bibliography}, sort_keys=False),
+            encoding="utf-8",
+        )
+        bundle_state = {}
+        current_bundle = module._write_paper_artifact_manifest(bundle_state, extract_dir)
+        output = extract_dir / "agent-workspace.txt"
+        output.write_text("workspace", encoding="utf-8")
+        state = {
+            "transaction_id": "txn", "status": "agent_required",
+            "extract_dir": "temp/inbox-extract/txn",
+            "artifact_bundle_sha256": current_bundle,
+            "bibliographic_meta": bibliography,
+            "errors": ["stale bundle"],
+            "agent_workspace": {
+                "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                "status": "awaiting_output",
+                "artifact_bundle_sha256": "legacy-bundle",
+                "output_path": "temp/inbox-extract/txn/agent-workspace.txt",
+            },
+        }
+        original_repo = module.REPO
+        try:
+            module.REPO = root
+            receipt = module._refresh_managed_workspace_bundle_baseline(state)
+            assert receipt["reason"] == "managed_bibliographic_manifest_rebase"
+            assert state["agent_workspace"]["artifact_bundle_sha256"] == current_bundle
+            assert state["errors"] == []
+
+            state["agent_workspace"]["artifact_bundle_sha256"] = "legacy-bundle"
+            state["artifact_bundle_sha256"] = "untrusted-bundle"
+            assert module._refresh_managed_workspace_bundle_baseline(state) is None
+            assert state["agent_workspace"]["artifact_bundle_sha256"] == "legacy-bundle"
+        finally:
+            module.REPO = original_repo
 
 
 def test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor():

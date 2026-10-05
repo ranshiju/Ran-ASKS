@@ -85,7 +85,6 @@ import ingest_user_assertions
 import source_fingerprints as sf
 import trash_util
 INBOX = REPO / "inbox"
-SKIP_FILES = {".gitkeep", ".DS_Store"}
 
 
 def call_json(*args, **kwargs):
@@ -513,13 +512,42 @@ def dsi_tool(file_type: str, rel_path: str, subproject: str,
     return "ingest_document_file", args
 
 
+def _pipeline_script(file_type: str) -> str:
+    return {
+        "paper": "ingest_paper.py",
+        "meeting": "ingest_meeting.py",
+        "document": "ingest_document.py",
+    }.get(file_type, "")
+
+
+def _resume_tool_args(state: dict, *, ocr_result: str | None = None,
+                      allow_remote_ocr: bool = False,
+                      allow_remote_ppt: bool = False) -> tuple[str, dict]:
+    tool = {
+        "ingest_paper.py": "ingest_paper_resume",
+        "ingest_meeting.py": "ingest_meeting_resume",
+        "ingest_document.py": "ingest_document_resume",
+    }.get(str(state.get("pipeline_script") or ""))
+    if not tool:
+        raise ValueError("same-source transaction has unsupported pipeline owner")
+    args = {"txn": str(state.get("transaction_id") or "")}
+    if tool == "ingest_document_resume":
+        if ocr_result:
+            args["ocr_result"] = ocr_result
+        if allow_remote_ocr:
+            args["allow_remote_ocr"] = True
+        if allow_remote_ppt:
+            args["allow_remote_ppt"] = True
+    return tool, args
+
+
 def scan_inbox() -> list[Path]:
     """扫描 inbox/，仅在 facts-pending.md 含事实条目时纳入处理。"""
     if not INBOX.is_dir():
         return []
     files = []
     for p in sorted(INBOX.iterdir()):
-        if not p.is_file() or p.name in SKIP_FILES or p.name.startswith("."):
+        if not p.is_file() or inbox_plan.is_ignored_entry(p):
             continue
         if p.name == "facts-pending.md" and inbox_plan.fact_entries(p) == 0:
             continue
@@ -732,7 +760,7 @@ def _map_paper_batch_results(parsed: dict) -> list[dict]:
                         "transaction_id", "proposition_status", "proposition_details",
                         "bibliographic_worker", "workspace_worker", "relationship_worker",
                         "semantic_repair_worker", "execution_backend",
-                        "quality_status", "quality_warnings"):
+                        "quality_status", "quality_warnings", "quality_warning_history"):
                 if item.get(key) is not None:
                     entry[key] = item[key]
         elif status == "duplicate_found":
@@ -781,6 +809,7 @@ def _result_entry(file_name: str, file_type: str, parsed: dict, content: str = "
             "proposition_details", "bibliographic_worker", "workspace_worker",
             "relationship_worker", "execution_backend",
             "semantic_repair_worker", "quality_status", "quality_warnings",
+            "quality_warning_history",
             "entrypoint", "semantic_backend", "ocr_backend",
         ):
             if parsed.get(key) is not None:
@@ -870,7 +899,7 @@ def stage_external_file(value: str, import_name: str = "") -> tuple[Path, dict]:
     else:
         raise ValueError("--import-file 用于 inbox/ 外附件；已有 inbox 文件请使用 --file")
     name = import_name.strip() or source.name
-    if Path(name).name != name or name.startswith(".") or name in SKIP_FILES:
+    if Path(name).name != name or inbox_plan.is_ignored_entry(Path(name)):
         raise ValueError("--import-name 必须是安全的单文件名")
     digest = _sha256_file(source)
     INBOX.mkdir(parents=True, exist_ok=True)
@@ -921,7 +950,7 @@ def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
     if original is not None and not original.is_file():
         raise ValueError(f"对话附件不存在: {source}")
     name = import_name or (original.name if original else "pasted-document.txt")
-    if (Path(name).name != name or name.startswith(".") or name in SKIP_FILES
+    if (Path(name).name != name or inbox_plan.is_ignored_entry(Path(name))
             or name == "facts-pending.md" or "\\" in name):
         raise ValueError("对话文档名必须是安全的普通文件名")
     if original is None:
@@ -1632,6 +1661,38 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
     return envelope
 
 
+def _reconcile_quality_after_maintenance(record: dict, maintenance: dict) -> None:
+    """Keep warning history while deriving current quality from maintenance state."""
+    current = [
+        dict(warning) for warning in record.get("quality_warnings", [])
+        if isinstance(warning, dict)
+    ]
+    history = [
+        dict(warning) for warning in record.get("quality_warning_history", [])
+        if isinstance(warning, dict)
+    ]
+    seen = {json.dumps(item, ensure_ascii=False, sort_keys=True) for item in history}
+    for warning in current:
+        key = json.dumps(warning, ensure_ascii=False, sort_keys=True)
+        if key not in seen:
+            history.append(warning)
+            seen.add(key)
+    abbreviations = (maintenance.get("components") or {}).get("abbreviations") or {}
+    if (abbreviations.get("status") == "completed"
+            and int(abbreviations.get("remaining_occurrences") or 0) == 0):
+        current = [
+            warning for warning in current
+            if warning.get("issue") != "semantic_bare_abbreviation"
+        ]
+        record["semantic_warnings"] = [
+            warning for warning in record.get("semantic_warnings", [])
+            if not (isinstance(warning, dict) and warning.get("issue") == "bare_abbreviation")
+        ]
+    record["quality_warning_history"] = history
+    record["quality_warnings"] = current
+    record["quality_status"] = "degraded" if current else "complete"
+
+
 def publish_maintenance_report(report_path: Path, report: dict, *,
                                state_overrides: dict | None = None,
                                repo: Path | None = None) -> bool:
@@ -1672,6 +1733,8 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
                 item_page = str(item.get("wiki_path") or "").removesuffix(".md")
                 if not state_page or state_page != item_page:
                     raise ValueError(f"maintenance transaction page mismatch: {transaction_id}")
+                _reconcile_quality_after_maintenance(item, maintenance)
+                _reconcile_quality_after_maintenance(state, maintenance)
                 state["maintenance"] = linked
                 updates.append((transaction_id, state))
         report["maintenance"] = {
@@ -1781,6 +1844,9 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
                 if isinstance(warning, dict) else {"detail": str(warning)[:240]}
                 for warning in warnings[:5]
             ]
+        history = item.get("quality_warning_history") or []
+        if history:
+            compact["quality_warning_history_count"] = len(history)
         files.append(inbox_state.output_payload(item, compact))
     batch = inbox_state.batch_output_payload(
         items=files,
@@ -2150,8 +2216,35 @@ def main():
         results.append(entry)
         audit("ingest/duplicate_cleanup", entry)
     classified = [item for item in classified if item[2] not in fingerprint_matches]
+    resume_matches = {}
+    resumable_classified = []
+    for f, ftype, rel in classified:
+        pipeline = _pipeline_script(ftype)
+        if not pipeline or ftype == "user-assertions":
+            resumable_classified.append((f, ftype, rel))
+            continue
+        try:
+            match = inbox_state.find_resumable_transaction(
+                rel, pipeline, semantic_backend=backend,
+            )
+        except ValueError as exc:
+            entry = {
+                "file": f.name, "type": ftype, "ok": False,
+                "status": "validation_error", "reason": str(exc),
+                "next_action": "resolve_ambiguous_same_source_transactions",
+            }
+            results.append(entry)
+            audit("ingest/skip", {
+                "file": rel, "status": "validation_error", "reason": str(exc),
+            })
+            continue
+        if match:
+            resume_matches[rel] = match
+        resumable_classified.append((f, ftype, rel))
+    classified = resumable_classified
     paper_batch = (backend == "api" and not args.file and len(classified) > 1 and
                    not classification_blocks and
+                   not resume_matches and
                    all(ftype == "paper" for _, ftype, _ in classified))
     if paper_batch:
         assert loop is not None
@@ -2242,22 +2335,39 @@ def main():
                 })
                 continue
             source_kind = classification_details.get(rel, {}).get("source_kind", "ordinary")
+            resume_state = resume_matches.get(rel)
             if backend == "api":
                 assert loop is not None
-                tool_name, tool_args = dsi_tool(
-                    ftype, rel, args.subproject, document_type=document_type,
-                    source_kind=source_kind,
-                    **ocr_options,
-                )
+                if resume_state:
+                    tool_name, tool_args = _resume_tool_args(resume_state, **ocr_options)
+                else:
+                    tool_name, tool_args = dsi_tool(
+                        ftype, rel, args.subproject, document_type=document_type,
+                        source_kind=source_kind,
+                        **ocr_options,
+                    )
                 content = loop.execute(tool_name, tool_args)
                 parsed = loop.last_structured or _extract_last_json(content)
                 tool_outputs.append({"file": f.name, "tool": tool_name, "output": content})
             else:
-                command = dispatch_command(
-                    ftype, rel, args.subproject, document_type=document_type,
-                    source_kind=source_kind,
-                    **ocr_options,
-                )
+                if resume_state:
+                    command = [
+                        sys.executable,
+                        str(REPO / ".scripts" / resume_state["pipeline_script"]),
+                        "--resume", resume_state["transaction_id"],
+                    ]
+                    if ocr_options.get("ocr_result"):
+                        command.extend(["--ocr-result", ocr_options["ocr_result"]])
+                    if ocr_options.get("allow_remote_ppt"):
+                        command.append("--allow-remote-ppt")
+                    if ocr_options.get("allow_remote_ocr"):
+                        command.append("--allow-remote-ocr")
+                else:
+                    command = dispatch_command(
+                        ftype, rel, args.subproject, document_type=document_type,
+                        source_kind=source_kind,
+                        **ocr_options,
+                    )
                 completed = subprocess.run(
                     command, cwd=REPO, text=True, capture_output=True, check=False,
                 )
@@ -2269,7 +2379,10 @@ def main():
                     "returncode": completed.returncode,
                     "stderr": completed.stderr[-2000:],
                 })
-            results.append(_result_entry(f.name, ftype, parsed, content))
+            result_entry = _result_entry(f.name, ftype, parsed, content)
+            if resume_state:
+                result_entry["resumed_transaction"] = resume_state["transaction_id"]
+            results.append(result_entry)
             audit("ingest/result", {
                 "file": rel, "status": results[-1]["status"],
                 "transaction_id": results[-1].get("transaction_id", ""),

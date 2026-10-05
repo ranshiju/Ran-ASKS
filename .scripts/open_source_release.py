@@ -68,7 +68,20 @@ def read_version() -> str | None:
 
 
 def release_badge(version: str) -> str:
-    return f"> Current release: v{version}"
+    return f"> Current main version: v{version}"
+
+
+def update_changelog_links(text: str, version: str) -> str:
+    """Point moving-main and version references at refs created by publication."""
+    lines = text.rstrip().splitlines()
+    prefixes = ("[Unreleased]:", f"[{version}]:")
+    lines = [line for line in lines if not line.startswith(prefixes)]
+    lines.extend([
+        "",
+        f"[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v{version}...HEAD",
+        f"[{version}]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v{version}",
+    ])
+    return "\n".join(lines) + "\n"
 
 
 def next_version(current: str, level: str) -> str:
@@ -123,7 +136,7 @@ def prepare_version(level: str, reason: str, reason_zh: str, from_version: str, 
                f"- {level.upper()}: {reason.strip()}\n"
                f"- {level.upper()}（中文）：{reason_zh.strip()}\n\n"
                + match[1].strip() + "\n\n")
-    updated = text[:match.start()] + section + text[match.end():]
+    updated = update_changelog_links(text[:match.start()] + section + text[match.end():], new_version)
     writes = {VERSION_PATH: new_version + "\n", changelog: updated, REPO / "CHANGELOG.md": updated}
     plan = {"status": "applied" if apply else "planned", "from": current, "to": new_version,
             "level": level, "reason": reason.strip(), "reason_zh": reason_zh.strip(), "date": dated,
@@ -144,7 +157,7 @@ def prepare_version(level: str, reason: str, reason_zh: str, from_version: str, 
 
 
 def localized_release_badge(version: str) -> str:
-    return f"> 当前发布版本: v{version}"
+    return f"> 当前 main 版本: v{version}"
 
 
 def matches(path: str, pattern: str) -> bool:
@@ -573,7 +586,8 @@ def stamp_readmes(destination: Path, version: str) -> None:
             raise ValueError(f"destination {name} missing during version stamping")
         text = readme.read_text(encoding="utf-8")
         marker = re.compile(
-            r"^> (?:Current release|当前发布版本): v[^\n]*$", re.MULTILINE
+            r"^> (?:Current release|Current main version|当前发布版本|当前 main 版本): v[^\n]*$",
+            re.MULTILINE,
         )
         if marker.search(text):
             text = marker.sub(lambda _match: badge, text, count=1)
@@ -619,6 +633,23 @@ def git_ignored_files(destination: Path, paths: set[str]) -> list[str]:
     if checked.returncode not in (0, 1):
         raise ValueError(f"git ignore audit failed: {checked.stderr.strip()}")
     return [line for line in checked.stdout.splitlines() if line]
+
+
+def prospective_git_ignored_files(tree: Path, paths: set[str]) -> list[str]:
+    """Audit release paths against the ignore rules shipped by that release tree."""
+    with tempfile.TemporaryDirectory(prefix="wikigraph-ignore-audit-") as temporary:
+        audit = Path(temporary)
+        for source in tree.rglob(".gitignore"):
+            relative = source.relative_to(tree)
+            target = audit / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        initialized = subprocess.run(
+            ["git", "init", "-q"], cwd=audit, text=True, capture_output=True,
+        )
+        if initialized.returncode:
+            raise ValueError(f"git ignore audit init failed: {initialized.stderr.strip()}")
+        return git_ignored_files(audit, paths)
 
 
 def documentation_omission_errors(destination: Path, manifest: dict, files: set[str]) -> list[str]:

@@ -392,7 +392,55 @@ nodes:
   wg:
     path: .scripts/wg.py
     kind: implementation
-    role: cross-capability-unified-entry-including-managed-external-file-ingest-and-portable-same-transaction-agent-task-control
+    role: cross-capability-unified-entry-including-managed-external-file-ingest-portable-agent-task-control-and-read-only-transaction-verification
+  project_metadata:
+    path: pyproject.toml
+    kind: config
+    role: canonical-python-environment-cli-entry-and-capability-extra-declaration
+  dependency_lock:
+    path: uv.lock
+    kind: lockfile
+    role: reproducible-cross-platform-python-dependency-resolution
+  cli_package:
+    path: ran_asks/cli.py
+    kind: implementation
+    role: installed-workspace-aware-cli-shim-preserving-repository-owned-command-boundaries
+  cli_package_test:
+    path: .scripts/test_cli_package.py
+    kind: test
+    role: installed-cli-workspace-resolution-version-and-dispatch-regression
+  workspace_doctor:
+    path: .scripts/workspace_doctor.py
+    kind: diagnostic
+    role: shared-read-only-offline-environment-dependency-config-and-contract-readiness-diagnostic
+  workspace_doctor_test:
+    path: .scripts/test_workspace_doctor.py
+    kind: test
+    role: workspace-doctor-profile-missing-marker-and-json-contract-regression
+  foundation_demo:
+    path: .scripts/foundation_demo.py
+    kind: diagnostic
+    role: shared-offline-synthetic-raw-wiki-graph-answer-and-provenance-tour
+  foundation_demo_corpus:
+    path: examples/demo/
+    kind: fixture
+    role: public-synthetic-source-wiki-and-scenario-corpus-for-first-success
+  provider_profiles:
+    path: examples/providers/
+    kind: config-family
+    role: public-provider-neutral-and-known-good-reference-environment-examples
+  foundation_demo_test:
+    path: .scripts/test_foundation_demo.py
+    kind: test
+    role: offline-demo-hash-graph-navigation-and-exact-raw-evidence-regression
+  test_suite:
+    path: .scripts/test_suite.py
+    kind: implementation
+    role: shared-profiled-single-command-regression-runner-with-machine-readable-results
+  test_suite_test:
+    path: .scripts/test_test_suite.py
+    kind: test
+    role: test-suite-profile-discovery-failure-and-json-contract-regression
   frontier:
     path: .scripts/frontier.py
     kind: implementation
@@ -441,6 +489,18 @@ nodes:
     path: dsh/evals/semantic-recovery-v1.json
     kind: config
     role: versioned-synthetic-and-curated-semantic-recovery-agent-exam-cases
+  weak_model_governance_eval:
+    path: dsh/weak_model_governance_eval.py
+    kind: diagnostic
+    role: offline-task-protocol-exam-for-malformed-output-evidence-injection-truncation-and-fallback-governance
+  weak_model_governance_exam:
+    path: dsh/evals/weak-model-governance-v1.json
+    kind: config
+    role: versioned-synthetic-weak-model-governance-cases-without-production-data-or-network-calls
+  weak_model_governance_test:
+    path: dsh/test_weak_model_governance_eval.py
+    kind: test
+    role: offline-weak-model-protocol-exam-schema-safety-and-no-persistence-regression
   dsh_guards:
     path: dsh/guards/
     kind: implementation
@@ -609,6 +669,14 @@ nodes:
     path: operations/engineering/open-source-assets/
     kind: documentation-family
     role: governed-public-release-documentation-and-static-assets
+  open_source_threat_model:
+    path: operations/engineering/open-source-assets/docs/security/threat-model.md
+    kind: policy
+    role: public-source-agent-parser-remote-boundary-threat-model-and-residual-risk-register
+  security_policy_test:
+    path: .scripts/test_security_policy.py
+    kind: test
+    role: public-threat-model-reporting-and-agent-data-control-boundary-regression
   open_source_governance:
     path: operations/engineering/open-source-assets/GOVERNANCE.md
     kind: policy
@@ -841,7 +909,7 @@ nodes:
   re_ingest:
     path: .scripts/re_ingest.py
     kind: implementation
-    role: pipeline-version-gated-dual-backend-reingest-orchestrator-with-agent-task-workspace-api-worker-review-api-semantic-handoff-revalidation-and-lineage-safe-clean-commit
+    role: pipeline-version-gated-dual-backend-reingest-orchestrator-with-agent-task-workspace-current-provider-evidence-refresh-api-worker-review-api-semantic-handoff-revalidation-and-declared-stage-lineage-safe-clean-commit
   research_memory:
     path: .scripts/research_memory.py
     kind: implementation
@@ -905,7 +973,7 @@ nodes:
   function_registry:
     path: .scripts/function_registry.py
     kind: implementation
-    role: runtime-function-catalog-validator-resolver-and-route-wg-discovery-source
+    role: runtime-function-catalog-validator-resolver-and-optional-dependency-safe-static-route-wg-dsh-discovery-source
   function_registry_test:
     path: .scripts/test_function_registry.py
     kind: test
@@ -941,7 +1009,7 @@ nodes:
   inbox_state:
     path: .scripts/inbox_state.py
     kind: implementation
-    role: inbox-transaction-state-persistence-with-structured-failure-taxonomy-and-agent-telemetry
+    role: inbox-transaction-state-persistence-with-declarative-transition-graph-hash-bound-final-receipts-read-only-operation-view-and-agent-telemetry
   source_locator:
     path: .scripts/source_locator.py
     kind: implementation
@@ -1866,6 +1934,24 @@ edges:
 - - dsh_semantic_recovery_eval
   - reads
   - llm_model_catalog
+- - weak_model_governance_eval
+  - reads
+  - weak_model_governance_exam
+- - weak_model_governance_eval
+  - uses
+  - llm_structured
+- - weak_model_governance_eval
+  - uses
+  - dsh_semantic_recovery_agent
+- - weak_model_governance_eval
+  - uses
+  - knowledge_ir
+- - weak_model_governance_eval
+  - tested_by
+  - weak_model_governance_test
+- - test_suite
+  - runs
+  - weak_model_governance_test
 - - route
   - tested_by
   - prompt_test
@@ -1944,6 +2030,66 @@ edges:
 - - public_release_ci
   - uses
   - open_source_publish_test
+- - cli_package
+  - uses
+  - wg
+- - cli_package
+  - tested_by
+  - cli_package_test
+- - workspace_doctor
+  - reads
+  - project_metadata
+- - workspace_doctor
+  - reads
+  - dependency_lock
+- - workspace_doctor
+  - reads
+  - engineering_manifest
+- - workspace_doctor
+  - tested_by
+  - workspace_doctor_test
+- - foundation_demo
+  - reads
+  - foundation_demo_corpus
+- - foundation_demo
+  - uses
+  - graph_lib
+- - foundation_demo
+  - uses
+  - source_locator
+- - foundation_demo
+  - tested_by
+  - foundation_demo_test
+- - test_suite
+  - tested_by
+  - test_suite_test
+- - public_release_ci
+  - uses
+  - test_suite
+- - open_source_release
+  - publishes
+  - open_source_threat_model
+- - open_source_manifest
+  - governs
+  - open_source_threat_model
+- - open_source_manifest
+  - governs
+  - project_metadata
+- - open_source_manifest
+  - governs
+  - dependency_lock
+- - open_source_manifest
+  - governs
+  - cli_package
+- - open_source_manifest
+  - governs
+  - foundation_demo_corpus
+- - open_source_manifest
+  - governs
+  - provider_profiles
+- - open_source_threat_model
+  - tested_by
+  - security_policy_test
 - - open_source_release
   - publishes
   - open_source_governance
@@ -2507,6 +2653,7 @@ capabilities:
       execution_rules:
       - 首次预热后立即调用受管入口；不为熟悉流程预读完整 INGEST、SCHEMA 或脚本源码。
       - 若程序返回 agent-task-v1，只读取其中声明的输入与协议，写入指定输出，再执行原 check/commit；diagnostics 只修当前问题。
+      - 长命令只按 runtime_status_ref 的 next_check_after_seconds 低频读取状态；attention 才定向读取 state/log，done 停止检查。
       profiles:
         paper:
           entrypoint: python3 .scripts/wg.py ingest <file> --subproject <domain>
@@ -2585,6 +2732,7 @@ capabilities:
     - Agent 模式由当前宿主 Agent 持有控制循环，程序只提供确定性代码壳、agent-task-v1 与机械校验；API 模式由程序持有控制循环，DSH、模型调用、重试和预算只存在于 API adapter。二者共享输入解析与定位、schema、validator、IR/Graph、报告与事务等确定性内核，不共享控制循环或语义执行 adapter。
     - 提示词撰写原则：以正向、直接、可执行的要求为主，说明目标、行动与验收条件；否定表述仅用于红线和必须明确的边界。
     - 优先实际效果、最小机制、单一事实源、可重建派生物和局部且规模不变的改动。处理缺陷时，在首次编辑前明确说明并用复现、代码路径或反事实验证因果链：症状 → 最早错误状态 → 产生机制 → 责任组件；默认修复责任组件，并让回归测试覆盖该责任边界。
+    - 缺陷修复采用双层范围：修复经证据确认、对同类问题具有普遍收益的责任组件，同时修正已确认且无需新增机制的具体数据问题。不得为单一样本引入特判、额外状态、流程或模型调用；通用修复只有在跨场景收益明确且不增加不必要复杂度时实施。
     - 只有根因位于当前系统边界外，或问题确认属于兼容性、迁移或历史数据修复时，才采用局部特判、兜底或事后补偿；须限定适用范围和退出条件，并验证不会掩盖其他错误。
     - 工程图只负责定位影响，工程文档只在当前判断需要时按 locator 读取。先运行 impact <target> --verify，再从推荐 locator 获取最小充分信息，不把总提示词当工程手册。
     - 完成实现、针对性回归和受影响文档同步；涉及模型后端时确认实际 backend，标记 shared、agent-only 或 api-only，并保持共享契约跨后端一致。
@@ -2795,6 +2943,25 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  project_metadata:
+  - python3 .scripts/test_cli_package.py
+  - python3 .scripts/test_workspace_doctor.py
+  cli_package:
+  - python3 .scripts/test_cli_package.py
+  dependency_lock:
+  - python3 .scripts/test_workspace_doctor.py
+  workspace_doctor:
+  - python3 .scripts/test_workspace_doctor.py
+  foundation_demo:
+  - python3 .scripts/test_foundation_demo.py
+  foundation_demo_corpus:
+  - python3 .scripts/test_foundation_demo.py
+  provider_profiles:
+  - python3 .scripts/test_workspace_doctor.py
+  test_suite:
+  - python3 .scripts/test_test_suite.py
+  open_source_threat_model:
+  - python3 .scripts/test_security_policy.py
   graph_visualize:
   - python3 .scripts/test_graph_visualize.py
   graph_visualize_ops:
@@ -3012,6 +3179,14 @@ verification:
   wg:
   - python3 .scripts/test_wg.py
   - python3 .scripts/test_agent_task.py
+  - python3 .scripts/test_ingest_pipeline.py
+  weak_model_governance_eval:
+  - python3 dsh/weak_model_governance_eval.py --validate
+  - python3 dsh/test_weak_model_governance_eval.py
+  weak_model_governance_exam:
+  - python3 dsh/weak_model_governance_eval.py --validate
+  weak_model_governance_test:
+  - python3 dsh/test_weak_model_governance_eval.py
   frontier:
   - python3 .scripts/test_frontier.py
   - python3 .scripts/test_wg.py
@@ -3052,6 +3227,37 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  workspace_doctor:
+    preconditions:
+    - workspace 必须由显式 --workspace、RAN_ASKS_WORKSPACE 或含 AGENTS.md 与 .scripts 的当前目录确定，不能静默检查其他仓库
+    - profile 只声明本地依赖集合；默认检查不访问网络、不调用模型、不打开或迁移 graph.db
+    writes: []
+    forbidden:
+    - 把缺少可选依赖报告成 core 不可用
+    - 为探测可用性发送远程请求、修改 .env 或创建数据库
+    verify:
+    - python3 .scripts/test_workspace_doctor.py
+  foundation_demo:
+    preconditions:
+    - 只读取 examples/demo 中明确标注的 synthetic corpus，并逐文件复验 scenario 声明的 SHA-256
+    - 事实答案必须经 Wiki 声明的 Raw locator 回读原文；临时 Graph 只负责选择应读取的页面
+    writes:
+    - 缺省仅写系统临时目录并在退出时清理；显式 --output 只写用户指定的 JSON 回执
+    forbidden:
+    - 调用远程模型或把 demo 中间产物写入生产 Raw、Wiki 或 graph.db
+    - 从 Graph 边文本直接生成事实答案而不核验 Raw locator
+    verify:
+    - python3 .scripts/test_foundation_demo.py
+  test_suite:
+    preconditions:
+    - profile 显式映射到稳定命令列表；all 只发现仓库声明的 Python regression，不执行带 --render 或真实远程调用的可选路径
+    writes:
+    - 子测试可按其既有契约写入可重建 temp 产物
+    forbidden:
+    - 用跳过或空命令报告成功
+    - 改写测试环境、安装依赖或吞掉子进程失败
+    verify:
+    - python3 .scripts/test_test_suite.py
   graph_visualize:
     preconditions:
     - 经 graph_lib.connect(read_only=True) 读取存在的 public 或 private 图，不迁移 schema，不隐式调用模型。
@@ -3349,6 +3555,7 @@ script_contracts:
     - python3 .scripts/test_open_source_release.py
   ingest_inbox:
     preconditions:
+    - inbox_plan 与执行扫描共用隐藏控制项/系统元数据过滤契约；这些条目不得进入分类、batch eligibility 或摄入队列
     - 对话文件使用 --keep-source 复制后分发；纯正文使用 --stdin 原样 UTF-8 暂存；两者共用现有分类、校验、去重与事务，正常 inbox 清理语义不变
     - 对话提交只处理本次暂存文件；分类恢复命令绑定该文件，不再次读 stdin、不扫描无关 inbox 文件；仅系统副本允许清理
     - inbox/.source-retention 持久标记按原件路径生效，不随内容变化解除；标记损坏或标记/目录为符号链接时失败关闭，计划以 retained_sources 明示保留项，清理不得删除保护标记
@@ -3382,6 +3589,7 @@ script_contracts:
     - 实际摄入前在 stderr 报告生效 backend；紧凑 stdout 保留 backend、质量告警总数及最多 5 条有界摘要，不为查看降级原因要求 Agent 输出完整图报告
     - --reconcile-maintenance-report 仅修复显式指定的受管历史报告关联，并重放事务中已有的方向裁决以闭环回执；不调用模型、不重摄入、不写 Raw 或图，不产生新语义裁决
     - 报告单独统计 awaiting_agent 与 duplicates；failed 只统计真实失败，agent_required 不得触发失败退出码
+    - batch terminal 表示工作流闭合；顶层 committed 仅在所有 item 均真实 committed 时为 true，duplicate_found 只计入 duplicates 且不得冒充知识提交
     writes:
     - temp/inbox-dsh/*.jsonl
     - cross-domain/ingest-reports/*.json（含 program classification 与 boundary API review）
@@ -3569,7 +3777,7 @@ script_contracts:
     - private paths are an unconditional publication deny rule across includes, asset sources/targets and template directories; preflight completes before clearing or copying the destination
     - source and destination paths must remain confined without symlink escape; verify rejects private paths even when the manifest approves them
     - 每次有实际公开变更的 GitHub 同步先由当前 Agent 评估 PATCH/MINOR/MAJOR 并说明功能与兼容性依据，不按文件数/行数推断；脚本 prepare-version 按显式级别与预期旧版本计算新版本，同次构建重试不重复排号
-    - 根目录 VERSION 是当前 MAJOR.MINOR.PATCH 发布边界；verify 对比公开仓库的待提交或最新提交基线，拒绝同版本或版本倒退的公开更新；Git tag/Release 的创建与版本排号分别授权
+    - 根目录 VERSION 是当前 MAJOR.MINOR.PATCH public-tree 边界；verify 对比公开仓库的待提交或最新提交基线，拒绝同版本或版本倒退的公开更新；自 v0.12.0 起每个发布版本有同名不可变 annotated tag，GitHub Release 仍与版本排号分别授权
     - 根目录 CHANGELOG.md 由公开资产生成，最新版本标题与 VERSION 一致；Unreleased、当前版本 highlights 和语义版本判断均同时包含英文与中文
     - 每次 GitHub 公开树更新均须内容级审阅并同步英文 README、中文 README、带日期的中文说明 Markdown 及其版本范围说明；相关机制、能力、配置或使用方式不得只写 changelog
     - 中文说明 Markdown 是 GitHub 默认在线阅读入口，图片使用公开相对路径；PDF 保留用于下载和打印，在读者内容变化时从同一已审阅来源同步更新
@@ -3586,6 +3794,8 @@ script_contracts:
     - build 先写入同文件系统临时树，验证通过后事务性替换指定目标公开树并保留 .git；目标绝不能是 REPO 自身，安装失败恢复旧树
     - build 写 RELEASE_PROVENANCE.json，记录 source mode/commit/tree、manifest SHA-256、版本、payload SHA-256 和 PDF render-health
     - prepare-version --apply 仅同步源 VERSION、公开资产 CHANGELOG 和根目录 CHANGELOG 镜像，将双语 Unreleased 条目归入新版本并记录中英文判断依据；缺省只输出计划，不调用 LLM 或 Git 网络
+    - publisher 安装前按拟发布树携带的 .gitignore 规则审计全部公开文件，允许同一版本更新自身的忽略边界；安装后继续按真实目标 worktree 规则复验
+    - open_source_publish 非 dry-run 在验证并提交公开树后创建版本 annotated tag；--push 原子推送分支与 tag 并分别确认远端 commit
     - 目标树中的 operations/engineering/graph.yaml 确定性投影，仅保留公开路径闭包
     forbidden:
     - 手工向生成公开树补入业务文件
@@ -3602,6 +3812,7 @@ script_contracts:
     - 把独立社区下游描述为官方、兼容或 Reference Distribution，或把其领域维护与用户支持默认为 Core 维护者责任
     - 目标 `.gitignore` 隐藏白名单文件，导致生成树通过但 Git 提交缺件
     - 把管线 CURRENT_PIPELINE_VERSION 当公开发布版本
+    - 覆盖、移动或复用已经存在的本地/远端版本 tag，或只推送分支造成新版本没有不可变引用
     verify:
     - python3 .scripts/test_open_source_release.py
     - python3 .scripts/test_open_source_publish.py
@@ -3759,6 +3970,7 @@ script_contracts:
     - arXiv Hub construction is academic-only; private never consumes the public catch-all or abbreviation queue
     - 正式提交时 wiki 页已落盘；--plan-only 可通过 --page-file 读取事务内暂存 Wiki，同时用 --page 保持最终逻辑页面 ID；类型语义输出必须先归一为经校验的 knowledge-ir-v1（历史 corrected.md 仅作兼容参考）
     - '`概念说明:` 每行以第一个 `|` 分隔概念名与局部说明；说明正文中的后续数学竖线保留为内容，三元组仍严格解析为三列'
+    - 研究基础/核心方法/对比方法/研究关键词等 concept predicate 的 object 由谓词角色确定为 concept；不得再用描述性短语启发式把术语内部的“表示/构造”等字样改判为 proposition
     - graph_ingest 是所有文档类型的唯一核心 graph.db writer；调用方不得绕过 IR/plan 直接新增类型专用事实边
     - graph_ingest 所有会写 live graph 的子命令（prefill/ingest/merge/init/cleanup-*）在打开目标 graph.db 前必须经同一命令边界取得按数据库路径隔离的跨进程 writer lock；--plan-only 与正式 commit 共用该锁并串行访问 live graph，SQLite busy_timeout 只作锁外异常争用的第二层保护
     - --plan-only 必须在 live graph 上运行同一 IR、GraphDelta inspection/fusion 与结构关系校验，最后 rollback；只允许写 temp IR/plan 回执，不得持久化节点、边、alias、gloss、Hub 动力学或待办
@@ -3921,6 +4133,7 @@ script_contracts:
   ingest_check:
     preconditions:
     - 页面已写入；页面 sources 可解析时允许只读相邻 source.yaml 进行确定性书目一致性检查；使用 --graph 前已完成图写入
+    - paper-summary venue 与 source.yaml 的锁定标量、结构化 layout venue candidates 或完整 layout block 做精确规范化匹配；匹配任一可信候选即一致，不做子串或模糊放行
     - 'date 通常为有效 YYYY/YYYY-MM/YYYY-MM-DD；来源确实无可证日期时允许显式 date: null + date_status: unknown，created/updated 仍须为完整日期'
     - paper-summary 作者覆盖优先以 source.yaml 中 review.locked=true 的 bibliographic.authors 为 raw 锚点；仅在锁定作者不可用时回退 paper.md 机械提取，或在人数/顺序逐项一致且唯一差异是锁定姓名停在 De/van/von 等姓氏连接词时，采用 paper.md 中的完整向后扩展
     - paper-summary 标题覆盖优先以 source.yaml 中 review.locked=true 的 bibliographic.title 为 raw 锚点；锁定标题不可用时才回退 paper.md 首个 H1，避免出版社包装标题造成假 WARN
@@ -4035,7 +4248,8 @@ script_contracts:
     - python3 .scripts/test_prompt_audit.py
   inbox_state:
     preconditions:
-    - status 必须属于已登记摄入状态；failed/agent_required 等非线性恢复只允许通过受限 transition helper 回到明确恢复点，包括图提交后尚未整体完成的 post_commit_projection
+    - status 必须属于已登记摄入状态；每次持久化的前向推进与 failed/agent_required 等非线性恢复都必须命中声明式转换图，pending transition 只记录原因且不能自行授权跳级
+    - completed/duplicate_found 自动生成 verification-receipt-v1，绑定稳定事务字段、转换轨迹、validator 回执哈希与已声明最终产物哈希；只读复验对缺失或变化 fail closed
     - superseded 只用于关闭同源重复事务；旧事务必须仍未提交，新事务必须 completed/duplicate_found，且 source 与已有 source_hash 均一致，关闭动作仍经 transition 与原子 save 留审计轨迹；事务 ID 接受文档入口生成的 Unicode 字母数字、下划线及既有点号/连字符，拒绝路径分隔符
     - failure taxonomy 保留 API、事务与 DSH 的层级差异，但事务统一产出 category/domain/disposition/retryable/owner/next_action，外层适配器优先消费结构化结果
     - JSON/协议 section 解析失败属于 worker_output_invalid；具备同协议 host-agent handoff 的编排器必须保留原事务并进入 agent_required，不得降级为 unknown_failure
@@ -4050,6 +4264,7 @@ script_contracts:
     - 删除 stale prepared 状态文件、跨来源 supersede，或用未完成事务取代旧事务
     - 接受未知 status，或让持久化 resume_from/pre_handoff_status 跳到未授权阶段
     - 用事务 stage 计数或 DSH session log 推算真实 API 请求数
+    - 把 verification receipt 当作事实蕴含、语义正确性或 Raw 证据的证明
     verify:
     - python3 .scripts/test_ingest_pipeline.py
     - python3 dsh/test_dsh_ingest_tools.py
@@ -4146,8 +4361,10 @@ script_contracts:
     - 单篇与 batch item 均经 inbox_state 输出 ingest-result-v1；completed 必须同时报告 committed=true 与可定位的 Raw/Wiki 产物，awaiting_agent 的本次产物是 agent-task-v1，不以进程退出码冒充事务完成
     - batch 顶层 workflow_status、terminal、committed 与 counts 只从 items 派生；prepared/partial 等旧顶层状态只保留为兼容 status，不得覆盖 item 四态或产生独立统计口径
     - 确定性 PDF metadata、首页规则与 MinerU 解析器只注册为带 provenance 的 candidate provider；候选是否锁定仍由 candidate-id-v2 裁决与 validator 决定
-    - bibliographic-candidate-provider-v6 在 v5 的 MinerU 文本候选之上保留 PDF 前两页 layout block 的 page/bbox/相对位置；标题下至摘要前的姓名块只生成 candidate_only 作者，affiliation 单列排除；日期候选绑定 published/published_online/accepted/received/revised/preprint kind，近端页眉页脚与 DOI 形态补充 venue 候选，冲突仍交同一 candidate-id-v2 workspace 裁决
+    - bibliographic-candidate-provider-v7 在 v6 的 PDF 前两页 layout block 基础上，直接从同一证据块注册 self DOI 候选并保留带冒号/副标题的完整 venue；标题下至摘要前的姓名块仍只生成 candidate_only 作者，affiliation 单列排除，日期候选绑定 published/published_online/accepted/received/revised/preprint kind，冲突仍交同一 candidate-id-v2 workspace 裁决
+    - 旧锁定 Raw 进入 re-ingest 时，title/authors/year/venue 等事实标量在裁决前保持不变，但 front_matter_blocks、layout_candidates 与 first_page_evidence 必须从原 PDF 按当前 provider 重算；候选门裁决只写事务与 Wiki/Graph，不回写 Raw
     - awaiting_output workspace 的 candidate provider 版本落后时，--resume 仅在 paper.md 哈希未变且 workspace 输出尚不存在时刷新同一事务；已有未提交输出必须经显式 --agent-refresh 归档旧输出及哈希后刷新，不得静默覆盖或新建事务
+    - --agent-refresh 可显式修复旧事务在受管书目回填并重算 manifest 后未同步的 workspace bundle 基线；仅当磁盘 bundle 与顶层 state 哈希相等、source.yaml.bibliographic 与已锁定书目完全相等、workspace 仍为 awaiting_output 时更新基线并留存审计；其他任何漂移继续阻断
     - paper_workspace_check 在书目可物化后尽量同轮收集 Wiki 与 semantics 的全部独立 diagnostics；只有依赖项不可用时才跳过下游门，并明确 skipped_by
     - Agent check 在最终 Raw/Wiki 落位前调用 graph_ingest --plan-only，以暂存 Wiki、暂存 Raw locator companion 和最终逻辑 page ID 在 live graph 上生成并校验 graph-plan-v1
     - Agent workspace 把暂存 paper.pdf 的 pages:1-2 作为首个有界书目输入，并提供程序抽取、带页码的 first-two-pages.txt 作为读取工具不支持 PDF 时的备用；两者均绑定哈希，Agent 核对完整作者/标题/venue 后仍引用候选 ID 或受 validator 约束的 paper.md locator，最终书目锁定仍归共享内核
@@ -4171,6 +4388,7 @@ script_contracts:
     - 新论文 wiki prompt 不生成 <<<META>>>；date/type/title/authors/venue/path 均由程序与 locked bibliography 确定性编译
     - 旧事务若仍携带 <<<META>>>，只写 legacy_meta_audit；不得据此改 paper-id、Raw/Wiki 路径或 locked bibliography
     - API adapter 将有界 paper context、候选目录、页面骨架与语义契约编入一次 paper-agent-workspace-v1 调用；40k chars 内的短论文保留全文，超长论文才按 22k chars 预算定向选段；输出依次通过 bibliography/Wiki/semantics/Graph preflight validator，不因合并调用放宽任一门
+    - API workspace 的局部语义恢复耗尽后仍只重开原 agent-workspace.txt 的 SLOTS 段；write_to、prompt、hash validator 与 resume 均指向该唯一可写产物，不再降级为独立 semantic.txt handoff
     - 预审前读取 PDF metadata（含 subject）与第一页发表页脚；同一证据行含 received/published 时 published year 优先；有近端 year/venue/DOI 证据时必须回填 skeleton/wiki
     - metadata.subject 中完整 journal citation 或期刊名属于近端 venue 候选；仅在可识别期刊形状时提取，不把关键词/分类主题猜成 venue；可靠 venue 候选存在却未锁定或未回填 Wiki 时硬阻断
     - 首页证据中的完整 Proceedings of ... 或 Findings of ... venue 原文必须进入候选集合，即使规范化 venue 为空或省略 Proceedings/Findings 前缀
@@ -4183,6 +4401,7 @@ script_contracts:
     - SLOTS 外层与三元组 section 使用同一结构诊断；正文仅含完整裸三元组时程序确定性补入 `三元组:`，不得为可机械修复的缺 section 调用 Worker
     - 语义覆盖率只统计 `三元组:` section 中可解析的 Worker 关系，排除由 Wiki frontmatter 确定性生成的作者、期刊等边，并在 prepare/commit 间保持同一口径
     - API/agent 语义槽为三元组中的 keyword 输出 `概念说明:` 局部 description；Worker 不生成 locator，程序从 Wiki section 脚注机械绑定 Raw locator，缺 locator 的 gloss 不得写 node_glosses 或主 description
+    - re-ingest 在命题编译与 clean commit 中必须持久化 `finalize → propositions → propositions_done → graph_ready → update_graph → validate_graph → finalize_tail → completed`；不得跳级造成已完成副作用被记为 failed
     - API 与 Agent 的 combined prompt 必须由同一版本化 bibliography/Wiki/paper semantic contract 编译；backend 只改变上下文传递方式，不得改变 candidate 边界、concept/proposition 类型、谓词边界或 Graph topology policy
     - workspace 校验失败只重开受影响产物：bibliography 失败阻断全部下游，Wiki 失败保留已验证 bibliography，slots 失败保留已验证 bibliography 与 Wiki；API 定向修复只调用对应 artifact，Agent 在原 workspace 内只改对应 segment
     - 研究基础/核心方法/对比方法的 object 是可复用 concept；核心创新点/局限性/未来展望的 object 是论文明确陈述的完整 proposition；概念间关系两端都必须是可独立指代的 concept
@@ -4501,6 +4720,20 @@ script_contracts:
     verify:
     - python3 dsh/semantic_recovery_eval.py --validate
     - python3 dsh/test_semantic_recovery_agent.py
+  weak_model_governance_eval:
+    preconditions:
+    - 只使用版本化合成 case，调用生产 JSON parser、proposal schema、Knowledge IR validator 与无写权限 Agent guard；不读取 Raw、Wiki、graph.db 或用户材料
+    - 默认离线执行且不得调用真实 provider；真实模型能力仍由各任务独立显式 eval 评估，不由本试卷自动推断或切换路由
+    - case 分别声明 handler、输入和预期 disposition；通过只证明协议防线按预期拒绝或隔离弱输出，不证明模型语义质量
+    writes:
+    - 无；报告仅输出 stdout，调用方若需留档必须显式写入 temp/agent-evals 且不得作为事实源
+    forbidden:
+    - 根据试卷结果自动修改 llm-models.yaml、preferred/fallback、.env 或运行时分解策略
+    - 把 schema/evidence locator 存在性校验表述为事实蕴含或语义正确性证明
+    - 在 prompt-injection case 注册 mutation tool、执行 shell、写暂存或持久状态
+    verify:
+    - python3 dsh/weak_model_governance_eval.py --validate
+    - python3 dsh/test_weak_model_governance_eval.py
   dsh_ingest_tools:
     preconditions:
     - 图片摄入可透传显式 ocr_result 或 allow_remote_ocr；不得因 API backend 或存在 endpoint/key 而自行授权图片上传

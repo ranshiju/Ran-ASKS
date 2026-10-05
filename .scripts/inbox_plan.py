@@ -20,6 +20,12 @@ SUBPROJECTS = ("academic", "admin", "teaching", "business")
 PAPER_SUFFIXES = {".pdf"}
 MEETING_SUFFIXES = {".txt"}
 DOCUMENT_SUFFIXES = {".md", ".docx", ".xls", ".xlsx", ".pptx"} | IMAGE_SUFFIXES
+IGNORED_ENTRY_NAMES = frozenset({".gitkeep", ".DS_Store"})
+
+
+def is_ignored_entry(path: Path) -> bool:
+    """Return whether an inbox entry is control/system metadata, not user content."""
+    return path.name in IGNORED_ENTRY_NAMES or path.name.startswith(".")
 
 
 def slugify(value: str) -> str:
@@ -73,7 +79,7 @@ def build_plan(inbox: Path) -> dict:
     items = []
     retained_sources = []
     for path in sorted(inbox.iterdir() if inbox.exists() else [], key=lambda item: item.name.lower()):
-        if path.name == ".gitkeep" or not path.is_file():
+        if is_ignored_entry(path) or not path.is_file():
             continue
         if inbox_source_policy.is_retained(REPO, path):
             retained_sources.append(str(path.relative_to(REPO)))

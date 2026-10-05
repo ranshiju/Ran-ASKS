@@ -2,6 +2,11 @@ version: 1
 purpose: "公开发布白名单：只允许此清单声明的工程文件进入开源副本。"
 include:
   - VERSION
+  - pyproject.toml
+  - uv.lock
+  - ran_asks/**
+  - examples/demo/**
+  - examples/providers/**
   - AGENTS.md
   - .env.example
   - .gitignore
@@ -60,6 +65,7 @@ public_assets:
   GOVERNANCE.md: operations/engineering/open-source-assets/GOVERNANCE.md
   ECOSYSTEM.md: operations/engineering/open-source-assets/ECOSYSTEM.md
   SECURITY.md: operations/engineering/open-source-assets/SECURITY.md
+  docs/security/threat-model.md: operations/engineering/open-source-assets/docs/security/threat-model.md
   LICENSE: operations/engineering/open-source-assets/LICENSE
   templates/cv/README.md: operations/engineering/open-source-assets/templates/cv/README.md
   templates/cv/academic-full.docx: operations/engineering/open-source-assets/templates/cv/academic-full.docx

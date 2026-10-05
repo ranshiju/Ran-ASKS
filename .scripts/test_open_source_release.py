@@ -109,6 +109,8 @@ def check_version_preparation() -> None:
             assert "- MINOR: Compatible image ingestion capability" in updated
             assert "- MINOR（中文）：新增向后兼容的图片摄入能力" in updated
             assert "- Image OCR." in updated and "- Earlier work." in updated
+            assert "[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.5.0...HEAD" in updated
+            assert "[0.5.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.5.0" in updated
             try:
                 release.prepare_version(**arguments, apply=True)
             except ValueError as error:
@@ -372,8 +374,8 @@ def main() -> None:
         assert (destination / "THIRD_PARTY_NOTICES.md").is_file()
         assert (destination / "VERSION").is_file()
         assert (destination / "VERSION").read_text(encoding="utf-8").strip() == expected_version
-        assert f"> Current release: v{expected_version}" in (destination / "README.md").read_text(encoding="utf-8")
-        assert f"> 当前发布版本: v{expected_version}" in (
+        assert f"> Current main version: v{expected_version}" in (destination / "README.md").read_text(encoding="utf-8")
+        assert f"> 当前 main 版本: v{expected_version}" in (
             destination / "README.zh-CN.md"
         ).read_text(encoding="utf-8")
         assert "[简体中文](README.zh-CN.md)" in (

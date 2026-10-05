@@ -31,10 +31,10 @@ or erase Git history; do not publish the source repository. History cleanup requ
 separately reviewed migration. Private maintenance receipts and backups stay under
 `private/outputs/`, never in a release or shared temporary directory.
 
-## Release version
+## Public-tree version and immutable tags
 
-- The canonical public release version is the root `VERSION` file, formatted as `MAJOR.MINOR.PATCH`; documentation must not duplicate a current-version constant.
-- `open_source_release.py build` reads `VERSION`, writes it to the destination tree, and stamps `> Current release: v<version>` into the public `README.md`.
+- The canonical moving-main version is the root `VERSION` file, formatted as `MAJOR.MINOR.PATCH`; documentation must not duplicate a current-version constant.
+- `open_source_release.py build` reads `VERSION`, writes it to the destination tree, and stamps `> Current main version: v<version>` into the public `README.md`.
 - `open_source_release.py verify` rejects a version mismatch between source `VERSION`, destination `VERSION`, and the README release badge.
 - Edit release notes only in `operations/engineering/open-source-assets/CHANGELOG.md`. Every new `Unreleased`/version section contains parallel `### Highlights` and `### 主要更新` sections, and the semantic version rationale is recorded in English and Chinese. `prepare-version --apply` synchronizes this asset and the source root `CHANGELOG.md` mirror; `build` copies the asset to the public root. The newest release heading must match `VERSION` before publication.
 - Keep the changelog human-readable: prioritize important user-facing capabilities, behavior or contract changes, compatibility, quality, and security; summarize minor fixes and internal adjustments instead of listing them individually.
@@ -42,7 +42,8 @@ separately reviewed migration. Private maintenance receipts and backups stay und
 - The Markdown introduction is the default GitHub reading view. Retain the dated PDF for download and printing, and update it whenever the introduction's reader-facing content changes. Normalize the PDF after Word export for portable rendering. `verify` checks the Ghostscript producer, page count, extractable text, missing-glyph markers, nonblank page renders and recorded render-health metadata. Human comparison with the reviewed edit source remains required because mechanical rendering cannot establish semantic or layout equivalence.
 - Before every actual public update, the host Agent automatically assesses the highest semantic change level and records the capability/compatibility rationale. Do not infer it from file counts, line counts, or the last Git tag: compare with the published tree and its `VERSION`. The deterministic `prepare-version` command calculates the next number; it does not call an LLM or classify changes itself.
 - Every public update advances `VERSION`, including documentation-only updates. `verify` rejects unchanged or decreasing versions against `HEAD` for pending changes, or `HEAD^` for the latest committed change when clean. Initial trees without a commit baseline are exempt. Rebuilding or retrying the same prepared batch does not allocate another version; `--from-version` rejects accidental repeated preparation. With no actual change to publish, do not prepare another version or publication commit.
-- Number allocation does not authorize a Git tag or GitHub Release. Create those only when separately requested; frozen paper artifacts keep their own immutable boundaries.
+- Starting with `v0.12.0`, every published public-tree version receives an annotated immutable Git tag with the same version. `open_source_publish.py` creates the local tag after the verified publication commit; `--push` atomically pushes the branch and tag, then confirms both resolve to that commit. An existing local or remote tag fails closed and is never moved.
+- A GitHub Release remains a separately authorized milestone or paper-archive action. Paper artifacts keep their own immutable data boundaries; creating the routine version tag does not create or modify a GitHub Release.
 - This number is separate from pipeline versioning: `CURRENT_PIPELINE_VERSION` in `.scripts/graph_lib.py` tracks content-pipeline upgrades and is never the public release number.
 - Increment PATCH for compatible fixes or documentation-only releases, MINOR for backward-compatible public capabilities, and MAJOR for breaking public contracts.
 - Apply this decision policy explicitly during `0.x` development too: record compatibility changes rather than silently treating all pre-1.0 updates as interchangeable. A large internal refactor can remain PATCH; a small new public capability can warrant MINOR.
@@ -55,10 +56,11 @@ separately reviewed migration. Private maintenance receipts and backups stay und
 4. Verify every included paper artifact with its declared verifier. The base
    `v0.2.0` artifact uses `.scripts/paper_artifact.py verify`; additive audit
    extensions such as `v0.2.1` use their versioned `verify.py`.
-5. In a Git worktree, verify that no manifest-approved release file is excluded
-   by the destination `.gitignore`.
+5. Before installation, verify that no manifest-approved release file is excluded
+   by the prospective tree's `.gitignore`; this lets a release update its own ignore
+   boundary. After installation, repeat the check in the destination Git worktree.
 6. Run `open_source_publish.py` with `--dry-run`. It resolves an explicit source commit, checks selected-source cleanliness, fetches and checks the public branch, builds from a detached source worktree, writes provenance, validates a temporary release tree and reports the planned diff without changing the public worktree.
-7. Review the planned diff and confirm that documentation describes the affected behavior rather than merely changing dates or version badges. Re-run without `--dry-run` to transactionally install and commit the generated public tree. Add `--push` only when GitHub publication is authorized; the command uses a non-force push and confirms the remote commit with `ls-remote`. It never creates a tag or GitHub Release.
+7. Review the planned diff and confirm that documentation describes the affected behavior rather than merely changing dates or version badges. Re-run without `--dry-run` to transactionally install and commit the generated public tree and create its annotated version tag. Add `--push` only when GitHub publication is authorized; the command atomically pushes the branch and tag without force, then confirms both with `ls-remote`. It never creates a GitHub Release.
 
 ### External contribution round trip
 

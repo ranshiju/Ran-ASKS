@@ -127,12 +127,55 @@ def test_tree_diff_paths() -> None:
         assert publish.tree_diff_paths(left, right) == {"changed.txt", "added.txt"}
 
 
+def test_prospective_ignore_audit_uses_staged_release_rules() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        destination = root / "destination"
+        staging = root / "staging"
+        destination.mkdir()
+        staging.mkdir()
+        (destination / ".gitignore").write_text("**/wiki/**\n", encoding="utf-8")
+        (staging / ".gitignore").write_text(
+            "**/wiki/**\n!examples/\n!examples/**\n", encoding="utf-8",
+        )
+        git(destination, "init", "-q")
+        path = "examples/demo/wiki/example.md"
+        assert release.git_ignored_files(destination, {path}) == [path]
+        assert release.prospective_git_ignored_files(staging, {path}) == []
+
+
+def test_version_tag_is_immutable_and_resolves_to_commit() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        remote = root / "remote.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        repository = root / "public"
+        init_repository(repository)
+        git(repository, "branch", "-M", "main")
+        git(repository, "remote", "add", "origin", str(remote))
+        git(repository, "push", "-qu", "origin", "main")
+        tag = publish.version_tag("0.12.0")
+        publish.assert_tag_available(repository, "origin", tag)
+        commit = git(repository, "rev-parse", "HEAD")
+        git(repository, "tag", "-a", tag, "-m", tag, commit)
+        git(repository, "push", "-q", "origin", f"refs/tags/{tag}")
+        assert publish.remote_tag_commit(repository, "origin", tag) == commit
+        try:
+            publish.assert_tag_available(repository, "origin", tag)
+        except publish.PublishError as error:
+            assert "already exists" in str(error)
+        else:
+            raise AssertionError("existing immutable tag was accepted")
+
+
 def main() -> None:
     tests = [
         test_dirty_release_input_boundary,
         test_destination_remote_and_divergence_guards,
         test_transactional_install_rolls_back,
         test_tree_diff_paths,
+        test_prospective_ignore_audit_uses_staged_release_rules,
+        test_version_tag_is_immutable_and_resolves_to_commit,
     ]
     for test in tests:
         test()

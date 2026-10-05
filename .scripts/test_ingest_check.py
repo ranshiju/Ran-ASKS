@@ -307,6 +307,42 @@ def test_bibliographic_consistency_uses_published_year_and_aps_doi():
     assert any("Phys. Rev. B 88, 035103" in error for error in errors)
 
 
+def test_bibliographic_consistency_accepts_exact_layout_venue_over_stale_scalar():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory).resolve()
+        raw_dir = repo / "academic/raw/references/demo"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "paper.md").write_text("# Demo\n", encoding="utf-8")
+        (raw_dir / "source.yaml").write_text(
+            "bibliographic:\n"
+            "  year: '2007'\n"
+            "  venue: Journal of Physics\n"
+            "  layout_candidates:\n"
+            "    venues:\n"
+            "    - value: Journal of Physics\n"
+            "      evidence: old-layout\n"
+            "  front_matter_blocks:\n"
+            "  - text: 'Journal of Physics: Condensed Matter'\n"
+            "    evidence: pdf_layout_front_matter.page1.block1\n",
+            encoding="utf-8",
+        )
+        page = repo / "academic/wiki/papers/demo.md"
+        page.parent.mkdir(parents=True)
+        fm = {
+            "type": "paper-summary",
+            "sources": ["academic/raw/references/demo/paper.md"],
+            "date": 2007,
+            "venue": "Journal of Physics: Condensed Matter",
+        }
+        old_repo = ingest_check.REPO
+        ingest_check.REPO = repo
+        try:
+            errors = ingest_check.check_bibliographic_consistency(page, fm)
+        finally:
+            ingest_check.REPO = old_repo
+    assert errors == []
+
+
 def test_coverage_anchors_prefer_locked_bibliographic_authors():
     with tempfile.TemporaryDirectory() as directory:
         repo = Path(directory).resolve()
@@ -552,6 +588,7 @@ y
 
     test_extract_engine_warns_on_non_mineru()
     test_bibliographic_consistency_uses_published_year_and_aps_doi()
+    test_bibliographic_consistency_accepts_exact_layout_venue_over_stale_scalar()
     test_coverage_anchors_prefer_locked_bibliographic_authors()
     test_coverage_anchors_expand_only_truncated_locked_surname_particle()
     test_locator_aware_page_runs_only_minimal_closed_loop_checks()

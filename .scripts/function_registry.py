@@ -296,6 +296,77 @@ def observed_dsh_tools(data: dict[str, Any] | None = None) -> set[str]:
     return {tool.name for tool in load_dsh_tools(data)}
 
 
+def observed_dsh_tool_names(data: dict[str, Any] | None = None) -> set[str]:
+    """Discover ToolDefinition names without importing optional providers."""
+    data = data if data is not None else load_registry()
+    names: list[str] = []
+    for module_name, _factory_name in dsh_providers(data):
+        path = (REPO / module_name.replace(".", "/")).with_suffix(".py")
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        constants: dict[str, str] = {}
+        for statement in tree.body:
+            if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                continue
+            target = statement.targets[0]
+            if isinstance(target, ast.Name):
+                try:
+                    value = ast.literal_eval(statement.value)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(value, str):
+                    constants[target.id] = value
+        for statement in tree.body:
+            if not isinstance(statement, ast.ImportFrom) or not statement.module:
+                continue
+            imported_path = (REPO / statement.module.replace(".", "/")).with_suffix(".py")
+            if not imported_path.is_file():
+                continue
+            imported_tree = ast.parse(
+                imported_path.read_text(encoding="utf-8"), filename=str(imported_path),
+            )
+            imported_constants = {}
+            for imported_statement in imported_tree.body:
+                if (isinstance(imported_statement, ast.Assign)
+                        and len(imported_statement.targets) == 1
+                        and isinstance(imported_statement.targets[0], ast.Name)):
+                    try:
+                        imported_value = ast.literal_eval(imported_statement.value)
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(imported_value, str):
+                        imported_constants[imported_statement.targets[0].id] = imported_value
+            for alias in statement.names:
+                if alias.name in imported_constants:
+                    constants[alias.asname or alias.name] = imported_constants[alias.name]
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            function_name = (
+                node.func.id if isinstance(node.func, ast.Name)
+                else node.func.attr if isinstance(node.func, ast.Attribute) else ""
+            )
+            if function_name != "ToolDefinition":
+                continue
+            keyword = next((item for item in node.keywords if item.arg == "name"), None)
+            value = keyword.value if keyword else (node.args[0] if node.args else None)
+            if isinstance(value, ast.Name) and value.id in constants:
+                names.append(constants[value.id])
+                continue
+            try:
+                name = ast.literal_eval(value)
+            except (ValueError, TypeError):
+                raise RegistryError(
+                    f"{module_name} ToolDefinition.name 必须是字符串常量"
+                ) from None
+            if not isinstance(name, str) or not name:
+                raise RegistryError(f"{module_name} ToolDefinition.name 非法")
+            names.append(name)
+    if len(names) != len(set(names)):
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        raise RegistryError(f"DSH provider 间工具名重复: {duplicates}")
+    return set(names)
+
+
 def _registered_route_tasks(data: dict) -> set[str]:
     tasks = set(_binding_owners(data, "route_tasks")) | set(_binding_owners(data, "route_task_aliases"))
     for state in data["states"].values():
@@ -339,7 +410,7 @@ def validate_runtime(data: dict[str, Any] | None = None) -> list[str]:
                 f"wg command 漂移: missing={sorted(observed_wg - registered_wg)} "
                 f"stale={sorted(registered_wg - observed_wg)}"
             )
-        observed_dsh = observed_dsh_tools(data)
+        observed_dsh = observed_dsh_tool_names(data)
         registered_dsh = set(_binding_owners(data, "dsh"))
         if observed_dsh != registered_dsh:
             errors.append(

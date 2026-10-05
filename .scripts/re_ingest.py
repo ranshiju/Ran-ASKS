@@ -294,8 +294,12 @@ def commit_wiki_and_graph(state: dict) -> dict:
         state["wiki_backup"] = str(backup_path.relative_to(REPO))
     os.replace(new_wiki, wiki_path)
     progress("完成", flush=True)
+    inbox_state.advance(state, "graph_ready", reason="reingest_wiki_replaced")
+    inbox_state.save(state["transaction_id"], state)
 
     # 2. 清旧图边 + 重建（复用 ic.step_update_graph，clean=True）
+    inbox_state.advance(state, "update_graph", reason="reingest_graph_commit_started")
+    inbox_state.save(state["transaction_id"], state)
     progress("[3.7] 写图边（graph_ingest --clean）...", flush=True, end=" ")
     graph_ok, graph_msg = ic.step_update_graph(state, REPO, clean=True)
     if not graph_ok:
@@ -314,6 +318,8 @@ def commit_wiki_and_graph(state: dict) -> dict:
     progress(f"完成（{edges}条边，清旧{removed}条）", flush=True)
 
     # 3. 图校验
+    inbox_state.advance(state, "validate_graph", reason="reingest_graph_commit_finished")
+    inbox_state.save(state["transaction_id"], state)
     progress("[3.8] 图校验（ingest_check --graph）...", flush=True, end=" ")
     graph_errors = ic.step_validate_graph(state, REPO)
     if graph_errors:
@@ -326,6 +332,8 @@ def commit_wiki_and_graph(state: dict) -> dict:
 
     # 4+5. catalog 重建 + log.md（复用 ic.step_finalize_tail，skip_index=True）
     state["_cleaned_removed"] = removed
+    inbox_state.advance(state, "finalize_tail", reason="reingest_graph_validated")
+    inbox_state.save(state["transaction_id"], state)
     progress("[3.9] 收尾（log/catalog/派生同步）...", flush=True, end=" ")
     tail_ok, tail_msg = ic.step_finalize_tail(state, REPO, REINGEST_TAIL_CONFIG)
     if not tail_ok:
@@ -337,7 +345,8 @@ def commit_wiki_and_graph(state: dict) -> dict:
     # 6. 清理 temp
     shutil.rmtree(extract_dir, ignore_errors=True)
 
-    state["status"] = "completed"
+    inbox_state.advance(state, "completed", reason="reingest_tail_finished")
+    state["errors"] = []
     inbox_state.save(state["transaction_id"], state)
     progress(f"\n{'='*60}\n✅ re-ingest 完成: {state.get('paper_id', '')}", flush=True)
     return state

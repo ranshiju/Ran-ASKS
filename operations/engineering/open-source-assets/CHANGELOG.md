@@ -7,6 +7,39 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-04
+
+### Version decision / 版本判断
+
+- MINOR: Add reproducible installation, offline first-run diagnostics and demo, unified tests, explicit threat modeling, and immutable version tags
+- MINOR（中文）：新增可复现安装、离线首次运行诊断与演示、统一测试、显式威胁模型和不可变版本标签
+
+### Highlights
+
+- Added a reproducible `uv`-locked Python package with the `ran-asks` command,
+  offline first-run diagnostics, a synthetic evidence-trace demo, and unified
+  profiled test suites.
+- Added explicit prompt-injection and data-plane threat boundaries, evaluated
+  provider profile examples, and frozen CI installation from the committed
+  lockfile.
+- Added declarative ingest transition enforcement, hash-bound final verification
+  receipts with read-only status/next/verify commands, and an offline synthetic
+  weak-model protocol governance exam.
+- From `v0.12.0`, every published public-tree version receives an immutable
+  annotated Git tag; pushing publishes the branch and tag atomically, while a
+  GitHub Release remains a separate explicitly authorized action.
+
+### 主要更新
+
+- 新增由 `uv` 锁定的可复现 Python 包与 `ran-asks` 命令，并提供离线首次运行诊断、
+  合成证据回溯演示和统一的分层测试入口。
+- 新增显式的提示注入与数据平面威胁边界、经评估的服务商配置示例，以及基于已提交
+  锁文件的冻结 CI 安装。
+- 新增声明式摄入状态转换校验、带哈希绑定的最终复验回执与只读 status/next/verify
+  命令，并加入离线合成的弱模型协议治理试卷。
+- 自 `v0.12.0` 起，每个已发布的公开树版本都获得不可变 annotated Git 标签；推送时
+  原子发布分支与标签，而 GitHub Release 仍是需要单独明确授权的动作。
+
 ## [0.11.0] - 2026-10-03
 
 ### Version decision / 版本判断
@@ -316,10 +349,12 @@ manifests and checksums.
 - Initial public Ran-ASKS release with the source-available engineering
   template and frozen paper artifact `1.0.0`.
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.12.0

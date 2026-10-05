@@ -88,6 +88,30 @@ def test_http_transient_retry_is_bounded():
     assert retry_state == {"http": 1}
 
 
+def test_remote_retry_hint_is_classified_as_retryable():
+    with tempfile.TemporaryDirectory() as directory:
+        pdf = Path(directory) / "paper.pdf"
+        pdf.write_bytes(b"%PDF-test")
+        payload = {
+            "code": 0,
+            "data": {"extract_result": [{
+                "file_name": "paper.pdf",
+                "state": "failed",
+                "err_code": None,
+                "err_msg": "parsing failed, please try again later",
+            }]},
+        }
+        with mock.patch.object(mineru_api, "_request_api_json", return_value=payload):
+            try:
+                mineru_api.poll_result(
+                    "token", "batch-1", pdf, "https://mineru.invalid", 1, 0, 1
+                )
+            except mineru_api.MinerURetryableRemoteError as exc:
+                assert exc.retryable is True
+            else:
+                raise AssertionError("explicit retry hint must be classified as retryable")
+
+
 def test_download_streams_to_atomic_destination():
     with tempfile.TemporaryDirectory() as directory:
         destination = Path(directory) / "result.zip"
@@ -151,6 +175,101 @@ def test_resume_after_download_failure_does_not_resubmit_remote_job():
         assert checkpoint["batch_id"] == "batch-1"
 
 
+def test_legacy_retryable_remote_failure_submits_one_replacement_job():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        pdf = root / "paper.pdf"
+        pdf.write_bytes(b"%PDF-not-a-real-pdf")
+        work = root / "work"
+        job = work / "MinerU_paper"
+        job.mkdir(parents=True)
+        input_sha = mineru_api._sha256_file(pdf)
+        request_sha = mineru_api._request_fingerprint(
+            pdf,
+            input_sha,
+            model_version="vlm",
+            base_url=mineru_api.DEFAULT_BASE_URL,
+            language=None,
+            is_ocr=False,
+            enable_formula=True,
+            enable_table=True,
+        )
+        (job / "mineru-job-v1.json").write_text(json.dumps({
+            "input_sha256": input_sha,
+            "request_sha256": request_sha,
+            "status": "remote_failed",
+            "batch_id": "failed-batch",
+            "uploaded": True,
+            "error": "MinerU 解析失败: parsing failed, please try again later",
+            "error_code": None,
+            "retry_count": {"http": 0, "api": 0},
+            "updated_at": "2026-10-04T17:30:04+0800",
+        }), encoding="utf-8")
+
+        with (
+            mock.patch.object(
+                mineru_api, "apply_upload_url", return_value=("replacement-batch", "upload")
+            ) as reserve,
+            mock.patch.object(mineru_api, "upload_file") as upload,
+            mock.patch.object(
+                mineru_api,
+                "poll_result",
+                return_value={"state": "done", "full_zip_url": "download"},
+            ) as poll,
+            mock.patch.object(
+                mineru_api, "download_file", side_effect=lambda url, path, timeout, **kwargs: _zip_result(path)
+            ),
+        ):
+            result = mineru_api.extract_pdf_bundle_with_mineru(pdf, "token", work_dir=work)
+
+        assert reserve.call_count == 1
+        assert upload.call_count == 1
+        assert poll.call_count == 1
+        checkpoint = json.loads(result.checkpoint_path.read_text(encoding="utf-8"))
+        assert checkpoint["status"] == "complete"
+        assert checkpoint["retry_count"]["remote_job"] == 1
+        assert checkpoint["failed_batches"][0]["batch_id"] == "failed-batch"
+        assert checkpoint["result_meta"]["batch_id"] == "replacement-batch"
+
+
+def test_retryable_remote_failure_stops_after_one_replacement_job():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        pdf = root / "paper.pdf"
+        pdf.write_bytes(b"%PDF-not-a-real-pdf")
+        work = root / "work"
+        retryable = mineru_api.MinerURetryableRemoteError(
+            "MinerU 解析失败: parsing failed, please try again later", retryable=True
+        )
+        with (
+            mock.patch.object(
+                mineru_api,
+                "apply_upload_url",
+                side_effect=[("batch-1", "upload-1"), ("batch-2", "upload-2")],
+            ) as reserve,
+            mock.patch.object(mineru_api, "upload_file") as upload,
+            mock.patch.object(mineru_api, "poll_result", side_effect=[retryable, retryable]),
+        ):
+            try:
+                mineru_api.extract_pdf_bundle_with_mineru(pdf, "token", work_dir=work)
+            except mineru_api.MinerURemoteError as exc:
+                assert "耗尽替代 batch" in str(exc)
+            else:
+                raise AssertionError("remote job retries must be bounded")
+
+        assert reserve.call_count == 2
+        assert upload.call_count == 2
+        checkpoint = json.loads(
+            (work / "MinerU_paper" / "mineru-job-v1.json").read_text(encoding="utf-8")
+        )
+        assert checkpoint["status"] == "remote_failed"
+        assert checkpoint["remote_retry_exhausted"] is True
+        assert checkpoint["retry_count"]["remote_job"] == 2
+        assert [item["batch_id"] for item in checkpoint["failed_batches"]] == [
+            "batch-1", "batch-2"
+        ]
+
+
 def test_safe_extract_rejects_traversal_and_symlink():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -192,8 +311,11 @@ if __name__ == "__main__":
     test_auth_gateway_envelope_is_terminal_auth_error()
     test_quota_and_input_errors_are_not_retryable()
     test_http_transient_retry_is_bounded()
+    test_remote_retry_hint_is_classified_as_retryable()
     test_download_streams_to_atomic_destination()
     test_resume_after_download_failure_does_not_resubmit_remote_job()
+    test_legacy_retryable_remote_failure_submits_one_replacement_job()
+    test_retryable_remote_failure_stops_after_one_replacement_job()
     test_safe_extract_rejects_traversal_and_symlink()
     test_missing_markdown_is_a_failure()
     print("mineru api regression: PASS")

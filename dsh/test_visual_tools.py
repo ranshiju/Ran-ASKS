@@ -18,6 +18,7 @@ from dsh.dispatch import dispatch_loop
 from dsh.harness import SessionLog, ToolExecution, ToolRegistry
 from dsh.visual_agent_loop import VisualAgentLoop
 from dsh.visual_tools import build_visual_tools
+from visual_qa import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL
 
 
 def _image(path: Path) -> None:
@@ -38,6 +39,8 @@ def test_visual_tool_schema() -> None:
     assert schema["required"] == ["path"]
     assert "deterministic_only" in schema["properties"]
     assert "allow_remote" in schema["properties"]
+    assert DEFAULT_MODEL in schema["properties"]["model"]["description"]
+    assert DEFAULT_FALLBACK_MODEL in schema["properties"]["fallback_model"]["description"]
 
 
 def test_visual_tool_executes_deterministic_check(tmp: Path) -> None:

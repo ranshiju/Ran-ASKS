@@ -96,6 +96,16 @@ evidence, and reusable slide receipts do not imply automatic visual approval.
 The Markdown and appended PDF page contain the same update; frozen paper
 artifacts remain unchanged.
 
+The 2026-10-04 `v0.12.0` update establishes a reproducible first-run and
+verification baseline: an installable `ran-asks` command, a committed `uv`
+lockfile, offline diagnostics, a synthetic Graph-to-Wiki-to-source demo,
+profiled test suites, provider examples, and explicit prompt-injection and data-
+plane threat boundaries. CI installs from the frozen lockfile. Starting with
+this version, every published public-tree version receives an immutable
+annotated Git tag; creating a GitHub Release remains separately authorized.
+The Markdown and appended PDF page contain the same update; frozen paper
+artifacts remain unchanged.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -174,6 +184,13 @@ ASKS-Compatible 身份和后续明确授予 Reference Distribution 的公开治�
 扩展的演示文稿生产模式，以及更可靠的证据绑定会议摄入与维护恢复。Raw 仍是事实权威；
 可视化只用于导航，模板复用回执也不代表自动通过视觉审阅。Markdown 与 PDF 新增页
 包含同一更新，冻结论文产物保持不变。
+
+2026年10月4日的 `v0.12.0` 更新建立可复现的首次运行与验证基线：提供可安装的
+`ran-asks` 命令、已提交的 `uv` 锁文件、离线诊断、从 Graph 到 Wiki 再到来源原文的
+合成演示、分层测试、服务商配置示例，以及明确的提示注入和数据平面威胁边界。CI
+严格从锁文件安装。自本版本起，每个已发布的公开树版本获得不可变 annotated Git
+标签；创建 GitHub Release 仍需单独授权。Markdown 与 PDF 新增页包含同一更新，
+冻结论文产物保持不变。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

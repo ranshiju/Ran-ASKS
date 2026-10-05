@@ -27,6 +27,7 @@ def test_registry_and_runtime_have_exact_coverage():
     assert len(data["functions"]) == 26
     assert set(data["states"]) == {"workspace", "research", "frontier"}
     assert len(registry.observed_dsh_tools()) == 38
+    assert registry.observed_dsh_tool_names() == registry.observed_dsh_tools()
 
 
 def test_dsh_tools_receive_canonical_policy_metadata():
@@ -37,6 +38,18 @@ def test_dsh_tools_receive_canonical_policy_metadata():
     assert next(tool for tool in tools if tool.name == "read_raw").function_id == "knowledge.query"
     assert next(tool for tool in tools if tool.name == "hub_route").function_id == "knowledge.hub"
     assert next(tool for tool in tools if tool.name == "comic_generate").function_id == "artifact.comic"
+
+
+def test_runtime_coverage_does_not_import_optional_dsh_providers():
+    data = registry.load_registry()
+    original_import = registry.importlib.import_module
+    registry.importlib.import_module = lambda name: (_ for _ in ()).throw(
+        AssertionError(f"unexpected provider import: {name}")
+    )
+    try:
+        assert registry.validate_runtime(data) == []
+    finally:
+        registry.importlib.import_module = original_import
 
 
 def test_registry_rejects_duplicate_yaml_keys():

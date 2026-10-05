@@ -312,6 +312,10 @@ def test_classify_error_categories():
     assert _classify_error(1, "PDF extract failed: no text", "") == "extraction_failed"
     assert _classify_error(1, "semantic slot validation failed", "") == "semantic_failed"
     assert _classify_error(1, "graph write error: sqlite locked", "") == "graph_failed"
+    assert _classify_error(
+        1, "Traceback: ValueError: ingest transition receipt mismatch: extract -> write_wiki",
+        "graph_ready context",
+    ) == "code_defect"
     assert _classify_error(1, "something unexpected", "") == "unknown"
 
 
@@ -351,6 +355,20 @@ def test_classify_error_consumes_canonical_failure_disposition():
         },
     })
     assert _classify_error(1, "", payload) == "graph_failed"
+
+
+def test_classify_error_consumes_canonical_code_defect():
+    from dsh.ingest_tools import _classify_error
+    payload = json.dumps({
+        "status": "failed",
+        "errors": ["未预期异常: ValueError: ingest transition receipt mismatch"],
+        "failure_disposition": {
+            "category": "code_defect", "domain": "code",
+            "disposition": "engineering_fix", "retryable": False,
+            "owner": "engineering", "next_action": "inspect_code_failure",
+        },
+    }, ensure_ascii=False)
+    assert _classify_error(1, "", payload) == "code_defect"
 
 
 def test_error_output_includes_category():
@@ -407,6 +425,7 @@ def main():
     test_classify_error_prefers_structured_bibliographic_failure_over_pdf_name()
     test_classify_error_honors_explicit_structured_category()
     test_classify_error_consumes_canonical_failure_disposition()
+    test_classify_error_consumes_canonical_code_defect()
     test_error_output_includes_category()
     test_nonzero_control_flow_status_is_not_wrapped_as_error()
     print("dsh ingest tools regression: PASS")

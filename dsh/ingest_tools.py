@@ -26,7 +26,8 @@ import inbox_state
 
 
 _ERROR_CATEGORIES = {
-    "api_timeout", "extraction_failed", "semantic_failed", "graph_failed", "unknown",
+    "api_timeout", "extraction_failed", "semantic_failed", "graph_failed",
+    "code_defect", "unknown",
 }
 
 
@@ -55,6 +56,10 @@ def _classify_error_text(text: str) -> str:
     if any(p in text for p in ("timeout", "timed out", "timeoutexpired",
                                "connection timeout", "read timeout", "api timeout")):
         return "api_timeout"
+    if any(p in text for p in (
+            "traceback", "nameerror", "brokenpipeerror",
+            "ingest transition receipt mismatch", "illegal persisted ingest transition")):
+        return "code_defect"
     if any(p in text for p in ("bibliographic", "书目", "预审", "semantic", "slot",
                                "wiki validation", "wiki 校验", "agent_required", "handoff")):
         return "semantic_failed"
@@ -78,6 +83,8 @@ def _dsh_category(failure: dict | None) -> str:
         return "extraction_failed"
     if domain == "graph":
         return "graph_failed"
+    if domain == "code":
+        return "code_defect"
     if domain in {"semantic", "worker", "policy"}:
         return "semantic_failed"
     return "unknown"
