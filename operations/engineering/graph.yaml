@@ -284,7 +284,7 @@ nodes:
   graph_lib:
     path: .scripts/graph_lib.py
     kind: implementation
-    role: graph-schema-stable-node-id-canonical-description-source-local-node-gloss-hub-scope-history-multi-alias-node-origin-lineage-and-shared-operations
+    role: graph-schema-stable-node-id-canonical-description-source-local-node-gloss-persisted-identity-distinction-hub-scope-history-multi-alias-node-origin-lineage-and-shared-operations
   graph_ingest:
     path: .scripts/graph_ingest.py
     kind: implementation
@@ -340,7 +340,7 @@ nodes:
   node_semantics:
     path: .scripts/node_semantics.py
     kind: implementation
-    role: read-only-node-identity-resolution-with-unique-decomposed-name-gate-and-semantic-recall
+    role: node-identity-resolution-with-managed-persisted-distinction-review-unique-decomposed-name-gate-and-semantic-recall
   node_semantics_test:
     path: .scripts/test_node_semantics.py
     kind: test
@@ -3570,7 +3570,7 @@ script_contracts:
     - PDF/TXT 先由程序返回 type/score/threshold/markers/confidence；PDF 1/2/3 分、TXT 1/2 分视为不确定，仅在 --run 时调用 ingest_type_review
     - 文件扩展名只决定提取器，不得单独决定来源种类；admin 文档命中文件名或正文中的强会议速记标记时，必须把 transcript 来源判定显式传给通用文档摄入并记录在分类审计中
     - API 分类裁决的中/高置信度具体类型可覆盖程序的不确定初判；ambiguous、low 或 API 失败均在事务前返回 classification_required 由用户兜底
-    - 分类 evidence_quotes 必须可回溯 review_text；validator 以 Unicode NFKC 与连续空白折叠后的文本做包含校验，允许 PDF 抽取造成的换行差异，但不得接受增删实词后无法定位的概述
+    - Agent 分类 task 必须携带按当前 pending items 生成的完整安全输出模板；evidence_quotes 必须可回溯 review_text，validator 以 Unicode NFKC、PDF 单词内连字符换行拼接与连续空白折叠后的文本做包含校验，允许表示差异但不得接受增删实词后无法定位的概述；失败诊断须指出具体 quote 索引
     - academic 域的非论文文档在专题导言/特邀编辑/本期专题等强信号命中时自动分类为 editorial；文件名或正文首个 H1 同时包含会议实体词与事务记录词时自动分类为 conference-summary
     - 单个 --file 可用 --document-type 显式选择 academic 通用文档类型；该选择覆盖基础 paper/document 初判并保留 program_file_type 与 explicit 来源审计，批量或非 academic 调用拒绝该参数
     - 全库缩写/人物/Hub 收尾只在本次至少一个文件 completed 时执行；全 classification_required/全失败/仅精确重复直接返回紧凑终态
@@ -4047,6 +4047,7 @@ script_contracts:
     - 作者、venue 等锁定 frontmatter 元数据端点由调用方标记为 deterministic metadata；精确名称未命中时按谓词专用规范名创建本地实体，不经 embedding 相似候选 abstain
     - 核心创新点、局限性、未来展望的 object 保持 proposition 身份；只复用既有 proposition 精确候选，无命题候选时创建完整本地命题，不进入 keyword 名称分解或 embedding identity resolution
     - inspect/fuse 报告携带 graph-delta-v1 validation receipt，内容寻址绑定规范化 Delta 与 attach plan；receipt 证明局部校验和 SAVEPOINT 释放，不冒充外层 SQLite commit 或事实证据
+    - attach plan 的唯一 alias 快路径也必须先查询 identity_distinctions；命中 distinct 时 create_local，不进入 merge_map 或 ambiguity 队列
     writes: []
     forbidden:
     - 新建永久子图数据库、证据数据库或 claim card
@@ -4063,8 +4064,10 @@ script_contracts:
     preconditions:
     - graph.db 已初始化；nodes.path 是稳定 node_id；description 可空；aliases 是确定性名称入口
     - 两个完整规范名称仅相差末尾括号缩写时可确定性视为同一名称；移除缩写后的完整名称必须相等，不能把复合标题中的局部缩写或片段提升为身份
+    - identity_distinctions 只保存规范名称对的明确 distinct 裁决及来源，不是知识边；resolve_node 在 embedding 身份门前查询并优先 keep separate，避免同一对名称重复产生歧义告警
     writes:
     - cross-domain/embeddings.db 文本向量缓存（不修改 graph.db）
+    - 仅显式 review-distinct 命令可经 graph_lib 幂等写 graph.db 的 identity_distinctions；普通 resolve/search 保持只读
     forbidden:
     - 直接创建、合并、删除节点或写 alias/边
     - 将完整双语名的中文/英文完整名称分别命中不同节点时仍判为同一身份；缩写不得推翻唯一完整名称，只可在完整名称均未命中时兜底
@@ -4072,6 +4075,7 @@ script_contracts:
     - 仅因输入双语名的一个分解片段命中由更长复合标题机械生成的 alias 就复用该复合节点；片段必须命中完整 title，或命中不嵌在该 title 内的独立 alias，否则继续走严格 lexical+semantic identity gate
     - 向 LLM 暴露裸向量并让其自行选择阈值
     - 将 semantic_search 相关候选升级为同一节点
+    - 把 distinct 裁决实现为知识关系边、仅存 embedding 缓存，或让其晚于 embedding 身份门生效
     - embedding 不可用时阻断 ingest/query；必须降级到 path/title/alias 或 lexical search
     verify:
     - python3 .scripts/test_node_semantics.py
@@ -4354,20 +4358,24 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_paper:
     preconditions:
-    - inbox 学术 PDF；paper.md 生成后，Agent/API 共用 paper-agent-workspace-v1 语义产物协议，一次产出书目裁决、Wiki 与语义槽；Agent 直接填写 workspace，API adapter 只发一次有界模型调用，程序仍分别物化、校验与提交
+    - inbox 学术 PDF；paper.md 生成后，Agent/API 共用 paper-agent-workspace-v1 外层产物协议，一次产出书目裁决、Wiki 与语义槽；Agent 书目段使用 evidence-bibliography-v1 直接提取并逐字段绑定 source/locator/quote，API adapter 保留 candidate-id-v2，二者编译为同一规范化 review 后再共享 validator、IR、Graph preflight 与提交
+    - Agent backend 的宿主控制循环独立使用 agent-paper-reading-v1：短文直接全文读取，长文先经 read_paper 定向读取关键章节，再按 section miss、证据定位或跨章节依赖回读原 paper.md；该策略不改变 API adapter 的上下文裁剪与调用预算
+    - Agent task 可选暴露 node_semantics 的现有 concept/Hub 查询 argv 模板；查询只读 live graph，候选仅帮助复用与导航，节点身份仍须经 resolve 与共享 validator 确认
+    - Agent task 的版本化 semantic protocol 必须直接暴露与共享 validator 一致的论文主语谓词分区：论文到 concept 只用研究基础/核心方法/对比方法，论文到 proposition 只用核心创新点/局限性/未来展望，主要研究、方向标签及作者/期刊等机械元数据明确排除；不得只暴露会误导宿主 Agent 的全量已登记谓词列表
+    - Agent validator issue 必须给出 stage、workspace scope、error 与局部 action；Agent 遥测仅记录源字符数、读取策略、check 次数、首轮/末轮校验结果、修复 scope 与最终 warning，不记录或评价宿主推理内容
     - 3.1 在读取 PDF 标题前先查询源文件 SHA-256；精确命中直接 duplicate_found，不调用 MinerU/LLM；MinerU 与书目锁定后再以 normalized text/title+authors+year/DOI/arXiv 做二次去重屏障
-    - agent workspace 返回明确 write_to；程序按 bibliography → wiki → semantics 顺序物化为独立暂存产物并逐层校验，resume 不重跑 MinerU 或已通过阶段
+    - agent workspace 返回明确 write_to；书目协议同时携带由同一运行时代码生成且自身通过 schema 的完整严格模板，避免 prose shape 与 validator 漂移；程序按 bibliography → wiki → semantics 顺序物化为独立暂存产物并逐层校验，resume 不重跑 MinerU 或已通过阶段
     - Agent 只经 paper_workspace_read/refresh/check/commit 四个类型化动作接管事务；公开 workflow_status 仅允许 awaiting_agent、ready_to_commit、completed、failed，内部细粒度 status 只作为 internal_status 返回
     - 单篇与 batch item 均经 inbox_state 输出 ingest-result-v1；completed 必须同时报告 committed=true 与可定位的 Raw/Wiki 产物，awaiting_agent 的本次产物是 agent-task-v1，不以进程退出码冒充事务完成
     - batch 顶层 workflow_status、terminal、committed 与 counts 只从 items 派生；prepared/partial 等旧顶层状态只保留为兼容 status，不得覆盖 item 四态或产生独立统计口径
-    - 确定性 PDF metadata、首页规则与 MinerU 解析器只注册为带 provenance 的 candidate provider；候选是否锁定仍由 candidate-id-v2 裁决与 validator 决定
+    - 确定性 PDF metadata、首页规则与 MinerU 解析器仍在后台注册带 provenance 的 candidate provider；API 由 candidate-id-v2 锁定，Agent 不接收候选目录且以原始证据直接提取，程序仅把候选用于 fast path、去重和字段冲突诊断
     - bibliographic-candidate-provider-v7 在 v6 的 PDF 前两页 layout block 基础上，直接从同一证据块注册 self DOI 候选并保留带冒号/副标题的完整 venue；标题下至摘要前的姓名块仍只生成 candidate_only 作者，affiliation 单列排除，日期候选绑定 published/published_online/accepted/received/revised/preprint kind，冲突仍交同一 candidate-id-v2 workspace 裁决
     - 旧锁定 Raw 进入 re-ingest 时，title/authors/year/venue 等事实标量在裁决前保持不变，但 front_matter_blocks、layout_candidates 与 first_page_evidence 必须从原 PDF 按当前 provider 重算；候选门裁决只写事务与 Wiki/Graph，不回写 Raw
     - awaiting_output workspace 的 candidate provider 版本落后时，--resume 仅在 paper.md 哈希未变且 workspace 输出尚不存在时刷新同一事务；已有未提交输出必须经显式 --agent-refresh 归档旧输出及哈希后刷新，不得静默覆盖或新建事务
     - --agent-refresh 可显式修复旧事务在受管书目回填并重算 manifest 后未同步的 workspace bundle 基线；仅当磁盘 bundle 与顶层 state 哈希相等、source.yaml.bibliographic 与已锁定书目完全相等、workspace 仍为 awaiting_output 时更新基线并留存审计；其他任何漂移继续阻断
     - paper_workspace_check 在书目可物化后尽量同轮收集 Wiki 与 semantics 的全部独立 diagnostics；只有依赖项不可用时才跳过下游门，并明确 skipped_by
     - Agent check 在最终 Raw/Wiki 落位前调用 graph_ingest --plan-only，以暂存 Wiki、暂存 Raw locator companion 和最终逻辑 page ID 在 live graph 上生成并校验 graph-plan-v1
-    - Agent workspace 把暂存 paper.pdf 的 pages:1-2 作为首个有界书目输入，并提供程序抽取、带页码的 first-two-pages.txt 作为读取工具不支持 PDF 时的备用；两者均绑定哈希，Agent 核对完整作者/标题/venue 后仍引用候选 ID 或受 validator 约束的 paper.md locator，最终书目锁定仍归共享内核
+    - Agent workspace 把暂存 paper.pdf 的 pages:1-2 作为首个有界书目输入，并提供程序抽取、带页码的 first-two-pages.txt 作为读取工具不支持 PDF 时的备用；两者均绑定哈希，Agent 对每个非空字段提交 source+locator+quote，quote 必须从对应哈希绑定输入逐字复制并保留 Unicode/变音符，字段值必须在 quote 中连续出现；完整值因 PDF 布局断裂而无法连续核验时，只能采用原文可验证的缩写或标为未决，最终书目锁定仍归共享内核
     - workspace prompt、bibliography/semantic contract、各 validator 与 validation receipt 均写入显式版本；receipt 绑定 paper.md、完整 artifact bundle、workspace、wiki、semantic、IR 与 graph plan 哈希
     - agent workspace 记录 paper.md、source PDF、前两页备用文本和完整 artifact bundle input hash 与 workspace output hash；落位前重新核对，任一暂存输入在校验后改变都必须停止提交并回到原 workspace 修正
     - paper.md 生成后、persist_bibliographic_metadata 前执行 ingest_bibliographic_review 轻量预审；输入仅 PDF metadata、标题邻域与发表证据行
@@ -4376,14 +4384,14 @@ script_contracts:
     - authors.proposed 只能引用 Worker 已收到的标题邻域 paper.md#Lx[-Ly]，每项最多四行且必须逐字可核；proposed 非空时必须给出完整有序作者列表且 accepted_ids 为空，列表不得重复；Worker 不得为 title/year/venue/DOI/arXiv 自由生成值或 locator
     - 标题作者块若把机构词或全大写机构缩写粘到末位作者，作者完整性复核只允许忽略已验证姓名后的明确机构尾部；真实缺失的作者仍须阻断
     - 本篇 DOI/arXiv 候选只来自 PDF metadata、首页或标题邻域；References/正文引用中的标识不得进入 self-bibliography 候选
-    - 候选为空的可选书目字段由程序直接派生为空值；Worker 返回中的空 candidate_id 状态只作冗余信息，不得造成可机械避免的中断
+    - 候选为空的可选书目字段由程序直接派生为空值；Agent evidence-bibliography-v1 中 DOI/arXiv 的空值若省略字段或把空 evidence 写成 null/空对象，程序在严格 schema 前确定性规范化为 canonical empty evidence，非空字段与其他 schema 错误仍硬拒绝；Worker 返回中的空 candidate_id 状态只作冗余信息，不得造成可机械避免的中断
     - deterministic_fast_path 不以单候选或 DOI/arXiv 单独放行；只在 title/authors/year/venue/identifier 的独立 candidate provider 近端证据一致、作者完整有序、标题无刊头形态且标识不来自引用区时锁定书目，否则进入共用语义 workspace
     - Worker 输入按协议版本+candidates+有限证据计算 input_hash；事务内只缓存当前协议 schema-valid decision，resume 或同输入重入必须 cache_hit，不重复调用
     - 标题高度相似但无 DOI/arXiv 强标识时不得直接标 duplicate_found；先完成 MinerU 后的 normalized-text+locked-bibliography 去重，再仅对仍未决候选调用一次 relation-id-v1 Worker
     - relation-id-v1 只能选择程序提供的 relation candidate ID 与 version/unrelated/ambiguous；精确 duplicate、supplementary、translation 仍由哈希/标识/文件名规则确定，Worker 不得删除 Raw 或直接建边
     - duplicate_line 等可机械修复的阻断 warning 先由程序处理且 API 调用为零；仍有非机械阻断项时整批最多一次 semantic-patch-v1 Worker，按 issue ID 局部 patch 后全量复验
     - relation/semantic Worker 均使用 retries=0、事务 input_hash 缓存；相同输入 resume 不得重复调用，worker receipt 记录控制决策，真实调用数只从 canonical ExecutionEvent 聚合
-    - 书目 fields 必须有精确定位 evidence；Worker 无法裁决时对应 status=ambiguous 且 review_status=manual_required，事务转 agent_required 并提供同一 v2 schema/write_to；Agent 仍受相同证据与程序硬约束，禁止继续落位
+    - 书目 fields 必须有精确定位 evidence；API Worker 无法裁决时对应 status=ambiguous 且 review_status=manual_required，事务转 Agent workspace 并改用 evidence-bibliography-v1；旧在途 Agent candidate-id-v2 workspace 继续只读兼容，所有路径仍受同一规范化 review validator 约束
     - 预审锁定 state.bibliographic_meta 后，paper-id、skeleton、wiki frontmatter 与 graph 机械作者边只消费该结果，不再从 paper.md 二次解析
     - 新论文 wiki prompt 不生成 <<<META>>>；date/type/title/authors/venue/path 均由程序与 locked bibliography 确定性编译
     - 旧事务若仍携带 <<<META>>>，只写 legacy_meta_audit；不得据此改 paper-id、Raw/Wiki 路径或 locked bibliography
@@ -4439,6 +4447,8 @@ script_contracts:
     - ACM 引用标题/venue 候选使用摘要或正文中的首次同词命中作为 evidence，或在 candidate provider 升级时静默覆盖已经存在的 Agent workspace 输出
     - 把候选为空字段的控制状态交给 Worker 决定，或从全文 References 的 DOI/arXiv 构造本篇标识候选
     - agent 后端为同一论文依次发出书目与 wiki/slots 两次常规主动交接，API 正常路径分别调用书目/Wiki/slots Worker，或把合并 workspace 当作绕过任一独立 validator 的许可
+    - 向新 Agent task 暴露 bibliographic candidate catalog、要求 Agent 复述 candidate ID，或让 Agent 直接提取绕过 source/locator/quote 原文核验；API candidate-id-v2 不得隐式切换为 Agent 协议
+    - 为保持 Agent/API 流程对称而把 Agent 自适应读取、宿主工具调用或遥测控制逻辑注入 API prompt/adapter，或让 Agent task 的只读知识候选绕过共享身份与语义校验
     - 因 slots 错误清空或重写已经通过验证的 bibliography/Wiki，或因 Wiki 错误重新裁决已经通过验证的 bibliography
     - 对 Agent 暴露内部阶段枚举作为流程控制接口，或 check 遇到首个 Wiki/semantic 错误就丢弃同轮可独立发现的其他诊断
     - 在 staged Graph preflight 通过前落位最终 Raw/Wiki，或把 preflight 产生的 live graph 临时变更提交

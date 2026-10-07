@@ -484,6 +484,16 @@ def test_agent_low_confidence_classification_is_one_batch_task():
             ]
             assert len(task["outputs"]) == 1
             assert "--classification-file" in task["commands"]["resume"]
+            template = task["protocol"]["template"]
+            assert [item["file"] for item in template["decisions"]] == [
+                "inbox/agenda.txt", "inbox/attendees.txt",
+            ]
+            assert all(
+                item["doc_type"] == "ambiguous"
+                and item["confidence"] == "low"
+                and module.classification_review_schema(item)
+                for item in template["decisions"]
+            )
     finally:
         (
             module.REPO, module.INBOX, module.sf.ensure_index, module.sf.lookup_exact,
@@ -886,12 +896,16 @@ def test_api_classification_review_resolves_uncertain_program_decision():
 
 def test_agent_classification_evidence_allows_pdf_line_wrapping():
     decision = {
-        "review_text": "A Simple Tensor Network\nAlgorithm for Two-Dimensional Systems",
+        "review_text": (
+            "A Simple Tensor Network\nAlgorithm for Two-Dimensional Systems. "
+            "We study the large-\ndistance limit."
+        ),
     }
     review = {
         "doc_type": "paper",
         "evidence_quotes": [
             "A Simple Tensor Network Algorithm for Two-Dimensional Systems",
+            "the large-distance limit",
         ],
     }
     module._validate_agent_classification(Path("inbox/paper.pdf"), decision, review)
@@ -901,6 +915,8 @@ def test_agent_classification_evidence_allows_pdf_line_wrapping():
         module._validate_agent_classification(Path("inbox/paper.pdf"), decision, review)
     except ValueError as exc:
         assert "evidence_quotes" in str(exc)
+        assert "evidence_quotes[0]" in str(exc)
+        assert "A Different Tensor Network Algorithm" in str(exc)
     else:
         raise AssertionError("Changed lexical evidence must still be rejected")
 

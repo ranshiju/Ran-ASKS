@@ -305,6 +305,38 @@ def test_embedding_failure_degrades_to_lexical_search():
     assert result["candidates"][0]["node_id"] == "mps"
 
 
+def test_persisted_distinction_blocks_alias_and_embedding_identity_reuse():
+    conn = make_db()
+    add_node(conn, "tensor-network", "张量网络", "张量表示方法")
+    gl.insert_aliases(conn, "tensor-network", ["谱张量网络"])
+    assert ns.record_identity_distinction(
+        conn,
+        "谱张量网络",
+        "张量网络",
+        source="user:2026-10-06",
+        reason="用户明确要求保持不同概念",
+    )
+    assert ns.record_identity_distinction(
+        conn,
+        "张量网络",
+        "谱张量网络",
+        source="user:2026-10-06",
+        reason="幂等更新",
+    )
+    assert conn.execute("SELECT COUNT(*) FROM identity_distinctions").fetchone()[0] == 1
+    old_queries = ns._embed_queries
+    ns._embed_queries = lambda _texts: (_ for _ in ()).throw(
+        AssertionError("persisted distinction must run before embeddings")
+    )
+    try:
+        result = ns.resolve_node(conn, "谱张量网络")
+    finally:
+        ns._embed_queries = old_queries
+    assert result["decision"] == "unmatched"
+    assert result["reason"] == "persisted_distinct"
+    assert result["allowed_actions"] == ["create_local"]
+
+
 def test_dsh_registers_semantic_capabilities_not_raw_embedding_tools():
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from dsh.tools import build_tools

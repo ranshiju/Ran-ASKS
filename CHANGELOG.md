@@ -7,6 +7,31 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-07
+
+### Version decision / 版本判断
+
+- MINOR: Add backward-compatible evidence-bound Agent paper workspaces and persistent concept-identity governance
+- MINOR（中文）：新增向后兼容的证据绑定 Agent 论文工作区与持久概念身份治理
+
+### Highlights
+
+- Strengthened Agent-mode paper ingestion with a single versioned
+  `BIBLIOGRAPHIC`/`WIKI`/`SLOTS` workspace, source-line evidence for every
+  non-empty bibliographic field, adaptive paper reading, explicit semantic
+  predicate roles, and transaction-bound validation and commit handoff.
+- Added fail-closed inbox-classification evidence checks and persistent
+  concept-identity distinctions that are applied before embedding-based
+  resolution, preventing reviewed names from being merged again.
+
+### 主要更新
+
+- 强化 Agent 模式论文摄入：使用单一版本化的
+  `BIBLIOGRAPHIC`／`WIKI`／`SLOTS` 工作区，要求每个非空书目字段绑定来源行证据，
+  支持自适应论文阅读、显式语义谓词角色，以及与原事务绑定的校验和提交接力。
+- 新增失败关闭的 inbox 分类引文检查，并持久保存概念身份区分，在 embedding
+  身份解析前优先应用，避免已人工确认不同的名称再次被合并。
+
 ## [0.12.0] - 2026-10-04
 
 ### Version decision / 版本判断
@@ -356,5 +381,7 @@ manifests and checksums.
 [0.2.1]: https://github.com/ranshiju/Ran-ASKS/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.2.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.12.0...HEAD
 [0.12.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.12.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.13.0

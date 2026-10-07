@@ -106,6 +106,15 @@ annotated Git tag; creating a GitHub Release remains separately authorized.
 The Markdown and appended PDF page contain the same update; frozen paper
 artifacts remain unchanged.
 
+The 2026-10-07 `v0.13.0` update strengthens Agent-mode paper ingestion with a
+single versioned bibliographic/Wiki/semantic workspace, bounded source-line
+evidence for bibliographic values, adaptive section reading, explicit semantic
+predicate roles, and transaction-bound validation and commit handoff. It also
+adds fail-closed inbox-classification evidence checks and persistent reviewed
+concept-identity distinctions. These backward-compatible capabilities do not
+change the Raw/Wiki/Graph boundary or any frozen paper artifact. The Markdown
+and appended PDF page contain the same update.
+
 | Content described in the introduction | Ran-ASKS boundary | Paper artifact | Status |
 | --- | --- | --- | --- |
 | Core method and 56-paper chronological demonstration | `v0.2.0` | `1.0.0` | Frozen arXiv v1 boundary for arXiv:2608.29612 |
@@ -191,6 +200,12 @@ ASKS-Compatible 身份和后续明确授予 Reference Distribution 的公开治�
 严格从锁文件安装。自本版本起，每个已发布的公开树版本获得不可变 annotated Git
 标签；创建 GitHub Release 仍需单独授权。Markdown 与 PDF 新增页包含同一更新，
 冻结论文产物保持不变。
+
+2026年10月7日的 `v0.13.0` 更新强化 Agent 模式论文摄入：使用单一版本化的书目／Wiki／
+语义工作区，为书目值绑定有界来源行证据，按章节自适应阅读论文，显式限制语义谓词角色，
+并让校验与提交接力始终绑定原事务。同时新增失败关闭的 inbox 分类证据检查和持久化的
+概念身份区分。这些能力向后兼容，不改变 Raw／Wiki／Graph 边界或任何冻结论文产物；
+Markdown 与追加的 PDF 页面包含同一更新。
 
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |

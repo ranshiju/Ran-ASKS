@@ -429,6 +429,19 @@ def connect(db_path=None, *, read_only=False):
         "ON node_description_reviews(node_path, source, id)"
     )
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS identity_distinctions (
+            left_key TEXT NOT NULL,
+            right_key TEXT NOT NULL,
+            left_name TEXT NOT NULL,
+            right_name TEXT NOT NULL,
+            source TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (left_key, right_key)
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS hub_scope_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             hub_path TEXT NOT NULL,
@@ -560,6 +573,18 @@ def init_schema(conn):
         proposed_description TEXT NOT NULL DEFAULT '',
         recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (node_path) REFERENCES nodes(path) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS identity_distinctions (
+        left_key TEXT NOT NULL,
+        right_key TEXT NOT NULL,
+        left_name TEXT NOT NULL,
+        right_name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (left_key, right_key)
     );
 
     CREATE TABLE IF NOT EXISTS hub_scope_history (
@@ -711,6 +736,33 @@ def add_node_description_review(
         (
             str(node_path), str(origin_page), str(source), str(status),
             str(reason or ""), str(proposed_description or ""),
+        ),
+    )
+    return True
+
+
+def upsert_identity_distinction(
+    conn, left_key, right_key, left_name, right_name, source, reason="",
+):
+    """Persist one explicit keep-separate identity decision; never creates a graph edge."""
+    left_key = str(left_key or "").strip()
+    right_key = str(right_key or "").strip()
+    source = str(source or "").strip()
+    if not left_key or not right_key or left_key == right_key or not source:
+        return False
+    if left_key > right_key:
+        left_key, right_key = right_key, left_key
+        left_name, right_name = right_name, left_name
+    conn.execute(
+        "INSERT INTO identity_distinctions "
+        "(left_key,right_key,left_name,right_name,source,reason,recorded_at,updated_at) "
+        "VALUES (?,?,?,?,?,?,datetime('now'),datetime('now')) "
+        "ON CONFLICT(left_key,right_key) DO UPDATE SET "
+        "left_name=excluded.left_name,right_name=excluded.right_name,"
+        "source=excluded.source,reason=excluded.reason,updated_at=datetime('now')",
+        (
+            left_key, right_key, str(left_name or ""), str(right_name or ""),
+            source, str(reason or ""),
         ),
     )
     return True

@@ -265,7 +265,10 @@ def test_reopen_agent_workspace_reuses_original_output_and_review_gate():
     assert state["agent_workspace"]["repair_scope"] == "wiki"
     assert state["bibliographic_review"]["status"] == "ok"
     assert state["agent_task"]["outputs"][0]["path"].endswith("agent-workspace.txt")
-    assert state["agent_task"]["issues"] == [{"stage": "Wiki", "error": "missing citation"}]
+    assert state["agent_task"]["issues"] == [{
+        "stage": "Wiki", "scope": "wiki", "error": "missing citation",
+        "action": "edit_workspace_wiki_section",
+    }]
     assert "output_sha256" not in state["agent_workspace"]
     assert state["wiki_content"] == ""
     assert state["slots_content"] == ""
@@ -643,6 +646,84 @@ def test_agent_workspace_check_aggregates_independent_diagnostics():
     assert by_stage["wiki"]["errors"] == ["wiki problem"]
     assert by_stage["semantics"]["errors"] == ["semantic problem"]
     assert by_stage["graph_preflight"]["skipped_by"] == ["wiki", "semantics"]
+    assert [(item["scope"], item["action"]) for item in result["repair_issues"]] == [
+        ("wiki", "edit_workspace_wiki_section"),
+        ("slots", "edit_workspace_slots_section"),
+    ]
+    assert result["agent_telemetry"]["check_attempts"] == 1
+    assert result["agent_telemetry"]["first_pass_validation"] == "invalid"
+
+
+def test_agent_reading_contract_uses_full_short_and_sections_long():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        paper = root / "temp/inbox-extract/txn/paper.md"
+        paper.parent.mkdir(parents=True)
+        original_repo = module.REPO
+        try:
+            module.REPO = root
+            paper.write_text("short paper", encoding="utf-8")
+            short = module._agent_reading_contract(paper)
+            assert short["mode"] == "full"
+            assert short["primary"]["action"] == "read_full"
+
+            paper.write_text("x" * (module.AGENT_FULL_TEXT_MAX_CHARS + 1), encoding="utf-8")
+            long = module._agent_reading_contract(paper)
+            assert long["mode"] == "adaptive_sections"
+            assert long["primary"]["action"] == "read_sections"
+            assert ".scripts/read_paper.py" in long["primary"]["command"]
+            assert "Method" in long["primary"]["command"]
+            assert long["fallback_rules"][0]["action"] == "read_relevant_source_ranges"
+        finally:
+            module.REPO = original_repo
+
+
+def test_agent_check_telemetry_does_not_apply_to_api_workspace():
+    state = {"agent_workspace": {"execution_backend": "api"}}
+    module._record_agent_check_telemetry(state, {
+        "validation": "invalid", "warnings": [],
+        "repair_issues": [{"scope": "wiki"}],
+    })
+    assert not ((state.get("telemetry") or {}).get("agent_ingest"))
+
+
+def test_agent_workspace_check_restores_hash_bound_input_artifacts():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract_dir = root / "temp/inbox-extract/txn"
+        extract_dir.mkdir(parents=True)
+        source = extract_dir / "source.yaml"
+        sidecar = extract_dir / "paper.pdf.source.json"
+        manifest = extract_dir / "manifest.json"
+        source.write_text("external_path: inbox/demo.pdf\n", encoding="utf-8")
+        sidecar.write_text('{"original": true}\n', encoding="utf-8")
+        expected_source = source.read_bytes()
+        expected_sidecar = sidecar.read_bytes()
+        state = {
+            "transaction_id": "txn",
+            "status": "agent_required",
+            "extract_dir": "temp/inbox-extract/txn",
+        }
+        original_repo = module.REPO
+        original_check = module._check_agent_workspace_once
+
+        def mutating_check(_state):
+            source.write_text("bibliographic: changed\n", encoding="utf-8")
+            sidecar.unlink()
+            manifest.write_text('{"changed": true}\n', encoding="utf-8")
+            return {"status": "ready_to_commit"}
+
+        try:
+            module.REPO = root
+            module._check_agent_workspace_once = mutating_check
+            result = module.check_agent_workspace(state)
+        finally:
+            module.REPO = original_repo
+            module._check_agent_workspace_once = original_check
+        assert result["status"] == "ready_to_commit"
+        assert source.read_bytes() == expected_source
+        assert sidecar.read_bytes() == expected_sidecar
+        assert not manifest.exists()
 
 
 def test_extract_pdf_bibliography_reads_metadata_and_first_page_footer():
@@ -1086,6 +1167,27 @@ def test_paper_semantic_contract_is_shared_by_api_and_agent_prompts():
     assert "作者明确指出长时间演化的计算成本较高" in standalone
     assert "\n   4. 不得补充论文未提及的事实" in combined
     assert "\n   6. 每个事实段落或事实列表项末尾" in combined
+
+
+def test_agent_semantic_protocol_scopes_paper_subject_predicates():
+    protocol = module.agent_paper_semantic_protocol()
+    subject = protocol["paper_subject_predicates"]
+    allowed = set(subject["concept"]) | set(subject["proposition"])
+    disallowed = set(subject["disallowed"])
+
+    assert protocol["contract"] == module.PAPER_SEMANTIC_CONTRACT_VERSION
+    assert set(subject["concept"]) == module.PAPER_SUBJECT_CONCEPT_PREDICATES
+    assert set(subject["proposition"]) == module.PROPOSITION_PREDICATES
+    assert allowed.isdisjoint(disallowed)
+    assert allowed | disallowed == module.SEMANTIC_PREDICATES
+    assert set(protocol["concept_relation_predicates"]) == (
+        module.CONCEPT_RELATION_PREDICATES
+    )
+    assert set(protocol["program_generated_predicates"]) == (
+        module.PROGRAM_GENERATED_PREDICATES
+    )
+    assert module.PROGRAM_GENERATED_PREDICATES <= disallowed
+    assert "涉及" in disallowed and "基于" in disallowed
 
 
 def test_bibliographic_review_merges_and_rejects_german_institutions():
@@ -1863,14 +1965,160 @@ def test_agent_workspace_exposes_first_two_pdf_pages_for_bibliography():
         assert task["inputs"][0]["name"] == "source_pdf_first_two_pages"
         assert task["inputs"][0]["read"] == "pages:1-2"
         assert task["inputs"][1]["name"] == "bibliographic_first_two_pages"
+        assert all(item["name"] != "bibliographic_candidates" for item in task["inputs"])
+        assert task["protocol"]["bibliography"]["contract"] == (
+            module.AGENT_BIBLIOGRAPHIC_PROTOCOL
+        )
+        template = task["protocol"]["bibliography"]["template"]
+        assert module.agent_bibliographic_decision_schema(template)
+        assert template["bibliographic"]["doi"]["evidence"] == {
+            "source": "", "locator": "", "quote": "",
+        }
+        assert "selection_source" not in task["protocol"]["bibliography"]
         assert task["protocol"]["bibliography"]["priority_evidence"][0][
             "read"
         ] == "pages:1-2"
         assert task["protocol"]["bibliography"]["priority_evidence"][1][
             "path"
         ].endswith("first-two-pages.txt")
+        bibliography_protocol = task["protocol"]["bibliography"]
+        assert bibliography_protocol["evidence_shape"]["quote_mode"] == (
+            "verbatim; preserve Unicode and diacritics"
+        )
+        assert "contiguously" in bibliography_protocol["value_evidence_policy"][
+            "non_empty"
+        ]
+        assert "ambiguous" in bibliography_protocol["value_evidence_policy"][
+            "fragmented_layout"
+        ]
+        assert task["protocol"]["task_version"] == (
+            module.AGENT_WORKSPACE_TASK_VERSION
+        )
+        semantics = task["protocol"]["semantics"]
+        assert "predicates" not in semantics
+        assert set(semantics["paper_subject_predicates"]["concept"]) == {
+            "研究基础", "核心方法", "对比方法",
+        }
+        assert "主要研究" in semantics["paper_subject_predicates"]["disallowed"]
+        assert "发表于" in semantics["program_generated_predicates"]
+        assert task["protocol"]["reading_strategy"]["mode"] == "full"
+        assert task["protocol"]["reading_strategy"]["source_character_count"] == len(
+            paper_md.read_text(encoding="utf-8")
+        )
+        lookup = task["protocol"]["existing_knowledge_lookup"]
+        assert lookup["mode"] == "optional_read_only"
+        assert lookup["argv_templates"]["search_hubs"][-1] == "hub"
+        assert state["telemetry"]["agent_ingest"]["reading_strategy"] == "full"
         assert state["agent_workspace"]["source_pdf_sha256"]
         assert state["agent_workspace"]["bibliographic_pages_sha256"]
+        assert state["agent_workspace"]["bibliography_contract"] == (
+            module.AGENT_BIBLIOGRAPHIC_PROTOCOL
+        )
+
+
+def _direct_bibliographic_decision():
+    evidence = {
+        "source": "paper.md",
+        "locator": "L1-L4",
+        "quote": (
+            "# Direct Evidence Paper\nAlice Example, Bob Builder\n"
+            "Journal of Reliable Results 2026\nDOI: 10.1234/direct.1"
+        ),
+    }
+    empty = {"source": "", "locator": "", "quote": ""}
+    return {
+        "protocol_version": module.AGENT_BIBLIOGRAPHIC_PROTOCOL,
+        "doc_type": "paper",
+        "review_status": "clean",
+        "bibliographic": {
+            "title": {"value": "Direct Evidence Paper", "evidence": evidence, "status": "confirmed"},
+            "authors": {
+                "value": ["Alice Example", "Bob Builder"],
+                "evidence": evidence, "rejected": [], "status": "confirmed",
+            },
+            "year": {
+                "value": "2026", "evidence": evidence,
+                "kind": "published", "status": "confirmed",
+            },
+            "venue": {
+                "value": "Journal of Reliable Results", "evidence": evidence,
+                "status": "confirmed",
+            },
+            "doi": {
+                "value": "10.1234/direct.1", "evidence": evidence,
+                "status": "confirmed",
+            },
+            "arxiv_id": {"value": "", "evidence": empty, "status": "ambiguous"},
+        },
+        "conflicts": [],
+        "review_notes": [],
+    }
+
+
+def test_agent_bibliography_template_and_empty_identifier_canonicalization():
+    template = module.agent_bibliographic_decision_template()
+    assert module.agent_bibliographic_decision_schema(template)
+
+    decision = _direct_bibliographic_decision()
+    decision["bibliographic"]["doi"] = {
+        "value": "", "evidence": None, "status": "ambiguous",
+    }
+    del decision["bibliographic"]["arxiv_id"]
+    normalized = module.canonicalize_agent_bibliographic_decision(decision)
+    assert normalized is not decision
+    assert module.agent_bibliographic_decision_schema(normalized)
+    assert normalized["bibliographic"]["doi"]["evidence"] == {
+        "source": "", "locator": "", "quote": "",
+    }
+    assert normalized["bibliographic"]["arxiv_id"] == {
+        "value": "",
+        "evidence": {"source": "", "locator": "", "quote": ""},
+        "status": "ambiguous",
+    }
+
+    nonempty = _direct_bibliographic_decision()
+    nonempty["bibliographic"]["doi"]["evidence"] = None
+    assert not module.agent_bibliographic_decision_schema(
+        module.canonicalize_agent_bibliographic_decision(nonempty)
+    )
+
+
+def test_agent_bibliography_compiles_direct_evidence_without_candidate_whitelist():
+    md_text = (
+        "# Direct Evidence Paper\nAlice Example, Bob Builder\n"
+        "Journal of Reliable Results 2026\nDOI: 10.1234/direct.1\n"
+    )
+    decision = _direct_bibliographic_decision()
+    candidates = {field: [] for field in module.BIBLIOGRAPHIC_REVIEW_FIELDS}
+    candidates["authors"] = ["Example University", "Example Institute"]
+    review = module.compile_agent_bibliographic_decision(
+        decision, {"paper.md": md_text}, candidates,
+    )
+    assert review["bibliographic"]["authors"]["value"] == [
+        "Alice Example", "Bob Builder",
+    ]
+    assert any(
+        conflict.get("kind") == "background_candidate_disagreement"
+        for conflict in review["conflicts"] if isinstance(conflict, dict)
+    )
+    assert module.validate_bibliographic_review(
+        review, candidates, md_text, enforce_candidate_boundary=False,
+    ) == []
+
+
+def test_agent_bibliography_rejects_quote_outside_declared_locator():
+    decision = _direct_bibliographic_decision()
+    decision["bibliographic"]["title"]["evidence"] = {
+        "source": "paper.md", "locator": "L1", "quote": "Invented Paper",
+    }
+    try:
+        module.compile_agent_bibliographic_decision(
+            decision, {"paper.md": "# Direct Evidence Paper\n"}, {},
+        )
+    except ValueError as exc:
+        assert "quote" in str(exc)
+    else:
+        raise AssertionError("forged evidence quote must be rejected")
 
 
 def test_bibliographic_schema_accepts_descriptive_string_conflicts():
@@ -5213,6 +5461,31 @@ def test_pdf_layout_candidates_separate_authors_affiliations_and_date_kinds():
     }]
 
 
+def test_pdf_layout_mixed_block_never_parses_affiliation_as_author():
+    blocks = [
+        {
+            "page": 1, "block": 1, "relative_bbox": [0.1, 0.1, 0.9, 0.2],
+            "text": "Stable Layout Paper",
+            "evidence": "pdf_layout_front_matter.page1.block1",
+        },
+        {
+            "page": 1, "block": 2, "relative_bbox": [0.1, 0.22, 0.9, 0.4],
+            "text": (
+                "Alice Example\nBob Builder\n"
+                "Department of Physics, Example University\n"
+                "alice@example.edu"
+            ),
+            "evidence": "pdf_layout_front_matter.page1.block2",
+        },
+    ]
+    layout = module._layout_bibliographic_candidates(blocks, "Stable Layout Paper")
+    assert [item["value"] for item in layout["authors"]] == [
+        "Alice Example", "Bob Builder",
+    ]
+    assert all("University" not in item["value"] for item in layout["authors"])
+    assert all("@" not in item["value"] for item in layout["authors"])
+
+
 def test_pdf_layout_catalog_keeps_typed_candidate_only_evidence():
     bibliography = {
         "title": "Stable Layout Paper",
@@ -5367,6 +5640,85 @@ def test_managed_workspace_bundle_rebase_requires_matching_state_and_bibliograph
             state["artifact_bundle_sha256"] = "untrusted-bundle"
             assert module._refresh_managed_workspace_bundle_baseline(state) is None
             assert state["agent_workspace"]["artifact_bundle_sha256"] == "legacy-bundle"
+        finally:
+            module.REPO = original_repo
+
+
+def test_explicit_refresh_restores_legacy_agent_check_bibliography_drift():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract_dir = root / "temp/inbox-extract/txn"
+        extract_dir.mkdir(parents=True)
+        paper = extract_dir / "paper.md"
+        paper.write_text("# Demo\n\nAlice Example\n\n2026\n", encoding="utf-8")
+        (extract_dir / "paper.pdf").write_bytes(b"pdf")
+        (extract_dir / "source.yaml").write_text(
+            module.yaml.safe_dump({"external_path": "inbox/demo.pdf"}, sort_keys=False),
+            encoding="utf-8",
+        )
+        candidates = {
+            "title": ["Demo"], "authors": ["Alice Example"], "year": ["2026"],
+            "venue": ["Example Journal"], "doi": [], "arxiv_id": [],
+        }
+        catalog = {
+            "protocol_version": module.BIBLIOGRAPHIC_DECISION_PROTOCOL,
+            "fields": {
+                "title": [{"id": "title-01", "value": "Demo", "evidence": "paper.md#L1"}],
+                "authors": [{"id": "author-01", "value": "Alice Example", "evidence": "paper.md#L3"}],
+                "year": [{"id": "year-01", "value": "2026", "evidence": "paper.md#L5", "kind": "published"}],
+                "venue": [{"id": "venue-01", "value": "Example Journal", "evidence": "pdf_metadata.subject"}],
+                "doi": [], "arxiv_id": [],
+            },
+        }
+        decision = {
+            "protocol_version": module.BIBLIOGRAPHIC_DECISION_PROTOCOL,
+            "doc_type": "paper", "review_status": "clean",
+            "selections": {
+                "title": {"candidate_id": "title-01", "status": "confirmed"},
+                "authors": {"accepted_ids": ["author-01"], "rejected_ids": [], "proposed": [], "status": "confirmed"},
+                "year": {"candidate_id": "year-01", "kind": "published", "status": "confirmed"},
+                "venue": {"candidate_id": "venue-01", "status": "confirmed"},
+                "doi": {"candidate_id": "", "status": "ambiguous"},
+                "arxiv_id": {"candidate_id": "", "status": "ambiguous"},
+            },
+            "conflicts": [], "review_notes": [],
+        }
+        output = extract_dir / "agent-workspace.txt"
+        output.write_text(
+            f"{module.BIBLIOGRAPHIC_DELIMITER}\n{json.dumps(decision)}\n"
+            f"{module.WIKI_DELIMITER}\n# Demo\n"
+            f"{module.SLOTS_DELIMITER}\n三元组:\n本论文|核心方法|测试方法\n",
+            encoding="utf-8",
+        )
+        state = {
+            "transaction_id": "txn", "status": "prepared",
+            "source": "inbox/demo.pdf", "extract_dir": "temp/inbox-extract/txn",
+            "bibliographic_meta": {}, "errors": ["bundle drift"],
+            "bibliographic_review": {"candidates": candidates, "catalog": catalog},
+        }
+        original_repo = module.REPO
+        try:
+            module.REPO = root
+            expected_bundle = module._write_paper_artifact_manifest(state, extract_dir)
+            state["agent_workspace"] = {
+                "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                "status": "awaiting_output",
+                "artifact_bundle_sha256": expected_bundle,
+                "output_path": "temp/inbox-extract/txn/agent-workspace.txt",
+            }
+            review = module.compile_bibliographic_decision(decision, catalog, paper.read_text())
+            module.normalize_bibliographic_review(review, candidates)
+            locked = module.merge_bibliographic_review({}, review)
+            module.persist_bibliographic_metadata(extract_dir, locked)
+            assert module._current_artifact_bundle_sha256(extract_dir) != expected_bundle
+            receipt = module._restore_agent_check_bundle_drift(state)
+            assert receipt["reason"] == "legacy_agent_check_input_restore"
+            assert module._current_artifact_bundle_sha256(extract_dir) == expected_bundle
+            source = module.yaml.safe_load(
+                (extract_dir / "source.yaml").read_text(encoding="utf-8")
+            )
+            assert "bibliographic" not in source
+            assert state["errors"] == []
         finally:
             module.REPO = original_repo
 

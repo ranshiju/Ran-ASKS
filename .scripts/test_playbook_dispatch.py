@@ -97,6 +97,35 @@ def test_real_playbook_dispatches_department_report_aliases():
         assert "## 班子会提案" not in result
 
 
+def test_real_playbook_dispatches_ingest_backend_model_aliases():
+    for query in (
+        "将ingest的后端模型改为agent",
+        "把 ingest 后端模型切换为 api",
+        "将摄入的后端模型设为 agent",
+        "修改摄入后端",
+    ):
+        result = module.dispatch(query)
+        assert result is not None
+        assert result.startswith("## 修改摄入后端\n")
+        assert "普通运行参数设置，不是建设任务" in result
+        assert "`.env` 的 `INGEST_BACKEND`" in result
+
+
+def test_real_playbook_dispatches_query_backend_model_aliases():
+    for query in (
+        "query backend是否也做了同样的处理",
+        "把 query 后端模型切换为 agent",
+        "将查询的后端模型设为 api",
+        "修改查询后端",
+    ):
+        result = module.dispatch(query)
+        assert result is not None
+        assert result.startswith("## 修改查询后端\n")
+        assert "普通运行参数设置，不是建设任务" in result
+        assert "`.env` 的 `QUERY_BACKEND`" in result
+        assert "private 查询" in result
+
+
 def test_dispatch_short_query():
     with playbook_fixture():
         result = module.dispatch("x")
@@ -122,6 +151,8 @@ def main():
     test_dispatch_no_match()
     test_real_playbook_dispatches_class_meeting_proposal_to_workspace_items()
     test_real_playbook_dispatches_department_report_aliases()
+    test_real_playbook_dispatches_ingest_backend_model_aliases()
+    test_real_playbook_dispatches_query_backend_model_aliases()
     test_dispatch_short_query()
     test_list_entries()
     print("playbook dispatch regression: PASS")

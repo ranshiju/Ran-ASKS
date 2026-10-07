@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.12.0
+> Current main version: v0.13.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -123,6 +123,15 @@ validator receipts, and declared artifact hashes; they do not claim that an
 interpretation is semantically entailed by its source. The foundation suite
 also runs an offline synthetic weak-model governance exam covering malformed
 output, missing evidence, prompt injection, and fallback trace completeness.
+
+Agent-mode paper ingestion uses one versioned workspace for bibliographic
+review, Wiki composition, and semantic slots. Every non-empty bibliographic
+field must quote a bounded source-line window, while adaptive section reading
+keeps the Wiki and semantic output grounded in the extracted paper. Validators
+enforce predicate roles and keep program-owned author, venue, and paper-topic
+edges out of model-authored slots before the same transaction can commit.
+Reviewed concept-name distinctions are persisted as governance metadata and
+applied before embedding-based identity resolution.
 
 ## Chat documents and presentation ingestion
 

@@ -2,7 +2,7 @@
 """节点身份解析与语义召回。
 
 对 LLM/Agent 暴露的是 ``resolve_node`` 和 ``semantic_search``，而不是裸向量。
-图只读；唯一可能的写入是 ``embed_cached_batch`` 对 embeddings.db 的文本缓存。
+resolve/search 只读；显式 ``review-distinct`` 经 graph_lib 写身份治理元数据。
 """
 from __future__ import annotations
 
@@ -61,6 +61,47 @@ def query_semantic_text(name: str, context: str = "") -> str:
 
 def _normalize(value: str) -> str:
     return re.sub(r"[^0-9a-z\u3400-\u9fff]+", "", str(value or "").casefold())
+
+
+def _identity_pair(left: str, right: str) -> tuple[str, str]:
+    return tuple(sorted((_normalize(left), _normalize(right))))
+
+
+def is_identity_distinct(conn, left: str, right: str) -> bool:
+    """Return a persisted explicit keep-separate decision for two canonical names."""
+    left_key, right_key = _identity_pair(left, right)
+    if not left_key or not right_key or left_key == right_key:
+        return False
+    try:
+        return conn.execute(
+            "SELECT 1 FROM identity_distinctions WHERE left_key=? AND right_key=?",
+            (left_key, right_key),
+        ).fetchone() is not None
+    except sqlite3.OperationalError:
+        return False
+
+
+def record_identity_distinction(
+    conn, left: str, right: str, *, source: str, reason: str = "",
+) -> bool:
+    """Record an explicit distinction through the managed graph schema."""
+    left = str(left or "").strip()
+    right = str(right or "").strip()
+    left_key, right_key = _identity_pair(left, right)
+    return gl.upsert_identity_distinction(
+        conn, left_key, right_key, left, right, source, reason,
+    )
+
+
+def _persisted_distinct_result(name: str, candidates: list[dict]) -> dict:
+    return {
+        "decision": "unmatched",
+        "reason": "persisted_distinct",
+        "match_mode": "identity_review",
+        "candidates": candidates,
+        "allowed_actions": ["create_local"],
+        "reviewed_name": name,
+    }
 
 
 def _meaningful_components(value: str) -> set[str]:
@@ -432,6 +473,14 @@ def resolve_node(
         return {"decision": "invalid", "reason": "empty_name", "candidates": []}
     top_k = max(1, min(int(top_k), MAX_TOP_K))
     exact = _exact_candidates(conn, name, node_types)
+    exact_path = [candidate for candidate in exact if candidate["node_id"] == name]
+    blocked_exact = [
+        candidate for candidate in exact
+        if candidate not in exact_path and is_identity_distinct(conn, name, candidate["title"])
+    ]
+    exact = exact_path + [candidate for candidate in exact if candidate not in blocked_exact + exact_path]
+    if blocked_exact and not exact:
+        return _persisted_distinct_result(name, blocked_exact[:top_k])
     if len(exact) == 1:
         candidate = exact[0]
         match_mode = "exact_path" if candidate["node_id"] == name else "unique_title_or_alias"
@@ -470,6 +519,13 @@ def resolve_node(
         }
 
     decomposed = _decomposed_exact_candidates(conn, name, node_types)
+    blocked_decomposed = [
+        candidate for candidate in decomposed
+        if is_identity_distinct(conn, name, candidate["title"])
+    ]
+    decomposed = [candidate for candidate in decomposed if candidate not in blocked_decomposed]
+    if blocked_decomposed and not decomposed:
+        return _persisted_distinct_result(name, blocked_decomposed[:top_k])
     if len(decomposed) == 1:
         candidate = decomposed[0]
         return {
@@ -492,7 +548,9 @@ def resolve_node(
 
     all_rows = _identity_rows(conn, node_types)
     acronym_equivalent = [
-        row for row in all_rows if optional_acronym_equivalent(name, row["title"])
+        row for row in all_rows
+        if optional_acronym_equivalent(name, row["title"])
+        and not is_identity_distinct(conn, name, row["title"])
     ]
     if len(acronym_equivalent) == 1:
         candidate = acronym_equivalent[0]
@@ -515,7 +573,15 @@ def resolve_node(
         }
     # 自动身份复用必须先有代码化名称信号；没有名称证据时不调用 embedding，
     # semantic relatedness 留给 semantic_search，不冒充 identity。
-    rows = [row for row in all_rows if lexical_identity_signal(name, row["title"])]
+    identity_rows = [
+        row for row in all_rows if lexical_identity_signal(name, row["title"])
+    ]
+    blocked_rows = [
+        row for row in identity_rows if is_identity_distinct(conn, name, row["title"])
+    ]
+    rows = [row for row in identity_rows if row not in blocked_rows]
+    if blocked_rows and not rows:
+        return _persisted_distinct_result(name, blocked_rows[:top_k])
     if not rows:
         return {
             "decision": "unmatched",
@@ -629,14 +695,34 @@ def main():
     search.add_argument("query")
     search.add_argument("--scope", choices=["node", "hub"], default="node")
     search.add_argument("--top-k", type=int, default=8)
+    distinct = sub.add_parser("review-distinct")
+    distinct.add_argument("left")
+    distinct.add_argument("right")
+    distinct.add_argument("--source", required=True)
+    distinct.add_argument("--reason", default="")
     parser.add_argument("--db", type=Path, default=None)
     args = parser.parse_args()
-    conn = gl.connect(args.db, read_only=True)
+    write_review = args.command == "review-distinct"
+    conn = gl.connect(args.db, read_only=not write_review)
     try:
         if args.command == "resolve":
             _json_print(resolve_node(conn, args.name, args.context, top_k=args.top_k))
-        else:
+        elif args.command == "search":
             _json_print(semantic_search(conn, args.query, args.scope, args.top_k))
+        else:
+            recorded = record_identity_distinction(
+                conn, args.left, args.right, source=args.source, reason=args.reason,
+            )
+            if not recorded:
+                raise SystemExit("invalid identity distinction")
+            conn.commit()
+            _json_print({
+                "status": "recorded",
+                "decision": "distinct",
+                "left": args.left,
+                "right": args.right,
+                "source": args.source,
+            })
     finally:
         conn.close()
 

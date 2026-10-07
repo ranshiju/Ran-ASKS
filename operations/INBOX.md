@@ -107,7 +107,7 @@
 - 目标 raw 目录或 wiki 文件已存在时，脚本必须失败；更新既有条目走标准 `ingest update`，不得以 inbox 落位覆盖事实层
 - 行政文档中的 `department` 只接受 Raw 逐字出现的完整部门名称；负责人关系还须同一证据片段明确出现“负责人/负责”等职责措辞，校长讲话、主讲或发言身份不得自行推断部门或负责人
 - 统一入口按顶层结构化状态解释摄入结果；Agent 的 `prepared` 与 API 兼容的 `agent_required`，以及 `awaiting_agent`、`ready_to_commit`、`partial`、`graph_ready`、`classification_required` 等可继续状态，不得包装成普通进程错误。统一报告将 `duplicates`、`awaiting_agent`、`pending` 与 `failed` 分开统计；DSH 只在 API backend 解释这些状态
-- 分类 `evidence_quotes` 仍须能回溯输入，但 validator 先做 Unicode NFKC 和连续空白折叠，允许 PDF 标题断行等表示差异；增删实词后的概述不算原文证据
+- Agent 分类 task 按当前文件生成完整、fail-closed 的结果模板，避免重复拼装 JSON；分类 `evidence_quotes` 仍须能回溯输入，但 validator 先做 Unicode NFKC、单词内连字符换行拼接和连续空白折叠，允许 PDF 标题断行等表示差异，失败时指出具体 quote 索引；增删实词后的概述不算原文证据
 
 ## 用户申明事实
 

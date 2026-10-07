@@ -75,6 +75,32 @@ def test_exact_and_unique_alias_are_reused():
     assert plan["merge_map"]["Stable Alias"] == "academic/wiki/topics/alias-target"
 
 
+def test_persisted_distinction_keeps_unique_alias_as_local_node():
+    conn = make_db()
+    add_node(conn, "tensor-network", "张量网络")
+    gl.insert_aliases(conn, "tensor-network", ["谱张量网络"])
+    assert gd.ns.record_identity_distinction(
+        conn,
+        "谱张量网络",
+        "张量网络",
+        source="user:2026-10-06",
+        reason="用户明确要求保持不同概念",
+    )
+    delta = gd.build_document_delta(
+        "academic/wiki/papers/example",
+        {"title": "Example"},
+        [{"subject": "本论文", "predicate": "涉及", "object": "谱张量网络"}],
+    )
+    plan = gd.plan_attachment(conn, delta)
+    assert "谱张量网络" not in plan["merge_map"]
+    decision = next(
+        item for item in plan["decisions"] if item["mention"] == "谱张量网络"
+    )
+    assert decision["action"] == "create_local"
+    assert decision["reason"] == "persisted_distinct"
+    assert "谱张量网络" in plan["new_nodes"]
+
+
 def test_locked_venue_uses_predicate_specific_identity_key():
     conn = make_db()
     existing = "the 2024 Conference on Empirical Methods in Natural Language Processing"

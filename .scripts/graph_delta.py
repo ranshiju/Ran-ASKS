@@ -415,6 +415,21 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
         candidates = _exact_candidates(mention, title_idx, alias_idx, suffix_idx)
         if len(candidates) == 1:
             resolved = candidates[0]
+            row = conn.execute(
+                "SELECT title FROM nodes WHERE path=?", (resolved,)
+            ).fetchone()
+            resolved_title = str(row[0] or resolved) if row else resolved
+            if resolved != mention and ns.is_identity_distinct(
+                    conn, mention, resolved_title):
+                decisions.append({
+                    "mention": mention,
+                    "action": "create_local",
+                    "target": mention,
+                    "reason": "persisted_distinct",
+                    "candidate_count": 1,
+                })
+                new_nodes.append(mention)
+                continue
             decisions.append({
                 "mention": mention,
                 "action": "reuse_unique",

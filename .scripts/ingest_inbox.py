@@ -339,6 +339,19 @@ def reconcile_classification(decision: dict, review: dict) -> tuple[str | None, 
     return str(api_type), ""
 
 
+def _classification_result_template(pending: list[dict]) -> dict:
+    """Build a schema-valid, fail-closed scaffold for the current batch."""
+    return {
+        "decisions": [{
+            "file": item["file"],
+            "doc_type": "ambiguous",
+            "confidence": "low",
+            "reasons": ["证据不足，需根据 review_text 裁决"],
+            "evidence_quotes": [],
+        } for item in pending],
+    }
+
+
 def _classification_task(pending: list[dict], args, issues: list | None = None) -> dict:
     identity = [
         {"file": item["file"], "sha256": hashlib.sha256(
@@ -383,6 +396,7 @@ def _classification_task(pending: list[dict], args, issues: list | None = None) 
         }],
         protocol={
             "name": "inbox-classification-result-v1",
+            "template": _classification_result_template(pending),
             "shape": {"decisions": [{
                 "file": "input file",
                 "doc_type": "allowed_types item or ambiguous",
@@ -390,6 +404,11 @@ def _classification_task(pending: list[dict], args, issues: list | None = None) 
                 "reasons": "1-4 strings",
                 "evidence_quotes": "0-4 exact source quotes",
             }]},
+            "evidence_rules": [
+                "Copy short contiguous snippets from review_text.",
+                "Whitespace and PDF word-internal hyphen line wraps are normalized.",
+                "Do not repair OCR spelling, punctuation, or lexical content inside quotes.",
+            ],
             "validator": "ingest_inbox.classification_review_schema",
         },
         issues=list(issues or []),
@@ -419,16 +438,22 @@ def _validate_agent_classification(path: Path, decision: dict, review: dict) -> 
     if review.get("doc_type") not in allowed_types | {"ambiguous"}:
         raise ValueError(f"{path}: doc_type 不适用于来源格式")
     source = _normalized_evidence_text(decision.get("review_text", ""))
-    if any(
-            quote and _normalized_evidence_text(quote) not in source
-            for quote in review.get("evidence_quotes", [])
-    ):
-        raise ValueError(f"{path}: evidence_quotes 不在分类输入中")
+    invalid = [
+        (index, quote)
+        for index, quote in enumerate(review.get("evidence_quotes", []))
+        if quote and _normalized_evidence_text(quote) not in source
+    ]
+    if invalid:
+        details = "; ".join(
+            f"evidence_quotes[{index}]={quote[:120]!r}" for index, quote in invalid
+        )
+        raise ValueError(f"{path}: 分类引文无法回溯 review_text: {details}")
 
 
 def _normalized_evidence_text(value: str) -> str:
     """Normalize representation noise while preserving lexical evidence."""
     normalized = unicodedata.normalize("NFKC", str(value or ""))
+    normalized = re.sub(r"(?<=\w)-[ \t]*\r?\n[ \t]*(?=\w)", "-", normalized)
     return " ".join(normalized.split())
 
 
