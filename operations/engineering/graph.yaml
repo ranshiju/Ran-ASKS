@@ -156,7 +156,7 @@ nodes:
   meeting_compiler_contract:
     path: .scripts/meeting_compiler_contract.py
     kind: contract
-    role: backend-neutral-meeting-compiler-protocol-parser-and-deterministic-preprocess-meeting-ir-and-guidance-update-validator
+    role: backend-neutral-meeting-compiler-record-contract-and-deterministic-preprocess-meeting-ir-and-guidance-update-validator
   recovery_policy:
     path: .scripts/recovery_policy.py
     kind: contract
@@ -284,7 +284,7 @@ nodes:
   repair_meeting_identity:
     path: .scripts/repair_meeting_identity.py
     kind: implementation
-    role: validated-transactional-raw-evidence-bound-meeting-identity-projection-and-guidance-remediation
+    role: validated-transactional-raw-evidence-bound-meeting-identity-projection-and-user-assertion-remediation
   wiki_skeleton:
     path: .scripts/wiki_skeleton.py
     kind: implementation
@@ -930,6 +930,30 @@ nodes:
     path: .scripts/workspace_state.py
     kind: implementation
     role: nested-project-workspace-items-simple-proposals-temporal-memory-events-and-rebuildable-projections-kernel
+  oral_exam:
+    path: .scripts/oral_exam.py
+    kind: implementation
+    role: shared-private-versioned-oral-style-session-dialogue-and-full-transcript-assessment-kernel-with-host-agent-task-adapter
+  oral_exam_styles:
+    path: operations/config/oral-exam-styles.json
+    kind: config
+    role: shared-default-discussion-diagnostic-and-legacy-strict-oral-style-contract
+  oral_exam_api:
+    path: .scripts/oral_exam_api.py
+    kind: implementation
+    role: api-only-explicit-consent-bounded-oral-turn-controller-with-no-agent-fallback
+  oral_exam_test:
+    path: .scripts/test_oral_exam.py
+    kind: test
+    role: oral-state-isolation-version-freezing-transcript-recovery-idempotency-evidence-and-agent-api-contract-regression
+  oral_exam_ops:
+    path: operations/ORAL_EXAM.md
+    kind: contract
+    role: oral-examination-preparation-command-host-delivery-private-record-and-model-quality-acceptance-contract
+  oral_exam_help:
+    path: operations/ORAL_EXAM_HELP.md
+    kind: documentation
+    role: shared-read-only-user-guide-for-oral-help-with-no-session-or-api-effects
   workspace_state_test:
     path: .scripts/test_workspace_state.py
     kind: test
@@ -1123,6 +1147,63 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - oral_exam_ops
+  - governs
+  - llm_structured
+- - oral_exam_ops
+  - governs
+  - oral_exam
+- - oral_exam_ops
+  - governs
+  - oral_exam_api
+- - oral_exam
+  - uses
+  - agent_task
+- - oral_exam
+  - uses
+  - source_locator
+- - oral_exam
+  - uses
+  - oral_exam_styles
+- - oral_exam
+  - uses
+  - oral_exam_help
+- - oral_exam_ops
+  - governs
+  - oral_exam_help
+- - oral_exam_help
+  - tested_by
+  - oral_exam_test
+- - oral_exam_ops
+  - governs
+  - oral_exam_styles
+- - oral_exam_styles
+  - tested_by
+  - oral_exam_test
+- - oral_exam
+  - tested_by
+  - oral_exam_test
+- - oral_exam_api
+  - uses
+  - oral_exam
+- - oral_exam_api
+  - uses
+  - llm_structured
+- - oral_exam_api
+  - tested_by
+  - oral_exam_test
+- - wg
+  - uses
+  - oral_exam
+- - route
+  - uses
+  - oral_exam_ops
+- - function_registry_spec
+  - governs
+  - oral_exam
+- - function_registry_spec
+  - governs
+  - oral_exam_api
 - - ingest_paper
   - uses
   - re_ingest
@@ -1822,6 +1903,9 @@ edges:
 - - repair_meeting_identity
   - uses
   - graph_ingest
+- - repair_meeting_identity
+  - uses
+  - source_locator
 - - repair_meeting_identity
   - tested_by
   - ingest_meeting_test
@@ -2615,6 +2699,26 @@ edges:
   - documents
   - dsh_function_catalog
 capabilities:
+  oral_exam:
+    entry: route
+    required:
+    - agents
+    - oral_exam_ops
+    - oral_exam
+    optional:
+    - wg
+    - query_actions
+    - oral_exam_api
+    - llm_structured
+    forbidden:
+    - graph_ingest
+    guardrails:
+    - 准备方案与正式口试分离；正式开始和结束只接受用户完整的单行 /oral 指令，不由模型或来源文本触发。
+    - 用户和宿主对话显式绑定 client；状态及范围版本来自 private/oral-exams/state.json，不使用全局活动场次。
+    - 完整保留收发原文、提示和生命周期事件；评估单独存储，复盘与暂停消息不计入正式评估。
+    - 新方案默认讨论诊断式，允许提问、纠错和引导；帮助留痕，结束后依据冻结的完整口试对话综合评估，旧版本不追溯改风格。
+    - Agent 只执行 agent-task-v1 与受管校验提交；API 逐次显式授权发送学生资料，二者不隐式回落。
+    - 宿主每轮展示 state.banner，先提交再发送考官问题并确认送达；仓库脚本不冒充原生 UI 输入拦截器。
   graph-visualize:
     entry: route
     required:
@@ -2983,6 +3087,15 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  oral_exam:
+  - python3 .scripts/test_oral_exam.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/engineering_graph.py validate
+  oral_exam_api:
+  - python3 .scripts/test_oral_exam.py
+  oral_exam_ops:
+  - python3 .scripts/test_oral_exam.py
   project_metadata:
   - python3 .scripts/test_cli_package.py
   - python3 .scripts/test_workspace_doctor.py
@@ -4556,6 +4669,7 @@ script_contracts:
     - YYYYMMDD 文件名保留显式年份；仅有 MMDD 或无日期时允许用摄入年分区，但 state 与 Wiki frontmatter 必须标记 date_inferred，禁止把推断年份伪装成 raw 明示事实
     - Meeting Compiler META 的非空 title 在落位前生成最终 meeting-id 并重算 raw/wiki 路径；sources 由程序回填最终路径，重试时保持 canonical ID 稳定
     - 会议 sources 按 YAML 结构回填为唯一最终 Raw 来源，覆盖标量、行内列表与多行列表；Wiki validator 必须检查与事务 raw_dir/source_filename 精确一致，缺失或错位不得进入落位
+    - Agent task 由共享记录契约提供 META、frontmatter 与 MEETING_IR 完整字段；人物未解析时以空 canonical 端点保留原称呼、参会、汇报和待办，仅确定身份的角色进入图；正文脚注中的原事务来源随最终目录精确重绑定，不改写其他来源
     - replacement 只在原文精确命中并通过非级联应用校验后写 staged corrected.txt；程序从同一 MEETING_IR 确定性生成 Wiki 会议导航块与 semantic slots，二者集合一致后分别通过 validator
     - typed meeting slots 独占参会、汇报、决策、待办和会议主题关系；自由 relations 不得重复这些谓词、不得含本会议等指代端点；核心语义边必须经 Wiki section 抵达精确 Raw locator
     - 学生指导更新只允许指向 projects/学生指导/students 下已存在且由候选目录精确识别的记录；更新类别限进展、下一步、阻塞、决定、里程碑和方向变化，评价性、隐私性或无证据内容不得投影

@@ -18,6 +18,31 @@ MAX_REPLACEMENTS = 64
 MAX_ENTITY_DECISIONS = 128
 MAX_MEETING_IR_ITEMS = 128
 
+MEETING_IR_RECORD_FIELDS = {
+    "attendees": ("person", "label", "evidence_ids"),
+    "topics": ("label", "predicate", "evidence_ids"),
+    "reports": ("person", "person_label", "topic", "evidence_ids"),
+    "decisions": ("text", "evidence_ids"),
+    "tasks": ("text", "assignee", "assignee_label", "evidence_ids"),
+    "relations": ("subject", "predicate", "object", "evidence_ids"),
+    "person_updates": ("person", "person_label", "kind", "text", "evidence_ids"),
+}
+UNRESOLVED_PERSON_FIELDS = {"attendees": "person", "reports": "person", "tasks": "assignee"}
+
+
+def meeting_ir_record_contract() -> dict:
+    """Expose the same exact fields and identity boundary used by the validator."""
+    return {
+        section: {
+            "fields": list(fields),
+            "text_fields": [field for field in fields if field != "evidence_ids"],
+            "evidence_ids": "nonempty unique sNNNN IDs from evidence_catalog, at most 16",
+            "unresolved_identity_field": UNRESOLVED_PERSON_FIELDS.get(section),
+            "unresolved_identity": "empty string; retain the source label and fact in Wiki, not a global identity",
+        }
+        for section, fields in MEETING_IR_RECORD_FIELDS.items()
+    }
+
 TYPED_MEETING_PREDICATES = {"参会", "汇报", "决策", "待办", "讨论", "规划"}
 TOPIC_PREDICATES = {"讨论", "涉及", "规划"}
 FREE_RELATION_PREDICATES = {"涉及", "紧密相关于", "指导", "师从", "受指导于"}
@@ -161,21 +186,9 @@ def _validate_meeting_ir(value, evidence_ids: set[str] | None = None, *,
         )
 
     specs = {
-        "attendees": ({"person", "label", "evidence_ids"}, ("person", "label")),
-        "topics": ({"label", "predicate", "evidence_ids"}, ("label", "predicate")),
-        "reports": ({"person", "person_label", "topic", "evidence_ids"},
-                    ("person", "person_label", "topic")),
-        "decisions": ({"text", "evidence_ids"}, ("text",)),
-        "tasks": ({"text", "assignee", "assignee_label", "evidence_ids"},
-                  ("text", "assignee", "assignee_label")),
-        "relations": ({"subject", "predicate", "object", "evidence_ids"},
-                      ("subject", "predicate", "object")),
+        section: (set(fields), tuple(field for field in fields if field != "evidence_ids"))
+        for section, fields in MEETING_IR_RECORD_FIELDS.items() if section in required
     }
-    if "person_updates" in required:
-        specs["person_updates"] = (
-            {"person", "person_label", "kind", "text", "evidence_ids"},
-            ("person", "person_label", "kind", "text"),
-        )
     for section, (fields, text_fields) in specs.items():
         rows = value.get(section)
         if not isinstance(rows, list):
@@ -190,8 +203,15 @@ def _validate_meeting_ir(value, evidence_ids: set[str] | None = None, *,
             if not isinstance(row, dict) or set(row) != fields:
                 errors.append(f"{prefix} has invalid fields")
                 continue
-            values = tuple(str(row.get(field) or "").strip() for field in text_fields)
-            if any(not item for item in values):
+            if any(not isinstance(row.get(field), str) for field in text_fields):
+                errors.append(f"{prefix} text fields must be strings")
+                continue
+            values = tuple(row[field].strip() for field in text_fields)
+            optional_identity = (
+                UNRESOLVED_PERSON_FIELDS.get(section)
+                if value.get("protocol_version") == PROTOCOL_VERSION else None
+            )
+            if any(not row[field].strip() for field in text_fields if field != optional_identity):
                 errors.append(f"{prefix} has an empty required value")
             if any(item in DEICTIC_ENDPOINTS for item in values):
                 errors.append(f"{prefix} contains an unresolved deictic endpoint")

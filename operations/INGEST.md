@@ -97,14 +97,16 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
 2. **程序只准备候选**：`speech_entity_resolver.py <raw.txt> --output <entity-candidates.json>` 从 `graph.db` 的 people、aliases 和人物关系生成 exact/review 候选，不使用 `--apply` 提前形成最终纠错文本。可用 `--candidate-file` 缩小本次局部召回；索引按人物知识指纹增量刷新。
 3. **一个 specialist 一次理解全文**：程序先把 Raw 非空行编成稳定的 `sNNNN` evidence catalog，并列出 `projects/学生指导/students/` 中已有研究记录；`dsh/meeting_compiler_agent.py` 接收只读原文、证据目录、人物候选、学生记录候选、程序生成的 meeting ID/目标 sources 和 validator 错误，在同一上下文中返回 `meeting-compiler-v3`：
    - `<<<PREPROCESS>>>`：仅包含原文精确片段替换和人物 resolved/unchanged/unresolved 决策；证据不足必须 unresolved。
-   - `<<<WIKI>>>`：conference-summary Wiki 草稿，Navigation 和 Content 以发现、到达与必要背景为主，不重复结构化清单。
+   - `<<<WIKI>>>`：conference-summary Wiki 草稿，Navigation 和 Content 保留研究问题、关键观察、方法限制与未决矛盾，不重复结构化清单；来源限制简明表述，不挤占研究背景。
    - `<<<MEETING_IR>>>`：参会者、议题、汇报、决策、待办、受限扩展关系和 `person_updates`；每项必须引用 evidence ID。`person_updates` 只能指向候选目录中的已有学生记录，类别限进展、下一步、阻塞、决定、里程碑与方向变化。
-4. **程序编译派生物**：所有 replacement 必须命中原文，按一次非级联替换生成 staged `corrected.txt`；候选目录与 specialist 决策合并为 `entity-resolution.json`。程序从同一 MEETING_IR 确定性生成 `## Content` 内的 `### 会议导航`、`学生指导更新` 证据块与 semantic slots，使默认 `read-section #content` 能直接返回精确 Raw 引用。概念保持全局可解析，决策和待办生成页面作用域 proposition/task，不进入全局 keyword 池；`decisions` 只允许最终仍有效的决定，禁止把已否定提案与后续纠正合并成同一决策。重叠、重复、无命中、无证据、相互冲突的决策或协议不完整均拒绝，不静默降级。
+4. **程序编译派生物**：所有 replacement 必须命中原文，按一次非级联替换生成 staged `corrected.txt`；候选目录与 specialist 决策合并为 `entity-resolution.json`。程序从同一 MEETING_IR 确定性生成 `## Content` 内的 `### 会议导航`、`学生指导更新` 证据块与 semantic slots，使默认 `read-section #content` 能直接返回精确 Raw 引用。人物未解析不删除角色事实：attendees/reports 的 person、tasks 的 assignee 使用空串，原称呼与明确动作仍带证据投影到 Wiki，仅已解析人物角色进入 Graph，不以网名创建全局身份。概念保持全局可解析，决策和待办生成页面作用域 proposition/task，不进入全局 keyword 池；`decisions` 只允许最终仍有效的决定，禁止把已否定提案与后续纠正合并成同一决策。重叠、重复、无命中、无证据、相互冲突的决策或协议不完整均拒绝，不静默降级。
 5. **产物与导航校验**：MEETING_IR、Wiki、semantic、knowledge IR 和 graph plan 逐层校验集合一致；typed Meeting Compiler 核心语义边必须 100% 具备 Wiki section locator，并经脚注抵达精确 Raw 行号。任一硬错误带精确错误回到同一个 Meeting Compiler 做一次定向修订；warning 继续走局部确定性修复。
 6. **后端与恢复**：`INGEST_BACKEND=agent` 时脚本返回 `prepared + agent-task-v1`，当前宿主直接读取任务列出的原文、候选和协议，写入同一暂存输出后执行 resume；校验失败只更新原任务的 issues。`INGEST_BACKEND=api` 时程序通过 DSH 调用一次 Meeting Compiler；rejected、协议解析失败或预算耗尽保留 trace，并进入兼容 `agent_required`。两端共用同一事务与 validator，不把长原文复制进任务清单。文件名中的 `YYYYMMDD` 是权威年份；仅 `MMDD` 或无日期时才允许用摄入年推断，并在事务与 Wiki 中写 `date_inferred`。Compiler 提供非空 title 后，程序在落位前重算最终 meeting ID、Raw/Wiki 路径和 sources。
 7. **统一落图**：校验后的 semantic 经 `knowledge-ir-v1` → 绑定 IR SHA-256 的 `graph-plan-v1` → 唯一 writer `graph_ingest.py`。Meeting Compiler 不写 Raw、Wiki 或 `graph.db`，也不自报 IR 的确定性字段。
 8. **学生记录同事务投影**：Raw/Wiki 落位与 Graph 校验通过后，同一 ingest transaction 必须执行 `student_guidance_projection.py`。它只幂等更新已匹配的学生页 `## 会议更新` 受管块，同步 `notes/status.md` 的最新进展、下一步和日期。投影失败时整体状态不得进入 `completed`；保留原 transaction ID 从 `post_commit_projection` 幂等恢复，不重跑知识库提交。未匹配人物不自动建档，出席、能力/态度评价、隐私和推测内容不投影。
 9. **置信与回溯**：会议人物关系继续按 speech-recognition 来源处理；Wiki `sources` 始终指向原始 Raw，不指向 corrected。无法唯一解析的人物/实体不强行绑定，作为 `meeting_entity_unresolved` 质量告警进入事务与报告。导航质量以可到达、关系类型正确、IR/Wiki/Graph 一致和精确 Raw locator 覆盖为硬门，不以固定新节点比例代替语义判断。事实回答必须回溯 Raw，学生记录仍是项目进度视图，不能替代 Raw/Wiki/Graph 或把纠错审计、DSH session log 当事实源。
+
+原先 unresolved 的称呼由用户澄清时，先经 user-assertions 事务归档原话及人物页，再在完整投影修复中传 `--identity-corrections-file`；文件为记录数组，每项恰含 `mention/canonical/label/source/quote`，source 必须是归档申明的 `#fact-*` locator，quote 逐字绑定原称呼与规范姓名，Wiki 必须引用该 locator，人物页必须有该申明来源。语境称呼不自动设为全库别名；修复同步原事务内容快照并刷新提交校验回执，具体命令见「更新模式」及工程 code-guidance。
 
 已有历史 `corrected.md` 保留不动、不回填、不删除，也不作为新流程输入。人物页/别名变化只影响下一次候选召回；历史会议仅在明确重摄入时更新。
 

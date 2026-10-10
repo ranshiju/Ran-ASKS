@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前 main 版本: v0.14.0
+> 当前 main 版本: v0.15.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -367,6 +367,25 @@ Frontier 将回答版本绑定本轮实际提供与引用的证据。刷新时�
 Scope、分裂历史和成员完整迁移。仅闭合已满足的交接，保留其他待审动作与质量告警，
 同步关联事务回执；不重新摄入或调用 embedding。详见 `operations/INBOX.md`
 和 `operations/HUB.md`。
+
+## 智能口试（preview）
+
+智能口试是持久工作状态，包含准备中、待开始、口试中、已暂停与已结束。
+用 `/oral prepare <主题>` 共同确定可复用范围与 Raw 支持的考查目标，
+用 `/oral confirm` 确认方案，再用 `/oral start` 正式开始。
+暂停、恢复和结束分别使用 `/oral pause`、`/oral resume`、`/oral end`；
+`/oral status` 读取已记录状态，自然语言讨论不代替控制指令。
+
+新方案默认采用讨论诊断式：学生可以主动提问，考官可有依据地解释、纠正或引导
+自纠，帮助类型与原始回答完整保留。结束后基于私有完整对话独立评估，区分原本
+独立理解与帮助后的学习变化，不简单累计错误。已确认的旧方案保留原风格。
+API 执行要求显式 `ORAL_EXAM_BACKEND=api` 和逐次外发授权，整场评估也不例外；
+Agent 路径不隐式回落到 API。
+
+发送 `/oral help` 或运行 `ran-asks oral help` 可查看[独立使用帮助](operations/ORAL_EXAM_HELP.md)，
+宿主接入、私有存储与评估细则见[工程契约](operations/ORAL_EXAM.md)。当前为 preview，
+不是认证成绩；真实弱模型试用和教师验收仍必要。会议摄入同时强化了未确认角色
+保留与有来源依据的显式身份纠正，不凭模糊称谓创建全局身份。
 
 ## 使用真实材料
 

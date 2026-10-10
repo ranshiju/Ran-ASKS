@@ -24,8 +24,8 @@ def test_registry_and_runtime_have_exact_coverage():
     data = registry.load_registry()
     assert registry.validate_registry(data) == []
     assert registry.validate_runtime(data) == []
-    assert len(data["functions"]) == 26
-    assert set(data["states"]) == {"workspace", "research", "frontier"}
+    assert len(data["functions"]) == 27
+    assert set(data["states"]) == {"workspace", "research", "frontier", "oral_exam"}
     assert len(registry.observed_dsh_tools()) == 38
     assert registry.observed_dsh_tool_names() == registry.observed_dsh_tools()
 
@@ -85,11 +85,17 @@ def test_resolution_enforces_caller_backend_and_state():
 
     api = registry.resolve("knowledge.query", caller="api_controller", backend="api")
     assert "graph_search" in api["bindings"]["dsh"]
+    oral = registry.resolve("state.oral_exam.manage", caller="main_agent", backend="agent", state="oral_exam")
+    assert oral["bindings"]["wg"] == ["oral"]
+    assert "dsh" not in oral["bindings"]
+    oral_api = registry.resolve("state.oral_exam.manage", caller="api_controller", backend="api", state="oral_exam")
+    assert ".scripts/oral_exam_api.py" in oral_api["bindings"]["implementations"]
 
     for function_id, caller, backend in (
         ("knowledge.ingest", "sub_agent", "agent"),
         ("worker.ingest.paper_workspace", "main_agent", "api"),
         ("artifact.write", "main_agent", "api"),
+        ("state.oral_exam.manage", "sub_agent", "agent"),
     ):
         try:
             registry.resolve(function_id, caller=caller, backend=backend)
@@ -118,7 +124,7 @@ def test_library_and_visualization_are_functions_with_discoverable_entries():
         assert record['bindings']['wg'] == [entry]
         assert record['bindings']['route_capabilities'] == {entry:['general']}
         assert 'raw' not in record['effects'] and 'graph' not in record['effects']
-    assert set(data['states']) == {'workspace','research','frontier'}
+    assert set(data['states']) == {'workspace','research','frontier','oral_exam'}
     proc = subprocess.run([sys.executable,str(SCRIPTS/'wg.py'),'slide-library','show',
                            '--template','temp/nonexistent-template-test-only'],
                           cwd=REPO,capture_output=True,text=True,check=True)

@@ -1,0 +1,32 @@
+{
+  "schema": "oral-exam-styles-v1",
+  "default": "discussion-diagnostic",
+  "styles": {
+    "discussion-diagnostic": {
+      "name": "讨论诊断式",
+      "description": "通过双向讨论诊断理解；允许学生提问、考官纠正与引导自纠，依据完整对话评价独立理解及学习变化。",
+      "assessment_mode": "full_transcript",
+      "allow_feedback": true,
+      "default_allow_hints": true,
+      "instructions": [
+        "围绕学生实际观点推进讨论，接受正确的替代推理，不以是否复述预设答案评价理解。",
+        "中性邀请学生提出疑问，考查其问题所涉及的概念关系和条件；不提问本身不扣分，不按数量或单个漂亮问题定水平。",
+        "允许当场回应、解释和纠错，也可通过反例、条件检查和追问引导自纠；科学纠正和实质解释须有当前 Raw 依据。",
+        "将实质帮助明确标为 hint、explanation 或 correction；程序性澄清标为 none。保持原始回答，不用纠正后的答案覆盖它。",
+        "每轮保存暂定观察，不锁定成绩；结束后基于完整对话区分独立理解、提问质量、自我纠正、解释吸收与迁移。帮助不是惩罚标签。",
+        "对术语或笔误先澄清，不确定的科学判断先核验；不将考官错误归罪于学生，也不把未考查当成不会。"
+      ]
+    },
+    "strict-examination": {
+      "name": "严格测评式",
+      "description": "保留首版逐题提问与证据化观察；是否提示由确认方案控制，结束报告汇集回合观察。",
+      "assessment_mode": "turn_observations",
+      "allow_feedback": false,
+      "default_allow_hints": false,
+      "instructions": [
+        "先判断本轮答案，再选择追问或新的考查点；反馈集中在结束后。",
+        "接受正确的替代推理；未考查和无法判断不等于错误。"
+      ]
+    }
+  }
+}

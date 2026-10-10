@@ -468,6 +468,13 @@ def cmd_remember(args):
                     sources=[], status="ok")
 
 
+def cmd_oral(args):
+    import oral_exam
+    parsed = oral_exam.build_parser().parse_args(args.oral_args)
+    result = oral_exam.run(parsed)
+    return envelope("oral", result, status="ok" if result.get("ok") else "error", ok=result.get("ok", True))
+
+
 def cmd_workspace(args):
     """Generic workspace-state thin wrapper; the target script owns its schema."""
     command = [sys.executable, str(SCRIPTS / "workspace_state.py"), *args.workspace_args]
@@ -698,6 +705,10 @@ def build_parser():
     p.add_argument("workspace_args", nargs=argparse.REMAINDER,
                    help="传给 workspace_state.py 的子命令与参数")
     p.set_defaults(func=cmd_workspace)
+
+    p = sub.add_parser("oral", help="智能口试：准备方案、显式状态、完整记录和受管 Agent/API 回合")
+    p.add_argument("oral_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_oral)
 
     p = sub.add_parser("cv", help="简历状态、校验、日期版本生成与差异比较")
     p.add_argument("cv_args", nargs=argparse.REMAINDER,

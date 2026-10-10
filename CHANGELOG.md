@@ -7,6 +7,36 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-10
+
+### Version decision / 版本判断
+
+- MINOR: Add backward-compatible preview oral-examination plans, explicit lifecycle, discussion-diagnostic dialogue and complete-transcript assessment
+- MINOR（中文）：新增向后兼容的 preview 智能口试方案、显式生命周期、讨论诊断式互动与完整对话评估
+
+### Highlights
+
+- Added a preview intelligent oral-examination state with reusable, evidence-backed
+  preparation plans, explicit start/pause/resume/end commands, isolated private
+  records, complete transcripts, and separate Agent/API controllers.
+- Made discussion-diagnostic dialogue the default for new plans: students may
+  ask questions, examiners may correct or guide self-correction, and final
+  assessment distinguishes independent understanding from learning after help.
+  Confirmed legacy plans retain their original rules.
+- Added a standalone `/oral help` guide and strengthened source-bound meeting
+  identity corrections, unresolved-role handling, and transaction-footnote binding.
+  API sharing remains explicitly authorized per call; model-quality acceptance
+  still requires real trials and teacher review.
+
+### 主要更新
+
+- 新增 preview 智能口试状态：支持有知识库依据的可复用准备方案、显式开始／暂停／
+  恢复／结束指令、私有隔离记录与完整对话，Agent 与 API 分别持有控制循环。
+- 新方案默认采用讨论诊断式，允许学生提问、考官纠正和引导自纠；结束后基于完整
+  对话区分独立理解与帮助后的学习变化，已确认的旧方案保留原规则。
+- 新增独立 `/oral help` 使用帮助，并强化会议身份纠正的来源依据、未确认角色处理
+  与事务脚注绑定。API 外发仍需逐次授权；模型质量仍需真实试用与教师验收。
+
 ## [0.14.0] - 2026-10-10
 
 ### Version decision / 版本判断
@@ -415,5 +445,7 @@ manifests and checksums.
 
 [0.13.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.13.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.14.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.15.0

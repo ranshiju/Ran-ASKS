@@ -474,6 +474,30 @@ review actions and quality warnings, and synchronizes linked transaction receipt
 without re-ingestion or embedding calls. See `operations/INBOX.md` and
 `operations/HUB.md`.
 
+## Intelligent oral examination (preview)
+
+Oral examination is a persistent state, with preparation, confirmed readiness,
+active examination, pause, and explicit completion. Prepare a reusable scope
+and Raw-backed objectives with `/oral prepare <topic>`, confirm the plan with
+`/oral confirm`, and begin with `/oral start`. Use `/oral pause`, `/oral resume`,
+and `/oral end` for lifecycle control; `/oral status` reads the recorded state.
+Natural-language discussion does not substitute for these control commands.
+
+New plans default to discussion-diagnostic dialogue: students may ask questions,
+and examiners may explain, correct, or guide self-correction with recorded Raw
+evidence. Complete private transcripts support a separate end-of-exam assessment
+of independent understanding and learning after assistance, rather than error
+counts. Confirmed legacy plans keep their original style. API execution requires
+`ORAL_EXAM_BACKEND=api` and per-call sharing authorization, including full-dialogue
+assessment; Agent execution never silently falls back to API.
+
+Read the [user guide](operations/ORAL_EXAM_HELP.md) with `/oral help` or
+`ran-asks oral help`. See [the integration contract](operations/ORAL_EXAM.md)
+for host delivery, private storage, and assessment details. This is a preview,
+not certified grading; real weak-model trials and teacher review remain required.
+Meeting ingestion also preserves unresolved roles without inventing global
+identities and requires archived source evidence for explicit identity repairs.
+
 ## Using real material
 
 Copy `.env.example` to `.env` only when a selected workflow needs a model or

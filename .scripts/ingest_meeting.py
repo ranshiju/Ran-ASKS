@@ -40,6 +40,7 @@ from meeting_compiler_contract import (
     PREPROCESS_DELIMITER,
     PROTOCOL_VERSION as MEETING_COMPILER_PROTOCOL,
     apply_transcript_replacements,
+    meeting_ir_record_contract,
     parse_proposal_detailed,
     task_context_hash,
     validate_meeting_ir,
@@ -274,11 +275,11 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
 
 [要求]
 1. PREPROCESS 只列必要、证据明确的 exact replacements；original 必须是原文中的连续原串，replacement 不得含换行。没有可靠纠错就返回空数组。不要输出整份改写后的原文。
-2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved，不得猜测。
+2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved。未解析人物仍保留明确的参会、汇报与责任任务，person/assignee 为空串、label/person_label/assignee_label 保留原称呼，不创建或猜测全局人物身份。
 3. Wiki 和 MEETING_IR 必须基于同一组纠错与实体判断，禁止使用相互矛盾的人名或术语。
 4. 撰写 conference-summary 类型 wiki 页面，含 frontmatter 和正文。
 5. frontmatter 必须包含: title, type: conference-summary, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: current, created（今日日期）, updated（今日日期）。
-6. 正文结构: # 标题 → ## Navigation（2-4 句导航概述）→ ## Content（只保留结构化导航无法表达的必要背景，避免重复叙述）。参会者、议题、汇报、决策、待办和学生指导更新由程序从 MEETING_IR 统一生成，不要在 wiki 草稿中另建这些清单。
+6. 正文结构: # 标题 → ## Navigation（2-4 句导航概述）→ ## Content（保留研究问题、关键观察、方法限制和未决矛盾，避免重复叙述结构化清单；来源限制简明表述）。参会者、议题、汇报、决策、待办和学生指导更新由程序从 MEETING_IR 统一生成。
 7. Wiki 简写、纠错、去口语化，但忠实于原文，不编造。
 8. 原文每个非空行前有程序分配的 [sNNNN] evidence_id。MEETING_IR 每个事实必须引用至少一个真实 evidence_id；不得编造路径、行号或 evidence_id。
 9. 议题使用规范学术概念名，格式优先「中文英文(缩写)」；决策只保留会议结束时仍有效的最终判断。先提出后被纠正、否决或替换的方案只能作为 Wiki 背景，不得与最终结论压成同一 decision；尚未确定的选择进入待办并明确“待确认”。待办保留可执行动作，不把决策和待办压缩成关键词。
@@ -297,6 +298,7 @@ MEETING_IR 是一个合法 JSON 对象，字段必须恰为：
 - relations: [{{"subject":"规范概念或人物路径","predicate":"涉及|紧密相关于|指导|师从|受指导于","object":"规范概念或人物路径","evidence_ids":["s0006"]}}]
 - person_updates: [{{"person":"学生目录中的 student_key","person_label":"学生姓名","kind":"progress|next_step|blocker|decision|milestone|topic_change","text":"可独立理解的更新","evidence_ids":["s0007"]}}]
 没有内容的数组返回 []。
+完整记录契约：{json.dumps(meeting_ir_record_contract(), ensure_ascii=False)}
 
 [输出格式]
 PREPROCESS 中仅放一个合法 JSON 对象，之后直接接 <<<WIKI>>>；不添加 <<</PREPROCESS>>> 结束标签。
@@ -338,13 +340,13 @@ def _annotated_evidence_text(catalog: list[dict]) -> str:
 def compile_meeting_slots(meeting_ir: dict) -> str:
     """Compile typed IR to the legacy semantic grammar consumed by graph_ingest."""
     lines = ["参会者:"]
-    lines.extend(row["person"] for row in meeting_ir["attendees"])
+    lines.extend(row["person"] for row in meeting_ir["attendees"] if row["person"].strip())
     lines.append("汇报者:")
-    lines.extend(f"{row['person']} | {row['topic']}" for row in meeting_ir["reports"])
+    lines.extend(f"{row['person']} | {row['topic']}" for row in meeting_ir["reports"] if row["person"].strip())
     lines.append("决策:")
     lines.extend(row["text"] for row in meeting_ir["decisions"])
     lines.append("待办:")
-    lines.extend(f"{row['text']} | {row['assignee']}" for row in meeting_ir["tasks"])
+    lines.extend(f"{row['text']} | {row['assignee']}" for row in meeting_ir["tasks"] if row["assignee"].strip())
     lines.append("三元组:")
     lines.extend(
         f"本会议 | {row['predicate']} | {row['label']}"
@@ -358,6 +360,8 @@ def compile_meeting_slots(meeting_ir: dict) -> str:
 
 
 def _wiki_person_link(person: str, label: str) -> str:
+    if not person.strip():
+        return f"{label}（身份待确认）"
     target = person.split("/wiki/", 1)[-1] if "/wiki/" in person else person
     return f"[[{target}|{label}]]"
 
@@ -542,10 +546,26 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
                 "transcript_replacements": ["original", "replacement", "reason"],
                 "entity_resolutions": ["mention", "canonical", "status", "reason"],
             },
-            "wiki": {"required_sections": ["Navigation", "Content"]},
+            "meta": {"fields": ["doc_date", "title", "doc_type"], "doc_type": "meeting"},
+            "wiki": {
+                "required_sections": ["Navigation", "Content"],
+                "frontmatter": {
+                    "title": "same as META.title", "type": "conference-summary",
+                    "sources": [sources_path], "source_type": "speech-recognition",
+                    "date": state.get("date"), "confidence": "low", "status": "current",
+                    "created": datetime.now().date().isoformat(),
+                    "updated": datetime.now().date().isoformat(),
+                },
+                "content": "research question, key reported observations, limitations and unresolved issues; program projects structured lists",
+                "source_binding": "program binds final Raw path after META; cite only this transaction source or existing verified sources",
+            },
             "meeting_ir": {
                 "sections": ["attendees", "topics", "reports", "decisions", "tasks", "relations", "person_updates"],
                 "evidence": "every item references evidence_catalog IDs",
+                "records": meeting_ir_record_contract(),
+                "topic_predicates": ["讨论", "涉及", "规划"],
+                "relation_predicates": ["涉及", "紧密相关于", "指导", "师从", "受指导于"],
+                "identity": "unresolved person/assignee is empty; preserve source labels and role facts in Wiki; only resolved roles enter Graph",
                 "person_updates": {
                     "student_identity": "person must equal student_guidance_candidates.student_key",
                     "kinds": sorted(sgp.GUIDANCE_KINDS),
@@ -672,9 +692,17 @@ def _meeting_frontmatter(markdown: str) -> tuple[dict, str]:
     return frontmatter, markdown[match.end():]
 
 
-def bind_meeting_source(markdown: str, source_path: str) -> str:
+def bind_meeting_source(markdown: str, source_path: str, *, previous_sources: tuple[str, ...] = ()) -> str:
     """Bind the program-owned canonical Raw path regardless of proposal YAML style."""
     frontmatter, body = _meeting_frontmatter(markdown)
+    def rebind_footnote(match: re.Match) -> str:
+        locator = wl.normalize_raw_footnote_locator(match.group(2))
+        previous, fragment = wl.raw_locator.split_locator(locator)
+        if previous in previous_sources and re.fullmatch(r"L\d+(?:-L?\d+)?", fragment):
+            return match.group(1) + source_path + "#" + fragment
+        return match.group(0)
+
+    body = re.sub(r"(?m)^(\[\^[^\]\n]+\]:[ \t]+)([^\n]+)$", rebind_footnote, body)
     frontmatter["sources"] = [source_path]
     header = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).rstrip("\n")
     return f"---\n{header}\n---{body}"
@@ -831,8 +859,12 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         )
     # Canonical ID may have changed after META; bind YAML, not one list spelling.
     correct_source = f"{state['raw_dir']}/{state['source_filename']}"
+    previous_sources = [sources_path]
+    if state.get("meeting_id_rebased_from"):
+        previous_paths = meeting_paths(subproject, state["meeting_id_rebased_from"], state["storage_year"])
+        previous_sources.append(f"{previous_paths['raw_dir']}/{state['source_filename']}")
     try:
-        wiki_content = bind_meeting_source(wiki_content, correct_source)
+        wiki_content = bind_meeting_source(wiki_content, correct_source, previous_sources=tuple(previous_sources))
     except ValueError as exc:
         return False, str(exc)
     meeting_ir = proposal.get("meeting_ir")
@@ -944,7 +976,7 @@ def step_validate_wiki(state: dict) -> list[str]:
         if "### 会议导航" not in wiki:
             errors.append("缺少程序生成的 ### 会议导航 段")
         expected_values = [
-            *(row["person"] for row in meeting_ir["attendees"]),
+            *(row["person"] or row["label"] for row in meeting_ir["attendees"]),
             *(row["label"] for row in meeting_ir["topics"]),
             *(row["topic"] for row in meeting_ir["reports"]),
             *(row["text"] for row in meeting_ir["decisions"]),

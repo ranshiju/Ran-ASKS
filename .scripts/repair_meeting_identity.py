@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO / ".scripts"))
 import graph_lib as gl
 import ingest_meeting as meeting
 import student_guidance_projection as guidance
+import source_locator
 from meeting_compiler_contract import validate_meeting_ir
 
 
@@ -105,6 +106,70 @@ def _replace_identity(meeting_ir: dict, old_entity: str, new_entity: str,
                 row[field] = new_entity
                 changed += 1
     return changed
+
+
+def _apply_identity_corrections(resolution: dict, source_text: str, corrections: list) -> list[dict]:
+    """Resolve source mentions only against archived, anchored user assertions."""
+    if not isinstance(corrections, list) or not corrections:
+        raise ValueError("identity corrections must be a nonempty list")
+    validated = []
+    seen = set()
+    for correction in corrections:
+        if not isinstance(correction, dict) or set(correction) != {
+            "mention", "canonical", "label", "source", "quote",
+        } or any(not isinstance(value, str) or not value.strip() for value in correction.values()):
+            raise ValueError("identity correction requires mention, canonical, label, source and quote strings")
+        mention = correction["mention"]
+        if mention in seen or mention not in source_text:
+            raise ValueError("identity correction must name a unique exact Raw mention")
+        seen.add(mention)
+        rows = [row for row in resolution.get("compiler_entity_resolutions", [])
+                if row.get("mention") == mention]
+        if len(rows) != 1:
+            raise ValueError("identity correction must match one compiler entity decision")
+        path, fragment = source_locator.split_locator(correction["source"])
+        if path != "cross-domain/raw/facts/user-assertions.md" or not fragment.startswith("fact-"):
+            raise ValueError("identity correction requires an archived user assertion fact anchor")
+        target = (REPO / path).resolve()
+        target.relative_to((REPO / "cross-domain/raw").resolve())
+        if not target.is_file() or source_locator.locator_status(fragment, target) != "present":
+            raise ValueError("identity correction assertion locator is missing")
+        excerpt = source_locator.read_locator_text(target, fragment) or ""
+        quote = correction["quote"]
+        if quote not in excerpt or mention not in quote or correction["label"] not in quote:
+            raise ValueError("identity correction quote does not bind the mention and canonical label")
+        person_path = (REPO / (correction["canonical"] + ".md")).resolve()
+        person_relative = person_path.relative_to(REPO.resolve())
+        if len(person_relative.parts) < 4 or person_relative.parts[0] not in {
+            "academic", "admin", "teaching", "business",
+        } or person_relative.parts[1] != "wiki":
+            raise ValueError("identity correction canonical page must be in public Wiki")
+        if not person_path.is_file():
+            raise ValueError("identity correction canonical people page is missing")
+        frontmatter, _body = meeting._meeting_frontmatter(person_path.read_text(encoding="utf-8"))
+        if frontmatter.get("type") != "people" or frontmatter.get("title") != correction["label"]:
+            raise ValueError("identity correction canonical people page does not match its label")
+        if path not in [source_locator.split_locator(value)[0]
+                        for value in frontmatter.get("sources", [])]:
+            raise ValueError("identity correction people page lacks the assertion source")
+        validated.append({**correction, "source_sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+    for correction in validated:
+        mention = correction["mention"]
+        decision = next(row for row in resolution["compiler_entity_resolutions"] if row["mention"] == mention)
+        decision.update({
+            "canonical": correction["canonical"], "status": "resolved",
+            "reason": f"Archived user assertion: {correction['source']}",
+            "identity_evidence": correction,
+        })
+        matched = [row for row in resolution.get("resolved", []) if row.get("original") == mention]
+        if not matched:
+            matched = [{"original": mention}]
+            resolution.setdefault("resolved", []).extend(matched)
+        for row in matched:
+            row.update({"normalized": correction["label"], "entity": correction["canonical"],
+                        "method": "user_assertion_repair", "confidence": "medium",
+                        "identity_evidence": correction})
+    return validated
 
 
 def repair(args: argparse.Namespace) -> dict:
@@ -205,6 +270,25 @@ def repair(args: argparse.Namespace) -> dict:
             "identity_changes": identity_changes,
             "guidance_updates": len(updates),
         }
+    corrections_path = getattr(args, "identity_corrections_file", None)
+    if corrections_path:
+        corrections = json.loads(_managed_repair_input(corrections_path).read_text(encoding="utf-8"))
+        identity_evidence = _apply_identity_corrections(repaired_resolution, source_text, corrections)
+        for correction in identity_evidence:
+            if correction["source"] not in wiki_draft:
+                raise ValueError("identity correction Wiki must cite the assertion locator")
+            for section, endpoint, label in (
+                ("attendees", "person", "label"), ("reports", "person", "person_label"),
+                ("tasks", "assignee", "assignee_label"),
+            ):
+                for row in repaired_ir[section]:
+                    if row[label] in {correction["mention"], correction["label"]} and (
+                        row[endpoint] != correction["canonical"] or row[label] != correction["label"]
+                    ):
+                        raise ValueError("identity correction disagrees with the proposed role projection")
+        repair_id += "-" + hashlib.sha256(_json_bytes(identity_evidence)).hexdigest()[:8]
+        audit.update({"repair_id": repair_id, "identity_evidence": identity_evidence})
+        audit["resolution_changes"] = len(identity_evidence)
     repairs = repaired_resolution.setdefault("managed_repairs", [])
     if not any(row.get("repair_id") == repair_id for row in repairs):
         repairs.append(audit)
@@ -294,6 +378,8 @@ def repair(args: argparse.Namespace) -> dict:
         _atomic_bytes(original_plan, staged_plan.read_bytes())
 
         state["meeting_ir_content"] = repaired_ir
+        state["wiki_content"] = repaired_wiki
+        state["slots_content"] = staged_semantic.read_text(encoding="utf-8")
         state["graph_report"] = graph_report
         state.setdefault("managed_repairs", []).append(audit)
         unresolved = [
@@ -343,6 +429,10 @@ def repair(args: argparse.Namespace) -> dict:
                 "- **验证**：来源级 Graph 重建与 `ingest_check --graph` 通过。\n"
             )
             _atomic_bytes(log_path, log_text.encode("utf-8"))
+        state["verification_receipt"] = meeting.inbox_state.build_verification_receipt(state, REPO)
+        if state["verification_receipt"]["status"] != "PASS":
+            raise RuntimeError("repaired meeting verification receipt failed")
+        _atomic_bytes(state_path, _json_bytes(state))
     except Exception:
         with gl.graph_writer_lock(gl.GRAPH_DB):
             gl.restore_graph(graph_backup, gl.GRAPH_DB)
@@ -356,7 +446,10 @@ def repair(args: argparse.Namespace) -> dict:
 
     report_path = REPO / "cross-domain" / "ingest-reports" / f"{repair_id}.json"
     final = {"status": "completed", **audit, "graph_report": graph_report,
-             "student_guidance_report": state.get("student_guidance_report", {})}
+             "student_guidance_report": state.get("student_guidance_report", {}),
+             "quality_status": state.get("quality_status"),
+             "quality_warnings": state.get("quality_warnings", []),
+             "verification_receipt": state["verification_receipt"]}
     _atomic_bytes(report_path, _json_bytes(final))
     return final | {"report": str(report_path.relative_to(REPO))}
 
@@ -371,6 +464,7 @@ def main() -> None:
     parser.add_argument("--meeting-ir-file")
     parser.add_argument("--meeting-ir-patch-file")
     parser.add_argument("--wiki-file")
+    parser.add_argument("--identity-corrections-file")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     projection_mode = bool(
@@ -389,6 +483,8 @@ def main() -> None:
             "identity repair requires --mention, --canonical-label, "
             "--canonical-entity and --updates-file"
         )
+    if args.identity_corrections_file and not projection_mode:
+        parser.error("identity-corrections-file requires a complete projection repair")
     print(json.dumps(repair(args), ensure_ascii=False, indent=2))
 
 

@@ -21,6 +21,11 @@ adapters:
         factory: build_build_tools
 
 states:
+  oral_exam:
+    title: 智能口试
+    summary: 持续讨论并确认可复用的口试方案，进行有明确边界、完整留痕和可恢复的文字口试。
+    authority: private/oral-exams/state.json
+    route_tasks: [oral_exam]
   workspace:
     title: 持续工作区
     summary: 项目事项、提案、记忆和可重建投影的工作状态。
@@ -367,6 +372,22 @@ functions:
     bindings:
       wg: [frontier]
       cli: [.scripts/frontier.py]
+
+  state.oral_exam.manage:
+    title: 智能口试方案与会话管理
+    summary: 准备、保存、确认、开始、暂停、恢复、结束和复盘口试；默认讨论诊断式，共享内核验证互动、帮助留痕和完整对话评估。
+    kind: state_operation
+    audience: [user, agent]
+    control_owners: [host_agent, api_controller, code]
+    allowed_callers: [main_agent, api_controller]
+    backends: [agent, api]
+    effects: [read, temp, state, remote]
+    maturity: preview
+    states: [oral_exam]
+    bindings:
+      wg: [oral]
+      cli: [.scripts/oral_exam.py]
+      implementations: [.scripts/oral_exam_api.py]
 
   engineering.build:
     title: 系统建设

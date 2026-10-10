@@ -210,7 +210,7 @@ def expand_env_references(values: dict[str, str]) -> dict[str, str]:
 
 def load_env() -> dict[str, str]:
     known = {
-        "QUERY_BACKEND", "INGEST_BACKEND", "LLM_API_BASE", "LLM_API_PATH",
+        "QUERY_BACKEND", "INGEST_BACKEND", "ORAL_EXAM_BACKEND", "LLM_API_BASE", "LLM_API_PATH",
         "LLM_API_KEY", "LLM_MODEL",
         "INGEST_KEYWORD_API_BASE", "INGEST_KEYWORD_API_KEY", "INGEST_KEYWORD_MODEL",
         "INGEST_REPAIR_API_BASE", "INGEST_REPAIR_API_KEY", "INGEST_REPAIR_MODEL",
@@ -396,7 +396,10 @@ def _retry_available(category: str, used: dict[str, int], limits: dict[str, int]
 def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束的知识库组件，只输出要求的 JSON。", max_tokens: int = 800, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", timeout_sec: float = 90) -> dict:
     config = load_env()
     is_ingest = operation == "ingest" or operation.startswith("ingest_")
-    mode = ingest_mode(config) if is_ingest else execution_mode(config)
+    if operation == "oral_exam":
+        mode = config.get("ORAL_EXAM_BACKEND", "agent").strip().lower() or "agent"
+    else:
+        mode = ingest_mode(config) if is_ingest else execution_mode(config)
     if mode != "api":
         raise RuntimeError(
             "llm_structured 仅支持 API backend；当前宿主 Agent 必须使用 agent-task-v1"

@@ -49,7 +49,7 @@
 - **何时调用**：每个知识库使用任务开始时；建设任务也调用 `build`。当前对话首次摄入先使用 `--context-warmup --format json` 获取一次性紧凑回执，同一上下文后续摄入不重复。
 - **写入**：否。
 - **作用**：按 task 输出本轮工作状态所需规范，或按 capability 输出状态内临时组合的能力规范，避免模型凭记忆操作。公共域摄入预热不读取或总结完整规范，而是从工程元图 `ingest.context_warmup` 机械选择 paper/meeting/document profile，应用已声明的 mode 覆盖，绑定本次参数并执行最终 JSON 字符预算；private 不进入该预热。paper update 的预热入口与完整卡均指向已有 Wiki 增量修订；整篇重编译另用 `re_ingest.py --raw`。
-- **运行时语义**：工作状态（state）表示围绕用户目标、跨多次功能执行和会话持续存在且可恢复的工作上下文；当前登记 `workspace`、`research`、`frontier`。function 表示有明确输入、目标、输出、副作用和完成条件的操作；一次执行可以跨多次底层调用并支持恢复，管线的执行状态不自动成为工作状态。定义、层次区分与现有清单见 `operations/engineering/adr/007-runtime-function-registry.md` 的“功能与工作状态的定义”及“当前功能与工作状态清单”。Route task、按需 capability、`wg.py`、DSH、CLI 与固定 pipeline 都是 function 的执行绑定，不再各自充当功能目录。`operations/config/function-registry.yaml` 是功能、工作状态、调用策略和绑定的管理真理源；工程元图只负责组件责任、影响与验证。覆盖检查通过 AST 静态读取 provider 的 `ToolDefinition.name`，不导入需要可选 PDF/视觉依赖的 provider；真实 API 工具加载仍动态导入并绑定完整策略元数据。
+- **运行时语义**：工作状态（state）表示围绕用户目标、跨多次功能执行和会话持续存在且可恢复的工作上下文；当前登记 `workspace`、`research`、`frontier`、`oral_exam`。function 表示有明确输入、目标、输出、副作用和完成条件的操作；一次执行可以跨多次底层调用并支持恢复，管线的执行状态不自动成为工作状态。定义、层次区分与现有清单见 `operations/engineering/adr/007-runtime-function-registry.md` 的“功能与工作状态的定义”及“当前功能与工作状态清单”。Route task、按需 capability、`wg.py`、DSH、CLI 与固定 pipeline 都是 function 的执行绑定，不再各自充当功能目录。`operations/config/function-registry.yaml` 是功能、工作状态、调用策略和绑定的管理真理源；工程元图只负责组件责任、影响与验证。覆盖检查通过 AST 静态读取 provider 的 `ToolDefinition.name`，不导入需要可选 PDF/视觉依赖的 provider；真实 API 工具加载仍动态导入并绑定完整策略元数据。
 - **输出顺序**：使用任务仍按工程上下文 → 任务卡 → 执行纪律 → 定向规范输出，ingest 另有模板复用补充。`build` 单独走轻量入口：只把 `graph.yaml` 的 build capability guardrails 渲染为 WikiGraph 方法哲学与信息入口，不展开 required/forbidden 节点清单、经验段或 `shared-conventions.md`/code-guidance 正文。缺陷修复须在首次编辑前明确说明，并以复现、代码路径或反事实建立“症状 → 最早错误状态 → 产生机制 → 责任组件”因果链；默认修复责任组件并在该边界回归。局部特判或补偿仅用于明确的边界外根因、兼容性、迁移或历史数据修复，并须限定适用范围和退出条件。具体影响、契约、模型后端门、同步清单和工具细节由 Agent 在确认目标后通过 `engineering_graph.py impact <target> --verify` 推荐的 locator 按需读取；总提示词不承担工程手册功能。
 - **query 固定上下文去重**：query 的 `start` 卡承载工程上下文、执行纪律、任务边界与经验触发；`evidence`/`continue`/`answer` 仅派发当前阶段规范段，不重复注入这些固定上下文。
 - **private 主题派发**：`--query-topic auto|general|metaphysics` 与查询意图 profile 独立；auto 仅在 private 按显式命理词命中，宿主根据语境为短句追问选择 metaphysics，并跨阶段传递。命理指引只在 start/answer 加载，其他阶段保留主题标记；公共域拒绝显式 metaphysics。主题只选择提示，不替 Agent 推理或更改存储、后端和取证规则。
@@ -104,6 +104,8 @@ python3 .scripts/ingest_meeting.py --resume <txn-id> --verbose
 - **流程**：3.1 dedup → 3.2 准备人物/已有学生候选与 Raw 行级 evidence catalog → 3.3 一个 Meeting Compiler specialist 一次完成转写纠错决策/精简 Wiki/typed MEETING_IR 与 `person_updates` → 程序从同一 IR 将 `### 会议导航` 投影到 `## Content` 内，并生成学生指导证据块与 semantic slots → 校验、落位、统一 IR/建图/图校验 → 3.9 幂等投影学生记录与总览 → 3.10 finalize_tail+清理。这样默认 `read-section #content` 可直接返回会议事实及 Raw 引用。学生投影失败时整体不进入 completed，以同一 transaction ID 从 `post_commit_projection` 恢复，不重放知识库提交。
 - **驱动器**：10 步调度循环、状态机、修复循环、resume 安全网委托 `ingest_pipeline.py`（`run_pipeline(state, MEETING_SPEC, progress)`）；本脚本只声明 spec + provider step 函数。
 - **后端模式**：两种后端共享 `meeting-compiler-v3` 的 parser/validator、证据目录、学生候选目录和 typed IR schema，不共享控制循环；v2 会议 IR 与 v1 slots parser 仅兼容在途产物。Agent 后端返回 `prepared + agent-task-v1`，当前宿主 Agent 完整读取 transcript/evidence/候选目录、写入 `agent-meeting-compiler.txt`，再执行 task 的 `resume` 命令；路径中不导入 DSH 或 `llm_structured`。API 后端才经 `run_api_meeting_compiler()` 进入 `dsh.meeting_compiler_agent` 和受控 provider transport/fallback。两端产物都不能直接写 Raw/Wiki/Graph/学生档案，所有落位与投影均由程序校验后执行。
+- **完整交接与未解析角色（shared）**：Agent task 直接携带 META、Wiki frontmatter 与共享 `meeting_ir_record_contract()` 完整记录字段，无需从源码反推格式。v3 的参会、汇报、待办可用空 person/assignee 与原称呼保留事实；Wiki 标示身份待确认，semantic slots 不输出这些未解析角色。正文优先保留研究问题、关键观察与方法限制，不用来源告警替代研究背景。最终 Raw 目录确定后，除 YAML sources 外，也精确重绑定本事务原路径的正文行号脚注；其他来源与普通文本不替换。
+- **用户身份澄清（shared）**：原来 unresolved 的称呼先经 `ingest_user_assertions.py` 归档用户原话与受管人物页；完整投影修复可传 `--identity-corrections-file`，逐项提供 mention/canonical/label/source/quote。入口验证归档 `#fact-*` 原文、人物页来源、Wiki 引用与角色一致性，保留独立身份来源，不扩大语境别名、不改原始转写；计划与应用共享检查，提交后刷新原事务的内容快照与验证回执，失败回滚。
 - **协议恢复**：Agent 输出缺 section 或校验失败时，原 `agent-task-v1` 带精确 issues 重新进入 `prepared`，继续同一事务与同一输出；API Worker 的 rejected/协议错误才消费有界模型修订，耗尽后保留兼容 `agent_required` handoff。任何恢复都不得新建第二条摄入链。
 - **修订上下文（API-only）**：`ingest_meeting` 将 compiler 的响应全文及结构化诊断按轮次保存在 `temp/inbox-extract/<txn>/compiler-attempt-N.json`（权限 0600）；state/trace 只保留引用、摘要和校验 hash，不把正文写入公共调用日志。下轮由代码读取最近一次同源、同候选上下文的产出，以 assistant 消息原样注入，再附当前校验错误和解析诊断；来源变化不复用旧产出，已引用文件损坏/缺失则暂停。解析成功但 Wiki/MEETING_IR 或确定性投影校验失败也复用该轮完整产出，不退回更早失败版本。
 - **诊断与修复边界（shared/API）**：shared `parse_proposal_detailed` 提供错误阶段、种类及 JSONDecodeError 的行列/字符位置/附近片段，位置相对去空白与标准 JSON fence 后的 PREPROCESS/MEETING_IR；原双返回值 parser 和错误摘要保持兼容。Agent 通过 task issues 获取相同诊断，不进入 API 重试。API 纯 JSON 语法错误要求保留 META/Wiki/MEETING_IR 中未受影响的判断；schema/内容错误按当前 validator 修改受影响部分。PREPROCESS 的 JSON 后直接接 `<<<WIKI>>>`，不添加 `<<</PREPROCESS>>>`；仍返回完整协议、使用原预算和全部提交前校验，不自动吞掉非法尾部。
@@ -282,6 +284,17 @@ python3 .scripts/engineering_locator.py read '.scripts/route.py#L219-L250'
 - **两级发现**：impact 不猜具体 Python symbol；先读它能确定的规范/契约 locator，再按施工意图用 `rg` 找符号关键词并进一步收紧 `--prefix py:<symbol>`。无 prefix 的完整 list 只作最后发现手段，尤其不得对大型 YAML 默认使用。
 - **失败边界**：裸路径、根 YAML pointer、歧义/失效 locator、非 UTF-8/二进制/数据库、越界和超预算都返回错误；不会静默整读，也不会把过大片段截半后交给 LLM。`raw/`、`wiki/` 分别使用 `read_raw`、`read_section`，本工具拒绝绕过。
 - **定向扩大例外**：`rg` 只用于定位候选文件或符号。仅 locator 明确不支持、返回错误，或任务所需上下文本身横跨多个逻辑块时，Agent 才可定向扩大读取，并在工作更新中说明原因；不得因为命令更熟悉而默认回到 `cat`/`sed` 全文读取。
+
+### 1.1f `.scripts/oral_exam.py` 与 `.scripts/oral_exam_api.py`
+
+- **何时调用**：准备可复用口试方案，或在明确开始后的独立场次中推进考官回合。入口为 `route.py --task oral_exam` 与 `wg.py oral`。
+- **只读帮助**：`/oral help` 返回 operations/ORAL_EXAM_HELP.md 全文；CLI `wg.py oral help` 无需 client，不读写私有记录、不调用模型。宿主直接展示返回 text，不进入准备或考官 task；所有聊天指令统一使用正斜杠。
+- **shared/agent-only/api-only**：oral_exam.py 是私有方案、显式状态、原文记录、幂等事务和回合校验的共享内核，并提供宿主 Agent 的 agent-task-v1；oral_exam_api.py 单独持有 API 回合控制循环，复用 llm_structured.call_json，显式 ORAL_EXAM_BACKEND，不继承 QUERY_BACKEND，不隐式切换。
+- **权威与写入**：private/oral-exams/state.json 保存方案版本、client 绑定、独立场次、完整消息、评估和回执。任务快照只在私有 tasks，声明输出仅在受限 temp/oral-exam；不改 Raw/Wiki/公共图，也不套用公共 projects 工作区。
+- **机械门**：用户完整单行 /oral 指令控制生命周期；方案确认校验 Raw locator、原文摘录和源 hash；口试 task/check/commit 验证状态、schema、证据归属、提示与结束条件，提交后显示并确认 delivered。科学正确性由考官判断，程序不冒充语义裁判。
+- **风格与综合评估**：operations/config/oral-exam-styles.json 保存默认讨论诊断式及兼容严格测评式；风格随确认版本冻结。学生 intent 区分回答/提问/澄清，纠正/解释/引导有帮助标记和 Raw 依据。结束后以冻结完整对话执行独立 assessment task/check/commit；复盘不补分，API 综合评估仍逐次授权外发。旧方案不追溯换风格。
+- **宿主与隐私**：每轮显示权威 state.banner 并保存实际收发消息；仓库不声称安装原生 UI hook。API 回合逐次要求外发授权；client 不是身份认证，服务化须在宿主加访问控制。
+- **完整协议与验证**：operations/ORAL_EXAM.md；python3 .scripts/test_oral_exam.py、test_function_registry.py、test_wg.py、test_agent_task.py 与 engineering_graph.py validate。真实弱模型和教师评审未验收前保持 preview。
 
 ### 1.2 `.scripts/read_section.sh`
 

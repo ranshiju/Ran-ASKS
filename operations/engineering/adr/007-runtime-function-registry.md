@@ -77,9 +77,9 @@ python3 .scripts/engineering_graph.py validate
 新增或删除 Route、WG、DSH 入口时，必须在同一改动中更新注册表和针对性回归。
 
 
-## 当前功能与工作状态清单（2026-09-29）
+## 当前功能与工作状态清单（2026-10-10）
 
-以下是从[运行时注册表](../../config/function-registry.yaml)整理的说明性快照；注册表仍是唯一管理目录。统计 canonical 条目，不把多个入口或一个功能的子操作重复计数。现有 **3种工作状态、26项功能记录**；功能记录包含 **20项非内部功能（16项stable、4项preview）和6项内部API worker**。20项中19项面向用户及Agent，系统建设面向Agent。成熟度是现有登记值，本次盘点不等于重新验收所有功能。
+以下是从[运行时注册表](../../config/function-registry.yaml)整理的说明性快照；注册表仍是唯一管理目录。统计 canonical 条目，不把多个入口或一个功能的子操作重复计数。现有 **4种工作状态、27项功能记录**；功能记录包含 **21项非内部功能（16项stable、5项preview）和6项内部API worker**。21项中20项面向用户及Agent，系统建设面向Agent。成熟度是现有登记值，本次盘点不等于重新验收所有功能。
 
 ### 已登记的工作状态
 
@@ -88,10 +88,11 @@ python3 .scripts/engineering_graph.py validate
 | `workspace` | 持续工作区 | 项目事项、提案、记忆和可重建投影的工作状态。 | `projects/<path>/workspace.yaml + .workspace/items + .workspace/memories` |
 | `research` | 研究工作 | 研究项目中的持续判断、实验、笔记和论文推进状态。 | `projects/<path>/workspace.yaml + research profile` |
 | `frontier` | 研究前沿 | 开放问题、部分答案、残余缺口、思路和验证轨迹的工作状态。 | `academic/frontier/questions + academic/frontier/trajectories` |
+| `oral_exam` | 智能口试 | 可恢复的准备讨论、可复用方案、固定范围的独立口试及复盘。 | `private/oral-exams/state.json` |
 
-`workspace` 提供通用承载，`research` 有专门研究语义并复用工作区内核，`frontier` 使用问题与轨迹记录。三种登记类型不意味着必须创建三套互不相干的数据。工作区的四种 profile 为通用工作（generic）、科研（research）、行政管理（role_work）、持续写作（writing），见 [WORKSPACE.md](../../WORKSPACE.md)。研究旧项目的`.research-memory`由兼容入口维护；工作区`notes/status.md`等为可重建投影，权威记录按各自协议维护。
+`workspace` 提供通用承载，`research` 有专门研究语义并复用工作区内核，`frontier` 使用问题与轨迹记录；`oral_exam` 有独立的私有权威记录、生命周期和恢复入口，不强行套用公共 projects 工作区。工作区的四种 profile 为通用工作（generic）、科研（research）、行政管理（role_work）、持续写作（writing），见 [WORKSPACE.md](../../WORKSPACE.md)。研究旧项目的`.research-memory`由兼容入口维护；工作区`notes/status.md`等为可重建投影，权威记录按各自协议维护。
 
-### 非内部功能（20项）
+### 非内部功能（21项）
 
 “关联工作状态”列列出注册表显式的 `states` 字段；“—”表示未声明工作状态筛选，不表示该功能没有执行状态或持久数据。`states` 的实际解析规则由 resolver 和专用入口共同约束。除标注preview的四项外，表内成熟度均为stable。
 
@@ -116,6 +117,7 @@ python3 .scripts/engineering_graph.py validate
 | `state.workspace.manage` | **工作区状态管理**：初始化、接续和管理事项、提案、记忆与可重建投影。 | state_operation | workspace、research |
 | `state.research.manage` | **研究项目与记忆管理**：初始化或校验研究项目，恢复上下文并记录稳定研究判断。 | state_operation | research |
 | `state.frontier.manage` | **Frontier 问题与轨迹管理**：提问、回答、检索、审查和追加开放问题、思路与验证记录。 | state_operation | frontier、research |
+| `state.oral_exam.manage` | **智能口试（preview）**：准备并确认方案、显式控制独立场次、完整留痕、校验并提交 Agent/API 回合。 | state_operation | oral_exam |
 | `engineering.build` | **系统建设**：分析工程影响面、精确读取工程 locator、修改、验证和同步工程文档。 | function | — |
 
 ### 内部API worker（6项）

@@ -20,6 +20,7 @@ include:
   - .codex/skills/manuscript-diagnosis/scripts/test_diagnosis_preflight.py
   - agents/**
   - dsh/**
+  # Includes oral-exam contracts, styles and help; private records remain excluded.
   # Includes PRESENTATION.md and presentation-test-plan.md; no active presentation assets.
   - operations/**
   - academic/SCHEMA.md

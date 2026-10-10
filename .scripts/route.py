@@ -235,6 +235,10 @@ ROUTES = {
         "file": "operations/FRONTIER.md",
         "sections": None,  # 全文输出
     },
+    "oral_exam": {
+        "file": "operations/ORAL_EXAM.md",
+        "sections": ["功能边界", "风格与默认", "用户入口", "宿主接入", "Agent 与 API"],
+    },
 }
 
 # 能力是工作状态内按需加载的规范包；它不创建或切换工作状态。

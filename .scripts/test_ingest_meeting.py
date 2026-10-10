@@ -307,6 +307,12 @@ def test_agent_path_prepares_task_without_entering_api_adapter():
         assert state["status"] == "prepared"
         assert state["agent_task"]["schema"] == "agent-task-v1"
         assert state["agent_task"]["kind"] == "ingest_meeting"
+        protocol = state["agent_task"]["protocol"]
+        assert protocol["meta"]["fields"] == ["doc_date", "title", "doc_type"]
+        assert protocol["wiki"]["frontmatter"]["sources"] == [state["agent_task"]["context"]["target_source_path"]]
+        for section, rows in _proposal()["meeting_ir"].items():
+            if isinstance(rows, list) and rows:
+                assert set(protocol["meeting_ir"]["records"][section]["fields"]) == set(rows[0])
         assert "agent_prompt" not in state
     finally:
         meeting.run_api_meeting_compiler = original_runner
@@ -864,7 +870,120 @@ def test_wiki_validation_rejects_noncanonical_or_missing_sources():
             raise AssertionError(f"invalid header accepted: {bad}")
 
 
+def test_unresolved_roles_preserve_wiki_without_global_identity():
+    proposal = _proposal()
+    meeting_ir = proposal["meeting_ir"]
+    for section, endpoint in (("attendees", "person"), ("reports", "person"), ("tasks", "assignee")):
+        meeting_ir[section][0][endpoint] = ""
+    assert meeting.validate_meeting_ir(meeting_ir, {"s0001"}) == []
+    semantic = meeting.compile_meeting_slots(meeting_ir)
+    assert "cnu-ren-shengquan" not in semantic
+    assert "验证知识库方案" not in semantic
+    wiki = meeting.compile_meeting_navigation(
+        proposal["wiki_markdown"], meeting_ir, raw_source="academic/raw/test.txt",
+        date="2026-09-03", catalog=[{"evidence_id": "s0001", "line": 1, "text": "任胜泉讨论知识库"}],
+    )
+    assert "任胜泉（身份待确认）" in wiki
+    assert "验证知识库方案" in wiki
+    assert "[^meeting-s0001]: academic/raw/test.txt#L1" in wiki
+    meeting_ir["tasks"][0]["assignee_label"] = ""
+    assert any("empty required" in error for error in meeting.validate_meeting_ir(meeting_ir, {"s0001"}))
+    meeting_ir["tasks"][0]["assignee_label"] = "任胜泉"
+    meeting_ir["tasks"][0]["assignee"] = None
+    assert any("must be strings" in error for error in meeting.validate_meeting_ir(meeting_ir, {"s0001"}))
+
+
+def test_source_binding_rebases_only_transaction_footnotes():
+    previous = "academic/raw/conferences/2026/0903-old/input.txt"
+    final = "academic/raw/conferences/2026/0903-new/input.txt"
+    other = previous + ".other"
+    wiki = _proposal()["wiki_markdown"] + (
+        f"\n[^context]: {previous}#L1\n[^range]: {previous}#L1-L2\n"
+        f"[^wrapped]: [[{previous}#L1]]\n"
+        f"[^other]: {other}#L1\nPlain text: {previous}#L1\n"
+    )
+    rendered = meeting.bind_meeting_source(wiki, final, previous_sources=(previous,))
+    assert f"[^context]: {final}#L1" in rendered
+    assert f"[^range]: {final}#L1-L2" in rendered
+    assert f"[^wrapped]: {final}#L1" in rendered
+    assert f"[^other]: {other}#L1" in rendered
+    assert f"Plain text: {previous}#L1" in rendered
+
+
+def test_identity_correction_requires_archived_exact_assertion():
+    with tempfile.TemporaryDirectory() as temporary:
+        repo = Path(temporary)
+        raw = repo / "cross-domain/raw/facts/user-assertions.md"
+        raw.parent.mkdir(parents=True)
+        raw.write_text("- [2026-10-10] **网名指真实姓名。** {: #fact-identity-test}\n", encoding="utf-8")
+        person = repo / "academic/wiki/authors/person.md"
+        person.parent.mkdir(parents=True)
+        person.write_text("---\ntitle: 真实姓名\ntype: people\nsources: [cross-domain/raw/facts/user-assertions.md]\n---\n", encoding="utf-8")
+        correction = {"mention": "网名", "canonical": "academic/wiki/authors/person", "label": "真实姓名",
+                      "source": "cross-domain/raw/facts/user-assertions.md#fact-identity-test", "quote": "网名指真实姓名。"}
+        resolution = {"resolved": [], "compiler_entity_resolutions": [
+            {"mention": "网名", "canonical": "", "status": "unresolved", "reason": "unknown"},
+        ]}
+        with patch.object(meeting_repair, "REPO", repo):
+            for field, invalid in (("source", "temp/forged.md#fact-identity-test"),
+                                   ("quote", "网名指其他姓名。"), ("canonical", "academic/wiki/authors/missing"),
+                                   ("source", "cross-domain/raw/facts/user-assertions.md#fact-missing")):
+                bad = {**correction, field: invalid}
+                try:
+                    meeting_repair._apply_identity_corrections(resolution, "网名参与会议", [bad])
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"invalid correction accepted: {field}")
+                assert resolution["compiler_entity_resolutions"][0]["status"] == "unresolved"
+            evidence = meeting_repair._apply_identity_corrections(resolution, "网名参与会议", [correction])
+            assert evidence[0]["source_sha256"]
+            assert resolution["compiler_entity_resolutions"][0]["status"] == "resolved"
+            assert resolution["resolved"][0]["entity"] == correction["canonical"]
+
+
+def test_body_source_rebinding_survives_title_change_in_both_backends():
+    for backend in ("api", "agent"):
+        work = _workspace()
+        try:
+            state = _state(work)
+            state.update(meeting.meeting_date_context(state["date_str"]))
+            state.update({"meeting_id": "0903-original", "meeting_id_source": "source_fallback",
+                          "raw_dir": "academic/raw/conferences/2026/0903-original"})
+            previous = f"{state['raw_dir']}/{state['source_filename']}"
+            proposal = _proposal()
+            proposal["wiki_markdown"] += f"\n背景证据。[^context]\n\n[^context]: {previous}#L1\n"
+            result = SimpleNamespace(status="compiled", reason="proposal_ready", proposal=proposal,
+                                     trace=lambda: {"protocol_version": PROTOCOL_VERSION, "status": "compiled"})
+            with patch.object(meeting, "ingest_mode", return_value=backend), patch.object(
+                meeting, "run_api_meeting_compiler", return_value=result,
+            ) as runner:
+                if backend == "agent":
+                    ok, error = meeting.step_write_wiki(state)
+                    assert not ok and error == "Agent task prepared"
+                    with patch.dict(globals(), {"_proposal": lambda: proposal}):
+                        output = _output()
+                    (work / "agent-meeting-compiler.txt").write_text(output, encoding="utf-8")
+                ok, error = meeting.step_write_wiki(state)
+                assert ok, (backend, error)
+                assert runner.call_count == (1 if backend == "api" else 0)
+                if backend == "api":
+                    ok, error = meeting.step_write_wiki(state)
+                    assert ok, error
+                    assert runner.call_count == 2
+            final = f"{state['raw_dir']}/{state['source_filename']}"
+            assert final != previous
+            assert f"[^context]: {final}#L1" in state["wiki_content"]
+            assert meeting.step_validate_wiki(state) == []
+        finally:
+            shutil.rmtree(work)
+
+
 def main():
+    test_body_source_rebinding_survives_title_change_in_both_backends()
+    test_unresolved_roles_preserve_wiki_without_global_identity()
+    test_source_binding_rebases_only_transaction_footnotes()
+    test_identity_correction_requires_archived_exact_assertion()
     test_source_binding_rebases_all_yaml_styles_in_both_backends()
     test_wiki_validation_rejects_noncanonical_or_missing_sources()
     test_api_retry_injects_latest_persisted_response_and_diagnostic()
