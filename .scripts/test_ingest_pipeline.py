@@ -1679,6 +1679,50 @@ def test_agent_slots_resume_does_not_rewrite_wiki():
         assert calls == ["write_slots"]
 
 
+def test_semantic_success_persists_finalize_before_artifact_commit():
+    import inbox_state
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        state = {
+            "transaction_id": "persist-finalize",
+            "status": "write_slots",
+            "wiki_content": "validated wiki",
+            "errors": [],
+        }
+        observed = []
+
+        def finalize(current):
+            persisted = inbox_state.load(current["transaction_id"])
+            observed.append(persisted["status"])
+            assert persisted["status"] == "finalize"
+            return True, ""
+
+        spec = {
+            "script_name": "test_driver.py",
+            "normalize_slots": lambda text: text,
+            "completion_label_key": None,
+            "steps": {
+                "write_slots": lambda current: (True, ""),
+                "validate_semantics": lambda current: ([], []),
+                "finalize": finalize,
+                "update_graph": lambda current: (True, ""),
+                "validate_graph": lambda current: [],
+                "finalize_tail": lambda current: (True, ""),
+            },
+        }
+        with patch.object(inbox_state, "REPO", root), \
+                patch.object(ingest_pipeline, "REPO", root), \
+                patch.object(ingest_pipeline.ic, "step_fill_semantics", return_value=(True, "")), \
+                patch.object(ingest_pipeline.ic, "validate_completion", return_value=[]):
+            inbox_state.save(state["transaction_id"], state)
+            result = ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+            assert result["status"] == "completed"
+            assert inbox_state.load(state["transaction_id"])["status"] == "completed"
+        assert observed == ["finalize"]
+
+
 def test_update_graph_failure_rolls_back_and_exposes_resume_point():
     state = {
         "transaction_id": "update-graph-failure",
@@ -2001,6 +2045,7 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
     import sys
     from types import ModuleType
     import ingest_common as ic
+    import inbox_source_policy
 
     calls = []
     fake = ModuleType("ingest_inbox")
@@ -2019,9 +2064,12 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
     sys.modules["ingest_inbox"] = fake
     try:
         with tempfile.TemporaryDirectory() as directory:
-            repo = Path(directory)
+            repo = Path(directory).resolve()
             inbox = repo / "inbox"
             inbox.mkdir()
+            original = (inbox / "retained-original.pdf").resolve()
+            original.write_bytes(b"retained original")
+            inbox_source_policy.retain_original(repo, original)
             pending = inbox / "next-paper.pdf"
             pending.write_bytes(b"pending")
             state = {
@@ -2067,6 +2115,7 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
                 "quality_warning_history": [],
             }
             assert calls == [([expected_item], "resume-txn-1")]
+            assert original.read_bytes() == b"retained original"
             persisted = json.loads((repo / maintenance["report_path"]).read_text(encoding="utf-8"))
             assert persisted["files"][0]["graph_report"]["hub_dynamics"]["affected_nodes"] == ["node-a"]
             assert persisted["degraded"] == 1
@@ -2343,6 +2392,7 @@ def main():
     test_locator_aware_page_adds_optional_wiki_section_locator_only()
     test_raw_original_and_locator_companion_share_node_and_wiki_source_edge()
     test_agent_slots_resume_does_not_rewrite_wiki()
+    test_semantic_success_persists_finalize_before_artifact_commit()
     test_bare_abbreviation_resolved_to_keyword_no_warning()
     test_bare_abbreviation_resolve_miss_keeps_warning()
     test_resolve_abbreviations_list_reports_unresolved_warnings()
@@ -2546,6 +2596,66 @@ def test_resolve_abbreviations_list_reports_unresolved_warnings():
         assert "MPS" not in out, "resolve 命中的缩写不应报 warning"
         assert "GPT" in out and "warning" in out, "resolve miss 的缩写应报 warning"
         conn.close()
+
+
+def test_runtime_summary_reports_api_breakdown_and_unmetered_costs():
+    import inbox_state
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        states = root / "states"
+        events = root / "events"
+        states.mkdir()
+        events.mkdir()
+        (states / "txn.json").write_text(json.dumps({
+            "transaction_id": "ingest-parent", "status": "completed",
+        }), encoding="utf-8")
+        event = {
+            "event_version": "execution-event-v1", "event_kind": "llm_api_call",
+            "transaction_id": "ingest-parent", "operation": "frontier_answer", "status": "ok",
+            "latency_sec": 9.25,
+            "usage": {"prompt_tokens": 1548, "completion_tokens": 439, "total_tokens": 1987},
+        }
+        untagged = {**event, "transaction_id": ""}
+        (events / "events.jsonl").write_text(
+            json.dumps(event) + "\n" + json.dumps(untagged) + "\n", encoding="utf-8",
+        )
+        result = inbox_state.summarize_runtime(states, events)
+        assert result["api"]["prompt_tokens"] == 1548
+        assert result["api"]["completion_tokens"] == 439
+        assert result["api"]["token_breakdown_missing_calls"] == 0
+        assert result["api"]["calls"] == 1
+        assert result["unattributed_api_events"]["calls"] == 1
+        assert result["api"]["usage_by_operation"]["frontier_answer"]["total_tokens"] == 1987
+        assert result["cost_coverage"]["monetary_cost"] is None
+        assert "host_agent" in result["cost_coverage"]["unmetered_components"]
+
+
+def test_subprocess_stdout_honors_quiet_log_without_hiding_stderr():
+    import ingest_common
+    from contextlib import redirect_stderr
+    original_run = ingest_common.subprocess.run
+    body = json.dumps({"large_report": "detail" * 1000}) + "\n"
+    try:
+        ingest_common.subprocess.run = lambda *_args, **_kwargs: type("Result", (), {
+            "returncode": 0, "stdout": body, "stderr": "WARN remains visible\n",
+        })()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log_file = root / "transaction.log"
+            output, errors = StringIO(), StringIO()
+            ingest_common.set_progress_file(log_file.open("w", encoding="utf-8"))
+            with redirect_stdout(output), redirect_stderr(errors):
+                returned = ingest_common.run_tracked(["local-command"], root)
+            ingest_common.close_progress_file()
+            assert returned == body and log_file.read_text() == body
+            assert output.getvalue() == ""
+            assert "WARN remains visible" in errors.getvalue()
+            with redirect_stdout(output), redirect_stderr(errors):
+                ingest_common.run_tracked(["local-command"], root)
+            assert output.getvalue() == body
+    finally:
+        ingest_common.close_progress_file()
+        ingest_common.subprocess.run = original_run
 
 
 if __name__ == "__main__":

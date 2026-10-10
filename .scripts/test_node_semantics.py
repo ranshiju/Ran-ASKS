@@ -103,6 +103,27 @@ def test_decomposed_method_alias_does_not_reuse_longer_compound_concept():
     assert result["decision"] != "resolved", result
 
 
+def test_named_framework_does_not_reuse_generic_component():
+    for mention in ("OSPREY框架", "SPARK框架", "框架framework(OSPREY)"):
+        conn = make_db()
+        add_node(conn, "generic", "框架")
+        gl.insert_aliases(conn, "generic", ["framework"])
+        result = ns.resolve_node(conn, mention, node_types=["entity"])
+        assert result["decision"] == "unmatched", (mention, result)
+
+
+def test_named_framework_reuses_specific_abbreviation_after_generic_filter():
+    conn = make_db()
+    add_node(conn, "generic", "框架")
+    add_node(conn, "osprey", "OSPREY")
+    add_node(conn, "spark", "SPARK")
+    for mention, expected in (("OSPREY框架", "osprey"), ("SPARK框架", "spark")):
+        result = ns.resolve_node(conn, mention, node_types=["entity"])
+        assert result["decision"] == "resolved", result
+        assert result["node_id"] == expected, result
+    assert ns.resolve_node(conn, "框架")["node_id"] == "generic"
+
+
 def test_full_method_name_reuses_variant_with_optional_trailing_acronym():
     conn = make_db()
     add_node(conn, "simple-update", "简单更新simple update(SU)")

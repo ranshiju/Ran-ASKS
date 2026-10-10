@@ -8,6 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import graph_lib as gl
+import graph_delta as gd
+import graph_ingest as gi
 
 SCRIPT = Path(__file__).with_name("graph_validate.py")
 spec = importlib.util.spec_from_file_location("graph_validate", SCRIPT)
@@ -58,6 +60,37 @@ def test_invalid_node_type_and_entity_subtype_are_errors():
         assert report["counts"]["unknown_node_type"] == 1
         assert report["counts"]["unknown_entity_subtype"] == 1
         assert len(report["errors"]) == 2
+
+
+def test_meeting_writer_task_passes_configured_and_default_type_checks():
+    tmp, conn = isolated_db()
+    try:
+        page = "academic/wiki/conferences/example"
+        person = "academic/wiki/authors/example"
+        gl.ensure_node(conn, page, "Meeting", "page")
+        gl.ensure_node(conn, person, "Person", "people")
+        delta = gd.build_document_delta(page, {
+            "title": "Meeting", "type": "conference-summary",
+            "compiler_protocol": "meeting-compiler-v3",
+        }, [{"subject": person, "predicate": "待办", "object": "验证方案",
+             "source": "academic/raw/example.txt#L1"}])
+        plan = gd.plan_attachment(conn, delta)
+        gi.add_knowledge_edges(conn, page, gd.knowledge_edges(delta), attach_plan=plan)
+        assert conn.execute("SELECT COUNT(*) FROM nodes WHERE entity_subtype='task'").fetchone()[0] == 1
+        configured = module.load_config()
+        assert set(configured["entity_subtypes"]) == set(module.DEFAULTS["entity_subtypes"])
+        before = conn.total_changes
+        for config in (module.DEFAULTS, configured):
+            assert not module.validate_graph(conn, config)["errors"]
+        assert conn.total_changes == before
+        insert(conn, "misspelled-task", "entity", "task-typo")
+        for config in (module.DEFAULTS, configured):
+            report = module.validate_graph(conn, config)
+            assert report["counts"]["unknown_entity_subtype"] == 1
+            assert any(item["check"] == "unknown_entity_subtype" for item in report["errors"])
+    finally:
+        conn.close()
+        tmp.cleanup()
 
 
 def test_missing_keyword_description_is_aggregated_warning():

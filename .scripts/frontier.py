@@ -18,7 +18,7 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 import yaml
 
@@ -30,6 +30,7 @@ import graph_lib as gl
 import agent_task
 import query_actions as qa
 import source_locator as sl
+import wiki_locator as wl
 
 DEFAULT_ROOT = REPO / "academic" / "frontier"
 
@@ -37,6 +38,7 @@ DEFAULT_ROOT = REPO / "academic" / "frontier"
 KINDS = {"question", "trajectory", "intake", "thread"}
 STATUSES = {"captured", "triaged", "active", "parked", "resolved", "rejected"}
 KB_STATES = {"unassessed", "no_evidence", "no_answer_found", "partial", "conflicting", "answered"}
+ANSWER_CHANGES = {"initial", "unchanged", "supplemented", "strengthened", "qualified", "contradicted", "uncertain", "not_assessed"}
 SCIENTIFIC_STATES = {"unverified", "likely_open", "partially_resolved", "contested", "likely_resolved", "resolved"}
 ORIGIN_KINDS = {"user_proposed", "paper_explicit", "ai_synthesis", "ai_inference"}
 EPISTEMIC = {"sourced", "synthesized", "derived", "speculative", "untested", "supported", "refuted", "inconclusive"}
@@ -65,6 +67,36 @@ QUESTION_CUES = re.compile(
     re.I,
 )
 
+CONJECTURE_CUES = re.compile(
+    r"\b(?:we|I)\s+(?:(?:also|further|here)\s+)?conjecture\b|"
+    r"\b(?:our|this|the)\s+conjecture\s+(?:is|remains?)\s+"
+    r"(?:open|unproven|unproved|unresolved)\b|我们(?:进一步)?猜想",
+    re.I,
+)
+RESEARCH_INTENT_CUES = re.compile(
+    r"\b(?:we|I)\s+(?:aim|plan|intend)\s+to\s+"
+    r"(?:explore|investigate|study|test|verify|extend|determine)\b",
+    re.I,
+)
+FUTURE_CONTEXT_CUES = re.compile(
+    r"\bfuture\b|\blooking ahead\b|\bgoing forward\b|\bnext steps?\b|未来|后续",
+    re.I,
+)
+AUTHOR_EXPECTATION_CUES = re.compile(r"\b(?:we|I)\s+(?:expect|anticipate)\b", re.I)
+FUTURE_IMPROVEMENT_CUES = re.compile(
+    r"\bfurther\s+(?:engineering|development|optimizations?|optimisations?|"
+    r"improvements?|research|work)\b", re.I,
+)
+CURRENT_WORK_CUES = re.compile(
+    r"\bin (?:this|the present) (?:paper|work|study)\b|\bin our experiments\b", re.I,
+)
+RESOLVED_CONJECTURE_CUES = re.compile(
+    r"\b(?:and|then)\s+(?:we\s+)?(?:prove|disprove|resolve|refute)\b|"
+    r"\b(?:conjecture|it)\s+(?:is|was|has been)\s+"
+    r"(?:proved|proven|disproved|resolved|refuted)\b|猜想(?:已|已经)(?:证明|解决|否定)",
+    re.I,
+)
+
 ENUMERATION_CUE = re.compile(
     r"^(?:first|second|third|fourth|finally|additionally|moreover|"
     r"one direction(?: is(?: to)?)?|another direction(?: is(?: to)?)?|"
@@ -76,7 +108,11 @@ ENUMERATION_CUE = re.compile(
 def explicit_question_units(text: str) -> list[str]:
     """把一行 future-work/limitation 段确定性拆成独立问题单元。"""
     compact = re.sub(r"\s+", " ", text.strip())
-    if not QUESTION_CUES.search(compact):
+    future_expectation = bool(AUTHOR_EXPECTATION_CUES.search(compact) and (
+        FUTURE_CONTEXT_CUES.search(compact) or FUTURE_IMPROVEMENT_CUES.search(compact)
+    ))
+    if not (QUESTION_CUES.search(compact) or CONJECTURE_CUES.search(compact)
+            or RESEARCH_INTENT_CUES.search(compact) or future_expectation):
         return []
     parts = re.split(
         r"(?<=[.!?。！？])\s+(?=[A-Z0-9一二三四五六七八九十])|"
@@ -90,7 +126,20 @@ def explicit_question_units(text: str) -> list[str]:
         part = part.strip()
         if not part:
             continue
-        has_cue = bool(QUESTION_CUES.search(part))
+        if FUTURE_CONTEXT_CUES.search(part):
+            in_future_scope = True
+        if CURRENT_WORK_CUES.search(part) and (
+            RESEARCH_INTENT_CUES.search(part) or AUTHOR_EXPECTATION_CUES.search(part)
+        ):
+            continue
+        future_expectation = bool(AUTHOR_EXPECTATION_CUES.search(part) and (
+            in_future_scope or FUTURE_IMPROVEMENT_CUES.search(part)
+        ))
+        has_cue = bool(QUESTION_CUES.search(part) or (
+            (CONJECTURE_CUES.search(part) or (
+                RESEARCH_INTENT_CUES.search(part) and in_future_scope
+            ) or future_expectation) and not RESOLVED_CONJECTURE_CUES.search(part)
+        ))
         generic_intro = bool(re.fullmatch(
             r"(?:future work|future research|未来工作|未来研究)[.:：。]?", part, re.I
         ) or re.search(
@@ -118,7 +167,13 @@ def explicit_question_units(text: str) -> list[str]:
         ))
         if has_cue or direction_marker or limitation_marker or expect_next or (in_future_scope and proposal):
             if len(cleaned) >= 18:
-                units.append(cleaned)
+                dependent = re.search(
+                    r"^(?:(?:hence|thus|therefore|however|accordingly)[,:]?\s+)*"
+                    r"(?:this|that|these|those|such)\b|"
+                    r"^(?:因此|所以|然而|故而|此外)?[，,\s]*(?:该|此|这种|这些|上述|这一)",
+                    cleaned, re.I,
+                )
+                units.append(compact if dependent else cleaned)
         expect_next = False
     return list(dict.fromkeys(units))
 
@@ -276,6 +331,20 @@ def render_body(record: dict) -> str:
             "## 残余缺口", "", _bullets(record.get("residual_gaps")), "",
             "## 保留价值", "", record.get("value_reason") or "待审查。", "",
         ]
+        if record.get("possibly_stale"):
+            lines += ["当前回答可能需要复核；来源命中不表示旧结论已被推翻。", ""]
+        if record.get("answer_history"):
+            lines += ["## 回答版本", "", "各版依据范围见本页元数据；历史回答不是新增事实源。", ""]
+            for version in record["answer_history"]:
+                change = version.get("change") or {}
+                lines += [
+                    f"### V{version['revision']} · {version.get('answered_at') or '历史时间未记录'}", "",
+                    version.get("answer", ""), "",
+                    f"- 范围：{version.get('coverage_note', '')}",
+                    f"- 变化判断：{change.get('kind', 'not_assessed')} — {change.get('reason', '')}",
+                    "- 当版引用：" + (", ".join(version.get("evidence_scope", {}).get("cited_raw_locators", [])) or "无"),
+                    "- 当版缺口：" + ("；".join(version.get("residual_gaps", [])) or "无"), "",
+                ]
     entries = record.get("entries") or []
     if entries:
         lines += ["## 条目", ""]
@@ -418,6 +487,11 @@ def _as_locator(source: str) -> str:
     if resolved is None or not resolved.is_file():
         return ""
     try:
+        with qa.query_scope("public"):
+            qa.check_path_scope(resolved)
+    except ValueError:
+        return ""
+    try:
         base = resolved.relative_to(REPO).as_posix()
     except ValueError:
         base = str(resolved)
@@ -440,20 +514,28 @@ def _raw_excerpt(locator: str, limit: int = 1000) -> str:
     path = REPO / raw
     if not path.is_file() or path.suffix.lower() not in {".md", ".txt"}:
         return ""
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    if re.fullmatch(r"L\d+", loc):
-        idx = int(loc[1:]) - 1
-        if 0 <= idx < len(lines):
-            return lines[idx].strip()[:limit]
-    text = "\n".join(lines)
+    try:
+        with qa.query_scope("public"):
+            qa.check_path_scope(path)
+            binding = sl.companion_binding_for_target(path)
+            if binding and binding["status"] == "invalid":
+                return ""
+            text = sl.read_locator_text(path, loc)
+    except (OSError, ValueError):
+        return ""
+    if not text:
+        return ""
     if loc and loc != "全篇":
-        match = re.search(rf"^#{{1,6}}\s+{re.escape(loc)}\s*$", text, re.M | re.I)
-        if match:
-            start = match.end()
-            nxt = re.search(r"^#{1,6}\s+", text[start:], re.M)
-            return text[start:start + (nxt.start() if nxt else limit)].strip()[:limit]
+        return text.strip()[:limit]
     abstract = re.search(r"^#{1,6}\s+Abstract\s*$\n(.*?)(?=^#{1,6}\s+|\Z)", text, re.M | re.I | re.S)
     return (abstract.group(1).strip() if abstract else text.strip())[:limit]
+
+
+def question_source_locators(record: dict) -> list[str]:
+    """问题来源优先；不把旧回答累计引用当成当前证据。"""
+    sources = [record.get("source_locator", "")]
+    sources.extend(item.get("locator", "") for item in record.get("source_mentions") or [])
+    return list(dict.fromkeys(str(source).strip() for source in sources if str(source or "").strip()))[:3]
 
 
 def duplicate_candidates(root: Path, question: str, limit: int = 5) -> list[dict]:
@@ -475,6 +557,7 @@ def build_kb_packet(
     topk: int = 6,
     recall_fn: Callable | None = None,
     relations_fn: Callable | None = None,
+    *, source_locators: list[str] | None = None,
 ) -> dict:
     recall_fn = recall_fn or qa.wiki_recall
     relations_fn = relations_fn or qa.graph_relations
@@ -482,6 +565,16 @@ def build_kb_packet(
     recall = _parse_json_text(text)
     candidates = (recall.get("candidates") or [])[:topk]
     raw_locators, graph_paths = [], []
+    priority_locators = set()
+    evidence_issues = []
+    for source in list(dict.fromkeys(source_locators or []))[:3]:
+        locator = _as_locator(source)
+        fragment = source.partition("#")[2]
+        if not locator or (fragment and locator.partition("#")[2] != fragment):
+            evidence_issues.append({"locator": source, "reason": "问题来源地址不可用；未以全文或摘要替代原定位"})
+        elif locator not in raw_locators:
+            raw_locators.append(locator)
+            priority_locators.add(locator)
     compact_candidates = []
     for candidate in candidates:
         page = str(candidate.get("path") or "").strip()
@@ -512,15 +605,31 @@ def build_kb_packet(
         except Exception:
             pass
     raw_locators = raw_locators[:8]
-    evidence = [{"locator": loc, "excerpt": _raw_excerpt(loc)} for loc in raw_locators[:5]]
+    evidence = []
+    for locator in raw_locators:
+        limit = 4000 if locator in priority_locators else 1000
+        excerpt = _raw_excerpt(locator, limit=limit)
+        if excerpt:
+            evidence.append({"locator": locator, "excerpt": excerpt})
+            if len(excerpt) >= limit:
+                evidence_issues.append({
+                    "locator": locator,
+                    "reason": f"片段达到 {limit} 字符预算，可能截断；不能据此断言来源缺少内容",
+                })
+        else:
+            evidence_issues.append({"locator": locator, "reason": "未取得可用 Raw 片段；不进入引用白名单"})
+        if len(evidence) == 5:
+            break
     return {
         "question": question,
-        "coverage": "仅评估当前 WikiGraph；无命中不等于科学界无答案。",
+        "built_at": now_iso(),
+        "coverage": "仅依据当前已摄入且本次检索提供的证据；不代表全库穷尽或学科最终答案，无命中不等于科学界无答案。",
         "recall_mode": recall.get("mode", "empty"),
         "candidates": compact_candidates,
         "raw_evidence": evidence,
+        "evidence_issues": evidence_issues,
         "anchors": {
-            "raw": raw_locators,
+            "raw": [item["locator"] for item in evidence],
             "wiki": [item["path"] for item in compact_candidates],
             "graph": graph_paths[:16],
         },
@@ -603,6 +712,10 @@ def _agent_semantic_task(kind: str, packet: dict, *, transaction_id: str = "",
             "fields": fields,
             "evidence_boundary": "supported claims may cite only packet anchors.raw",
             "validator": f"frontier.{kind}_schema",
+            **({
+                "optional_fields": {"change": {"kind": sorted(ANSWER_CHANGES), "reason": "string"}},
+                "comparison_boundary": "previous_answer is a prior interpretation, not evidence; compare conditions with current Raw evidence; unknown change may remain uncertain/not_assessed",
+            } if kind == "answer" else {}),
         },
         commands={"commit": commit_command} if commit_command else {},
         context={"packet_sha256": packet_hash},
@@ -621,6 +734,7 @@ def run_assessment(packet: dict, *, transaction_id: str = "",
     return llm.call_json(
         assessment_prompt(packet), assessment_schema,
         max_tokens=900, retries=1, operation="frontier_assess", reasoning="fast",
+        transaction_id=transaction_id,
         system="你是受约束的研究前沿准入组件，只输出 JSON，不补充知识库外事实。",
     )
 
@@ -633,6 +747,7 @@ def answer_schema(value) -> bool:
     if not required <= set(value) or value["kb_state"] not in KB_STATES - {"unassessed"}:
         return False
     claims = value["supported_claims"]
+    change = value.get("change")
     return (
         isinstance(value["answer"], str)
         and isinstance(claims, list)
@@ -646,6 +761,12 @@ def answer_schema(value) -> bool:
         and isinstance(value["residual_gaps"], list)
         and all(isinstance(item, str) for item in value["residual_gaps"])
         and isinstance(value["coverage_note"], str)
+        and (change is None or (
+            isinstance(change, dict)
+            and isinstance(change.get("kind"), str)
+            and change.get("kind") in ANSWER_CHANGES
+            and isinstance(change.get("reason"), str)
+        ))
     )
 
 
@@ -655,23 +776,29 @@ def answer_prompt(packet: dict) -> str:
         "question": packet.get("question", ""),
         "coverage": packet.get("coverage", ""),
         "question_sources": (packet.get("question_sources") or [])[:3],
+        "evidence_issues": (packet.get("evidence_issues") or [])[:8],
         "candidates": [{
             "path": item.get("path", ""), "title": item.get("title", ""),
             "navigation": str(item.get("navigation", ""))[:320],
         } for item in (packet.get("candidates") or [])[:4]],
         "evidence": [{
             "locator": item.get("locator", ""),
-            "excerpt": str(item.get("excerpt", ""))[:420],
-        } for item in (packet.get("raw_evidence") or [])[:4]],
-        "allowed_raw_locators": (packet.get("anchors", {}).get("raw") or [])[:8],
+            "excerpt": str(item.get("excerpt", "")),
+        } for item in (packet.get("raw_evidence") or [])[:5]],
+        "allowed_raw_locators": [item.get("locator", "")
+                                 for item in (packet.get("raw_evidence") or [])[:5]],
+        "previous_answer": packet.get("previous_answer"),
     }
     compact = json.dumps(compact_packet, ensure_ascii=False)
     return f"""你是 Frontier 的知识库内回答器。只能依据给定 WikiGraph 证据包回答，不能使用外部知识。
 输出严格 JSON：kb_state(no_evidence/no_answer_found/partial/conflicting/answered), answer,
 supported_claims([{{claim,evidence:[Raw locator]}}]), derived_claims(字符串数组),
-residual_gaps(字符串数组), coverage_note。
+residual_gaps(字符串数组), coverage_note；可附 change={{kind,reason}}，kind 为
+initial/unchanged/supplemented/strengthened/qualified/contradicted/uncertain/not_assessed。
 规则：每条 supported_claim 必须引用证据包中已有 Raw locator；推导只能进入 derived_claims；
 来源中的开放问题表述本身不是答案；无命中只表示本库覆盖不足，不能说科学界尚未解决。
+说明本次实际证据与适用范围。previous_answer 只是待比较的旧解释，不是事实证据；
+比较新旧依据及条件后说明变化理由，不能从新文献到达自动推出反驳；无法判断可用 uncertain。
 
 知识库证据包：
 {compact}"""
@@ -688,6 +815,7 @@ def run_answer(packet: dict, *, transaction_id: str = "",
     return llm.call_json(
         answer_prompt(packet), answer_schema,
         max_tokens=1800, retries=1, operation="frontier_answer", reasoning="fast",
+        transaction_id=transaction_id,
         system="你是证据约束的库内回答组件，只输出 JSON，不补充知识库外事实。",
     )
 
@@ -705,6 +833,41 @@ def _next_entry_id(record: dict) -> str:
         if match:
             numbers.append(int(match.group(1)))
     return f"E-{(max(numbers, default=0) + 1):04d}"
+
+
+def current_answer_snapshot(record: dict) -> dict | None:
+    """旧格式只能恢复当前投影，不能从累计条目猜测哪条属于哪版。"""
+    if not record.get("answer_fingerprint") and record.get("answer_status") != "completed":
+        return None
+    history = record.get("answer_history") or []
+    if history and history[-1].get("question") == record.get("question"):
+        return json.loads(json.dumps(history[-1], ensure_ascii=False))
+    return {
+        "revision": 0, "question": record.get("question", ""),
+        "answered_at": record.get("answer_checked_at"),
+        "fingerprint": record.get("answer_fingerprint", ""),
+        "kb_state": record.get("kb_state"), "answer": record.get("kb_summary", ""),
+        "supported_claims": [], "derived_claims": [],
+        "residual_gaps": list(record.get("residual_gaps") or []),
+        "coverage_note": record.get("coverage_note", ""),
+        "evidence_scope": {"legacy_unversioned": True,
+                           "retained_raw_anchors": list((record.get("anchors") or {}).get("raw") or [])},
+        "change": {"kind": "not_assessed", "reason": "旧格式快照；逐版结论与证据范围未完整记录。"},
+    }
+
+
+def answer_evidence_scope(packet: dict, answer: dict) -> dict:
+    """记录提供的范围与实际声明引用，不把候选或提供片段冒充已核验全文。"""
+    return {
+        "coverage": packet.get("coverage", ""),
+        "candidate_paths": sorted({item["path"] for item in packet.get("candidates", []) if item.get("path")}),
+        "provided_raw_locators": sorted(set(packet.get("anchors", {}).get("raw") or [])),
+        "provided_excerpts": [{
+            "locator": item.get("locator", ""),
+            "sha256": hashlib.sha256(str(item.get("excerpt", "")).encode("utf-8")).hexdigest(),
+        } for item in packet.get("raw_evidence", [])],
+        "cited_raw_locators": sorted({loc for claim in answer["supported_claims"] for loc in claim["evidence"]}),
+    }
 
 
 def apply_answer(root: Path, record: dict, packet: dict, answer: dict) -> dict:
@@ -725,7 +888,7 @@ def apply_answer(root: Path, record: dict, packet: dict, answer: dict) -> dict:
         "supported_claims": answer["supported_claims"],
         "derived_claims": [item.strip() for item in answer["derived_claims"] if item.strip()],
         "residual_gaps": [item.strip() for item in answer["residual_gaps"] if item.strip()],
-        "coverage_note": answer["coverage_note"].strip(),
+        "coverage_note": answer["coverage_note"].strip() or packet.get("coverage", ""),
     }
     if not normalized["supported_claims"] and normalized["kb_state"] in {"no_evidence", "no_answer_found"}:
         normalized["answer"] = "当前知识库未检索到足以回答该问题的可定位证据。"
@@ -733,6 +896,41 @@ def apply_answer(root: Path, record: dict, packet: dict, answer: dict) -> dict:
         json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
     changed = fingerprint != record.get("answer_fingerprint")
+    previous = current_answer_snapshot(record)
+    scope = answer_evidence_scope(packet, normalized)
+    if "previous_answer" in packet and packet["previous_answer"] != previous:
+        if (not changed and previous is not None and previous.get("evidence_scope") == scope
+                and (answer.get("change") is None or answer["change"] == previous.get("change"))):
+            # 已提交任务的重放只返回原结果，不清除随后到达的待复核提醒。
+            return {"id": record["id"], "status": "completed", "kb_state": record["kb_state"],
+                    "changed": False, "revision_added": False, "replayed": True,
+                    "revision": len(record.get("answer_history") or []),
+                    "possibly_stale": bool(record.get("possibly_stale")),
+                    "supported_claims": len(normalized["supported_claims"])}
+        raise ValueError("旧回答已变化；请重新准备刷新证据包")
+    revision_added = (
+        changed or previous is None or previous.get("evidence_scope") != scope
+        or bool(record.get("stale_reasons"))
+        or (answer.get("change") is not None and answer["change"] != previous.get("change"))
+    )
+    if revision_added:
+        history = record.setdefault("answer_history", [])
+        if previous is not None and previous.get("revision") == 0:
+            previous["revision"] = len(history) + 1
+            history.append(previous)
+        snapshot = {
+            "revision": len(history) + 1, "question": record.get("question", ""),
+            "answered_at": now_iso(), "packet_built_at": packet.get("built_at"),
+            "fingerprint": fingerprint, **normalized,
+            "evidence_scope": scope,
+            "change": answer.get("change") or {
+                "kind": "initial" if previous is None else "not_assessed",
+                "reason": "首次记录。" if previous is None else "尚未完成新旧证据的语义比较。",
+            },
+            "refresh_reasons": list(record.get("stale_reasons") or []),
+        }
+        # 切断调用者可变列表与已存历史的引用关系。
+        history.append(json.loads(json.dumps(snapshot, ensure_ascii=False)))
     if changed:
         created = now_iso()
         entries = record.setdefault("entries", [])
@@ -758,6 +956,7 @@ def apply_answer(root: Path, record: dict, packet: dict, answer: dict) -> dict:
     record["answer_checked_at"] = now_iso()
     record["answer_fingerprint"] = fingerprint
     record["possibly_stale"] = False
+    record["stale_reasons"] = []
     # 只持久化问题来源和真正被支持结论使用的 Raw；召回候选留在 kb_candidates，
     # 不把一次搜索的低相关路径固化成 Frontier fact_links。
     mentions = record.get("source_mentions") or []
@@ -774,16 +973,23 @@ def apply_answer(root: Path, record: dict, packet: dict, answer: dict) -> dict:
     write_record(root, record)
     rebuild_index(root)
     return {"id": record["id"], "status": "completed", "kb_state": record["kb_state"],
-            "changed": changed, "supported_claims": len(normalized["supported_claims"])}
+            "changed": changed, "revision_added": revision_added,
+            "revision": len(record.get("answer_history") or []),
+            "supported_claims": len(normalized["supported_claims"])}
 
 
 def answer_question(root: Path, record_id: str, topk: int = 6, *, no_ai: bool = False,
-                    packet: dict | None = None, answer_fn: Callable | None = None) -> dict:
+                    packet: dict | None = None, answer_fn: Callable | None = None,
+                    transaction_id: str = "") -> dict:
     record, _ = find_record(root, record_id)
     if record.get("kind") not in {"question", "intake", "thread"}:
         raise ValueError("answer 只接受 Question Page")
-    packet = packet or build_kb_packet(record.get("question") or record["title"], root, topk)
-    packet["question_sources"] = list((record.get("anchors") or {}).get("raw") or [])
+    packet = dict(packet if packet is not None else build_kb_packet(
+        record.get("question") or record["title"], root, topk,
+        source_locators=question_source_locators(record),
+    ))
+    packet["previous_answer"] = current_answer_snapshot(record)
+    packet["question_sources"] = question_source_locators(record)
     if not packet.get("candidates") and not packet.get("raw_evidence"):
         answer = {
             "kb_state": "no_evidence",
@@ -795,8 +1001,9 @@ def answer_question(root: Path, record_id: str, topk: int = 6, *, no_ai: bool = 
         return apply_answer(root, record, packet, answer)
     if no_ai:
         record["answer_status"] = "pending"
-        record["answer_checked_at"] = now_iso()
-        record["coverage_note"] = packet.get("coverage", "")
+        record["answer_attempted_at"] = now_iso()
+        if current_answer_snapshot(record) is None:
+            record["coverage_note"] = packet.get("coverage", "")
         record["updated_at"] = now_iso()
         write_record(root, record)
         rebuild_index(root)
@@ -814,7 +1021,7 @@ def answer_question(root: Path, record_id: str, topk: int = 6, *, no_ai: bool = 
         )
         result = run_answer(
             packet,
-            transaction_id=f"frontier-answer-{record_id}",
+            transaction_id=transaction_id or f"frontier-answer-{record_id}",
             commit_command=(
                 f"python3 .scripts/frontier.py{root_option} answer {record_id} "
                 f"--answer-file temp/frontier-agent/frontier-answer-{record_id}-answer.json "
@@ -824,7 +1031,7 @@ def answer_question(root: Path, record_id: str, topk: int = 6, *, no_ai: bool = 
     if result.get("ok"):
         return apply_answer(root, record, packet, result["parsed"])
     record["answer_status"] = "pending"
-    record["answer_checked_at"] = now_iso()
+    record["answer_attempted_at"] = now_iso()
     record["updated_at"] = now_iso()
     write_record(root, record)
     rebuild_index(root)
@@ -915,9 +1122,10 @@ def apply_assessment(root: Path, intake: dict, assessment: dict, promote: bool =
         raise ValueError("assessment 未通过 schema")
     intake["canonical_question"] = assessment["canonical_question"].strip() or intake["question"]
     intake["title"] = intake["canonical_question"][:120]
-    intake["kb_state"] = assessment["kb_state"]
-    intake["kb_summary"] = assessment["kb_summary"].strip()
-    intake["residual_gaps"] = [item.strip() for item in assessment["residual_gaps"] if item.strip()]
+    if current_answer_snapshot(intake) is None:
+        intake["kb_state"] = assessment["kb_state"]
+        intake["kb_summary"] = assessment["kb_summary"].strip()
+        intake["residual_gaps"] = [item.strip() for item in assessment["residual_gaps"] if item.strip()]
     intake["value_reason"] = assessment["value_reason"].strip()
     intake["assessment"] = {key: assessment[key] for key in ("academic", "specific", "recommended_disposition", "duplicate_target")}
     intake["updated_at"] = now_iso()
@@ -959,6 +1167,10 @@ def find_record(root: Path, record_id: str) -> tuple[dict, Path]:
 def mark_stale_for_targets(root: Path, targets: set[str], exclude: set[str] | None = None) -> list[str]:
     changed = []
     exclude = exclude or set()
+    # Raw 的整文件更新应触及行号/章节引用；不使用字符串前缀以免误中相邻文献。
+    def source_key(value: str) -> str:
+        return value.split("#", 1)[0] if "/raw/" in value else value
+    target_keys = {source_key(value) for value in targets if value}
     for record, _, _ in load_records(root).values():
         if record.get("id") in exclude:
             continue
@@ -966,13 +1178,75 @@ def mark_stale_for_targets(root: Path, targets: set[str], exclude: set[str] | No
             continue
         anchors = record.get("anchors") or {}
         flat = {str(value) for values in anchors.values() for value in (values or [])}
-        if flat & targets:
+        matched = {value for value in flat if source_key(value) in target_keys}
+        if matched:
             record["possibly_stale"] = True
             record["updated_at"] = now_iso()
-            record.setdefault("stale_reasons", []).extend(sorted((flat & targets) - set(record.get("stale_reasons") or [])))
+            record.setdefault("stale_reasons", []).extend(sorted(matched - set(record.get("stale_reasons") or [])))
             write_record(root, record)
             changed.append(record["id"])
     return changed
+
+
+def related_question_candidates(records: dict, page: str, page_text: str,
+                                exclude: set[str] | None = None, limit: int = 3) -> dict:
+    """只读导航候选；词汇重叠不是新证据已影响旧答案的判据。"""
+    limit = max(0, min(limit, 5))
+    exclude = exclude or set()
+    page_tokens = wl.semantic_overlap_tokens(page_text[:4000])
+    candidates = []
+    for record, _, path in records.values():
+        if (record.get("id") in exclude
+                or record.get("kind") not in {"question", "intake", "thread"}
+                or record.get("status") in {"parked", "rejected"}):
+            continue
+        question_text = "\n".join([
+            record.get("question") or record.get("title", ""),
+            record.get("kb_summary", ""),
+            "\n".join(record.get("residual_gaps") or []),
+        ])[:4000]
+        tokens = wl.semantic_overlap_tokens(question_text)
+        shared = tokens & page_tokens
+        if len(shared) < 2:
+            continue
+        candidates.append({
+            "id": record["id"], "question": record.get("question") or record.get("title", ""),
+            "question_path": path.relative_to(REPO).as_posix() if path.is_relative_to(REPO) else str(path),
+            "incoming_page": page, "status": "unreviewed",
+            "basis": "title_navigation_lexical_overlap",
+            "matched_terms": sorted(shared)[:12], "overlap_count": len(shared),
+            "lexical_score": round(len(shared) / (len(tokens) * len(page_tokens)) ** 0.5, 6),
+        })
+    candidates.sort(key=lambda item: (-item["lexical_score"], item["id"]))
+    return {
+        "candidates": candidates[:limit], "total_matches": len(candidates),
+        "returned": min(len(candidates), limit), "truncated": len(candidates) > limit,
+        "limit": limit, "text_char_limit": 4000,
+        "coverage": "仅词汇召回已登记问题；可能误召或漏召，不表示旧答案失效。",
+        "next_action": "Agent 按问题读取新页相关 section 并核验 Raw；确认相关后按需刷新，旧答案仅作比较对象。",
+    }
+
+
+def paper_prose_lines(text: str) -> Iterator[tuple[int, str]]:
+    in_references = False
+    for line_no, line in enumerate(text.splitlines(), 1):
+        stripped = re.sub(r"\s+", " ", line.strip())
+        if re.fullmatch(
+            r"(?:#{1,6}\s+)?(?:references(?:\s+and\s+notes)?|bibliography|参考文献)\s*[:：]?",
+            stripped, re.I,
+        ):
+            in_references = True
+            continue
+        if in_references and re.match(
+            r"^(?:#{1,6}\s+|(?:end\s+matter|appendix|appendices|"
+            r"supplement(?:al|ary)\s+material|附录|补充材料)(?:\b|[：:\s]))",
+            stripped, re.I,
+        ):
+            in_references = False
+        if re.match(r"^\[\d+\]\s+(?:[A-ZÀ-ÖØ-Þ]\.\s*){1,4}[A-ZÀ-ÖØ-Þ][\w’'´-]*", stripped):
+            in_references = True
+        if not in_references:
+            yield line_no, stripped
 
 
 def extract_paper_candidates(root: Path, page: str, limit: int = 3) -> dict:
@@ -997,13 +1271,17 @@ def extract_paper_candidates(root: Path, page: str, limit: int = 3) -> dict:
     if raw_path is None:
         return {"page": page_rel, "captured": [], "skipped": "无可读 Raw Markdown/TXT", "stale_records": []}
     existing = load_records(root)
-    existing_keys = {(rec.get("source_page"), rec.get("source_locator"), normalize_text(rec.get("question", ""))) for rec, _, _ in existing.values()}
+    existing_keys = {
+        (mention.get("page"), mention.get("locator"), normalize_text(mention.get("text", "")))
+        for record, _, _ in existing.values()
+        for mention in [{
+            "page": record.get("source_page"), "locator": record.get("source_locator"),
+            "text": record.get("question", ""),
+        }, *(record.get("source_mentions") or [])]
+    }
     captured, reused = [], []
     reached_limit = False
-    for line_no, line in enumerate(raw_path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-        stripped_line = re.sub(r"\s+", " ", line.strip())
-        if re.match(r"^#{1,6}\s+(references|参考文献)", stripped_line, re.I):
-            break
+    for line_no, stripped_line in paper_prose_lines(raw_path.read_text(encoding="utf-8", errors="replace")):
         if not 18 <= len(stripped_line) <= 4000:
             continue
         for stripped in explicit_question_units(stripped_line):
@@ -1039,14 +1317,20 @@ def extract_paper_candidates(root: Path, page: str, limit: int = 3) -> dict:
                 break
         if reached_limit:
             break
-    targets = {page_rel}
+    targets = {page_rel, raw_rel}
     rel_text, _ = qa.graph_relations(page_rel)
     for edge in _parse_json_text(rel_text).get("edges") or []:
         targets.update(str(edge.get(key) or "") for key in ("subject", "object") if edge.get(key))
     stale = mark_stale_for_targets(root, targets, set(captured + reused))
+    navigation = wl.get_wiki_section(page_path, "navigation")
+    page_text = str(fm.get("title") or "") + "\n" + (navigation.text if navigation else "")
+    related = related_question_candidates(
+        existing, page_rel, page_text, set(captured + reused + stale), limit=limit,
+    )
     rebuild_index(root)
     return {"page": page_rel, "captured": captured, "reused": reused,
-            "count": len(captured), "stale_records": stale}
+            "count": len(captured), "stale_records": stale,
+            "related_question_candidates": related}
 
 
 def cmd_init(args) -> int:
@@ -1212,7 +1496,11 @@ def cmd_capture_paper(args) -> int:
     if not args.no_answer:
         for record_id in list(dict.fromkeys(result["captured"] + result.get("reused", [])))[:args.limit]:
             try:
-                attempts.append(answer_question(root, record_id, args.topk))
+                attempts.append(answer_question(
+                    root, record_id, args.topk,
+                    **({"transaction_id": args.transaction_id}
+                       if getattr(args, "transaction_id", "") else {}),
+                ))
             except Exception as exc:
                 # 回答是非阻断后处理；Question Page 已保存，失败只保持 pending。
                 record, _ = find_record(root, record_id)
@@ -1381,7 +1669,8 @@ def cmd_answer(args) -> int:
                 REPO, args.packet_file, "frontier-agent",
             ).read_text(encoding="utf-8"))
             if args.packet_file else
-            build_kb_packet(record.get("question") or record["title"], root, args.topk)
+            build_kb_packet(record.get("question") or record["title"], root, args.topk,
+                            source_locators=question_source_locators(record))
         )
         answer = json.loads(answer_path.read_text(encoding="utf-8"))
         return print_json(apply_answer(root, record, packet, answer))
@@ -1426,7 +1715,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("list"); p.add_argument("--kind", choices=sorted(KINDS), default=""); p.add_argument("--status", choices=sorted(STATUSES), default=""); p.add_argument("--all", action="store_true"); p.add_argument("--limit", type=int, default=50); p.set_defaults(func=cmd_list)
     p = sub.add_parser("search"); p.add_argument("query"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_search)
     p = sub.add_parser("show"); p.add_argument("record_id"); p.set_defaults(func=cmd_show)
-    p = sub.add_parser("capture-paper"); p.add_argument("page"); p.add_argument("--limit", type=int, default=3); p.add_argument("--topk", type=int, default=6); p.add_argument("--no-answer", action="store_true"); p.set_defaults(func=cmd_capture_paper)
+    p = sub.add_parser("capture-paper"); p.add_argument("page"); p.add_argument("--limit", type=int, default=3); p.add_argument("--topk", type=int, default=6); p.add_argument("--no-answer", action="store_true"); p.add_argument("--transaction-id", default=""); p.set_defaults(func=cmd_capture_paper)
 
     p = sub.add_parser("add-trajectory"); p.add_argument("--title", required=True); p.add_argument("--scope", required=True); p.add_argument("--origin", choices=sorted(ORIGIN_KINDS), default="ai_synthesis"); p.add_argument("--events-file", default=""); p.add_argument("--thread", action="append"); p.add_argument("--raw-anchor", action="append"); p.add_argument("--wiki-anchor", action="append"); p.add_argument("--graph-anchor", action="append"); p.set_defaults(func=cmd_add_trajectory)
     p = sub.add_parser("add-entry"); p.add_argument("record_id"); p.add_argument("--kind", choices=sorted(ENTRY_KINDS), required=True); p.add_argument("--content", required=True); p.add_argument("--origin", choices=sorted(ORIGIN_KINDS), default="user_proposed"); p.add_argument("--epistemic", choices=sorted(EPISTEMIC), default="untested"); p.add_argument("--evidence", action="append"); p.set_defaults(func=cmd_add_entry)

@@ -2,7 +2,7 @@
 """
 PDF → Markdown 提取工具（多引擎级联版）
 
-引擎优先级: MinerU (本地/API) > BLSC OCR > Docling > PyMuPDF
+默认策略: MinerU (本地/API) → 已启用且授权的 PaddleOCR 官网 doc_parsing API → 显式失败
 高质量可覆盖低质量，低质量不可覆盖高质量。
 
 用法:
@@ -24,7 +24,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from pathlib import PurePosixPath
 from datetime import datetime
@@ -43,6 +43,7 @@ from mineru_api import (
     MinerUQuotaError,
     extract_pdf_bundle_with_mineru,
 )
+from paddleocr_api import PaddleOCRError, PaddleOCRExtraction, extract_pdf_bundle_with_paddleocr
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("extractor")
@@ -50,6 +51,7 @@ logger = logging.getLogger("extractor")
 # ─── 引擎优先级 ─────────────────────────────────────────────
 ENGINE_PRIORITY = {
     "mineru": 4,     # 最高（本地结果或专用 PDF API）
+    "paddleocr": 3,
     "blsc_ocr": 3,   # 高（BLSC 视觉模型逐页 OCR）
     "docling": 2,    # 中等（本地离线 OCR）
     "pymupdf": 1,    # 最低（文字层兜底）
@@ -74,6 +76,7 @@ class ExtractionContent:
     content: str
     metadata: dict
     mineru_bundle: Optional[MinerUExtraction] = None
+    paddleocr_bundle: Optional[PaddleOCRExtraction] = None
 
 for _name, _value in env_config.load_env(PROJECT_ROOT / ".env").items():
     os.environ.setdefault(_name, _value)
@@ -114,7 +117,7 @@ def save_parse_meta(paper_dir: Path, meta: dict):
     os.replace(temporary, meta_path)
 
 
-def _referenced_mineru_images(content: str, artifact_root: Path) -> list[tuple[Path, Path]]:
+def _referenced_document_images(content: str, artifact_root: Path) -> list[tuple[Path, Path]]:
     """Return validated (source, relative-to-images) files referenced by Markdown."""
     refs: list[tuple[Path, Path]] = []
     seen = set()
@@ -126,16 +129,16 @@ def _referenced_mineru_images(content: str, artifact_root: Path) -> list[tuple[P
             continue
         relative = PurePosixPath(parsed.path)
         if relative.is_absolute() or ".." in relative.parts:
-            raise MinerUError(f"MinerU Markdown 包含非法图片路径: {raw_ref}")
+            raise MinerUError(f"解析 Markdown 包含非法图片路径: {raw_ref}")
         if not relative.parts or relative.parts[0] != "images":
-            raise MinerUError(f"MinerU Markdown 本地图片必须位于 images/: {raw_ref}")
+            raise MinerUError(f"解析 Markdown 本地图片必须位于 images/: {raw_ref}")
         source = (artifact_root / Path(*relative.parts)).resolve(strict=False)
         try:
             source.relative_to(root)
         except ValueError as exc:
-            raise MinerUError(f"MinerU 图片越过结果目录: {raw_ref}") from exc
+            raise MinerUError(f"解析图片越过结果目录: {raw_ref}") from exc
         if not source.is_file() or source.is_symlink():
-            raise MinerUError(f"MinerU Markdown 引用的图片缺失或非法: {raw_ref}")
+            raise MinerUError(f"解析 Markdown 引用的图片缺失或非法: {raw_ref}")
         destination = Path(*relative.parts[1:])
         key = destination.as_posix()
         if key not in seen:
@@ -144,25 +147,26 @@ def _referenced_mineru_images(content: str, artifact_root: Path) -> list[tuple[P
     return refs
 
 
-def _commit_mineru_document_bundle(
+def _commit_document_bundle(
     paper_dir: Path,
     md_path: Path,
     output: ExtractionContent,
 ) -> dict:
-    """Atomically install Markdown plus its referenced MinerU assets."""
+    """Atomically install Markdown plus its referenced parsing assets."""
     token = uuid.uuid4().hex
     temporary_md = paper_dir / f".paper.md.partial-{token}"
     temporary_images = paper_dir / f".images.partial-{token}"
-    temporary_sidecars = paper_dir / f".mineru-artifacts.partial-{token}"
+    temporary_sidecars = paper_dir / f".parse-artifacts.partial-{token}"
     old_images = paper_dir / f".images.previous-{token}"
-    old_sidecars = paper_dir / f".mineru-artifacts.previous-{token}"
-    bundle = output.mineru_bundle
+    old_sidecars = paper_dir / f".parse-artifacts.previous-{token}"
+    bundle = output.paddleocr_bundle or output.mineru_bundle
+    sidecar_dir = "paddleocr" if output.paddleocr_bundle else "mineru"
     image_refs: list[tuple[Path, Path]] = []
     sidecar_refs: list[tuple[Path, Path]] = []
     temporary_md.write_text(output.content, encoding="utf-8")
     try:
         if bundle is not None:
-            image_refs = _referenced_mineru_images(output.content, bundle.artifact_root)
+            image_refs = _referenced_document_images(output.content, bundle.artifact_root)
             for source, relative in image_refs:
                 destination = temporary_images / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -182,7 +186,7 @@ def _commit_mineru_document_bundle(
                 sidecar_refs.append((source, relative))
 
             current_images = paper_dir / "images"
-            current_sidecars = paper_dir / "mineru"
+            current_sidecars = paper_dir / sidecar_dir
             for current, label in (
                 (current_images, "images"), (current_sidecars, "mineru"),
             ):
@@ -391,12 +395,14 @@ def record_external_md_path(paper_dir: Path, external_md_uri: str) -> None:
 #  引擎 1: MinerU（本地结果或 API）
 # ═══════════════════════════════════════════════════════════
 
-def extract_mineru(paper_dir: Path, paper_id: str) -> Optional[ExtractionContent]:
+def extract_mineru(paper_dir: Path, paper_id: str, *, failure: Optional[dict] = None) -> Optional[ExtractionContent]:
     """
     检查用户是否已手动放置 MinerU 解析结果。
     
     优先使用本地手动结果；没有本地结果时，若配置了 Token，自动调用 MinerU API。
     """
+    if failure is not None:
+        failure["reason"] = "unavailable_or_disabled"
     mineru_path = paper_dir / "paper_mineru.md"
     
     if mineru_path.exists():
@@ -433,6 +439,7 @@ def extract_mineru(paper_dir: Path, paper_id: str) -> Optional[ExtractionContent
             timeout_sec=int(mineru_config.get("timeout_sec", 1800)),
             interval_sec=int(mineru_config.get("poll_interval_sec", 5)),
             request_timeout_sec=int(mineru_config.get("request_timeout_sec", 60)),
+            transfer_timeout_sec=mineru_config.get("transfer_timeout_sec"),
             work_dir=paper_dir / ".mineru",
             keep_archive=bool(mineru_config.get("keep_archive", False)),
             language=mineru_config.get("language") or None,
@@ -446,21 +453,51 @@ def extract_mineru(paper_dir: Path, paper_id: str) -> Optional[ExtractionContent
             mineru_bundle=result,
         )
     except MinerUAuthError as exc:
+        if failure is not None:
+            failure["reason"] = "authentication"
         logger.warning(
             "  ⚠️ MinerU API 认证失败：%s 可能已过期或无效，请更新项目根目录 .env。详情: %s",
             token_env,
             exc,
         )
     except MinerUQuotaError as exc:
+        if failure is not None:
+            failure["reason"] = "quota"
         logger.warning("  ⚠️ MinerU API 配额不足，当前运行不重试: %s", exc)
     except MinerUInputError as exc:
+        if failure is not None:
+            failure["reason"] = "input_limit"
         logger.warning("  ⚠️ MinerU 输入不符合服务限制，当前运行不重试: %s", exc)
     except (MinerUError, OSError) as exc:
+        if failure is not None:
+            failure["reason"] = type(exc).__name__
         logger.warning(
             "  ⚠️ MinerU API 调用失败；已保留远端任务 checkpoint，恢复时继续原任务: %s",
             exc,
         )
     return None
+
+
+def extract_paddleocr(paper_dir: Path, paper_id: str) -> Optional[ExtractionContent]:
+    config = (load_config().get("extraction") or {}).get("paddleocr") or {}
+    if not config.get("enabled", False):
+        logger.warning("  PaddleOCR 官网 API 未启用")
+        return None
+    token = os.getenv("PADDLEOCR_ACCESS_TOKEN", "").strip()
+    if not token:
+        logger.warning("  PaddleOCR 官网 API 缺少 PADDLEOCR_ACCESS_TOKEN；请在本机 .env 配置")
+        return None
+    try:
+        bundle = extract_pdf_bundle_with_paddleocr(
+            paper_dir / "paper.pdf", token, work_dir=paper_dir / ".paddleocr",
+            request_timeout_sec=int(config.get("request_timeout_sec", 60)),
+            poll_timeout_sec=int(config.get("poll_timeout_sec", 300)),
+            interval_sec=int(config.get("poll_interval_sec", 5)),
+        )
+        return ExtractionContent(bundle.markdown, bundle.meta, paddleocr_bundle=bundle)
+    except (PaddleOCRError, OSError, ValueError) as exc:
+        logger.warning("  PaddleOCR 官网解析失败；保留任务 checkpoint: %s", exc)
+        return None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -728,7 +765,7 @@ def _clean_pymupdf_text(text: str, page_num: int) -> str:
 #  主流程
 # ═══════════════════════════════════════════════════════════
 
-def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = False, external_pdf: Optional[str] = None, papers_dir: Optional[Path] = None) -> bool:
+def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = False, external_pdf: Optional[str] = None, papers_dir: Optional[Path] = None, allow_paddleocr: bool = False) -> bool:
     """
     提取单篇论文。
     
@@ -739,6 +776,15 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
     """
     papers_dir = papers_dir or PAPERS_DIR
     paper_dir = papers_dir / paper_id
+    private_root = (PROJECT_ROOT / "private").resolve()
+    source_ref = external_pdf or load_source_yaml(paper_dir).get("external_path")
+    source_path = resolve_synology_path(source_ref, load_config()) if source_ref else None
+    if paper_dir.resolve().is_relative_to(private_root) or (
+            source_path and source_path.resolve().is_relative_to(private_root)):
+        allow_paddleocr = False
+    if engine == "paddleocr" and not allow_paddleocr:
+        logger.error("PaddleOCR 上传需要本次公开材料的 --allow-paddleocr 授权；private 不允许上传")
+        return False
 
     # Inbox/archive callers may preserve the original title as the PDF filename.
     # The extractor contract is one canonical local input: paper.pdf.
@@ -776,6 +822,9 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
     logger.info(f"📄 {paper_id}")
     logger.info(f"   当前引擎: {current_engine or '无'}")
     
+    paddleocr_enabled = bool(((load_config().get("extraction") or {}).get("paddleocr") or {}).get("enabled", False))
+    automatic_engines = (["mineru", "paddleocr"] if paddleocr_enabled
+                         else ["mineru", "blsc_ocr", "docling", "pymupdf"])
     # ── 确定提取策略 ──
     if engine:
         # 用户指定引擎：已有 md 才检查覆盖（新论文无 md 任意引擎可提取）
@@ -788,7 +837,7 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
         engines_to_try = [engine]
     elif force:
         # 强制重提取：按优先级尝试所有引擎
-        engines_to_try = ["mineru", "blsc_ocr", "docling", "pymupdf"]
+        engines_to_try = automatic_engines
     else:
         # 自动模式：只尝试比当前引擎更高优先级的引擎
         if not has_existing_md:
@@ -798,7 +847,7 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
         else:
             current_priority = ENGINE_PRIORITY.get(current_engine, 0)
         engines_to_try = [
-            e for e in ["mineru", "blsc_ocr", "docling", "pymupdf"]
+            e for e in automatic_engines
             if ENGINE_PRIORITY[e] > current_priority
         ]
         
@@ -809,6 +858,7 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
     # ── 按优先级尝试引擎 ──
     extractors = {
         "mineru": extract_mineru,
+        "paddleocr": extract_paddleocr,
         "blsc_ocr": extract_blsc_ocr,
         "docling": extract_docling,
         "pymupdf": extract_pymupdf,
@@ -817,10 +867,25 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
     best_content = None
     best_engine = None
     best_output: Optional[ExtractionContent] = None
+    mineru_failure = {}
     
     for eng in engines_to_try:
         extractor = extractors[eng]
-        extracted = extractor(paper_dir, paper_id)
+        if eng == "paddleocr" and not allow_paddleocr:
+            logger.warning("  未授权本次 PaddleOCR 上传；停止提取，不级联其他引擎")
+            break
+        if eng == "mineru":
+            extracted = extractor(paper_dir, paper_id, failure=mineru_failure)
+        else:
+            extracted = extractor(paper_dir, paper_id)
+        if eng == "paddleocr" and isinstance(extracted, ExtractionContent):
+            extracted = replace(extracted, metadata={
+                **extracted.metadata,
+                "fallback_from": "mineru" if "mineru" in engines_to_try else None,
+                "fallback_reason": mineru_failure.get(
+                    "reason", "unavailable_or_disabled" if "mineru" in engines_to_try else "explicit_engine"),
+                "upload_authorization": "public_pdf",
+            })
         if isinstance(extracted, ExtractionContent):
             content = extracted.content
             output = extracted
@@ -836,7 +901,8 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
             break
         # MinerU 失败仅允许回落 BLSC OCR；不静默回落到本地 docling/pymupdf。
         # 用户显式 --engine docling/pymupdf 时 engines_to_try 只含单个引擎，不受此限制。
-        if eng == "mineru" and len(engines_to_try) > 1 and "blsc_ocr" not in engines_to_try:
+        if eng == "mineru" and len(engines_to_try) > 1 and not any(
+                candidate in engines_to_try for candidate in ("paddleocr", "blsc_ocr")):
             logger.warning(
                 "  ⚠️ MinerU 失败且未启用 BLSC OCR 回退，论文 PDF 不回落 docling/pymupdf；"
                 "如需强制使用低优先级引擎，请 --engine docling 或 --engine pymupdf"
@@ -856,6 +922,8 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
             logger.error(f"   ❌ 所有引擎均失败，且无现有 paper.md")
             return False
         logger.warning(f"   ⚠️ 所有引擎均失败，保留现有 paper.md ({current_engine})")
+        if paddleocr_enabled:
+            return False
         return True
 
     if best_engine != "mineru":
@@ -871,7 +939,7 @@ def extract_paper(paper_id: str, engine: Optional[str] = None, force: bool = Fal
         logger.info(f"   💾 备份: {backup_path.name}")
     
     # 原子写入 Markdown；MinerU 同时安装其实际引用的图片和 allowlist sidecar。
-    extraction_meta = _commit_mineru_document_bundle(
+    extraction_meta = _commit_document_bundle(
         paper_dir,
         md_path,
         best_output or ExtractionContent(content=best_content, metadata={}),
@@ -949,8 +1017,10 @@ def main():
     
     parser = argparse.ArgumentParser(description="PDF → Markdown 提取工具（多引擎级联）")
     parser.add_argument("--paper", type=str, help="论文 ID（目录名,位于 papers-dir 下）")
-    parser.add_argument("--engine", type=str, choices=["mineru", "blsc_ocr", "docling", "pymupdf"],
+    parser.add_argument("--engine", type=str, choices=["mineru", "paddleocr", "blsc_ocr", "docling", "pymupdf"],
                        help="强制使用指定引擎")
+    parser.add_argument("--allow-paddleocr", action="store_true",
+                       help="授权本次公开 PDF 上传至 PaddleOCR 官网 API；不用于 private/保密材料")
     parser.add_argument("--force", action="store_true", help="强制重新提取")
     parser.add_argument("--external-pdf", type=str, default=None,
                         help="外部 PDF 源（绝对路径或 synology:// 路径），实体复制到 paper.pdf（不符号链接）")
@@ -959,6 +1029,8 @@ def main():
                        help="论文目录(默认 academic/raw/works/papers;他人论文传 academic/raw/references/);也可从 config extraction.papers_dir 读")
     
     args = parser.parse_args()
+    if args.batch and args.allow_paddleocr:
+        parser.error("PaddleOCR 上传授权限单篇；不允许批量授权")
     
     # papers_dir 解析优先级: CLI > config > 默认 PAPERS_DIR
     cli_papers_dir = Path(args.papers_dir) if args.papers_dir else None
@@ -976,7 +1048,7 @@ def main():
     if args.batch:
         batch_extract(force=args.force, engine=args.engine, papers_dir=papers_dir)
     elif args.paper:
-        success = extract_paper(args.paper, engine=args.engine, force=args.force, external_pdf=args.external_pdf, papers_dir=papers_dir)
+        success = extract_paper(args.paper, engine=args.engine, force=args.force, external_pdf=args.external_pdf, papers_dir=papers_dir, allow_paddleocr=args.allow_paddleocr)
         sys.exit(0 if success else 1)
     else:
         parser.print_help()

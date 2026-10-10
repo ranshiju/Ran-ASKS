@@ -458,6 +458,32 @@ def test_wiki_locator_minimal_validation():
         cleanup()
 
 
+def test_raw_footnote_wrappers_preserve_evidence_and_query_locators():
+    raw, wiki = setup_locator_wiki()
+    try:
+        original = wiki.read_text(encoding="utf-8")
+        address = str(raw.relative_to(REPO)) + "#L3"
+        for wrapped in (f"[[{address}]]", f"`{address}`", f"<{address}>"):
+            text = original.replace(address, wrapped)
+            wiki.write_text(text, encoding="utf-8")
+            assert module.wl.validate_wiki_page(wiki, require_citations=True) == []
+            section = module.wl.get_wiki_section(wiki, "retrieval-control")
+            assert section.raw_citations[0] == address
+            assert module.wl.normalize_raw_footnotes(text) == original
+        assert module.wl.normalize_raw_footnotes(original) == original
+        for invalid in (
+            f"[[{address}|label]]", f"`[[{address}]]`", f"[[{address}]] trailing",
+            f"[[{address.replace('#L3', '#L99')}]]",
+            f"`{address.replace('document.md', 'missing.md')}`",
+        ):
+            wiki.write_text(original.replace(address, invalid), encoding="utf-8")
+            assert module.wl.validate_wiki_page(wiki, require_citations=True), invalid
+        wiki.write_text(original + f"[^r1]: `{'missing/raw/file.md#L1'}`\n", encoding="utf-8")
+        assert any("脚注定义重复" in error for error in module.wl.validate_wiki_page(wiki))
+    finally:
+        cleanup()
+
+
 def test_wiki_locator_rejects_raw_handle_and_truncated_footnote():
     _raw, wiki = setup_locator_wiki()
     try:
@@ -921,6 +947,7 @@ def main():
     test_parser_defaults()
     test_wiki_locator_reads_one_section_and_raw_citations()
     test_wiki_locator_minimal_validation()
+    test_raw_footnote_wrappers_preserve_evidence_and_query_locators()
     test_wiki_locator_rejects_raw_handle_and_truncated_footnote()
     test_wiki_graph_source_points_to_cited_section()
     test_wiki_graph_source_ranks_nonidentical_chinese_proposition_by_bigrams()

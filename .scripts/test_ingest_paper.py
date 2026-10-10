@@ -654,6 +654,25 @@ def test_agent_workspace_check_aggregates_independent_diagnostics():
     assert result["agent_telemetry"]["first_pass_validation"] == "invalid"
 
 
+def test_agent_repair_issues_keep_precise_validator_targets():
+    result = module._agent_repair_issues([
+        {"stage": "wiki", "errors": ["脚注 [^r7] locator 不存在: academic/raw/a.md#L99"]},
+        {"stage": "bibliography", "errors": ["title: 书目证据 quote 未逐字出现\nyear 非空时必须提供 source/locator/quote"]},
+        {"stage": "semantics", "blocking_warnings": [{
+            "issue": "invalid_predicate", "section": "三元组", "line": "本论文 | 错误 | 方法",
+            "field": "predicate", "is_triple": True, "reason": "核对关系谓词",
+        }]},
+        {"stage": "graph_preflight", "errors": ["graph: 作者集合与 wiki frontmatter 不一致 (missing=['Alice'])"]},
+    ])
+    assert result[0]["target"] == {"footnote_id": "r7"}
+    assert result[1]["target"]["fields"] == ["bibliographic.title", "bibliographic.year"]
+    assert result[2]["target"]["line"] == "本论文 | 错误 | 方法"
+    assert result[2]["target"]["field"] == "predicate"
+    assert result[2]["code"] == "invalid_predicate"
+    assert result[3]["target"] == {"field": "authors"}
+    assert "target" not in module._agent_repair_issue("workspace", "unknown failure")
+
+
 def test_agent_reading_contract_uses_full_short_and_sections_long():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -685,6 +704,39 @@ def test_agent_check_telemetry_does_not_apply_to_api_workspace():
         "repair_issues": [{"scope": "wiki"}],
     })
     assert not ((state.get("telemetry") or {}).get("agent_ingest"))
+
+
+def test_agent_check_history_preserves_failure_after_success_without_repeating_payload():
+    state = {
+        "agent_workspace": {"execution_backend": "agent"},
+        "telemetry": {"agent_ingest": {
+            "check_attempts": 4, "first_pass_validation": "invalid",
+        }},
+    }
+    result = {
+        "validation": "invalid",
+        "repair_issues": [{"stage": "bibliography", "scope": "bibliography",
+                           "error": "title and year lack evidence",
+                           "action": "edit_workspace_bibliography_section"}],
+        "warnings": [{"issue": "bare_abbreviation"}],
+        "versions": {"validators": {"bibliography": "test-version"}},
+    }
+    module._record_agent_check_telemetry(state, result)
+    result["repair_issues"][0]["error"] = "later mutation"
+    result["versions"]["validators"]["bibliography"] = "later-version"
+    module._record_agent_check_telemetry(state, {"validation": "valid"})
+    telemetry = state["telemetry"]["agent_ingest"]
+    history = telemetry["check_history"]
+    assert [item["attempt"] for item in history] == [5, 6]  # No invented legacy history.
+    assert history[0]["repair_issues"][0]["error"] == "title and year lack evidence"
+    assert history[0]["versions"]["validators"]["bibliography"] == "test-version"
+    assert history[0]["warnings"] == [{"issue": "bare_abbreviation"}]
+    assert history[1]["repair_issues"] == []
+    assert telemetry["first_pass_validation"] == "invalid"
+    assert telemetry["last_validation"] == "valid"
+    assert telemetry["final_warnings"] == []
+    assert "check_history" not in module._agent_telemetry_payload(state)
+    assert len(telemetry["check_history"]) == 2
 
 
 def test_agent_workspace_check_restores_hash_bound_input_artifacts():
@@ -2119,6 +2171,36 @@ def test_agent_bibliography_rejects_quote_outside_declared_locator():
         assert "quote" in str(exc)
     else:
         raise AssertionError("forged evidence quote must be rejected")
+
+
+def test_agent_bibliography_reports_independent_field_and_author_errors_together():
+    decision = _direct_bibliographic_decision()
+    decision["bibliographic"]["title"]["value"] = "Wrong title"
+    decision["bibliographic"]["authors"]["value"] = ["Wrong author one", "Wrong author two"]
+    decision["bibliographic"]["year"]["value"] = "1900"
+    decision["bibliographic"]["venue"]["evidence"] = {
+        "source": "untrusted.md", "locator": "L1", "quote": "Unknown venue",
+    }
+    before = json.dumps(decision, sort_keys=True)
+    sources = {"paper.md": (
+        "# Direct Evidence Paper\nAlice Example, Bob Builder\n"
+        "Journal of Reliable Results 2026\nDOI: 10.1234/direct.1\n"
+    )}
+    try:
+        module.compile_agent_bibliographic_decision(decision, sources)
+    except ValueError as exc:
+        errors = str(exc).splitlines()
+        assert len(errors) == 5, errors
+        assert any("Wrong title" in error for error in errors)
+        assert any("Wrong author one" in error for error in errors)
+        assert any("Wrong author two" in error for error in errors)
+        assert any("1900" in error for error in errors)
+        assert any("venue:" in error and "source" in error for error in errors)
+    else:
+        raise AssertionError("no partial review may pass with invalid evidence")
+    assert json.dumps(decision, sort_keys=True) == before
+    review = module.compile_agent_bibliographic_decision(_direct_bibliographic_decision(), sources)
+    assert review["bibliographic"]["authors"]["value"] == ["Alice Example", "Bob Builder"]
 
 
 def test_bibliographic_schema_accepts_descriptive_string_conflicts():
@@ -4498,6 +4580,35 @@ def test_is_blocking_warning_descriptive_phrase_is_nonblocking():
 
 # ===== from_raw / reingest / clean 对齐测试 =====
 
+def test_raw_cli_uses_archived_paper_owner_and_preserves_exit_status():
+    """The compatibility CLI must not create the obsolete content-only task."""
+    from unittest.mock import patch
+    raw_arg = "academic/raw/references/paper with spaces $(literal)/paper.md"
+    for exit_code, verbose in ((0, False), (7, True)):
+        argv = ["ingest_paper.py", "--raw", raw_arg]
+        if verbose:
+            argv.append("--verbose")
+        with patch.object(sys, "argv", argv), \
+                patch.object(module, "new_state_for_raw", side_effect=AssertionError(
+                    "raw CLI entered the obsolete content-only task path")), \
+                patch.object(module.subprocess, "run") as delegated:
+            delegated.return_value.returncode = exit_code
+            try:
+                module.main()
+            except SystemExit as exc:
+                assert exc.code == exit_code
+            else:
+                raise AssertionError("delegated exit status was not propagated")
+            command = delegated.call_args.args[0]
+            assert command[:3] == [sys.executable, str(module.REPO / ".scripts/re_ingest.py"), "--raw"]
+            assert command[3] == raw_arg  # One literal argument, no shell expansion.
+            assert ("--verbose" in command) == verbose
+            assert "--force" not in command
+            assert not delegated.call_args.kwargs.get("shell")
+            assert "env" not in delegated.call_args.kwargs  # Preserve the caller's backend.
+            assert not delegated.call_args.kwargs.get("capture_output")
+
+
 def test_new_state_for_raw_sets_from_raw_flag():
     """from_raw 模式：raw 已在位，跳过 dedup+extract，状态从 write_wiki 开始。"""
     with tempfile.TemporaryDirectory() as directory:
@@ -5723,7 +5834,7 @@ def test_explicit_refresh_restores_legacy_agent_check_bibliography_drift():
             module.REPO = original_repo
 
 
-def test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor():
+def test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor(engine="mineru"):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         source = root / "inbox/paper.pdf"
@@ -5735,10 +5846,15 @@ def test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor(
         (extract_dir / "paper.md").write_text("# Stable Paper\n", encoding="utf-8")
         (extract_dir / "images/a.png").write_bytes(b"image")
         digest = module._file_sha256(source)
-        (extract_dir / "parse_meta.yaml").write_text(
-            "preferred: mineru\nengines:\n  mineru:\n    input_sha256: " + digest + "\n",
-            encoding="utf-8",
-        )
+        record = {"input_sha256": digest}
+        if engine == "paddleocr":
+            record.update(source="paddleocr_official_api", model="PaddleOCR-VL-1.6",
+                          task="doc_parsing", page_count=1, job_id="job-1",
+                          request_sha256="b" * 64, upload_authorization="public_pdf",
+                          fallback_reason="quota")
+        (extract_dir / "parse_meta.yaml").write_text(module.yaml.safe_dump({
+            "preferred": engine, "engines": {engine: record},
+        }), encoding="utf-8")
         state = {
             "transaction_id": "txn", "source": "inbox/paper.pdf",
             "bibliographic_meta": {}, "errors": [],
@@ -5775,6 +5891,10 @@ def test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor(
         assert state["artifact_bundle_sha256"]
 
 
+def test_step_extract_reuses_official_paddleocr_bundle_without_rerunning_extractor():
+    test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor("paddleocr")
+
+
 def test_step_extract_preserves_only_mineru_checkpoint_before_retry():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -5784,6 +5904,8 @@ def test_step_extract_preserves_only_mineru_checkpoint_before_retry():
         extract_dir = root / "temp/inbox-extract/txn"
         (extract_dir / ".mineru").mkdir(parents=True)
         (extract_dir / ".mineru/mineru-job-v1.json").write_text("{}", encoding="utf-8")
+        (extract_dir / ".paddleocr").mkdir()
+        (extract_dir / ".paddleocr/paddleocr-job-v1.json").write_text("{}", encoding="utf-8")
         (extract_dir / "stale.txt").write_text("stale", encoding="utf-8")
         state = {
             "transaction_id": "txn", "source": "inbox/paper.pdf",
@@ -5800,6 +5922,8 @@ def test_step_extract_preserves_only_mineru_checkpoint_before_retry():
 
             def fake_run(_command):
                 assert (extract_dir / ".mineru/mineru-job-v1.json").is_file()
+                assert (extract_dir / ".paddleocr/paddleocr-job-v1.json").is_file()
+                assert "--allow-paddleocr" in _command
                 assert not (extract_dir / "stale.txt").exists()
                 (extract_dir / "paper.pdf").write_bytes(b"pdf")
                 (extract_dir / "paper.md").write_text("# Stable Paper\n", encoding="utf-8")
@@ -5825,6 +5949,109 @@ def test_step_extract_preserves_only_mineru_checkpoint_before_retry():
             ) = originals
         assert not ok and message == "Agent task prepared"
         assert (extract_dir / ".mineru/mineru-job-v1.json").is_file()
+
+
+def test_agent_bibliography_schema_reports_independent_field_errors():
+    decision = _direct_bibliographic_decision()
+    decision["bibliographic"]["year"]["kind"] = "publication"
+    decision["bibliographic"]["authors"]["status"] = "invented"
+    decision["bibliographic"]["doi"]["evidence"] = {"locator": "L1"}
+    errors = module.agent_bibliographic_schema_errors(decision)
+    assert not module.agent_bibliographic_decision_schema(decision)
+    assert any("year:" in error and "published_online" in error for error in errors)
+    assert any("authors:" in error and "status" in error for error in errors)
+    assert any("doi:" in error and "evidence" in error for error in errors)
+    issues = module._agent_repair_issues([{"stage": "bibliography", "errors": errors}])
+    assert {issue["target"]["fields"][0] for issue in issues} == {
+        "bibliographic.year", "bibliographic.authors", "bibliographic.doi",
+    }
+    decision["bibliographic"]["year"]["kind"] = ["invalid"]
+    assert module.agent_bibliographic_schema_errors(decision)
+    assert not module.agent_bibliographic_decision_schema(None)
+
+
+def test_agent_reading_contract_exposes_individual_section_commands():
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / "paper with spaces.md"
+        source.write_text("text " * 10000, encoding="utf-8")
+        contract = module._agent_reading_contract(source)
+        assert contract["mode"] == "adaptive_sections"
+        commands = contract["primary"]["section_commands"]
+        assert set(commands) == set(module.AGENT_READING_SECTIONS)
+        assert commands["Abstract"].endswith(" Abstract")
+        assert "Introduction" not in commands["Abstract"]
+        assert contract["read_policy"]["protocol"] == "read_once_then_reuse"
+
+
+def test_agent_commit_returns_summary_and_preserves_detailed_state():
+    state = {
+        "transaction_id": "compact-test", "status": "completed", "errors": [],
+        "graph_report": {
+            "graph_delta": {"subgraph": {"edge_count": 18, "semantic_edges": 8,
+                                         "hard_errors": []},
+                            "large_detail": "detail" * 10000},
+            "hub_scope_route": {"decision": "candidates", "reason": "scope_below_floor",
+                                "top_score": 0.44, "candidates": ["detail"] * 1000},
+        },
+        "agent_workspace": {"validation_receipt": {"schema": "receipt",
+                                                     "hashes": {"test": "hash"}}},
+        "maintenance": {
+            "status": "completed", "actions": ["large detail"] * 10000,
+            "next_action": "inspect_review", "components": {
+                "hubs": {"status": "pending", "next_action": "review_scope",
+                         "review_file": "temp/hub-review.json", "large_detail": "detail" * 10000},
+            },
+        },
+        "frontier_capture": {"backend": "agent", "answer_policy": "host_agent",
+                             "captured": ["Q-test"], "count": 1,
+                             "related_question_candidates": "detail" * 10000},
+    }
+    result = module.agent_workspace_commit_payload(state)
+    assert result["committed"] is True
+    assert "graph_report" not in result
+    assert result["graph_summary"]["edge_count"] == 18
+    assert result["graph_report_ref"]["path"] == "temp/inbox-state/compact-test.json"
+    assert result["maintenance"]["status"] == "completed"
+    assert result["maintenance"]["action_count"] == 10000
+    assert result["maintenance"]["next_action"] == "inspect_review"
+    assert result["maintenance"]["components"]["hubs"]["review_file"] == "temp/hub-review.json"
+    assert result["frontier_capture"]["answer_policy"] == "host_agent"
+    assert len(json.dumps(result)) < 5000
+    assert len(state["graph_report"]["graph_delta"]["large_detail"]) > 5000
+
+
+def test_frontier_tail_respects_ingest_backend_and_parent_transaction():
+    import ingest_common as common
+    for backend in ("agent", "api"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = []
+            original_run, original_subprocess = common.run, common.subprocess.run
+            try:
+                common.run = lambda *_: ""
+                common.subprocess.run = lambda command, **kwargs: (
+                    calls.append((command, kwargs)) or type("Result", (), {
+                        "returncode": 0, "stdout": '{"captured":[],"count":0}', "stderr": "",
+                    })()
+                )
+                state = {"paper_id": "demo", "wiki_path": "academic/wiki/papers/demo",
+                         "transaction_id": "ingest-parent", "semantic_backend": "api",
+                         "agent_workspace": {"execution_backend": backend}}
+                config = {
+                    "doc_id_key": "paper_id", "frontier_capture": True,
+                    "get_log_path": lambda *_: root / "log.md",
+                    "get_index_path": lambda *_: root / "index.md",
+                    "build_log_entry": lambda *_: "## demo\n",
+                }
+                success, message = common.step_finalize_tail(state, root, config)
+                assert success, message
+            finally:
+                common.run, common.subprocess.run = original_run, original_subprocess
+            command, kwargs = calls[-1]
+            assert ("--no-answer" in command) == (backend == "agent")
+            assert command[command.index("--transaction-id") + 1] == "ingest-parent"
+            assert kwargs["env"]["QUERY_BACKEND"] == backend
+            assert state["frontier_capture"]["backend"] == backend
 
 
 def main():

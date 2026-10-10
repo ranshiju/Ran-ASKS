@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.13.0
+> Current main version: v0.14.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -448,6 +448,32 @@ Visual QA is opt-in. It runs when the user requests it or when a layout-dependen
 edit requires visible page context; ordinary text editing and compilation do
 not trigger it automatically. See `operations/VISUAL_QA.md` and
 `operations/VISUAL_TO_EDITABLE_PPT.md`.
+
+## Extraction recovery and evidence-scoped research updates
+
+Public PDF extraction can optionally use the official PaddleOCR document-parsing
+API after MinerU fails. Enable `extraction.paddleocr.enabled` in your local
+configuration and set `PADDLEOCR_ACCESS_TOKEN`; a token alone is not upload
+authorization. The extractor also requires `--allow-paddleocr` for that run.
+Private inputs are excluded. Jobs can resume from a source-bound checkpoint;
+requests, polling, downloads, and returned assets have bounded budgets, and
+extraction records retain the backend and fallback reason. Without authorization,
+the enabled PaddleOCR fallback stops rather than silently cascading to another
+engine. See `operations/INGEST.md` for the managed workflow.
+
+Frontier keeps answer versions tied to the evidence actually provided and cited.
+Refresh compares the previous answer with newly checked Raw excerpts, prioritizes
+the question's own sources, and reports unreadable or truncated evidence. An
+answer is scoped to that evidence, not a claim that the scientific question is
+finally solved. Reference lists and ordinary expectations are filtered from
+future-work candidates; admission remains a separate semantic judgment.
+
+After an approved Hub split, reconcile the batch maintenance report to verify
+canonical child Scopes, split history, and complete member migration. This
+read-only reconciliation closes only the satisfied handoff, preserves unrelated
+review actions and quality warnings, and synchronizes linked transaction receipts
+without re-ingestion or embedding calls. See `operations/INBOX.md` and
+`operations/HUB.md`.
 
 ## Using real material
 

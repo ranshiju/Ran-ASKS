@@ -270,6 +270,26 @@ def test_extract_engine_warns_on_non_mineru():
             ingest_check.REPO = old_repo
         assert not errors
         assert not any("mineru" in w for w in warnings), f"mineru should not warn, got {warnings}"
+        record = {
+            "source": "paddleocr_official_api", "model": "PaddleOCR-VL-1.6",
+            "task": "doc_parsing", "page_count": 1, "job_id": "job-1",
+            "upload_authorization": "public_pdf", "fallback_reason": "quota",
+            "input_sha256": "a" * 64, "request_sha256": "b" * 64,
+        }
+        for approved in (True, False):
+            if not approved:
+                record.pop("task")
+            import yaml
+            (raw_dir / "parse_meta.yaml").write_text(yaml.safe_dump({
+                "preferred": "paddleocr", "engines": {"paddleocr": record},
+            }), encoding="utf-8")
+            ingest_check.REPO = repo
+            try:
+                errors, warnings = ingest_check.check_file(page, set(), set())
+            finally:
+                ingest_check.REPO = old_repo
+            assert not errors
+            assert any("非 mineru" in warning for warning in warnings) == (not approved)
 
 
 def test_bibliographic_consistency_uses_published_year_and_aps_doi():

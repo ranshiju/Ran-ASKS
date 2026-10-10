@@ -26,6 +26,13 @@ def relation_endpoint_kind(predicate: str, role: str) -> str:
         return "proposition"
     if role == "object" and predicate in TASK_OBJECT_PREDICATES:
         return "task"
+    if predicate in {"指导", "师从", "受指导于"}:
+        return "person"
+    if role == "subject" and predicate in {
+            "第一作者", "作者", "通讯作者", "任职于", "所属", "参会", "汇报", "待办"}:
+        return "person"
+    if role == "object" and predicate in {"负责人", "主讲人"}:
+        return "person"
     return "entity"
 
 

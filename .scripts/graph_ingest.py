@@ -31,6 +31,15 @@ import graph_delta as gd
 import hub_semantics as hs
 import knowledge_ir as kir
 import wiki_locator as wl
+import ingest_check
+
+
+class PageValidationError(ValueError):
+    """A complete, local page gate failed before the transaction committed."""
+
+    def __init__(self, stage, errors, warnings=()):
+        self.report = {"stage": stage, "errors": list(errors), "warnings": list(warnings)}
+        super().__init__("\n".join(errors))
 
 
 class IngestResult(NamedTuple):
@@ -2302,9 +2311,10 @@ def add_knowledge_edges(
                     else:
                         prop_path = gl.extract_descriptive_id(name, concept_map, abbr_map)
                     existing_title = conn.execute(
-                        "SELECT title FROM nodes WHERE path=?", (prop_path,)
+                        "SELECT title,type FROM nodes WHERE path=?", (prop_path,)
                     ).fetchone()
-                    if existing_title and existing_title[0] != name:
+                    if existing_title and (
+                            existing_title[0] != name or existing_title[1] != "entity"):
                         prop_path = name
                     path_existed = gl.node_exists(conn, prop_path)
                     _ensure_entity_node(conn, name, prop_path, "proposition", title_idx, alias_idx, t, key)
@@ -2318,9 +2328,10 @@ def add_knowledge_edges(
                     )
                     if keyword_id != name:
                         existing_title = conn.execute(
-                            "SELECT title FROM nodes WHERE path=?", (keyword_id,)
+                            "SELECT title,type FROM nodes WHERE path=?", (keyword_id,)
                         ).fetchone()
-                        if existing_title and existing_title[0] != name:
+                        if existing_title and (
+                                existing_title[0] != name or existing_title[1] != "entity"):
                             keyword_id = name
                     path_existed = gl.node_exists(conn, keyword_id)
                     _ensure_entity_node(conn, name, keyword_id, "keyword", title_idx, alias_idx, t, key)
@@ -2423,6 +2434,7 @@ def add_knowledge_edges(
                 else:
                     edge_id = exists["id"]
                 gl.add_edge_origin(conn, edge_id, page_path, page_source_note)
+                gl.add_node_origin(conn, other_kid, page_path, page_source_note)
     # proposition → concept 稀疏包含边（程序化、零 LLM）。候选只来自：
     # 1) 本页已确认概念及其确定性中英/缩写形态；2) 主图唯一精确 title/alias。
     # 未命中或歧义静默跳过，绝不从 proposition 片段创建 concept。
@@ -2451,6 +2463,7 @@ def add_knowledge_edges(
             else:
                 edge_id = exists["id"]
             gl.add_edge_origin(conn, edge_id, page_path, page_source_note)
+            gl.add_node_origin(conn, concept_path, page_path, page_source_note)
     descriptive_warns = _revisit_bare_abbreviations(
         descriptive_warns, conn, title_idx, alias_idx, suffix_idx)
     return IngestResult(added, len(skip_dedup), skipped_dup, resolve_hits, resolve_ambig, nodes_created, descriptive_warns)
@@ -2458,16 +2471,7 @@ def add_knowledge_edges(
 
 def is_person_reference(triple, role):
     """判断新建裸实体是否由人物关系指向，避免把所有 entity 当人物。"""
-    predicate = triple.get("predicate", "")
-    if predicate in {"指导", "师从", "受指导于"}:
-        return True  # 师生关系：主体和客体都是人
-    if predicate in {"第一作者", "作者", "通讯作者", "任职于", "所属"}:
-        return role == "subject"  # 主体是人，客体是论文/机构
-    if predicate in {"参会", "汇报", "待办"}:
-        return role == "subject"  # 主体是人，客体是会议/议题/任务
-    if predicate in {"负责人", "主讲人"}:
-        return role == "object"  # 文档/课程 → 人
-    return False
+    return kir.relation_endpoint_kind(triple.get("predicate", ""), role) == "person"
 
 
 def merge_nodes(conn, src_node, tgt_node):
@@ -2795,6 +2799,8 @@ def _route_paper_from_file(conn, page, page_file):
 
 
 def _cmd_ingest_locked(args):
+    if getattr(args, "metadata_only", False) and getattr(args, "clean", False):
+        raise ValueError("--metadata-only cannot be combined with --clean")
     page = args.page.removesuffix(".md")
     page_file = _page_file_for(args, page)
     fm = gl.read_frontmatter(page_file)
@@ -2802,6 +2808,15 @@ def _cmd_ingest_locked(args):
     for source in gl.parse_list_field(fm, "sources"):
         gl.validate_graph_target(gl.raw_node_path(source, page), _graph_db_path_for(args))
     raw_overrides = _staged_raw_overrides(args, fm)
+    page_validation = {"errors": [], "warnings": []}
+    if getattr(args, "validate_page", False):
+        page_errors, page_warnings = ingest_check.check_file(
+            page_file, *ingest_check.build_wiki_index(),
+            page_path=gl.REPO / f"{page}.md", raw_overrides=raw_overrides,
+        )
+        page_validation["warnings"].extend(page_warnings)
+        if page_errors:
+            raise PageValidationError("wiki", page_errors, page_warnings)
     direct_ir_path = getattr(args, "knowledge_ir", None)
     semantic_path = getattr(args, "semantic", None)
     legacy_inputs = [
@@ -2909,7 +2924,7 @@ def _cmd_ingest_locked(args):
     if merged:
         report["auto_merged"] = merged
 
-    if semantic_path or direct_ir is not None:
+    if semantic_path or direct_ir is not None or getattr(args, "metadata_only", False):
         # 预填+语义模式
         text = page_file.read_text(encoding="utf-8")
         nav = extract_section_text(text, "Navigation")
@@ -2943,7 +2958,8 @@ def _cmd_ingest_locked(args):
             }
             reject_protected_edge_proposals(sem_triples, page)
         else:
-            sem_text = Path(semantic_path).read_text(encoding="utf-8")
+            sem_text = (Path(semantic_path).read_text(encoding="utf-8")
+                        if semantic_path else "三元组:\n")
             sem_triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = parse_semantic_text(
                 sem_text, page, fm
             )
@@ -2993,7 +3009,7 @@ def _cmd_ingest_locked(args):
             t for t in mechanical
             if not (t["predicate"] == "作者" and t["subject"] in corresponding)
         ]
-        if _is_paper:
+        if _is_paper and not getattr(args, "metadata_only", False):
             scope_route = _route_paper_from_file(conn, page, page_file)
             report["hub_scope_route"] = scope_route
             if scope_route.get("decision") == "resolved":
@@ -3171,6 +3187,14 @@ def _cmd_ingest_locked(args):
                 "planned": len(knowledge_ir_doc["structural_relations"]),
                 "added": structural_added,
             }
+        if getattr(args, "validate_page", False):
+            page_errors, page_warnings = ingest_check.graph_checks(
+                page_file, connection=conn, page_path=gl.REPO / f"{page}.md",
+            )
+            page_validation["warnings"].extend(page_warnings)
+            if page_errors:
+                raise PageValidationError("graph", page_errors, page_validation["warnings"])
+            report["page_validation"] = page_validation
         if getattr(args, "plan_only", False):
             conn.rollback()
             report["plan_only"] = True
@@ -3319,11 +3343,15 @@ def main():
     p_g.add_argument("--page-file", help="暂存 Wiki 文件；只改变读取位置，不改变 --page 逻辑 ID")
     p_g.add_argument("--raw-source-override", help="暂存 Raw locator companion，映射 frontmatter 首个 source")
     p_g.add_argument("--plan-only", action="store_true", help="在 live graph 上生成并校验计划后回滚全部图变更")
+    p_g.add_argument("--validate-page", action="store_true",
+                     help="复用完整 ingest_check，在提交前检查暂存正文和本事务中的预期图；可与 --plan-only 合用")
     input_group = p_g.add_mutually_exclusive_group()
     input_group.add_argument("--triples", help="LLM 临时片段文件路径(JSON,兼容模式)")
     input_group.add_argument("--triples-json", help="LLM 临时 JSON 字符串(兼容模式)")
     input_group.add_argument("--semantic", help="LLM 填的语义槽文件(预填模式)")
     input_group.add_argument("--citations", help="引文 JSON(含 title),用于跨论文补全")
+    input_group.add_argument("--metadata-only", action="store_true",
+                             help="局部正文更新：复用既有语义边，只从 frontmatter 同步机械边；不与 --clean 合用")
     input_group.add_argument(
         "--knowledge-ir",
         help="semantic worker 输出的 knowledge-ir-v1 提案；程序重编译确定性字段",
@@ -3335,7 +3363,16 @@ def main():
     p_g.add_argument("--clean", action="store_true", help="re-ingest 模式:先删本页旧边再重建(原子)")
     p_g.set_defaults(func=cmd_ingest)
     args = ap.parse_args()
-    args.func(args)
+    if getattr(args, "metadata_only", False) and getattr(args, "clean", False):
+        ap.error("--metadata-only cannot be combined with --clean")
+    try:
+        args.func(args)
+    except PageValidationError as exc:
+        print(json.dumps({
+            "page": args.page, "committed": False,
+            "plan_only": bool(args.plan_only), "page_validation": exc.report,
+        }, ensure_ascii=False, indent=2))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -256,13 +256,14 @@ def extract_wikilinks(text):
     return out
 
 
-def check_file(path, rel_paths, basenames):
+def check_file(path, rel_paths, basenames, *, page_path=None, raw_overrides=None):
     errors = []
     warns = []
     try:
         text = Path(path).read_text(encoding="utf-8")
     except Exception as e:
         return [f"读取失败: {e}"], []
+    logical_path = page_path or path
 
     fm, raw_fm, body = parse_frontmatter(text)
     if fm is None:
@@ -288,17 +289,17 @@ def check_file(path, rel_paths, basenames):
             warns.append(f"frontmatter: 软必填字段缺失 '{k}'(模板列有,非阻断)")
 
     # --- 枚举值 ---
-    type_enum = type_enum_for(path)
+    type_enum = type_enum_for(logical_path)
     if "type" in fm and fm["type"] not in type_enum:
-        dom = domain_of(path) or "未知"
+        dom = domain_of(logical_path) or "未知"
         errors.append(f"frontmatter: type 非法值 '{fm['type']}',合法: {sorted(type_enum)} (域: {dom})")
     if "source_type" in fm and fm["source_type"] not in SOURCE_TYPE_ENUM:
         errors.append(f"frontmatter: source_type 非法值 '{fm['source_type']}',合法: {sorted(SOURCE_TYPE_ENUM)}")
     if "confidence" in fm and fm["confidence"] not in CONFIDENCE_ENUM:
         errors.append(f"frontmatter: confidence 非法值 '{fm['confidence']}',合法: {sorted(CONFIDENCE_ENUM)}")
-    status_enum = status_enum_for(path)
+    status_enum = status_enum_for(logical_path)
     if "status" in fm and fm["status"] not in status_enum:
-        errors.append(f"frontmatter: status 非法值 '{fm['status']}',合法: {sorted(status_enum)} (域: {domain_of(path) or '未知'})")
+        errors.append(f"frontmatter: status 非法值 '{fm['status']}',合法: {sorted(status_enum)} (域: {domain_of(logical_path) or '未知'})")
     date_status = fm.get("date_status")
     if date_status not in (None, "unknown"):
         errors.append(f"frontmatter: date_status 非法值 '{date_status}'，合法: unknown")
@@ -357,8 +358,9 @@ def check_file(path, rel_paths, basenames):
         is_temp_draft = Path(path).resolve().is_relative_to((REPO / "temp").resolve())
     except Exception:
         is_temp_draft = False
-    if "[^" in text and not is_temp_draft:
-        errors.extend(f"wiki-locator: {error}" for error in wl.validate_wiki_page(path))
+    if "[^" in text and (not is_temp_draft or page_path is not None):
+        errors.extend(f"wiki-locator: {error}" for error in wl.validate_wiki_page(
+            path, raw_overrides=raw_overrides, base_path=logical_path))
 
     created = fm.get("created", "")
     created_str = str(created)
@@ -396,23 +398,25 @@ def check_file(path, rel_paths, basenames):
         path_part = ss.split("#", 1)[0]
         if not path_part:
             continue
-        dom = domain_of(str(path))
+        dom = domain_of(str(logical_path))
         candidates = [REPO / dom / path_part] if dom else []
         candidates.append(REPO / path_part)
-        if not any(c.exists() for c in candidates):
+        if not any(c.exists() for c in candidates) and not (
+                raw_overrides and path_part in raw_overrides
+                and Path(raw_overrides[path_part]).is_file()):
             warns.append(f"sources: 内部路径不存在 '{ss}'")
 
     # --- 裸缩写 keyword 检查(缩写须在括号内,格式「中文英文(缩写)」) ---
     warns.extend(check_bare_abbreviation(fm))
 
     # --- 论文书目近端证据一致性（确定性冲突为 ERROR）---
-    errors.extend(check_bibliographic_consistency(path, fm))
+    errors.extend(check_bibliographic_consistency(logical_path, fm))
 
     # --- 覆盖度锚点检查(v6,2026-07-27,轻量grep非全读LLM) ---
-    warns.extend(check_coverage_anchors(path, fm, body))
+    warns.extend(check_coverage_anchors(logical_path, fm, body))
 
     # --- 提取引擎检查(v8,2026-07-30,非 mineru 提取的 raw 给 WARN) ---
-    warns.extend(check_extract_engine(path, fm))
+    warns.extend(check_extract_engine(logical_path, fm))
 
     return errors, warns
 
@@ -667,7 +671,7 @@ def check_coverage_anchors(path, fm, body):
 
 def check_extract_engine(path, fm):
     """检查 raw 全文 md 的提取引擎(v8,2026-07-30)。
-    若 parse_meta.yaml 的 preferred 非 mineru → WARN(mineru 质量最高,见 extractor ENGINE_PRIORITY)。
+    非 MinerU 且无受认可 PaddleOCR 官网完整解析溯源 → WARN。
     无 parse_meta.yaml 的 source 不触发(非 PDF 提取场景:会议纪要/docx/web 等)。
     """
     warns = []
@@ -703,7 +707,10 @@ def check_extract_engine(path, fm):
         except Exception:
             continue
         preferred = (meta or {}).get('preferred')
-        if preferred and preferred != 'mineru':
+        from paddleocr_api import is_official_paddleocr_record
+        approved_paddleocr = preferred == 'paddleocr' and is_official_paddleocr_record(
+            ((meta or {}).get('engines') or {}).get('paddleocr') or {})
+        if preferred and preferred != 'mineru' and not approved_paddleocr:
             warns.append(f"引擎: raw 全文 md 由 '{preferred}' 生成(非 mineru),建议用 mineru 重提取保证质量: {meta_path.relative_to(REPO)}")
     return warns
 
@@ -725,11 +732,11 @@ def extract_section_body(non_code_lines, name):
     return "\n".join(out)
 
 
-def graph_checks(path, connection=None):
+def graph_checks(path, connection=None, *, page_path=None):
     """校验本页是否已入图，并做 paper 的确定性跨层一致性检查。"""
     import sqlite3
     try:
-        rel = Path(path).resolve().relative_to(REPO).with_suffix("").as_posix()
+        rel = Path(page_path or path).resolve().relative_to(REPO).with_suffix("").as_posix()
     except ValueError:
         return ["graph: 页面不在仓库内，无法定位节点"], []
     # 按 db 选择:private 物理隔离,用 private/graph.db;其余用主库 cross-domain/graph.db
@@ -738,7 +745,7 @@ def graph_checks(path, connection=None):
         db_path = REPO / "private" / "graph.db"
     else:
         db_path = REPO / "cross-domain" / "graph.db"
-    if not db_path.exists():
+    if connection is None and not db_path.exists():
         return ["graph: graph.db 不存在"], []
     conn = connection if connection is not None else sqlite3.connect(db_path)
     try:

@@ -13,7 +13,7 @@
   neighbors <node> [--depth N]      关联召回 BFS(默认 2 跳,按 confidence 排序)
   relations <node> [--predicate P]  某节点的关系边(可按谓词过滤)
   hub_of <page>                     查某页属于哪个 Hub(沿语义边反向)
-  search <keyword> [--granularity G]  按关键词查节点(title/keywords/aliases)
+  search <keyword> [--granularity G]  按字面关键词查节点(title/path/aliases)，完整匹配优先
                                     granularity: keyword=导航聚合, proposition=精确推理
   path_exists <from> <to>           两节点是否连通(辅助验证)
   temporal --at DATE [--subject S] [--object O] [--predicate P]
@@ -21,7 +21,7 @@
 
 选项:
   --json          输出 JSON(默认人类可读文本)
-  --top-k N       限制返回边数(默认不限;预算压力下用)
+  --top-k N       限制返回边数；search 限制节点数(1–50，默认50)
   --similar-topk N 每节点相似边上限(动态K;0=排除第一轮,-1=全部,默认5)
   --include-hub   neighbors 含 Hub 节点(默认排除,省 token;显式查才返回)
   --granularity   search 按颗粒度过滤(keyword/proposition;对应查询意图)
@@ -309,34 +309,47 @@ def hub_of(conn, page):
     return {"page": page, "hubs": hubs}
 
 
-def search_nodes(conn, keyword, granularity=None):
-    """按关键词查节点(title/aliases/path 匹配,主数据化 v4:aliases 独立表)。
+def search_nodes(conn, keyword, granularity=None, top_k=None):
+    """按字面关键词查节点；完整匹配、前缀、子串在截断前排序。
 
     granularity: 按颗粒度过滤(对应查询意图)。
       - keyword  : 只返回概念节点(导航聚合类查询:哪些文献涉及某主题)
       - proposition : 只返回论断节点(精确推理类查询:谁验证/反对某 claim)
       - None : 不过滤(默认,返回所有颗粒度)
     """
-    kw = f"%{keyword}%"
+    limit = 50 if top_k is None else max(1, min(int(top_k), 50))
+    literal = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    kw = f"%{literal}%"
+    prefix = f"{literal}%"
     query = (
-        "SELECT DISTINCT n.path, n.title, n.type, n.status, n.entity_subtype "
+        "SELECT n.path, n.title, n.type, n.status, n.entity_subtype, "
+        "MIN(CASE "
+        "WHEN n.title = ? COLLATE NOCASE OR n.path = ? COLLATE NOCASE "
+        "OR a.alias = ? COLLATE NOCASE THEN 0 "
+        "WHEN n.title LIKE ? ESCAPE '\\' OR n.path LIKE ? ESCAPE '\\' "
+        "OR a.alias LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END) AS match_priority "
         "FROM nodes n "
         "LEFT JOIN aliases a ON a.node_path = n.path "
-        "WHERE (n.title LIKE ? OR n.path LIKE ? OR a.alias LIKE ?) "
+        "WHERE (n.title LIKE ? ESCAPE '\\' OR n.path LIKE ? ESCAPE '\\' "
+        "OR a.alias LIKE ? ESCAPE '\\') "
     )
-    params = [kw, kw, kw]
+    params = [keyword, keyword, keyword, prefix, prefix, prefix, kw, kw, kw]
     if granularity:
         query += "AND n.entity_subtype = ? "
         params.append(granularity)
-    query += "LIMIT 50"
+    query += "GROUP BY n.path ORDER BY match_priority, n.path LIMIT ?"
+    params.append(limit + 1)
     rows = conn.execute(query, params).fetchall()
     results = []
-    for r in rows:
+    for r in rows[:limit]:
         results.append({
             "path": r["path"], "title": r["title"], "type": r["type"],
             "status": r["status"], "granularity": r["entity_subtype"] or "unspecified",
         })
-    return {"keyword": keyword, "granularity": granularity, "count": len(results), "nodes": results}
+    return {
+        "keyword": keyword, "granularity": granularity, "count": len(results),
+        "limit": limit, "truncated": len(rows) > limit, "nodes": results,
+    }
 
 
 def path_exists(conn, frm, to):
@@ -422,9 +435,13 @@ def fmt_text(result, cmd):
             )
         return "\n".join(lines)
     if cmd == "search":
-        lines = [f"搜索 '{result['keyword']}': 命中 {result['count']} 个节点"]
+        count = result["count"]
+        summary = f"返回前 {count} 个节点（仍有更多匹配）" if result.get("truncated") else f"命中 {count} 个节点"
+        lines = [f"搜索 '{result['keyword']}': {summary}"]
         for n in result["nodes"][:20]:
             lines.append(f"  - {n['title']} [{n['type']}] {n['path']} ({n['status']})")
+        if count > 20:
+            lines.append(f"  当前展示前 20 个；--json 可查看本次返回的全部 {count} 个节点。")
         return "\n".join(lines)
     if cmd == "path_exists":
         return f"{result['from']} → {result['to']}: {'连通' if result['connected'] else '不连通'}"
@@ -483,7 +500,7 @@ def main():
     elif args.cmd == "hub_of":
         result = hub_of(conn, args.args[0])
     elif args.cmd == "search":
-        result = search_nodes(conn, args.args[0], args.granularity)
+        result = search_nodes(conn, args.args[0], args.granularity, args.top_k)
     elif args.cmd == "path_exists":
         result = path_exists(conn, args.args[0], args.args[1])
     elif args.cmd == "temporal":

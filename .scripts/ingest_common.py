@@ -12,6 +12,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1217,13 +1218,13 @@ def progress(*args, **kwargs) -> None:
 # ===== 子进程封装 =====
 
 def run(command: list[str], REPO: Path) -> str:
-    """运行子进程，失败抛 RuntimeError。stdout/stderr 实时打印，返回 stdout。"""
+    """运行子进程，stdout 遵循进度通道，stderr 保持可见，失败抛 RuntimeError。"""
     return run_tracked(command, REPO)
 
 
 def run_tracked(command: list[str], REPO: Path, state: dict | None = None,
                 label: str | None = None) -> str:
-    """运行子进程，失败抛 RuntimeError。stdout/stderr 实时打印，返回 stdout。
+    """运行子进程，stdout 遵循进度通道，stderr 保持可见，返回完整 stdout。
 
     P0 遥测：传入 state+label 时记录 returncode/duration，便于事后定位
     「子进程退出码被静默吞掉」的问题。"""
@@ -1231,7 +1232,7 @@ def run_tracked(command: list[str], REPO: Path, state: dict | None = None,
     result = subprocess.run(command, cwd=REPO, text=True, capture_output=True)
     duration_ms = int((time.monotonic() - start) * 1000)
     if result.stdout:
-        print(result.stdout, end="")
+        progress(result.stdout, end="")
     if result.stderr:
         print(result.stderr, end="", file=sys.stderr)
     if state is not None and label:
@@ -1829,12 +1830,14 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
     repo = Path(state.get("repo") or state.get("repo_path") or Path(__file__).resolve().parents[1])
     inbox = repo / "inbox"
     from inbox_plan import fact_entries
+    from inbox_source_policy import is_retained
     skip_files = {".gitkeep", ".DS_Store"}
     pending = [
         path for path in inbox.iterdir()
         if (path.is_file()
             and path.name not in skip_files
             and not path.name.startswith(".")
+            and not is_retained(repo, path)
             and (path.name != "facts-pending.md" or fact_entries(path) > 0))
     ] if inbox.is_dir() else []
     parent_batch = _reconcile_parent_batch_report(repo, state)
@@ -2110,7 +2113,7 @@ def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str
         build_entry: (ctx) -> str | None — 自定义 index 条目；None 则用默认格式
         skip_index: bool — True 时跳过 index.md 追加（re-ingest 等已有索引场景）
         frontier_capture: bool — 论文成功后限量捕获作者明示开放问题；失败仅 warning
-        frontier_answer: bool — 捕获后在当前 WikiGraph 内非阻断尝试回答；默认 True
+        frontier_answer: bool — API 捕获后非阻断尝试回答；Agent 始终由宿主按需回答
         fingerprint_artifact: (state, REPO) -> {source_path,text_path,source_kind}
     """
     import graph_lib as gl
@@ -2201,17 +2204,32 @@ def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str
     # 5. Frontier 候选捕获：独立于 ingest 事务，只抓作者明示问题/局限/future work。
     # 失败不得让事实摄入回滚或失败。
     if config.get("frontier_capture") and wiki_page:
+        backend = str(
+            (state.get("agent_workspace") or {}).get("execution_backend")
+            or state.get("semantic_backend") or agent_task.ingest_backend()
+        )
         cmd = [sys.executable, str(REPO / ".scripts/frontier.py"),
                "capture-paper", wiki_page, "--limit", str(config.get("frontier_capture_limit", 3))]
-        if not config.get("frontier_answer", True):
+        if state.get("transaction_id"):
+            cmd.extend(["--transaction-id", state["transaction_id"]])
+        if backend == "agent" or not config.get("frontier_answer", True):
             cmd.append("--no-answer")
         started = time.monotonic()
-        result = subprocess.run(cmd, cwd=REPO, text=True, capture_output=True)
+        result = subprocess.run(
+            cmd, cwd=REPO, text=True, capture_output=True,
+            env={**os.environ, "QUERY_BACKEND": backend},
+        )
         record_subprocess(state, "frontier_capture", cmd, result.returncode,
                           int((time.monotonic() - started) * 1000))
         if result.returncode == 0:
             try:
-                state["frontier_capture"] = json.loads(result.stdout)
+                state["frontier_capture"] = {
+                    **json.loads(result.stdout), "backend": backend,
+                    "answer_policy": (
+                        "host_agent" if backend == "agent" else
+                        "api" if config.get("frontier_answer", True) else "disabled"
+                    ),
+                }
             except json.JSONDecodeError:
                 state["frontier_capture"] = {"status": "degraded", "error": "非 JSON 输出"}
         else:

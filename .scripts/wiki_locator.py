@@ -93,6 +93,37 @@ def _frontmatter_end(lines: list[str]) -> int:
     return 0
 
 
+def normalize_raw_footnote_locator(value: str) -> str:
+    """Unwrap one unambiguous Markdown wrapper without changing the address.
+
+    Aliases, nested wrappers, inline commentary and non-Raw links stay untouched
+    so the ordinary evidence validator can reject them. This is not resolution.
+    """
+    locator = value.strip()
+    for opening, closing in (("[[", "]]"), ("`", "`"), ("<", ">")):
+        if not (locator.startswith(opening) and locator.endswith(closing)):
+            continue
+        inner = locator[len(opening):-len(closing)].strip()
+        path, fragment = raw_locator.split_locator(inner)
+        if (path and "/raw/" in f"/{path}" and fragment
+                and not any(char in inner for char in "`[]<>|\r\n")):
+            return inner
+        break
+    return locator
+
+
+def normalize_raw_footnotes(text: str) -> str:
+    """Canonicalize only footnote definitions; leave prose and IDs unchanged."""
+    def replace(match):
+        value = match.group("locator")
+        normalized = normalize_raw_footnote_locator(value)
+        if normalized == value.strip():
+            return match.group(0)
+        return f"[^{match.group('id')}]: {normalized}"
+
+    return re.sub(FOOTNOTE_DEF_RE.pattern, replace, text, flags=re.M)
+
+
 def _footnote_definitions(lines: list[str]) -> tuple[dict[str, str], list[str]]:
     definitions: dict[str, str] = {}
     duplicates: list[str] = []
@@ -104,10 +135,7 @@ def _footnote_definitions(lines: list[str]) -> tuple[dict[str, str], list[str]]:
         if footnote_id in definitions:
             duplicates.append(footnote_id)
         else:
-            locator = match.group("locator").strip()
-            if locator.startswith("<") and locator.endswith(">"):
-                locator = locator[1:-1].strip()
-            definitions[footnote_id] = locator
+            definitions[footnote_id] = normalize_raw_footnote_locator(match.group("locator"))
     return definitions, duplicates
 
 
@@ -192,7 +220,8 @@ def read_wiki_locator(value: str, section: str = "") -> dict:
 
 
 def validate_wiki_page(path: Path | str, *, require_citations: bool = False,
-                       raw_overrides: dict[str, Path | str] | None = None) -> list[str]:
+                       raw_overrides: dict[str, Path | str] | None = None,
+                       base_path: Path | str | None = None) -> list[str]:
     """Run the closed-loop checks required by the Wiki→Raw locator contract."""
     target = Path(path)
     text = target.read_text(encoding="utf-8", errors="replace")
@@ -236,7 +265,7 @@ def validate_wiki_page(path: Path | str, *, require_citations: bool = False,
         if not raw_path or "/raw/" not in f"/{raw_path}" or not fragment or fragment == "全篇":
             errors.append(f"脚注 [^{footnote_id}] 不是精确 Raw locator: {locator or '<empty>'}")
             continue
-        resolved = overrides.get(raw_path) or raw_locator.resolve_path(raw_path, target)
+        resolved = overrides.get(raw_path) or raw_locator.resolve_path(raw_path, base_path or target)
         if resolved is None or not Path(resolved).is_file():
             errors.append(f"脚注 [^{footnote_id}] Raw 路径不存在: {raw_path}")
             continue

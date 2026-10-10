@@ -45,7 +45,7 @@
 
 紧凑回执保留质量告警总数和最多 5 条 issue/detail 摘要（每字段最多 240 字符）；先据此定位降级原因，只有摘要不足时再按报告字段定向读取完整诊断。
 
-首次摄入与直接 resume 使用共享报告发布入口，把维护回执及报告地址关联到本批所有已完成事务。历史报告缺少关联时运行 `python3 .scripts/ingest_inbox.py --reconcile-maintenance-report cross-domain/ingest-reports/<report>.json`：仅重建指定报告的关联、重放已有方向裁决并同步回执，不重新摄入、不调用模型、不写 Raw 或图。独立质量告警和其他待审动作继续保留。
+首次摄入与直接 resume 使用共享报告发布入口，把维护回执及报告地址关联到本批所有已完成事务。历史报告缺少关联，或 Hub 分裂成功后回执尚未闭合时，运行 `python3 .scripts/ingest_inbox.py --reconcile-maintenance-report cross-domain/ingest-reports/<report>.json`：仅重建指定报告的关联、重放已有方向裁决，并只读核验分裂父 Hub 的 canonical 直接子 Hub、既有 split Scope history 与原候选成员迁移。每个原簇须完整迁入不同子 Hub，且不再保留父 membership，才标记对应 handoff 已应用并更新 split_count；已有子 Hub、手写 resolution 或数量变化本身不能证明完成。不重新摄入、不调用模型、不写 Raw 或图。独立质量告警和其他待审动作继续保留，缺图或无可验证候选时保留待审。
 
 维护语义以共享回执为准，事务仅持有同步快照。发布先在报告写 `maintenance.publication.status=pending` 检查点，再同步本批事务，最后标为 `completed`；方向闭环同步全部关联事务而非仅当前论文。I/O 失败单独返回 `maintenance.status=error`、`publication`、`retryable` 与 `next_action`，文件 `completed` 和失败计数不变。已落检查点可用上述 reconcile 命令继续，直接 resume 遇到 publication pending/error 也只重试发布，不重跑全局维护；检查点尚未落盘时明确返回 `report_persisted=false`，须先恢复报告持久化条件，不假称存在可恢复报告。
 

@@ -7,6 +7,36 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-10
+
+### Version decision / 版本判断
+
+- MINOR: Add backward-compatible opt-in PDF extraction recovery, evidence-scoped Frontier answer history, and post-split Hub maintenance reconciliation
+- MINOR（中文）：新增向后兼容的显式授权 PDF 提取恢复、按证据范围记录的 Frontier 回答历史与 Hub 分裂后维护对账
+
+### Highlights
+
+- Added an opt-in official PaddleOCR document-parsing fallback for public PDFs,
+  with per-run upload authorization, resumable jobs, bounded network transfers,
+  and retained extraction provenance; private material cannot use this backend.
+- Added evidence-scoped Frontier answer history and refresh comparison, with
+  source-first retrieval and exact Raw excerpts. Reference lists and ordinary
+  expectations no longer masquerade as author-proposed future research.
+- Closed post-split Hub maintenance handoffs through read-only membership and
+  Scope-history reconciliation, preserving unrelated review actions and warnings.
+- Hardened ingestion and navigation around source-bound paper evidence,
+  incompatible graph-node identities, temporal provenance, and failure recovery.
+
+### 主要更新
+
+- 新增面向公开 PDF、显式启用的 PaddleOCR 官网文档解析回退，要求逐次上传授权，
+  支持任务恢复、有界网络传输和提取来源记录；private 材料禁止使用该后端。
+- 新增按证据范围记录的 Frontier 回答历史与刷新比较，优先读取问题来源并使用
+  精确 Raw 摘录；过滤参考文献和普通预期，减少将它们误判为作者未来研究的情况。
+- 通过只读核验成员迁移与 Scope 历史，闭合 Hub 分裂后的维护交接，同时保留其他
+  待审动作和独立质量告警。
+- 强化摄入与导航中的论文来源证据、不兼容图节点身份、时间来源及失败恢复边界。
+
 ## [0.13.0] - 2026-10-07
 
 ### Version decision / 版本判断
@@ -383,5 +413,7 @@ manifests and checksums.
 
 [0.12.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.12.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.13.0...HEAD
 [0.13.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.13.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.14.0

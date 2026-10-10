@@ -136,6 +136,7 @@ def test_resume_after_download_failure_does_not_resubmit_remote_job():
             return "batch-1", "https://upload.invalid/one"
 
         def upload(*args, **kwargs):
+            assert args[2] == 7
             del args, kwargs
             calls["upload"] += 1
 
@@ -145,6 +146,7 @@ def test_resume_after_download_failure_does_not_resubmit_remote_job():
             return {"state": "done", "full_zip_url": "https://download.invalid/one"}
 
         def download(url, destination, timeout, **kwargs):
+            assert timeout == 7
             del url, timeout, kwargs
             calls["download"] += 1
             if calls["download"] == 1:
@@ -159,12 +161,12 @@ def test_resume_after_download_failure_does_not_resubmit_remote_job():
         )
         with patches[0], patches[1], patches[2], patches[3]:
             try:
-                mineru_api.extract_pdf_bundle_with_mineru(pdf, "token", work_dir=work)
+                mineru_api.extract_pdf_bundle_with_mineru(pdf, "token", work_dir=work, transfer_timeout_sec=7)
             except mineru_api.MinerUTransientError:
                 pass
             else:
                 raise AssertionError("first download must fail")
-            result = mineru_api.extract_pdf_bundle_with_mineru(pdf, "token", work_dir=work)
+            result = mineru_api.extract_pdf_bundle_with_mineru(pdf, "token", work_dir=work, transfer_timeout_sec=7)
 
         assert calls == {"reserve": 1, "upload": 1, "poll": 1, "download": 2}
         assert result.meta["batch_id"] == "batch-1"

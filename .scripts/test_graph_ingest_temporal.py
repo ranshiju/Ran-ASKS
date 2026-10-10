@@ -10,9 +10,11 @@ from argparse import Namespace
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import graph_lib as gl
+import graph_validate as gv
 
 SCRIPT = Path(__file__).with_name("graph_ingest.py")
 spec = importlib.util.spec_from_file_location("graph_ingest_temporal", SCRIPT)
@@ -279,6 +281,8 @@ def test_clean_page_edges_only_collects_unowned_managed_nodes():
     assert first["managed_nodes_removed"] == 0
     assert conn.execute("SELECT 1 FROM nodes WHERE path='shared'").fetchone()
     assert conn.execute("SELECT 1 FROM nodes WHERE path='historical'").fetchone()
+    assert not gv.validate_graph(conn, gv.load_config())["errors"]
+    assert conn.execute("SELECT created_origin_page FROM managed_nodes WHERE node_path='shared'").fetchone()[0] == page_a
 
     second = module.clean_page_edges(conn, page_b)
     assert second["managed_nodes_removed"] == 1
@@ -384,6 +388,125 @@ def test_cmd_ingest_writes_temporal_fact_end_to_end():
             hub_split.check_all_hubs = old_check
             sync_keyword_aliases.resolve_abbreviation_todo = old_resolve
             gl.REPO, gl.GRAPH_DB = old_repo, old_db
+
+
+def test_staged_page_preflight_checks_future_graph_and_rolls_back():
+    """Catch missing author edges before commit, using the staged page identity."""
+    import sync_keyword_aliases
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory).resolve()
+        page = "academic/wiki/papers/demo"
+        original = repo / f"{page}.md"
+        draft = repo / "temp/update/wiki.md"
+        raw = repo / "academic/raw/references/demo/paper.md"
+        db = repo / "cross-domain/graph.db"
+        for path in (original, draft, raw, db):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        raw.write_text("# Demo\n\nAlice Example\n\nSupported fact.\n", encoding="utf-8")
+        text = (
+            "---\ntitle: Demo\ntype: paper-summary\nauthors: [Alice Example]\n"
+            "sources: [academic/raw/references/demo/paper.md]\n"
+            "source_type: official-doc\ndate: 2026\nstatus: current\nconfidence: high\n"
+            "created: 2026-10-01\nupdated: 2026-10-09\n---\n# Demo\n"
+            "## Navigation\n\n## Content\nSupported fact.[^r1]\n"
+            "## Sources\n[^r1]: academic/raw/references/demo/paper.md#L5\n"
+        )
+        original.write_text(text, encoding="utf-8")
+        draft.write_text(text, encoding="utf-8")
+        with (patch.object(gl, "REPO", repo), patch.object(gl, "GRAPH_DB", db),
+              patch.object(module.ingest_check, "REPO", repo),
+              patch.object(module.wl, "REPO", repo),
+              patch.object(module.wl.raw_locator, "REPO", repo),
+              patch.object(module, "_route_paper_from_file", return_value={}),
+              patch.object(module.hs, "refresh_after_ingest", return_value={}),
+              patch.object(sync_keyword_aliases, "sync", return_value=(0, 0, 0)),
+              patch.object(sync_keyword_aliases, "resolve_abbreviation_todo", return_value=([], 0))):
+            conn = gl.connect(str(db))
+            gl.init_schema(conn)
+            gl.ensure_node(conn, page, "Demo", "page")
+            gl.ensure_node(conn, "existing-concept", "Existing concept", "entity")
+            conn.execute("INSERT INTO edges(subject,predicate,object) VALUES (?,?,?)",
+                         (page, "研究基础", "existing-concept"))
+            conn.commit()
+            before = list(conn.iterdump())
+            args = Namespace(page=page, page_file=str(draft), db=str(db), clean=False,
+                             semantic=None, citations=None, triples=None, triples_json="[]",
+                             plan_only=True, validate_page=True, metadata_only=False)
+            # Direct empty triples leave the old missing author uncorrected. The
+            # prospective graph gate must reject and roll back Raw/node updates.
+            for plan_only in (True, False):
+                args.plan_only = plan_only
+                try:
+                    with redirect_stdout(StringIO()):
+                        module.cmd_ingest(args)
+                    assert False, "missing author must fail before commit"
+                except module.PageValidationError as exc:
+                    assert exc.report["stage"] == "graph"
+                    assert any("作者集合" in error for error in exc.report["errors"])
+                assert list(conn.iterdump()) == before
+            args.plan_only = True
+            args.triples_json = None
+            args.metadata_only = True
+            output = StringIO()
+            with redirect_stdout(output):
+                module.cmd_ingest(args)
+            report = json.loads(output.getvalue())
+            assert report["plan_only"] and not report["committed"]
+            assert not report["page_validation"]["errors"]
+            assert list(conn.iterdump()) == before
+            assert original.read_text(encoding="utf-8") == text
+            # Temp location must not bypass locator validation or domain enums.
+            draft.write_text(text.replace("#L5", "#L500").replace("status: current", "status: archived"),
+                             encoding="utf-8")
+            try:
+                module.cmd_ingest(args)
+                assert False, "invalid staged page must fail"
+            except module.PageValidationError as exc:
+                assert exc.report["stage"] == "wiki"
+                assert any("locator 不存在" in error for error in exc.report["errors"])
+                assert any("status 非法" in error for error in exc.report["errors"])
+            assert list(conn.iterdump()) == before
+            draft.write_text(text, encoding="utf-8")
+            args.plan_only = False
+            with redirect_stdout(StringIO()):
+                module.cmd_ingest(args)
+            assert not module.ingest_check.graph_checks(original, connection=conn)[0]
+            assert conn.execute("SELECT 1 FROM edges WHERE subject=? AND object='existing-concept'",
+                                (page,)).fetchone()
+            args.clean = True
+            try:
+                module.cmd_ingest(args)
+                assert False, "metadata update cannot erase semantic edges"
+            except ValueError as exc:
+                assert "--clean" in str(exc)
+            conn.close()
+
+
+def test_derived_concept_use_records_origin_and_survives_creator_cleanup():
+    conn = make_db()
+    page_a, page_b = "academic/wiki/papers/a", "academic/wiki/papers/b"
+    for page in (page_a, page_b):
+        add_node(conn, page, "page")
+    gl.ensure_node(conn, "shared", "Shared", "entity", entity_subtype="keyword")
+    gl.add_node_origin(conn, "shared", page_a, "raw/a#L1", managed=True)
+    # Page B uses Shared only through generated containment, not an input endpoint.
+    mention = "Shared仍需验证"
+    triples = [{"subject": page_b, "predicate": "局限性", "object": mention}]
+    plan = {"decisions": [{"mention": mention, "action": "create_local", "target": mention}]}
+    module.add_knowledge_edges(conn, page_b, triples, attach_plan=plan)
+    assert conn.execute("SELECT 1 FROM node_origins WHERE node_path='shared' AND origin_page=?", (page_b,)).fetchone()
+    # Reusing the derived edge must register its endpoint too, without duplication.
+    conn.execute("DELETE FROM node_origins WHERE node_path='shared' AND origin_page=?", (page_b,))
+    module.add_knowledge_edges(conn, page_b, triples, attach_plan=plan)
+    assert conn.execute("SELECT COUNT(*) FROM edges WHERE predicate='包含' AND object='shared'").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM node_origins WHERE node_path='shared' AND origin_page=?", (page_b,)).fetchone()[0] == 1
+    module.clean_page_edges(conn, page_a)
+    assert gl.node_exists(conn, "shared")
+    assert not gv.validate_graph(conn, gv.load_config())["errors"]
+    module.clean_page_edges(conn, page_b)
+    assert not gl.node_exists(conn, "shared")
+    assert not conn.execute("PRAGMA foreign_key_check").fetchall()
+    conn.close()
 
 
 def main():

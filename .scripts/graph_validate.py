@@ -41,7 +41,7 @@ DEFAULTS = {
     "version": 5,
     "node_types": ["page", "people", "entity", "hub", "raw", "timeline-summary"],
     "entity_subtypes": [
-        "keyword", "person", "proposition", "institution",
+        "keyword", "person", "proposition", "task", "institution",
         "venue", "citation-only",
     ],
     "edge_confidence": {
@@ -332,13 +332,13 @@ def validate_graph(conn, config: dict) -> dict:
                 _add(findings, "error", "invalid_managed_node_type",
                      f"managed_node 不是 entity: {row['node_path']}", row)
         if not conn.execute(
-            "SELECT 1 FROM node_origins WHERE node_path=? AND origin_page=? LIMIT 1",
-            (row["node_path"], row["created_origin_page"]),
+            "SELECT 1 FROM node_origins WHERE node_path=? LIMIT 1",
+            (row["node_path"],),
         ).fetchone():
             type_counts["managed_node_missing_origin"] += 1
             if len(findings["errors"]) < sample_limit:
                 _add(findings, "error", "managed_node_missing_origin",
-                     f"managed_node 缺少创建页 origin: {row['node_path']}", row)
+                     f"managed_node 缺少当前使用页 origin: {row['node_path']}", row)
 
     duplicate_rows = conn.execute(
         "SELECT subject, predicate, object, COALESCE(confidence,'') AS confidence, COUNT(*) AS n "

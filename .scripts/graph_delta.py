@@ -238,14 +238,19 @@ def _mention_context(delta: GraphDelta, mention: str) -> str:
     return "；".join(lines[:4])
 
 
-def _mention_node_types(delta: GraphDelta, mention: str) -> list[str] | None:
-    """普通知识端点默认是 entity；纯引用标题保留 page/entity 双类型解析。"""
+def _mention_node_types(delta: GraphDelta, mention: str) -> list[str]:
+    """概念默认是 entity；引用允许 page/entity，人物另允许 people。"""
     related = [
         edge for edge in knowledge_edges(delta)
         if mention in (edge.get("subject"), edge.get("object"))
     ]
     if related and all(edge.get("predicate") == "引用" for edge in related):
-        return None
+        return ["page", "entity"]
+    if related and all(
+            kir.relation_endpoint_kind(edge.get("predicate", ""), role) == "person"
+            for edge in related for role in ("subject", "object")
+            if edge.get(role) == mention):
+        return ["people", "page", "entity"]
     return ["entity"]
 
 
@@ -412,12 +417,20 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
                 })
                 new_nodes.append(mention)
             continue
-        candidates = _exact_candidates(mention, title_idx, alias_idx, suffix_idx)
+        node_types = _mention_node_types(delta, mention)
+        candidate_rows = {
+            candidate: conn.execute(
+                "SELECT title,type FROM nodes WHERE path=?", (candidate,)
+            ).fetchone()
+            for candidate in _exact_candidates(mention, title_idx, alias_idx, suffix_idx)
+        }
+        candidates = [
+            candidate for candidate, row in candidate_rows.items()
+            if row is not None and row["type"] in node_types
+        ]
         if len(candidates) == 1:
             resolved = candidates[0]
-            row = conn.execute(
-                "SELECT title FROM nodes WHERE path=?", (resolved,)
-            ).fetchone()
+            row = candidate_rows[resolved]
             resolved_title = str(row[0] or resolved) if row else resolved
             if resolved != mention and ns.is_identity_distinct(
                     conn, mention, resolved_title):
@@ -440,7 +453,7 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
         elif len(candidates) > 1:
             resolution = ns.resolve_node(
                 conn, mention, _mention_context(delta, mention),
-                node_types=_mention_node_types(delta, mention), top_k=5
+                node_types=node_types, top_k=5
             )
             if resolution.get("decision") == "resolved":
                 target = resolution["node_id"]
@@ -465,7 +478,7 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
         else:
             resolution = ns.resolve_node(
                 conn, mention, _mention_context(delta, mention),
-                node_types=_mention_node_types(delta, mention), top_k=5
+                node_types=node_types, top_k=5
             )
             if resolution.get("decision") == "resolved":
                 target = resolution["node_id"]
@@ -500,6 +513,27 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
                     "reason": resolution.get("reason", "no_identity_candidate"),
                 })
                 new_nodes.append(mention)
+    # Local creation must not reuse or retype an occupied non-entity ID, even
+    # when the ID is absent from the name indexes or identity is kept distinct.
+    blocked_local = set()
+    for item in decisions:
+        if item["action"] not in {
+                "create_local", "keep_local_ambiguous", "create_local_proposition"}:
+            continue
+        mention = item["mention"]
+        row = conn.execute("SELECT type FROM nodes WHERE path=?", (mention,)).fetchone()
+        if row is not None and row["type"] != "entity":
+            blocked_local.add(mention)
+            item.clear()
+            item.update({
+                "mention": mention,
+                "action": "abstain_incompatible_type",
+                "candidates": [mention],
+                "candidate_count": 1,
+                "reason": "surface_path_has_incompatible_node_type",
+            })
+    new_nodes = [mention for mention in new_nodes if mention not in blocked_local]
+    ambiguous = [item for item in ambiguous if item["mention"] not in blocked_local]
     return {
         "decisions": decisions,
         "merge_map": merge_map,

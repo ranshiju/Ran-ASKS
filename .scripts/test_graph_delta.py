@@ -6,6 +6,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import graph_delta as gd
@@ -73,6 +74,168 @@ def test_exact_and_unique_alias_are_reused():
     plan = gd.plan_attachment(conn, delta)
     assert plan["merge_map"]["academic/wiki/topics/exact"] == "academic/wiki/topics/exact"
     assert plan["merge_map"]["Stable Alias"] == "academic/wiki/topics/alias-target"
+
+
+def test_concept_name_matches_exclude_non_entity_nodes():
+    for node_type in ("hub", "page", "raw"):
+        for match_kind in ("title", "alias", "suffix"):
+            with make_db() as conn:
+                mention = "共同概念"
+                path = "existing/共同概念" if match_kind == "suffix" else "existing"
+                add_node(conn, path, mention if match_kind == "title" else "Other", node_type)
+                if match_kind == "alias":
+                    gl.insert_aliases(conn, path, [mention])
+                delta = gd.build_document_delta(
+                    "academic/wiki/papers/example", {"title": "Example"},
+                    [{"subject": "本论文", "predicate": "核心方法", "object": mention}],
+                )
+                with patch.object(gd.ns, "_rank_with_embeddings", side_effect=AssertionError("unexpected embedding call")):
+                    plan = gd.plan_attachment(conn, delta)
+                assert plan["decisions"][0]["action"] == "create_local", (node_type, match_kind)
+                prepare_source_skeleton(conn, delta)
+                gi.add_knowledge_edges(conn, delta.page, gd.knowledge_edges(delta), attach_plan=plan)
+                edge = conn.execute("SELECT object FROM edges WHERE predicate='核心方法'").fetchone()
+                assert edge[0] == mention
+                assert conn.execute("SELECT type FROM nodes WHERE path=?", (mention,)).fetchone()[0] == "entity"
+                assert conn.execute("SELECT type FROM nodes WHERE path=?", (path,)).fetchone()[0] == node_type
+
+
+def test_named_framework_retains_identity_and_source_relation():
+    conn = make_db()
+    add_node(conn, "框架", "框架")
+    original = tuple(conn.execute("SELECT * FROM nodes WHERE path='框架'").fetchone())
+    delta = gd.build_document_delta(
+        "academic/wiki/papers/example", {"title": "Example"},
+        [{"subject": "本论文", "predicate": "研究基础", "object": "OSPREY框架"}],
+    )
+    plan = gd.plan_attachment(conn, delta)
+    assert plan["decisions"][0]["action"] == "create_local", plan
+    assert "OSPREY框架" not in plan["merge_map"]
+    prepare_source_skeleton(conn, delta)
+    gi.add_knowledge_edges(conn, delta.page, gd.knowledge_edges(delta), attach_plan=plan)
+    edge = conn.execute("SELECT object FROM edges WHERE predicate='研究基础'").fetchone()
+    assert edge[0] != "框架"
+    node = conn.execute("SELECT title FROM nodes WHERE path=?", (edge[0],)).fetchone()
+    assert node[0] == "OSPREY框架"
+    assert tuple(conn.execute("SELECT * FROM nodes WHERE path='框架'").fetchone()) == original
+
+
+def test_concept_reuses_compatible_entity_despite_incompatible_namesake():
+    for occupied_path in ("existing-hub", "共同概念"):
+        with make_db() as conn:
+            add_node(conn, occupied_path, "共同概念", "hub")
+            add_node(conn, "existing-entity", "共同概念")
+            delta = gd.build_document_delta(
+                "academic/wiki/papers/example", {"title": "Example"},
+                [{"subject": "本论文", "predicate": "核心方法", "object": "共同概念"}],
+            )
+            with patch.object(gd.ns, "resolve_node", side_effect=AssertionError("unique entity must resolve directly")):
+                plan = gd.plan_attachment(conn, delta)
+            assert plan["merge_map"] == {"共同概念": "existing-entity"}
+            assert plan["abstained"] == []
+
+
+def test_local_creation_abstains_when_literal_id_has_incompatible_type():
+    for node_type in ("hub", "page", "raw"):
+        for mention in ("共同名称", "existing/full/path"):
+            for predicate in ("核心方法", "局限性"):
+                with make_db() as conn:
+                    add_node(conn, mention, "Other", node_type)
+                    before = tuple(conn.execute("SELECT * FROM nodes WHERE path=?", (mention,)).fetchone())
+                    delta = gd.build_document_delta(
+                        "academic/wiki/papers/example", {"title": "Example"},
+                        [{"subject": "本论文", "predicate": predicate, "object": mention}],
+                    )
+                    plan = gd.plan_attachment(conn, delta)
+                    assert plan["decisions"][0]["action"] == "abstain_incompatible_type"
+                    assert plan["abstained"] == [mention]
+                    assert plan["new_nodes"] == []
+                    prepare_source_skeleton(conn, delta)
+                    gi.add_knowledge_edges(conn, delta.page, gd.knowledge_edges(delta), attach_plan=plan)
+                    assert conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 0
+                    assert tuple(conn.execute("SELECT * FROM nodes WHERE path=?", (mention,)).fetchone()) == before
+
+
+def test_persisted_distinction_does_not_reuse_incompatible_literal_id():
+    conn = make_db()
+    add_node(conn, "谱张量网络", "Other", "hub")
+    add_node(conn, "tensor-network", "张量网络")
+    gl.insert_aliases(conn, "tensor-network", ["谱张量网络"])
+    gd.ns.record_identity_distinction(conn, "谱张量网络", "张量网络", source="user:test", reason="different concepts")
+    delta = gd.build_document_delta(
+        "academic/wiki/papers/example", {"title": "Example"},
+        [{"subject": "本论文", "predicate": "核心方法", "object": "谱张量网络"}],
+    )
+    plan = gd.plan_attachment(conn, delta)
+    assert plan["abstained"] == ["谱张量网络"]
+    assert plan["merge_map"] == {}
+    assert plan["new_nodes"] == []
+
+
+def test_derived_entity_ids_preserve_existing_non_entity_nodes():
+    concept = "矩阵乘积态matrix product state(MPS)"
+    proposition = "证明矩阵乘积态matrix product state(MPS)具有表示能力"
+    for node_type in ("hub", "page", "raw"):
+        for mention, predicate, derived_id in (
+                (concept, "核心方法", gl.extract_keyword_id(concept)),
+                (proposition, "核心创新点", gl.extract_descriptive_id(proposition, {concept: "MPS"}))):
+            with make_db() as conn:
+                assert derived_id != mention
+                add_node(conn, derived_id, mention, node_type)
+                before = tuple(conn.execute("SELECT * FROM nodes WHERE path=?", (derived_id,)).fetchone())
+                triples = [{"subject": "本论文", "predicate": predicate, "object": mention}]
+                if predicate == "核心创新点":
+                    # Supplies the concept map after the proposition is compiled.
+                    triples.append({"subject": "本论文", "predicate": "核心方法", "object": concept})
+                delta = gd.build_document_delta("academic/wiki/papers/example", {"title": "Example"}, triples)
+                plan = gd.plan_attachment(conn, delta)
+                prepare_source_skeleton(conn, delta)
+                gi.add_knowledge_edges(conn, delta.page, gd.knowledge_edges(delta), attach_plan=plan)
+                edge = conn.execute("SELECT object FROM edges WHERE subject=? AND predicate=?", (delta.page, predicate)).fetchone()
+                assert edge[0] == mention
+                assert conn.execute("SELECT type FROM nodes WHERE path=?", (mention,)).fetchone()[0] == "entity"
+                assert tuple(conn.execute("SELECT * FROM nodes WHERE path=?", (derived_id,)).fetchone()) == before
+
+
+def test_person_roles_reuse_pages_without_merging_namesakes():
+    for node_type, predicate, role in ((kind, pred, endpoint)
+            for kind in ("people", "page", "entity")
+            for pred, endpoint in (("参会", "subject"), ("汇报", "subject"),
+                            ("待办", "subject"), ("负责人", "object"),
+                            ("指导", "subject"), ("指导", "object"))):
+        for ambiguous in (False, True):
+            conn = make_db()
+            add_node(conn, "academic/wiki/authors/person", "某人", node_type)
+            add_node(conn, "hub", "某人", "hub")
+            if ambiguous:
+                add_node(conn, "other-person", "某人", "entity")
+            triple = {"subject": "本会议", "predicate": predicate, "object": "本会议"}
+            triple[role] = "某人"
+            delta = gd.build_document_delta("academic/wiki/conferences/example", {"title": "Example"}, [triple])
+            plan = gd.plan_attachment(conn, delta)
+            if ambiguous:
+                assert plan["abstained"] == ["某人"]
+                assert set(plan["decisions"][0]["candidates"]) == {"academic/wiki/authors/person", "other-person"}
+            else:
+                assert plan["merge_map"] == {"某人": "academic/wiki/authors/person"}
+
+
+def test_person_subject_does_not_make_report_topic_a_page():
+    conn = make_db()
+    page = "academic/wiki/conferences/example"
+    person = "academic/wiki/authors/person"
+    add_node(conn, person, "某人", "people")
+    add_node(conn, "topic-page", "图学习", "page")
+    delta = gd.build_document_delta(page, {"title": "Example"}, [
+        {"subject": person, "predicate": "汇报", "object": "图学习"},
+    ])
+    plan = gd.plan_attachment(conn, delta)
+    assert plan["merge_map"] == {person: person}
+    assert plan["new_nodes"] == ["图学习"]
+    prepare_source_skeleton(conn, delta)
+    gi.add_knowledge_edges(conn, page, gd.knowledge_edges(delta), attach_plan=plan)
+    assert conn.execute("SELECT object FROM edges WHERE subject=? AND predicate='汇报'", (person,)).fetchone()[0] == "图学习"
+    assert conn.execute("SELECT type FROM nodes WHERE path=?", (person,)).fetchone()[0] == "people"
 
 
 def test_persisted_distinction_keeps_unique_alias_as_local_node():
@@ -214,6 +377,8 @@ def test_citation_title_keeps_page_entity_type_ambiguity():
     conn = make_db()
     add_node(conn, "paper-page", "Shared Paper", "page")
     add_node(conn, "paper-entity", "Shared Paper", "entity")
+    add_node(conn, "paper-hub", "Shared Paper", "hub")
+    add_node(conn, "paper-raw", "Shared Paper", "raw")
     delta = gd.build_document_delta(
         "academic/wiki/papers/example",
         {"title": "Example"},
@@ -222,6 +387,40 @@ def test_citation_title_keeps_page_entity_type_ambiguity():
     plan = gd.plan_attachment(conn, delta)
     decision = next(item for item in plan["decisions"] if item["mention"] == "Shared Paper")
     assert decision["action"] == "abstain_ambiguous"
+    assert set(decision["candidates"]) == {"paper-page", "paper-entity"}
+
+
+def test_citation_title_reuses_only_page_or_entity():
+    for allowed_type in (None, "page", "entity"):
+        conn = make_db()
+        add_node(conn, "paper-hub", "Shared Paper", "hub")
+        add_node(conn, "paper-raw", "Shared Paper", "raw")
+        if allowed_type:
+            add_node(conn, "paper-target", "Shared Paper", allowed_type)
+        delta = gd.build_document_delta(
+            "academic/wiki/papers/example", {"title": "Example"},
+            [{"subject": "本论文", "predicate": "引用", "object": "Shared Paper"}],
+        )
+        with patch.object(gd.ns, "_rank_with_embeddings", side_effect=AssertionError("unexpected embedding call")):
+            plan = gd.plan_attachment(conn, delta)
+        if allowed_type:
+            assert plan["merge_map"] == {"Shared Paper": "paper-target"}
+        else:
+            assert plan["new_nodes"] == ["Shared Paper"]
+            assert plan["merge_map"] == {}
+
+
+def test_explicit_canonical_endpoint_preserves_non_entity_targets():
+    for node_type in ("hub", "page", "raw"):
+        conn = make_db()
+        add_node(conn, "existing-target", "Shared", node_type)
+        delta = gd.build_document_delta(
+            "academic/wiki/papers/example", {"title": "Example"},
+            [{"subject": "本论文", "predicate": "涉及", "object": "existing-target", "object_is_canonical": True}],
+        )
+        plan = gd.plan_attachment(conn, delta)
+        assert plan["decisions"][0]["action"] == "reuse_canonical_id"
+        assert plan["merge_map"] == {"existing-target": "existing-target"}
 
 
 def test_dual_view_identity_resolution_is_applied_to_attach_plan():
@@ -668,7 +867,7 @@ def test_current_meeting_protocol_resolves_deictics_requires_sources_and_scopes_
     conn = make_db()
     page = "academic/wiki/conferences/0903-example"
     person = "academic/wiki/authors/example"
-    add_node(conn, person, "Example Person")
+    add_node(conn, person, "Example Person", "people")
     fm = {
         "title": "Example Meeting",
         "type": "conference-summary",
@@ -685,6 +884,8 @@ def test_current_meeting_protocol_resolves_deictics_requires_sources_and_scopes_
     assert all("本会议" not in (edge["subject"], edge["object"]) for edge in gd.knowledge_edges(delta))
     plan = gd.plan_attachment(conn, delta)
     actions = {item["mention"]: item["action"] for item in plan["decisions"]}
+    assert plan["merge_map"][person] == person
+    assert plan["abstained"] == []
     assert actions["采用统一方案"] == "create_scoped_proposition"
     assert actions["验证统一方案"] == "create_scoped_task"
     probes = gd.run_query_probes(conn, delta, plan)
@@ -707,7 +908,7 @@ def test_meeting_v2_writer_uses_document_scoped_task_and_decision_nodes():
     page = "academic/wiki/conferences/0903-example"
     person = "academic/wiki/authors/example"
     add_node(conn, page, "Example Meeting", "page")
-    add_node(conn, person, "Example Person")
+    add_node(conn, person, "Example Person", "people")
     triples = [
         {"subject": page, "predicate": "决策", "object": "采用统一方案", "source": "wiki#decisions"},
         {"subject": person, "predicate": "待办", "object": "验证统一方案", "source": "wiki#tasks"},

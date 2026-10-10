@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""query_graph.py temporal 子命令的纯代码回归测试。"""
+"""query_graph.py 搜索、来源详情、关系与时态的纯代码回归测试。"""
 import importlib.util
+import json
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -128,11 +130,74 @@ def test_relations_profile_filters_derived_predicate_families():
     assert {edge["predicate"] for edge in result["edges"]} == {"来源", "核心方法"}
 
 
+def test_search_ranks_all_exact_candidates_before_limit_and_keeps_ambiguity():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = make_db(directory)
+        for index in range(60):
+            gl.ensure_node(conn, f"noise-{index:02}", f"a decomposition {index}", "entity")
+        gl.ensure_node(conn, "MPO", "Matrix product operator", "entity")
+        gl.ensure_node(conn, "z-title", "mpo", "page")
+        gl.ensure_node(conn, "z-alias", "Another meaning", "entity")
+        gl.insert_aliases(conn, "z-alias", ["MPO", "MPO alternative", "inside MPO"])
+        gl.ensure_node(conn, "prefix", "MPO method", "entity")
+        before = conn.total_changes
+        result = module.search_nodes(conn, "MPO")
+        assert conn.total_changes == before
+        assert [node["path"] for node in result["nodes"][:4]] == [
+            "MPO", "z-alias", "z-title", "prefix",
+        ]
+        assert len({node["path"] for node in result["nodes"]}) == 50
+        assert result["count"] == 50 and result["truncated"] is True
+        assert result["nodes"] == module.search_nodes(conn, "mpo")["nodes"]
+        text = module.fmt_text(result, "search")
+        assert "仍有更多匹配" in text and "当前展示前 20 个" in text
+        conn.close()
+
+
+def test_search_literal_patterns_granularity_and_exact_limit():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = make_db(directory)
+        gl.ensure_node(conn, "name_1", "Percent 20%", "entity", entity_subtype="keyword")
+        gl.ensure_node(conn, "nameA1", "Percent 200", "entity", entity_subtype="proposition")
+        gl.insert_aliases(conn, "name_1", [r"path\part", "Shared"])
+        gl.insert_aliases(conn, "nameA1", ["Shared"])
+        for term in ("_", "%", "\\"):
+            result = module.search_nodes(conn, term)
+            assert [node["path"] for node in result["nodes"]] == ["name_1"], term
+        result = module.search_nodes(conn, "Shared", granularity="keyword", top_k=1)
+        assert [node["path"] for node in result["nodes"]] == ["name_1"]
+        assert result["truncated"] is False
+        result = module.search_nodes(conn, "Shared", top_k=1)
+        assert result["count"] == 1 and result["truncated"] is True
+        result = module.search_nodes(conn, "Shared", top_k=2)
+        assert result["count"] == 2 and result["truncated"] is False
+        empty = module.search_nodes(conn, "not-in-graph")
+        assert empty["nodes"] == [] and empty["truncated"] is False
+        conn.close()
+
+
+def test_search_cli_honors_top_k():
+    with tempfile.TemporaryDirectory() as directory:
+        conn = make_db(directory)
+        for index in range(4):
+            gl.ensure_node(conn, f"term-{index}", f"Term {index}", "entity")
+        conn.commit()
+        conn.close()
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "search", "Term", "--top-k", "2", "--json",
+             "--db", str(Path(directory) / "graph.db")],
+            check=True, capture_output=True, text=True,
+        )
+        payload = json.loads(result.stdout)
+        assert payload["count"] == payload["limit"] == 2
+        assert payload["truncated"] is True
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
     for test in tests:
         test()
-    print(f"query_graph temporal regression: {len(tests)}/{len(tests)} PASS")
+    print(f"query_graph regression: {len(tests)}/{len(tests)} PASS")
 
 
 if __name__ == "__main__":

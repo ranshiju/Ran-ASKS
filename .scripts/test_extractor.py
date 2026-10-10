@@ -1,8 +1,11 @@
 import tempfile
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import extractor
 from mineru_api import MinerUError, MinerUExtraction
+from paddleocr_api import PaddleOCRExtraction
 
 
 def test_single_noncanonical_pdf_is_copied_to_paper_pdf():
@@ -65,7 +68,7 @@ def test_mineru_bundle_keeps_only_referenced_images_and_sidecars():
             checkpoint_path=checkpoint,
         )
         paper_dir.mkdir()
-        meta = extractor._commit_mineru_document_bundle(
+        meta = extractor._commit_document_bundle(
             paper_dir,
             paper_dir / "paper.md",
             extractor.ExtractionContent(markdown, bundle.meta, bundle),
@@ -98,7 +101,7 @@ def test_mineru_bundle_rejects_missing_local_image_without_partial_markdown():
             checkpoint_path=root / "job.json",
         )
         try:
-            extractor._commit_mineru_document_bundle(
+            extractor._commit_document_bundle(
                 paper_dir,
                 paper_dir / "paper.md",
                 extractor.ExtractionContent(markdown, {}, bundle),
@@ -131,7 +134,7 @@ def test_mineru_bundle_rejects_non_directory_managed_targets_without_replacing_m
             checkpoint_path=root / "job.json",
         )
         try:
-            extractor._commit_mineru_document_bundle(
+            extractor._commit_document_bundle(
                 paper_dir,
                 paper_dir / "paper.md",
                 extractor.ExtractionContent("# New\n", {}, bundle),
@@ -144,10 +147,97 @@ def test_mineru_bundle_rejects_non_directory_managed_targets_without_replacing_m
         assert (paper_dir / "images").is_file()
 
 
+def test_paddleocr_fallback_is_opt_in_and_atomic_with_honest_metadata():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        paper_dir = root / "demo"
+        paper_dir.mkdir()
+        (paper_dir / "paper.pdf").write_bytes(b"pdf")
+        artifacts = root / "artifacts"
+        (artifacts / "images").mkdir(parents=True)
+        (artifacts / "images/a.png").write_bytes(b"image")
+        bundle = PaddleOCRExtraction("# Paddle\n![a](images/a.png)\n", artifacts, {
+            "source": "paddleocr_official_api", "model": "PaddleOCR-VL-1.6",
+            "input_sha256": "a" * 64,
+        })
+        config = {"extraction": {"paddleocr": {"enabled": True}}}
+        with patch.object(extractor, "load_config", return_value=config), patch.object(
+                extractor, "extract_mineru", return_value=None), patch.object(
+                extractor, "extract_paddleocr", return_value=extractor.ExtractionContent(
+                    bundle.markdown, bundle.meta, paddleocr_bundle=bundle)) as paddle, patch.object(
+                extractor, "extract_blsc_ocr") as blsc, patch.object(extractor, "extract_docling") as docling:
+            assert not extractor.extract_paper("demo", papers_dir=root)
+            paddle.assert_not_called()
+            assert extractor.extract_paper("demo", papers_dir=root, allow_paddleocr=True)
+            blsc.assert_not_called()
+            docling.assert_not_called()
+        meta = extractor.load_parse_meta(paper_dir)
+        assert meta["preferred"] == "paddleocr"
+        assert "mineru" not in meta["engines"]
+        assert meta["engines"]["paddleocr"]["upload_authorization"] == "public_pdf"
+        assert meta["engines"]["paddleocr"]["fallback_from"] == "mineru"
+        assert (paper_dir / "images/a.png").read_bytes() == b"image"
+        assert not (paper_dir / "mineru").exists()
+
+
+def test_paddleocr_failure_stops_chain_and_private_is_never_uploaded():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        config = {"extraction": {"paddleocr": {"enabled": True}}}
+        for location in ("public", "private"):
+            paper_dir = root / location / "demo"
+            paper_dir.mkdir(parents=True)
+            (paper_dir / "paper.pdf").write_bytes(b"pdf")
+            with patch.object(extractor, "PROJECT_ROOT", root), patch.object(
+                    extractor, "load_config", return_value=config), patch.object(
+                    extractor, "extract_mineru", return_value=None), patch.object(
+                    extractor, "extract_paddleocr", return_value=None) as paddle, patch.object(
+                    extractor, "extract_blsc_ocr") as blsc, patch.object(extractor, "extract_pymupdf") as pymupdf:
+                assert not extractor.extract_paper("demo", papers_dir=paper_dir.parent, allow_paddleocr=True)
+                assert paddle.call_count == (1 if location == "public" else 0)
+                blsc.assert_not_called()
+                pymupdf.assert_not_called()
+                assert not (paper_dir / "paper.md").exists()
+                (paper_dir / "paper.md").write_text("old text", encoding="utf-8")
+                extractor.save_parse_meta(paper_dir, {"preferred": "pymupdf"})
+                assert not extractor.extract_paper("demo", papers_dir=paper_dir.parent, allow_paddleocr=True)
+                assert (paper_dir / "paper.md").read_text(encoding="utf-8") == "old text"
+
+
+def test_private_external_source_cannot_use_paddleocr_even_in_public_staging():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        paper_dir = root / "public/demo"
+        paper_dir.mkdir(parents=True)
+        source = root / "private/original.pdf"
+        source.parent.mkdir()
+        source.write_bytes(b"pdf")
+        (paper_dir / "paper.pdf").write_bytes(b"pdf")
+        extractor.save_source_yaml(paper_dir, {"external_path": str(source)})
+        with patch.object(extractor, "PROJECT_ROOT", root), patch.object(
+                extractor, "load_config", return_value={"extraction": {"paddleocr": {"enabled": True}}}), patch.object(
+                extractor, "extract_paddleocr") as paddle:
+            assert not extractor.extract_paper("demo", engine="paddleocr", papers_dir=paper_dir.parent,
+                                               allow_paddleocr=True)
+            paddle.assert_not_called()
+
+
+def test_missing_paddleocr_token_does_not_call_api():
+    with patch.dict(os.environ, {"PADDLEOCR_ACCESS_TOKEN": ""}), patch.object(
+            extractor, "load_config", return_value={"extraction": {"paddleocr": {"enabled": True}}}), patch.object(
+            extractor, "extract_pdf_bundle_with_paddleocr") as remote:
+        assert extractor.extract_paddleocr(Path("unused"), "demo") is None
+        remote.assert_not_called()
+
+
 if __name__ == "__main__":
     test_single_noncanonical_pdf_is_copied_to_paper_pdf()
     test_multiple_noncanonical_pdfs_are_rejected()
     test_mineru_bundle_keeps_only_referenced_images_and_sidecars()
     test_mineru_bundle_rejects_missing_local_image_without_partial_markdown()
     test_mineru_bundle_rejects_non_directory_managed_targets_without_replacing_markdown()
+    test_paddleocr_fallback_is_opt_in_and_atomic_with_honest_metadata()
+    test_paddleocr_failure_stops_chain_and_private_is_never_uploaded()
+    test_missing_paddleocr_token_does_not_call_api()
+    test_private_external_source_cannot_use_paddleocr_even_in_public_staging()
     print("extractor regression: PASS")

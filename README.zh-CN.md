@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前 main 版本: v0.13.0
+> 当前 main 版本: v0.14.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -348,6 +348,25 @@ python3 paper-artifacts/v0.2.1/verify.py
 视觉检查按需调用：用户明确要求时调用，或当版式相关修改必须借助页面视觉上下文
 才能被准确理解时调用；普通文字编辑和编译不会自动触发。参见
 `operations/VISUAL_QA.md` 和 `operations/VISUAL_TO_EDITABLE_PPT.md`。
+
+## 提取恢复与按证据范围更新研究判断
+
+公开 PDF 在 MinerU 失败后，可以选择使用 PaddleOCR 官网文档解析 API。
+需在本机配置启用 `extraction.paddleocr.enabled`，设置 `PADDLEOCR_ACCESS_TOKEN`，
+并为本次提取显式传入 `--allow-paddleocr`；配置 token 本身不构成上传授权。
+private 输入禁止使用该后端。任务可从绑定来源的检查点恢复；请求、轮询、下载和
+返回附件都有预算，提取记录保留后端与回退原因。启用该回退但未授权时停止，
+不静默级联其他引擎。受管流程见 `operations/INGEST.md`。
+
+Frontier 将回答版本绑定本轮实际提供与引用的证据。刷新时优先读取问题自身来源，
+用重新核验的 Raw 摘录比较旧回答，并披露无法读取或可能截断的证据。
+回答只代表本轮证据范围内的判断，不宣称科学问题最终解决。未来研究候选会过滤
+参考文献和普通预期，但是否准入仍需独立的语义判断。
+
+已批准的 Hub 分裂完成后，通过批次维护报告对账，只读核验子 Hub 的 canonical
+Scope、分裂历史和成员完整迁移。仅闭合已满足的交接，保留其他待审动作与质量告警，
+同步关联事务回执；不重新摄入或调用 embedding。详见 `operations/INBOX.md`
+和 `operations/HUB.md`。
 
 ## 使用真实材料
 

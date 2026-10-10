@@ -48,6 +48,7 @@ entity_subtypes:
   - keyword
   - person
   - proposition
+  - task
   - institution
   - venue
   - citation-only

@@ -864,7 +864,13 @@ def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = N
             recovery[str(category)] += int(count or 0)
 
     api_calls = 0
+    unattributed_calls = 0
+    unattributed_tokens = 0
     total_tokens = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+    token_breakdown_missing = 0
+    operation_usage = {}
     latency_sec = 0.0
     operations: Counter[str] = Counter()
     api_statuses: Counter[str] = Counter()
@@ -884,12 +890,31 @@ def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = N
                 if event.get("event_version") != "execution-event-v1" or event.get("event_kind") != "llm_api_call":
                     continue
                 transaction_id = str(event.get("transaction_id") or "")
+                if not transaction_id:
+                    unattributed_calls += 1
+                    unattributed_tokens += int((event.get("usage") or {}).get("total_tokens") or 0)
                 if transaction_id not in transactions:
                     continue
                 api_calls += 1
                 latency_sec += float(event.get("latency_sec") or 0)
-                total_tokens += int((event.get("usage") or {}).get("total_tokens") or 0)
-                operations[str(event.get("operation") or "unknown")] += 1
+                usage = event.get("usage") or {}
+                total_tokens += int(usage.get("total_tokens") or 0)
+                prompt_tokens += int(usage.get("prompt_tokens") or 0)
+                completion_tokens += int(usage.get("completion_tokens") or 0)
+                token_breakdown_missing += int(
+                    "prompt_tokens" not in usage or "completion_tokens" not in usage
+                )
+                operation = str(event.get("operation") or "unknown")
+                operations[operation] += 1
+                breakdown = operation_usage.setdefault(operation, {
+                    "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                    "latency_sec": 0.0,
+                })
+                for token_field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    breakdown[token_field] += int(usage.get(token_field) or 0)
+                breakdown["latency_sec"] = round(
+                    breakdown["latency_sec"] + float(event.get("latency_sec") or 0), 3,
+                )
                 api_statuses[str(event.get("status") or "unknown")] += 1
     return {
         "summary_version": RUNTIME_SUMMARY_VERSION,
@@ -902,12 +927,25 @@ def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = N
             "event_version": "execution-event-v1",
             "calls": api_calls,
             "total_tokens": total_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "token_breakdown_missing_calls": token_breakdown_missing,
+            "usage_by_operation": dict(sorted(operation_usage.items())),
             "latency_sec": round(latency_sec, 3),
             "by_operation": dict(sorted(operations.items())),
             "by_status": dict(sorted(api_statuses.items())),
         },
         "invalid_state_files": invalid_state_files,
         "invalid_event_lines": invalid_event_lines,
+        "unattributed_api_events": {
+            "calls": unattributed_calls, "total_tokens": unattributed_tokens,
+            "scope": "all_scanned_event_files_without_transaction_id",
+        },
+        "cost_coverage": {
+            "scope": "transaction_tagged_llm_api_events_only",
+            "monetary_cost": None,
+            "unmetered_components": ["host_agent", "embedding", "pdf_extraction"],
+        },
     }
 
 

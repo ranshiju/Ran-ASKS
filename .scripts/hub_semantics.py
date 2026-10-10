@@ -613,6 +613,74 @@ def _managed_artifact(relative: str, prefix: str) -> Path | None:
     return target
 
 
+def completed_split_resolution(conn, candidate: dict) -> dict | None:
+    parent = candidate.get("hub")
+    clusters = candidate.get("clusters")
+    if not isinstance(parent, str) or not parent.startswith("academic/wiki/hubs/"):
+        return None
+    if not isinstance(clusters, list) or len(clusters) < 2:
+        return None
+    member_groups = []
+    for cluster in clusters:
+        members = cluster.get("members") if isinstance(cluster, dict) else None
+        if not isinstance(members, list) or not members or not all(
+            isinstance(member, str) and member for member in members
+        ):
+            return None
+        member_groups.append(set(members))
+    all_members = set().union(*member_groups)
+    if sum(map(len, member_groups)) != len(all_members):
+        return None
+    child_paths = []
+    for row in conn.execute(
+        "SELECT DISTINCT nodes.path,nodes.status,nodes.description FROM edges "
+        "JOIN nodes ON nodes.path=edges.object "
+        "WHERE edges.subject=? AND edges.predicate='子方向' AND nodes.type='hub'",
+        (parent,),
+    ):
+        child = row["path"]
+        if not child.startswith("academic/wiki/hubs/"):
+            continue
+        scope = read_hub_scope(child)
+        frontmatter = _frontmatter(child)
+        if (row["status"] in {"retired", "archived"}
+                or frontmatter.get("status") in {"retired", "archived"}
+                or frontmatter.get("parent") != parent
+                or validate_scope(scope) or row["description"] != scope):
+            continue
+        if any(
+            history["operation"] == "split" and any(
+                related.get("path") == parent for related in history["related_hubs"]
+            )
+            for history in scope_history(conn, child)
+        ):
+            child_paths.append(child)
+    if len(child_paths) < len(member_groups):
+        return None
+    member_placeholders = ",".join("?" for _ in all_members)
+    family = [parent, *child_paths]
+    family_placeholders = ",".join("?" for _ in family)
+    memberships = {path: set() for path in family}
+    for row in conn.execute(
+        f"SELECT subject,object FROM edges WHERE predicate=? "
+        f"AND subject IN ({member_placeholders}) AND object IN ({family_placeholders})",
+        (MEMBERSHIP_PREDICATE, *sorted(all_members), *family),
+    ):
+        memberships[row["object"]].add(row["subject"])
+    if memberships[parent]:
+        return None
+    matched = []
+    for members in member_groups:
+        matches = [child for child in child_paths if memberships[child] == members]
+        if len(matches) != 1 or matches[0] in matched:
+            return None
+        matched.append(matches[0])
+    return {
+        "status": "applied", "parent": parent, "children": matched,
+        "basis": "canonical_split_history_and_membership",
+    }
+
+
 def _finish_hub_route_action(envelope: dict, remaining: int) -> None:
     components = envelope.setdefault("components", {})
     hubs = components.setdefault("hubs", {})

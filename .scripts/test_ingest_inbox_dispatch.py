@@ -1653,6 +1653,114 @@ def test_initial_maintenance_publication_and_historical_reconciliation(historica
             assert json.loads(report_path.read_text())["maintenance"]["actions"] == receipt["actions"]
 
 
+def test_split_handoff_reconciliation(preserve_pending=False, interrupt_receipt=False):
+    import inbox_state
+    import hub_semantics
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary).resolve()
+        with patch.object(module, "REPO", root), patch.object(inbox_state, "REPO", root), \
+                patch.object(hub_semantics, "REPO", root), \
+                patch.object(hub_semantics.gl, "REPO", root), \
+                patch.object(hub_semantics, "_embed", side_effect=AssertionError("no embedding")):
+            graph_path = root / "cross-domain/graph.db"
+            graph_path.parent.mkdir(parents=True)
+            conn = hub_semantics.gl.connect(graph_path)
+            hub_semantics.gl.init_schema(conn)
+            parent = "academic/wiki/hubs/parent"
+            hub_semantics.create_hub(
+                conn, path=parent, title="父方向",
+                scope="研究量子多体动力学和张量网络态表示中的方法、结构与计算问题。",
+                agent_confirmed=True,
+            )
+            groups = [["open-system", "dissipation"], ["matrix-product", "isometric-state"]]
+            for index, members in enumerate(groups):
+                child = f"academic/wiki/hubs/child-{index}"
+                hub_semantics.create_hub(
+                    conn, path=child, title=f"子方向{index}", parent=parent,
+                    scope=f"研究子方向{index}中量子多体系统的状态结构与高效数值模拟问题。",
+                    agent_confirmed=True, lifecycle_operation="split",
+                )
+                for member in members:
+                    hub_semantics.gl.ensure_node(conn, member, member, "entity", entity_subtype="keyword")
+                    conn.execute(
+                        "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+                        "VALUES(?, ?, ?, '推断', '', 0)",
+                        (member, hub_semantics.MEMBERSHIP_PREDICATE, child),
+                    )
+            conn.commit()
+            conn.close()
+            graph_before = graph_path.read_bytes()
+            split_rel = "temp/hub-auto-split/initial.json"
+            receipt_rel = "temp/inbox-maintenance/initial.json"
+            report_path = root / "cross-domain/ingest-reports/initial.json"
+            candidates = [{"hub": parent, "clusters": [{"members": members} for members in groups]}]
+            if preserve_pending:
+                candidates.append({
+                    "hub": "academic/wiki/hubs/unprocessed", "clusters": candidates[0]["clusters"],
+                    "resolution": {"status": "applied"},
+                })
+            module._write_json_atomic(root / split_rel, candidates)
+            receipt = {
+                "status": "agent_required", "receipt_path": receipt_rel, "errors": [],
+                "actions": [{"component": "hubs", "split_candidates_file": split_rel}],
+                "components": {"hubs": {
+                    "status": "agent_required", "split_candidates_file": split_rel,
+                    "split_count": len(candidates), "eligible_count": 0,
+                    "redistribution_count": 0, "route_review_count": int(preserve_pending),
+                }},
+            }
+            if preserve_pending:
+                receipt["actions"].append({"component": "abbreviations", "next_action": "review"})
+            module._write_json_atomic(root / receipt_rel, receipt)
+            files = []
+            for transaction_id in ("txn-first", "txn-second"):
+                state = {
+                    "transaction_id": transaction_id, "status": "completed",
+                    "wiki_path": f"academic/wiki/papers/{transaction_id}",
+                    "ok": True,
+                    "quality_status": "degraded", "quality_warnings": [{"issue": "unrelated_warning"}],
+                }
+                inbox_state.save(transaction_id, state)
+                files.append(dict(state))
+            report = {"total": 2, **module._report_counts(files), "files": files, "maintenance": receipt}
+            assert module.publish_maintenance_report(report_path, report)
+            original_write = module._write_json_atomic
+            if interrupt_receipt:
+                def interrupted_write(path, value):
+                    if path == root / receipt_rel and value["components"]["hubs"]["split_count"] == 0:
+                        raise OSError("receipt write interrupted")
+                    return original_write(path, value)
+                with patch.object(module, "_write_json_atomic", side_effect=interrupted_write):
+                    interrupted = module.reconcile_maintenance_report(report_path)
+                assert interrupted["completed"] == 2 and interrupted["failed"] == 0
+                assert interrupted["maintenance"]["status"] == "error"
+                assert interrupted["maintenance"]["retryable"] is True
+                assert json.loads((root / split_rel).read_text())[0]["resolution"]["status"] == "applied"
+                assert json.loads((root / receipt_rel).read_text())["components"]["hubs"]["split_count"] == 1
+            summary = module.reconcile_maintenance_report(report_path)
+            expected = "agent_required" if preserve_pending else "completed"
+            assert summary["completed"] == 2 and summary["failed"] == 0
+            assert summary["maintenance"]["status"] == expected
+            repaired = json.loads(report_path.read_text())
+            hubs = repaired["maintenance"]["components"]["hubs"]
+            assert hubs["split_count"] == int(preserve_pending)
+            assert hubs["route_review_count"] == int(preserve_pending)
+            assert repaired["degraded"] == 2
+            if preserve_pending:
+                assert repaired["maintenance"]["actions"] == receipt["actions"]
+            else:
+                assert repaired["maintenance"]["actions"] == []
+            for item in files:
+                state = inbox_state.load(item["transaction_id"])
+                assert state["status"] == "completed"
+                assert state["quality_warnings"] == item["quality_warnings"]
+                assert state["maintenance"]["status"] == expected
+                assert state["maintenance"]["components"]["hubs"]["split_count"] == int(preserve_pending)
+            module.reconcile_maintenance_report(report_path)
+            assert json.loads(report_path.read_text()) == repaired
+            assert graph_path.read_bytes() == graph_before
+
+
 def test_maintenance_publication_rejects_mismatched_state_before_writing():
     import inbox_state
     with tempfile.TemporaryDirectory() as temporary:
@@ -1837,6 +1945,9 @@ def main():
     test_initial_maintenance_publication_and_historical_reconciliation()
     test_initial_maintenance_publication_and_historical_reconciliation(historical=False)
     test_initial_maintenance_publication_and_historical_reconciliation(historical=False, interrupt_publication=True)
+    test_split_handoff_reconciliation()
+    test_split_handoff_reconciliation(preserve_pending=True)
+    test_split_handoff_reconciliation(interrupt_receipt=True)
     test_maintenance_publication_rejects_mismatched_state_before_writing()
     test_maintenance_publication_recovers_write_failures()
     test_paper_batch_keeps_preclassified_fingerprint_results()

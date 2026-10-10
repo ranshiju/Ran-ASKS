@@ -552,6 +552,7 @@ def extract_pdf_bundle_with_mineru(
     timeout_sec: int = 1800,
     interval_sec: int = 5,
     request_timeout_sec: int = 60,
+    transfer_timeout_sec: Optional[int] = None,
     keep_archive: bool = False,
     language: Optional[str] = None,
     is_ocr: bool = False,
@@ -704,7 +705,7 @@ def extract_pdf_bundle_with_mineru(
         if not checkpoint.get("uploaded"):
             logger.info("  MinerU API: 上传 PDF...")
             upload_file(
-                str(upload_url), pdf_path, request_timeout_sec * 10, retry_state=retry_state
+                str(upload_url), pdf_path, transfer_timeout_sec or request_timeout_sec * 10, retry_state=retry_state
             )
             save(status="uploaded", uploaded=True)
 
@@ -730,7 +731,7 @@ def extract_pdf_bundle_with_mineru(
         if not zip_path.is_file() or checkpoint.get("status") not in {"downloaded", "complete"}:
             logger.info("  MinerU API: 流式下载结果包...")
             download_file(
-                str(zip_url), zip_path, request_timeout_sec * 10, retry_state=retry_state
+                str(zip_url), zip_path, transfer_timeout_sec or request_timeout_sec * 10, retry_state=retry_state
             )
             save(status="downloaded", archive_sha256=_sha256_file(zip_path))
 
@@ -785,6 +786,7 @@ def extract_pdf_bundle_with_mineru(
                 timeout_sec=timeout_sec,
                 interval_sec=interval_sec,
                 request_timeout_sec=request_timeout_sec,
+                transfer_timeout_sec=transfer_timeout_sec,
                 keep_archive=keep_archive,
                 language=language,
                 is_ocr=is_ocr,

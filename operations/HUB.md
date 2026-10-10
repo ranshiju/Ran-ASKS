@@ -124,6 +124,7 @@ create、define-scope、split、merge 与 batch-create 的 apply 共享同一生
 
 - unassigned 候选簇 cohesion≥0.6 且 members≥4 时写入 `temp/hub-auto-create/<session>.json`，主 Agent 生成 title/Scope/parent 后调用 `hub_semantics auto-create --apply <file>`。
 - canonical Hub 的 `聚类于` 成员数超过上限、尚无子 Hub，且 `analyze_split` 通过成员数量、小簇稳定性和质心区分度闸时，写入 `temp/hub-auto-split/<session>.json`。主 Agent 为每簇生成 title/Scope、原样使用候选 members，随后调用 `hub_semantics split-apply --parent <hub> --plan <file> --agent-confirmed`。
+- 分裂成功后，以本批报告运行 `ingest_inbox.py --reconcile-maintenance-report <report>` 闭合维护 handoff；shared 对账只读直接子 Hub 的 canonical Scope、与父 Hub 关联的 split history 和候选成员的 family membership。原簇完整迁入不同子 Hub 且已移除父 membership 才消费该候选，保留其他分裂、方向复核、缩写等待审动作，并沿共享发布入口同步报告、回执和全部关联事务；不重新聚类或调用 embedding。
 - 已有子 Hub 的超限父 Hub 写入 `temp/hub-auto-redistribute/<session>.json`。handoff 列出 canonical Scope readiness、blockers 及受控命令；任一子 Hub 缺正式 Scope 时先用 `define-scope --agent-confirmed` 定义，随后才允许 `redistribute --agent-confirmed`。
 - 论文 canonical Scope 路由达到 floor 但 margin 不足时写入 `temp/hub-route-review/<session>.json`，只保留 canonical 候选和 `route-apply` 命令模板交主 Agent判断，不自动写方向边。
 - membership 先汇总并去重 profile、Scope 与 prototype 文本，再单次进入 embedding cache；provider 可按 batch 上限分块，但禁止逐节点串行请求 API。维护超过 120 秒返回可重试 `deferred`，不得改变文件摄入终态。

@@ -930,6 +930,10 @@ def test_split_requires_agent_scopes_and_passes_code_route_probe():
             ], dtype=float)
         hs._embed = fake_embed
         try:
+            candidate = {"hub": parent, "clusters": [
+                {"members": child["members"]} for child in children
+            ]}
+            assert hs.completed_split_resolution(conn, candidate) is None
             report = hs.apply_split(conn, parent, children, agent_confirmed=True)
         finally:
             hs._embed = old_embed
@@ -944,6 +948,48 @@ def test_split_requires_agent_scopes_and_passes_code_route_probe():
         assert history[0]["operation"] == "split"
         assert history[0]["related_hubs"][0]["path"] == parent
         assert len(history[0]["evidence"]) == 2
+        changes = conn.total_changes
+        resolution = hs.completed_split_resolution(conn, candidate)
+        assert resolution["status"] == "applied"
+        assert resolution["children"] == [child["path"] for child in children]
+        assert conn.total_changes == changes
+        member = children[0]["members"][0]
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES(?, ?, ?, '推断', '', 0)",
+            (member, hs.MEMBERSHIP_PREDICATE, parent),
+        )
+        assert hs.completed_split_resolution(conn, candidate) is None
+        conn.execute(
+            "DELETE FROM edges WHERE subject=? AND predicate=? AND object=?",
+            (member, hs.MEMBERSHIP_PREDICATE, parent),
+        )
+        conn.execute(
+            "DELETE FROM edges WHERE subject=? AND predicate=? AND object=?",
+            (member, hs.MEMBERSHIP_PREDICATE, children[0]["path"]),
+        )
+        assert hs.completed_split_resolution(conn, candidate) is None
+        conn.execute(
+            "INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+            "VALUES(?, ?, ?, '推断', '', 0)",
+            (member, hs.MEMBERSHIP_PREDICATE, children[0]["path"]),
+        )
+        conn.execute("UPDATE hub_scope_history SET operation='create'")
+        assert hs.completed_split_resolution(conn, candidate) is None
+        conn.execute("UPDATE hub_scope_history SET operation='split'")
+        conn.execute("UPDATE nodes SET status='retired' WHERE path=?", (children[0]["path"],))
+        assert hs.completed_split_resolution(conn, candidate) is None
+        conn.execute("UPDATE nodes SET status='active' WHERE path=?", (children[0]["path"],))
+        scope_path = root / f"{children[0]['path']}.md"
+        scope_content = scope_path.read_text(encoding="utf-8")
+        scope_path.write_text(scope_content.replace("## Scope", "## Legacy Scope"), encoding="utf-8")
+        assert hs.completed_split_resolution(conn, candidate) is None
+        scope_path.write_text(scope_content, encoding="utf-8")
+        assert hs.completed_split_resolution(conn, candidate) == resolution
+        assert hs.completed_split_resolution(conn, {"hub": parent, "clusters": []}) is None
+        assert hs.completed_split_resolution(conn, {
+            "hub": "../../outside", "clusters": candidate["clusters"],
+        }) is None
 
 
 def test_merge_is_non_destructive_and_updates_survivor_scope():

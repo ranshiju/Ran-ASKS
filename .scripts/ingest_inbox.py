@@ -1796,6 +1796,48 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
         return False
 
 
+def _reconcile_split_handoffs(maintenance: dict) -> bool:
+    import hub_semantics
+    hubs = (maintenance.get("components") or {}).get("hubs") or {}
+    if not hubs.get("split_count"):
+        return False
+    split_path = hub_semantics._managed_artifact(
+        str(hubs.get("split_candidates_file") or ""), "temp/hub-auto-split",
+    )
+    if split_path is None or not split_path.is_file():
+        return False
+    candidates = json.loads(split_path.read_text(encoding="utf-8"))
+    if not isinstance(candidates, list) or not candidates or not all(
+        isinstance(item, dict) for item in candidates
+    ):
+        return False
+    graph_path = REPO / "cross-domain/graph.db"
+    if not graph_path.is_file():
+        return False
+    changed = False
+    remaining = 0
+    conn = hub_semantics.gl.connect(graph_path, read_only=True)
+    try:
+        for candidate in candidates:
+            resolution = hub_semantics.completed_split_resolution(conn, candidate)
+            if resolution is None:
+                remaining += 1
+            else:
+                if candidate.get("resolution") != resolution:
+                    candidate["resolution"] = resolution
+                    changed = True
+    finally:
+        conn.close()
+    if changed:
+        _write_json_atomic(split_path, candidates)
+    if remaining != hubs.get("split_count"):
+        hubs["split_count"] = remaining
+        changed = True
+    if changed:
+        hub_semantics._finish_hub_route_action(maintenance, int(hubs.get("route_review_count") or 0))
+    return changed
+
+
 def reconcile_maintenance_report(report_path: Path) -> dict:
     """Repair one historical report using only recorded transaction decisions."""
     import inbox_state
@@ -1823,6 +1865,26 @@ def reconcile_maintenance_report(report_path: Path) -> dict:
                     return _compact_summary(closed_report, report_path)
         inbox_state.save(item["transaction_id"], state)
     repaired = json.loads(report_path.read_text(encoding="utf-8"))
+    try:
+        if _reconcile_split_handoffs(repaired.get("maintenance") or {}):
+            receipt_path = hub_semantics._managed_artifact(
+                str(repaired["maintenance"].get("receipt_path") or ""), "temp/inbox-maintenance",
+            )
+            if receipt_path is not None and receipt_path.is_file():
+                _write_json_atomic(receipt_path, repaired["maintenance"])
+    except (OSError, ValueError) as exc:
+        maintenance = repaired.get("maintenance") or {}
+        repaired["maintenance"] = {
+            **maintenance, "status": "error", "retryable": isinstance(exc, OSError),
+            "errors": [*maintenance.get("errors", []), f"split handoff reconciliation failed: {exc}"],
+            "next_action": "reconcile_maintenance_report",
+            "publication": {"status": "error", "report_persisted": True},
+        }
+        try:
+            _write_json_atomic(report_path, repaired)
+        except OSError:
+            repaired["maintenance"]["publication"]["report_persisted"] = False
+        return _compact_summary(repaired, report_path)
     publish_maintenance_report(report_path, repaired)
     return _compact_summary(repaired, report_path)
 

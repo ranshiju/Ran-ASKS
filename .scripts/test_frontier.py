@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 import shutil
 import sqlite3
@@ -10,6 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name("frontier.py")
 spec = importlib.util.spec_from_file_location("frontier", SCRIPT)
@@ -97,6 +100,37 @@ def test_api_backend_uses_model_adapter_and_shared_schema():
         ))
         result = frontier.run_assessment(packet())
         assert result["ok"] and calls
+    finally:
+        frontier.agent_task.query_backend = original_backend
+        if original_module is None:
+            sys.modules.pop("llm_structured", None)
+        else:
+            sys.modules["llm_structured"] = original_module
+
+
+def test_answer_adapters_receive_previous_answer_without_extra_model_call():
+    original_backend = frontier.agent_task.query_backend
+    original_module = sys.modules.get("llm_structured")
+    p = packet()
+    p["previous_answer"] = {"answer": "旧的有限条件回答"}
+    calls = []
+    try:
+        frontier.agent_task.query_backend = lambda: "agent"
+        task = frontier.run_answer(p, transaction_id="frontier-comparison-test")["agent_task"]
+        assert "change" in task["protocol"]["optional_fields"]
+        payload = json.loads((REPO / task["inputs"][0]["path"]).read_text())
+        assert payload["previous_answer"] == p["previous_answer"]
+        frontier.agent_task.query_backend = lambda: "api"
+        def fake_model(prompt, schema, **kwargs):
+            calls.append(prompt)
+            value = good_answer(change={"kind": "uncertain", "reason": "条件尚不可比较"})
+            assert schema(value)
+            return {"ok": True, "parsed": value}
+        sys.modules["llm_structured"] = SimpleNamespace(call_json=fake_model)
+        result = frontier.run_answer(p)
+        assert len(calls) == 1 and "旧的有限条件回答" in calls[0]
+        assert result["parsed"]["change"]["kind"] == "uncertain"
+        assert not frontier.answer_schema(good_answer(change={"kind": ["qualified"], "reason": "bad type"}))
     finally:
         frontier.agent_task.query_backend = original_backend
         if original_module is None:
@@ -236,6 +270,95 @@ def test_fact_locator_normalizes_legacy_path_and_bad_anchor():
         shutil.rmtree(TEMP_REPO_AREA)
 
 
+def test_question_source_survives_recall_miss_and_evidence_budget():
+    with tempfile.TemporaryDirectory(dir=REPO / "temp") as directory:
+        root = Path(directory)
+        raw_dir = root / "raw"
+        raw_dir.mkdir()
+        source = raw_dir / "source.md"
+        source.write_text("# Original source\nDirect source observation.\nOpen question.\n")
+        source_loc = source.relative_to(REPO).as_posix() + "#L2-L3"
+        decoy = raw_dir / "decoy.md"
+        decoy.write_text("\n".join(f"Other observation {i}." for i in range(10)))
+        decoy_base = decoy.relative_to(REPO).as_posix()
+        recall = lambda *_: (json.dumps({"candidates": [{"path": "academic/wiki/papers/missing-test-candidate"}]}), 0)
+        relations = lambda *_: (json.dumps({"edges": [
+            {"source": f"{decoy_base}#L{i}"} for i in range(1, 10)
+        ]}), 0)
+        result = frontier.build_kb_packet(
+            "Different wording", root, recall_fn=recall, relations_fn=relations,
+            source_locators=[source_loc, source_loc],
+        )
+        assert result["raw_evidence"][0] == {
+            "locator": source_loc, "excerpt": "Direct source observation.\nOpen question.",
+        }
+        assert len(result["raw_evidence"]) == 5
+        assert result["anchors"]["raw"] == [item["locator"] for item in result["raw_evidence"]]
+        assert len(set(result["anchors"]["raw"])) == 5
+        assert source_loc in frontier.answer_prompt(result)
+
+
+def test_answer_default_uses_question_sources_but_explicit_packet_stays_bounded():
+    with tempfile.TemporaryDirectory(dir=REPO / "temp") as directory:
+        root = Path(directory)
+        source = "academic/raw/references/source/paper.md#L20"
+        mention = "academic/raw/references/other/paper.md#L10-L12"
+        question = frontier.new_question("Problem", "paper_explicit", packet(), source_locator=source)
+        question["source_mentions"].extend([{"locator": source}, {"locator": mention}])
+        frontier.write_record(root, question)
+        seen = []
+        respond = lambda value: (seen.append(value) or {"ok": True, "parsed": good_answer()})
+        with patch.object(frontier, "build_kb_packet", return_value=packet()) as builder:
+            frontier.answer_question(root, question["id"], answer_fn=respond)
+            assert builder.call_args.kwargs["source_locators"] == [source, mention]
+            assert seen[-1]["question_sources"] == [source, mention]
+            builder.reset_mock()
+            explicit = packet()
+            frontier.answer_question(root, question["id"], packet=explicit, answer_fn=respond)
+            builder.assert_not_called()
+            assert seen[-1]["raw_evidence"] == explicit["raw_evidence"]
+            assert seen[-1]["anchors"] == explicit["anchors"]
+            assert "previous_answer" not in explicit
+
+
+def test_raw_excerpt_honors_ranges_sections_and_binding_failure():
+    with tempfile.TemporaryDirectory(dir=REPO / "temp") as directory:
+        root = Path(directory)
+        raw_dir = root / "raw"
+        raw_dir.mkdir()
+        source = raw_dir / "source.md"
+        source.write_text("# Title\nTitle preface.\n## Results\nFirst result.\nSecond result.\n## Outlook\nOpen question.\n")
+        base = source.relative_to(REPO).as_posix()
+        for span in ("L4-L5", "L4-5", "Results"):
+            assert frontier._raw_excerpt(f"{base}#{span}") == "First result.\nSecond result."
+        for span in ("L999", "L999-L1000", "Missing section"):
+            assert frontier._raw_excerpt(f"{base}#{span}") == ""
+        with patch.object(frontier.sl, "companion_binding_for_target", return_value={"status": "invalid"}):
+            assert frontier._raw_excerpt(f"{base}#L4-L5") == ""
+            assert frontier._raw_excerpt(f"{base}#全篇") == ""
+
+
+def test_unreadable_question_sources_are_disclosed_not_allowed_as_evidence():
+    with tempfile.TemporaryDirectory(dir=REPO / "temp") as directory:
+        root = Path(directory)
+        raw_dir = root / "raw"
+        raw_dir.mkdir()
+        source = raw_dir / "source.md"
+        source.write_text("# Title\nExisting passage.\n")
+        base = source.relative_to(REPO).as_posix()
+        empty_recall = lambda *_: ('{"candidates": []}', 0)
+        result = frontier.build_kb_packet("Question", root, recall_fn=empty_recall,
+                                          source_locators=[f"{base}#L999"])
+        assert result["raw_evidence"] == result["anchors"]["raw"] == []
+        assert result["evidence_issues"][0]["locator"] == f"{base}#L999"
+        with patch.object(frontier.sl, "companion_binding_for_target", return_value={"status": "invalid"}):
+            result = frontier.build_kb_packet("Question", root, recall_fn=empty_recall,
+                                              source_locators=[f"{base}#L2"])
+        assert result["raw_evidence"] == result["anchors"]["raw"] == []
+        assert result["evidence_issues"][0]["locator"] == f"{base}#L2"
+        assert "evidence_issues" in frontier.answer_prompt(result)
+
+
 def setup_paper_source():
     if TEMP_REPO_AREA.exists():
         shutil.rmtree(TEMP_REPO_AREA)
@@ -299,6 +422,156 @@ def test_interesting_future_study_is_an_explicit_question_unit():
     assert frontier.explicit_question_units(paragraph) == [sentence]
 
 
+def test_explicit_conjectures_and_future_intents_are_question_units():
+    statements = [
+        "Conversely, we conjecture that perfect transmission implies a duality between the theories.",
+        "We further conjecture that the correspondence extends to higher dimensions.",
+        "The conjecture remains unproven for interacting quantum systems.",
+        "We aim to explore chiral fermions on the lattice in the near future.",
+        "Looking ahead, we plan to investigate the thermodynamic limit.",
+        "我们猜想这一对偶关系可以推广到更高维度的体系。",
+    ]
+    for statement in statements:
+        assert frontier.explicit_question_units(statement) == [statement], statement
+    paragraph = "The construction proves the forward direction. " + statements[0]
+    assert frontier.explicit_question_units(paragraph) == [statements[0]]
+
+
+def test_conjecture_cues_do_not_capture_resolved_historical_or_current_work():
+    statements = [
+        "Earlier authors conjectured that the transition is continuous.",
+        "We conjectured that the bound was tight before finding a counterexample.",
+        "We do not conjecture that every transparent interface is topological.",
+        "We conjecture a spectral correspondence and prove it in this paper.",
+        "We conjecture this relation, but it has been disproved by a counterexample.",
+        "The conjecture has been proved for all finite lattices.",
+        "In this paper, we aim to study transmission through an interface.",
+    ]
+    for statement in statements:
+        assert frontier.explicit_question_units(statement) == [], statement
+    unresolved = "We conjecture that the stronger bound holds for interacting systems."
+    assert frontier.explicit_question_units(statements[3] + " " + unresolved) == [unresolved]
+
+
+def test_capture_conjectures_preserves_raw_locators_and_is_idempotent():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki = setup_paper_source()
+        try:
+            raw = TEMP_REPO_AREA / "raw/paper.md"
+            raw.write_text(
+                "# Paper\n\nWe conjecture that perfect transmission implies a duality.\n"
+                "We aim to explore chiral fermions in the near future.\n"
+                "## References\nWe conjecture that this citation is relevant.\n",
+                encoding="utf-8",
+            )
+            first = frontier.extract_paper_candidates(root, str(wiki))
+            assert first["count"] == 2
+            records = frontier.load_records(root)
+            assert {record["source_locator"] for record, _, _ in records.values()} == {
+                "temp/test_frontier_sources/raw/paper.md#L3",
+                "temp/test_frontier_sources/raw/paper.md#L4",
+            }
+            assert all(record["origin_kind"] == "paper_explicit" for record, _, _ in records.values())
+            assert frontier.extract_paper_candidates(root, str(wiki))["count"] == 0
+            assert len(frontier.load_records(root)) == 2
+        finally:
+            shutil.rmtree(TEMP_REPO_AREA)
+
+
+def test_future_expectations_require_forward_looking_context():
+    statements = [
+        "Looking ahead, we expect the method to enable precise low-temperature computations.",
+        "We anticipate significant speedups through further engineering and GPU acceleration.",
+        "We expect faster convergence through further optimization of the implementation.",
+    ]
+    for statement in statements:
+        assert frontier.explicit_question_units(statement) == [statement], statement
+    expected = "We expect the method to enable precise low-temperature computations."
+    paragraph = "Looking ahead, important applications remain challenging. " + expected
+    assert frontier.explicit_question_units(paragraph) == [expected]
+    planned = "We plan to investigate the thermodynamic limit."
+    assert frontier.explicit_question_units("Looking ahead, several questions remain. " + planned) == [planned]
+    for statement in [
+        "We expect the measured energy to equal zero.",
+        "We anticipate agreement with the reference calculation.",
+        "We expected further improvements before completing the experiments.",
+        "Earlier authors anticipated future speedups for the method.",
+        "Looking ahead, we do not expect further improvements from this approximation.",
+        "In this paper, we expect speedups through further optimization of the implementation.",
+        "In this paper, we aim to explore the thermodynamic limit for future applications.",
+        "Looking ahead, in this paper we expect to improve convergence.",
+    ]:
+        assert frontier.explicit_question_units(statement) == [], statement
+
+
+def test_paper_prose_skips_bibliography_and_resumes_after_it():
+    before = "We conjecture that the bound is sharp."
+    after = "We conjecture that the extension is possible."
+    citation = "[1] K. Binder and A. P. Young, Spin glasses and open questions, Rev. Mod. Phys. (1986)."
+    for heading, resume_heading in [
+        ("", "## End Matter"),
+        ("## References\n", "## Appendix A"),
+        ("References\n", "End Matter"),
+        ("## Bibliography\n", "Appendix A: Further results"),
+        ("参考文献\n", "附录 A"),
+    ]:
+        text = "# Paper\n" + before + "\n" + heading + citation + "\n"
+        text += "Future work in the cited paper remains challenging.\n"
+        text += "[2] A. Young, Future research directions (2006).\n"
+        text += resume_heading + "\n" + after + "\n"
+        prose = list(frontier.paper_prose_lines(text))
+        assert before in [line for _, line in prose]
+        assert after in [line for _, line in prose]
+        assert citation not in [line for _, line in prose]
+        assert not any("cited paper" in line or "A. Young" in line for _, line in prose)
+        assert next(number for number, line in prose if line == after) == len(text.splitlines())
+
+
+def test_numbered_open_questions_are_not_bibliography():
+    text = (
+        "## Future work\n"
+        "[1] We conjecture that the stronger bound holds.\n"
+        "[2] We plan to investigate the thermodynamic limit in future work.\n"
+    )
+    units = [unit for _, line in frontier.paper_prose_lines(text)
+             for unit in frontier.explicit_question_units(line)]
+    assert units == text.splitlines()[1:]
+
+
+def test_capture_future_expectations_ignores_references_and_keeps_locators():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki = setup_paper_source()
+        try:
+            raw = TEMP_REPO_AREA / "raw/paper.md"
+            raw.write_text(
+                "# Paper\n"
+                "Looking ahead, we expect the method to enable precise low-temperature computations.\n"
+                "We anticipate significant speedups through further engineering and GPU acceleration.\n"
+                "[1] K. Binder and A. P. Young, Spin glasses and open questions (1986).\n"
+                "Future work in the cited paper remains challenging.\n"
+                "## End Matter\n"
+                "We conjecture that the extension is possible.\n",
+                encoding="utf-8",
+            )
+            with patch.object(frontier.qa, "graph_relations", return_value=("{}", [])):
+                first = frontier.extract_paper_candidates(root, str(wiki))
+                second = frontier.extract_paper_candidates(root, str(wiki))
+            assert first["count"] == 3
+            assert second["count"] == 0
+            records = frontier.load_records(root)
+            assert len(records) == 3
+            assert {record["source_locator"] for record, _, _ in records.values()} == {
+                "temp/test_frontier_sources/raw/paper.md#L2",
+                "temp/test_frontier_sources/raw/paper.md#L3",
+                "temp/test_frontier_sources/raw/paper.md#L7",
+            }
+            assert all(record["scientific_state"] == "unverified" for record, _, _ in records.values())
+        finally:
+            shutil.rmtree(TEMP_REPO_AREA)
+
+
 def test_frontier_write_does_not_touch_fact_graph():
     graph = REPO / "cross-domain" / "graph.db"
     before = (graph.stat().st_size, graph.stat().st_mtime_ns) if graph.exists() else None
@@ -321,6 +594,83 @@ def test_mark_stale_from_fact_anchor():
         assert changed == [result["question_id"]]
         question, _ = frontier.find_record(root, result["question_id"])
         assert question["possibly_stale"] is True
+
+
+def test_related_questions_are_bounded_read_only_candidates():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for number in range(4):
+            q = frontier.new_question(f"quantum tensor entanglement bound {number}", "user_proposed", packet())
+            frontier.apply_answer(root, q, packet(), good_answer())
+        records = frontier.load_records(root)
+        before = {p: p.read_bytes() for _, _, p in records.values()}
+        result = frontier.related_question_candidates(records, "academic/wiki/papers/new",
+                                                       "quantum tensor entanglement bound", limit=2)
+        assert result["total_matches"] == 4 and result["returned"] == 2 and result["truncated"]
+        assert all(item["status"] == "unreviewed" for item in result["candidates"])
+        assert all(p.read_bytes() == data for p, data in before.items())
+        assert result == frontier.related_question_candidates(records, "academic/wiki/papers/new",
+                                                              "quantum tensor entanglement bound", limit=2)
+
+
+def test_related_question_uses_current_answer_but_not_historical_entries():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        q = frontier.new_question("需要怎样改进？", "user_proposed", packet())
+        frontier.apply_answer(root, q, packet(), good_answer(answer="费米子波函数的纠缠结构与网络表示有关。"))
+        result = frontier.related_question_candidates(frontier.load_records(root), "new",
+                                                       "费米子谱张量网络与纠缠结构")
+        assert result["candidates"][0]["id"] == q["id"]
+        q["kb_summary"] = "训练时间未测量。"
+        q["residual_gaps"] = []
+        frontier.write_record(root, q)
+        assert frontier.related_question_candidates(frontier.load_records(root), "new",
+                                                     "费米子谱张量网络与纠缠结构")["returned"] == 0
+
+
+def test_related_question_exclusions_and_empty_or_unrelated_text():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        ids = []
+        for status in ("captured", "parked", "rejected", "resolved"):
+            q = frontier.new_question("quantum tensor entanglement", "user_proposed", packet())
+            q["status"] = status
+            frontier.write_record(root, q)
+            ids.append(q["id"])
+        records = frontier.load_records(root)
+        result = frontier.related_question_candidates(records, "new", "quantum tensor entanglement",
+                                                       exclude={ids[0]}, limit=999)
+        assert [item["id"] for item in result["candidates"]] == [ids[3]]
+        assert result["limit"] == 5
+        assert frontier.related_question_candidates(records, "new", "")["returned"] == 0
+        assert frontier.related_question_candidates(records, "new", "banana bicycle orchard")["returned"] == 0
+
+
+def test_capture_related_question_never_marks_stale_or_auto_answers_it():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki = setup_paper_source()
+        original_answer = frontier.answer_question
+        calls = []
+        try:
+            wiki.write_text(wiki.read_text() + "\n## Navigation\n\nquantum tensor entanglement bounds\n")
+            q = frontier.new_question("quantum tensor entanglement bounds?", "user_proposed", packet())
+            frontier.apply_answer(root, q, packet(), good_answer())
+            path = frontier.record_path(root, "question", q["id"])
+            before = path.read_bytes()
+            frontier.answer_question = lambda _root, record_id, _topk: (
+                calls.append(record_id) or {"id": record_id, "status": "pending"})
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                frontier.cmd_capture_paper(SimpleNamespace(root=str(root), page=str(wiki), limit=3,
+                                                          topk=6, no_answer=False))
+            result = json.loads(output.getvalue())
+            assert q["id"] in [item["id"] for item in result["related_question_candidates"]["candidates"]]
+            assert q["id"] not in calls and q["id"] not in result["stale_records"]
+            assert calls and path.read_bytes() == before
+        finally:
+            frontier.answer_question = original_answer
+            shutil.rmtree(TEMP_REPO_AREA)
 
 
 def test_answer_question_writes_evidence_bound_answer_once():
@@ -352,6 +702,168 @@ def test_answer_rejects_locator_outside_packet():
             assert False, "越界 locator 应失败"
         except ValueError as exc:
             assert "证据包" in str(exc)
+
+
+def test_answer_history_preserves_evidence_gaps_and_semantic_review():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        original = packet()
+        question = frontier.new_question(original["question"], "user_proposed", original)
+        frontier.write_record(root, question)
+        frontier.answer_question(root, question["id"], packet=original,
+                                 answer_fn=lambda _: {"ok": True, "parsed": good_answer()})
+        before, _ = frontier.find_record(root, question["id"])
+        v1 = json.loads(json.dumps(before["answer_history"][0]))
+        added = "academic/raw/references/new-result/paper.md#L20"
+        expanded = packet()
+        expanded["anchors"]["raw"].append(added)
+        expanded["raw_evidence"].append({"locator": added, "excerpt": "Only for short-range models."})
+        updated = good_answer(
+            answer="新证据限定了可饱和条件，其他模型仍不确定。",
+            supported_claims=[{"claim": "短程模型可饱和。", "evidence": [added]}],
+            residual_gaps=["长程模型是否可饱和"],
+            change={"kind": "qualified", "reason": "新结果只覆盖短程模型，不能推广。"},
+        )
+        observed = []
+        frontier.answer_question(root, question["id"], packet=expanded,
+                                 answer_fn=lambda p: (observed.append(p) or {"ok": True, "parsed": updated}))
+        record, path = frontier.find_record(root, question["id"])
+        assert record["answer_history"][0] == v1
+        assert len(record["answer_history"]) == 2
+        assert observed[0]["previous_answer"] == v1
+        assert record["answer_history"][1]["change"]["kind"] == "qualified"
+        assert record["answer_history"][1]["evidence_scope"]["cited_raw_locators"] == [added]
+        assert record["scientific_state"] == "unverified"
+        assert record["anchors"]["raw"] == [added]
+        assert "回答版本" in path.read_text()
+        repeated = frontier.answer_question(root, question["id"], packet=expanded,
+                                            answer_fn=lambda _: {"ok": True, "parsed": updated})
+        assert not repeated["revision_added"]
+
+
+def test_same_answer_with_changed_evidence_scope_gets_new_version():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        question = frontier.new_question("问题", "user_proposed", packet())
+        frontier.apply_answer(root, question, packet(), good_answer())
+        expanded = packet()
+        expanded["raw_evidence"][0]["excerpt"] = "More precise conditions in revised source."
+        result = frontier.apply_answer(root, question, expanded, good_answer())
+        assert result["changed"] is False and result["revision_added"] is True
+        assert question["answer_history"][-1]["change"]["kind"] == "not_assessed"
+        assert len(question["entries"]) == 2
+
+
+def test_refresh_failure_and_invalid_answer_preserve_last_answer():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        question = frontier.new_question("问题", "user_proposed", packet())
+        frontier.apply_answer(root, question, packet(), good_answer())
+        frontier.mark_stale_for_targets(root, {"academic/raw/references/demo/paper.md"})
+        before, path = frontier.find_record(root, question["id"])
+        frontier.answer_question(root, question["id"], packet=packet(),
+                                 answer_fn=lambda _: {"ok": False, "status": "unavailable"})
+        pending, _ = frontier.find_record(root, question["id"])
+        for key in ("kb_summary", "coverage_note", "answer_history", "answer_checked_at", "stale_reasons"):
+            assert pending[key] == before[key]
+        assert pending["possibly_stale"] and pending["answer_status"] == "pending"
+        file_before = path.read_bytes()
+        try:
+            frontier.apply_answer(root, pending, packet(), good_answer(
+                supported_claims=[{"claim": "不允许", "evidence": ["academic/raw/other.md#L1"]}]))
+            assert False
+        except ValueError:
+            pass
+        assert path.read_bytes() == file_before
+
+
+def test_legacy_answer_is_retained_without_inventing_claim_versions():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        question = frontier.new_question("问题", "user_proposed", packet())
+        question.update(answer_status="completed", answer_fingerprint="legacy",
+                        kb_summary="旧答案", residual_gaps=["旧缺口"])
+        frontier.apply_answer(root, question, packet(), good_answer())
+        old = question["answer_history"][0]
+        assert old["answer"] == "旧答案" and old["residual_gaps"] == ["旧缺口"]
+        assert old["evidence_scope"]["legacy_unversioned"]
+        assert old["supported_claims"] == []
+        assert len(question["answer_history"]) == 2
+
+
+def test_stale_raw_file_matches_locators_but_not_adjacent_file():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        question = frontier.new_question("问题", "user_proposed", packet())
+        frontier.apply_answer(root, question, packet(), good_answer())
+        assert frontier.mark_stale_for_targets(root, {"academic/raw/references/demo/paper.md.bak"}) == []
+        assert frontier.mark_stale_for_targets(root, {"academic/raw/references/demo/paper.md"}) == [question["id"]]
+        stale, _ = frontier.find_record(root, question["id"])
+        assert stale["stale_reasons"] == packet()["anchors"]["raw"]
+        frontier.apply_answer(root, stale, packet(), good_answer(
+            change={"kind": "unchanged", "reason": "核验后，原条件与结论仍成立。"}))
+        assert not stale["possibly_stale"] and stale["stale_reasons"] == []
+        assert stale["answer_history"][-1]["refresh_reasons"] == packet()["anchors"]["raw"]
+
+
+def test_capture_paper_marks_raw_citations_without_graph_anchor():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki = setup_paper_source()
+        try:
+            p = packet()
+            raw = "temp/test_frontier_sources/raw/paper.md#L3"
+            p["anchors"]["raw"] = [raw]
+            question = frontier.new_question("原结论是否可靠？", "user_proposed", p)
+            frontier.apply_answer(root, question, p, good_answer(
+                supported_claims=[{"claim": "已有结果", "evidence": [raw]}]))
+            result = frontier.extract_paper_candidates(root, str(wiki))
+            assert question["id"] in result["stale_records"]
+        finally:
+            shutil.rmtree(TEMP_REPO_AREA)
+
+
+def test_assessment_does_not_overwrite_completed_answer():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        question = frontier.new_question("问题", "user_proposed", packet())
+        frontier.apply_answer(root, question, packet(), good_answer())
+        frontier.apply_assessment(root, question, good_assessment(kb_summary="未经回答校验的另一种解释"))
+        assert question["kb_summary"] == good_answer()["answer"]
+        assert question["kb_summary"] == question["answer_history"][-1]["answer"]
+
+
+def test_outdated_prepared_comparison_cannot_overwrite_newer_answer():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        question = frontier.new_question("问题", "user_proposed", packet())
+        frontier.apply_answer(root, question, packet(), good_answer())
+        prepared = packet()
+        prepared["previous_answer"] = frontier.current_answer_snapshot(question)
+        frontier.apply_answer(root, question, packet(), good_answer(answer="更新后的回答"))
+        path = frontier.record_path(root, "question", question["id"])
+        before = path.read_bytes()
+        try:
+            frontier.apply_answer(root, question, prepared, good_answer(answer="旧任务的回答"))
+            assert False
+        except ValueError as exc:
+            assert "旧回答已变化" in str(exc)
+        assert path.read_bytes() == before
+
+
+def test_completed_task_replay_is_noop_and_keeps_later_stale_notice():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        question = frontier.new_question("问题", "user_proposed", packet())
+        prepared = packet()
+        prepared["previous_answer"] = None
+        frontier.apply_answer(root, question, prepared, good_answer())
+        frontier.mark_stale_for_targets(root, {"academic/raw/references/demo/paper.md"})
+        current, path = frontier.find_record(root, question["id"])
+        before = path.read_bytes()
+        result = frontier.apply_answer(root, current, prepared, good_answer())
+        assert result["replayed"] and result["possibly_stale"]
+        assert not result["revision_added"] and path.read_bytes() == before
 
 
 def test_no_evidence_answer_is_deterministic_and_not_scientific_claim():
@@ -423,6 +935,83 @@ def test_split_legacy_paragraph_into_single_question_pages():
             "evaluate longer contexts.", "calibrate the score.",
         }
         assert all(item["answer_status"] == "pending" and not item["kb_summary"] for item in records)
+
+
+def test_dependent_future_work_preserves_antecedent_context():
+    paragraph = (
+        "An alternative safety approach is human review of risky actions. "
+        "Human response can become the throughput bottleneck. "
+        "Hence, this approach was not implemented and could be explored as future work."
+    )
+    assert frontier.explicit_question_units(paragraph) == [paragraph]
+    independent = "Future work should evaluate robustness across instruments."
+    assert frontier.explicit_question_units(independent) == [independent]
+
+
+def test_answer_prompt_preserves_priority_source_beyond_old_limits():
+    with tempfile.TemporaryDirectory(dir=REPO / "temp") as directory:
+        root = Path(directory)
+        source = root / "raw" / "source.md"
+        source.parent.mkdir()
+        paragraph = "General instrument operation. " * 40 + (
+            "The alternative approach is human review of risky actions; "
+            "it was not implemented because human response limits throughput."
+        )
+        source.write_text(paragraph, encoding="utf-8")
+        locator = source.relative_to(REPO).as_posix() + "#L1"
+        result = frontier.build_kb_packet(
+            "Which alternative approach?", root,
+            recall_fn=lambda *_: ('{"candidates":[]}', 0),
+            source_locators=[locator],
+        )
+        assert len(paragraph) > 1000
+        assert result["raw_evidence"][0]["excerpt"] == paragraph
+        prompt = frontier.answer_prompt(result)
+        assert paragraph in prompt
+        assert "human response limits throughput" in prompt
+
+
+def test_frontier_api_calls_keep_transaction_identity():
+    calls = []
+    adapter = SimpleNamespace(call_json=lambda prompt, schema, **kwargs: (
+        calls.append(kwargs) or {"ok": True, "parsed": good_answer()}
+    ))
+    with patch.object(frontier.agent_task, "query_backend", return_value="api"), \
+            patch.dict(sys.modules, {"llm_structured": adapter}):
+        frontier.run_assessment(packet(), transaction_id="ingest-parent")
+        frontier.run_answer(packet(), transaction_id="ingest-parent")
+    assert [call["transaction_id"] for call in calls] == ["ingest-parent", "ingest-parent"]
+    assert [call["operation"] for call in calls] == ["frontier_assess", "frontier_answer"]
+
+
+def test_capture_paper_passes_parent_transaction_to_answer():
+    with tempfile.TemporaryDirectory() as directory:
+        args = SimpleNamespace(root=directory, page="demo", limit=3, topk=6,
+                               no_answer=False, transaction_id="ingest-parent")
+        with patch.object(frontier, "extract_paper_candidates", return_value={
+            "captured": ["Q-test"], "reused": [],
+        }), patch.object(frontier, "answer_question", return_value={
+            "status": "completed",
+        }) as answer, patch.object(frontier, "rebuild_index"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            frontier.cmd_capture_paper(args)
+        assert answer.call_args.kwargs["transaction_id"] == "ingest-parent"
+
+
+def test_capture_known_source_mention_does_not_duplicate_normalized_question():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki = setup_paper_source()
+        try:
+            first = frontier.extract_paper_candidates(root, str(wiki))
+            record, _ = frontier.find_record(root, first["captured"][0])
+            record["question"] = "Normalized research question with resolved references."
+            frontier.write_record(root, record)
+            second = frontier.extract_paper_candidates(root, str(wiki))
+            assert second["captured"] == []
+            assert len(frontier.load_records(root)) == len(first["captured"])
+        finally:
+            shutil.rmtree(TEMP_REPO_AREA)
 
 
 def main():

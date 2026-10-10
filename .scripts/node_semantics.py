@@ -267,9 +267,9 @@ def _decomposed_exact_candidates(
     """用双语名分解结果精确查 title/alias；完整名称优先于缩写。"""
     generic_components = {
         "变换", "方法", "材料", "模型", "系统", "理论", "算法", "困难", "完全",
-        "困难问题", "完全问题",
+        "困难问题", "完全问题", "框架",
         "transformation", "method", "material", "model", "system", "theory", "algorithm",
-        "hard", "complete",
+        "hard", "complete", "framework",
     }
     leading_latin = re.match(
         r"^([A-Za-z][A-Za-z0-9 .:'+&/\-]*?)(?=[\u3400-\u9fff])", name,

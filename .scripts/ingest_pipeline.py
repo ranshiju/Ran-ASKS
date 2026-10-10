@@ -398,6 +398,7 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
         if not sem_hard and not slot_warnings:
             state["errors"] = []
             _advance(state, "finalize", "semantics_validated")
+            _save(state)
             break
         # 结构错误早停
         if sem_hard:
