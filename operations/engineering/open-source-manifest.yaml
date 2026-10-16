@@ -12,6 +12,10 @@ include:
   - .gitignore
   - .github/workflows/public-release.yml
   - preprocess.py
+  # Generic deterministic host adapters and synthetic regressions are public source.
+  - .scripts/platform_compat.py
+  - .scripts/document_text.py
+  - .scripts/test_platform_compat.py
   # Includes local-only presentation runtime/state/renderer/delivery and isolated regression fixtures.
   - .scripts/**
   - computing/code-library/src/tensor_train.py
@@ -22,6 +26,8 @@ include:
   - .codex/skills/manuscript-diagnosis/scripts/test_diagnosis_preflight.py
   - agents/**
   - dsh/**
+  # Generic Ubuntu host setup contains no deployment paths or local configuration.
+  - operations/UBUNTU.md
   # Generic host instructions live under operations; local memory remains excluded.
   # Includes oral-exam contracts, styles and help; private records remain excluded.
   # Includes PRESENTATION.md and presentation-test-plan.md; no active presentation assets.

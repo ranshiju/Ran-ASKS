@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import env_config
+import platform_compat
 
 try:
     import fitz  # PyMuPDF
@@ -206,42 +207,17 @@ def parse_page_selector(selector: str | None, total_pages: int) -> list[int]:
 
 
 def _find_soffice(explicit: str | None = None) -> Path:
-    candidates: list[Path] = []
-    if explicit:
-        candidates.append(Path(explicit).expanduser())
-    if os.environ.get("SOFFICE_BIN"):
-        candidates.append(Path(os.environ["SOFFICE_BIN"]).expanduser())
-    found = shutil.which("soffice") or shutil.which("libreoffice")
-    if found:
-        candidates.append(Path(found))
-    candidates.append(Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"))
-    runtime_root = Path.home() / ".cache" / "codex-runtimes"
-    if runtime_root.exists():
-        candidates.extend(sorted(runtime_root.glob(
-            "*/dependencies/bin/override/soffice"
-        )))
-    for candidate in candidates:
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return candidate.resolve()
+    candidate = platform_compat.find_soffice(explicit)
+    if candidate is not None:
+        return candidate
     raise VisualQAError(
         "PPT/PPTX rendering requires LibreOffice/soffice; set SOFFICE_BIN"
     )
 
 
 def _soffice_env(soffice: Path) -> dict[str, str]:
-    """Load bundled macOS fontconfig without changing caller or global settings."""
-    env = os.environ.copy()
-    if env.get("FONTCONFIG_FILE") or env.get("FONTCONFIG_PATH"):
-        return env
-    candidates = [soffice.parent.parent / "Resources/fontconfig/fonts.conf"]
-    if soffice.parent.name == "override" and soffice.parent.parent.name == "bin":
-        candidates.append(soffice.parent.parent.parent /
-                          "native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/Resources/fontconfig/fonts.conf")
-    for config in candidates:
-        if config.is_file():
-            env["FONTCONFIG_FILE"] = str(config)
-            break
-    return env
+    """Build the isolated LibreOffice child environment."""
+    return platform_compat.soffice_environment(soffice)
 
 
 def _convert_slides_to_pdf(path: Path, target_pdf: Path,

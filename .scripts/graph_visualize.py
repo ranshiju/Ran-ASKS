@@ -14,6 +14,7 @@ from urllib.parse import quote
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / '.scripts'))
 import graph_lib as gl
+import platform_compat
 
 COLORS = {'page':'#3979bc','hub':'#c5424a','people':'#23956b','raw':'#c58627',
           'entity':'#677588','timeline-summary':'#8b65ab'}
@@ -240,9 +241,8 @@ def run(args):
         if created_output: output.unlink(missing_ok=True)
         if created_manifest: output.with_suffix('.json').unlink(missing_ok=True)
         raise
-    if args.open:
-        import webbrowser
-        webbrowser.open(output.as_uri())
+    if args.open and not platform_compat.open_with_default_app(output):
+        print(f"无法调用桌面程序打开输出，请手动打开: {output}", file=sys.stderr)
     return {'status':'rendered','artifact':str(output),'manifest':str(output.with_suffix('.json')),
             'selection':data['selection'],'sources':[data['database']]}
 

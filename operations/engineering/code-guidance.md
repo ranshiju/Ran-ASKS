@@ -154,7 +154,7 @@ python3 .scripts/ingest_document.py --resume <txn-id> --verbose
 python3 .scripts/ingest_document.py --file inbox/<file> --subproject admin
 ```
 
-- **流程**：3.1 dedup → 3.2 preprocess（textutil/pandoc 提取）→ 短文档 3.3 单次受限 Worker 生成 wiki+slots（长文档仍为 3.3a wiki → 3.4 校验 → 3.3b slots）→ 程序编译 frontmatter/Content/Sources → 3.4/3.6 分别校验 → [语义硬错误最多一次定向 slots 重写] → [3.6b 局部修复 warning] → 落位 → graph snapshot → 3.7 update_graph → 3.8 validate_graph → 3.9 finalize_tail（+清理 inbox 源至回收站）
+- **流程**：3.1 dedup → 3.2 preprocess（shared Word/PPTX、PDF、OCR 或表格提取）→ 短文档 3.3 单次受限 Worker 生成 wiki+slots（长文档仍为 3.3a wiki → 3.4 校验 → 3.3b slots）→ 程序编译 frontmatter/Content/Sources → 3.4/3.6 分别校验 → [语义硬错误最多一次定向 slots 重写] → [3.6b 局部修复 warning] → 落位 → graph snapshot → 3.7 update_graph → 3.8 validate_graph → 3.9 finalize_tail（+清理 inbox 源至回收站）
 - **驱动器**：9 步调度循环、状态机、修复循环、resume 安全网委托 `ingest_pipeline.py`（`run_pipeline(state, DOCUMENT_SPEC, progress)`）；本脚本只声明 spec + provider step 函数。
 - **后端模式**：`INGEST_BACKEND=agent` 返回 `prepared + agent-task-v1`，当前宿主 Agent 读取事务内 `doc.md` 并写 temp 产物；任务只携带 locator、输出协议、issues 和后续命令，不包装 prompt 或 DSH loop。`INGEST_BACKEND=api` 时，正文不超过 30,000 字符的文档由 `build_doc_wiki_slots_prompt` 一次生成 wiki+候选语义槽，更长文档才分两次；长文先对完整 `doc.md` 绑定原始 `RAW#Lx` 再缩减，禁止裁剪后从 L1 重新编号。两端复用同一 parser、schema 和 validator。
 - **Wiki 生成契约（shared）**：`document_wiki_generation_rules` 单一提供域合法 status 枚举、来源语义选择规则及正文直接 RAW handle 引用规则；Agent task 的 `wiki.status`/`wiki.evidence` 和 API 单独/合并 prompt 读取同一规则。拟修订且未确认生效的材料按草稿标为 `draft`，不通过文件名特判自动改写；事实段落、列表项及表格记录直接使用原文物理行号，不自行生成 Sources 或脚注定义。编译器与证据 validator 保持原闸门。
@@ -178,6 +178,14 @@ python3 .scripts/ingest_document.py --file inbox/<file> --subproject admin
 - **不要**：让 agent 手动拆步或全程监控；对学术论文 PDF 使用（走 `ingest_paper.py`）。
 
 - **PPTX**：复用 `.scripts/pptx_document.py` 的 shared 原生页序/表格/备注提取与 `visual_qa` 本地渲染；Agent/API 均使用独立 `pptx_visual` API 内容识读；`--allow-remote-ppt` 显式授权，未完成交接纯文字 `pptx_api_action`，不回落宿主看图、不切换语义后端。Wiki ID 使用来源文件名而非提取器生成的通用标题；最终原件、companion、source.json 同事务落位并逐项验哈希；细则见 INGEST「演示文稿（PPTX）」。
+
+### 1.1g `.scripts/platform_compat.py` 与 `.scripts/document_text.py`（shared 宿主适配）
+
+- **归属与边界**：两者是 Agent/API 共用的确定性输入/宿主接口，不持有语义控制循环，不调用模型，不改变摄入、校验、Raw/Wiki/Graph 或远程授权契约。来源内容保持不可信数据面。
+- **Word**：`document_text` 原生读取 DOCX OOXML 正文、表格和支持的引用辅助部分；`mc:AlternateContent` 只选明确 `Fallback`，不声明支持 `Choice` 特征；无 `Fallback` 走既有 `textutil` 或受控 LibreOffice 恢复。旧 DOC 保留 `textutil` 优先及其他可用转换器；LibreOffice 在独立临时目录输出 DOCX，再原生读取一次以保留受支持的页眉页脚，不使用 TXT 导出或递归转换。`ingest_document` 与 inbox 预览消费同一结果，原件只读，缺工具或坏输入不生成伪正文。
+- **LibreOffice 与字体**：`platform_compat` 按显式 `SOFFICE_BIN`、PATH 与支持的平台位置发现工具；保留调用者 `FONTCONFIG_FILE/PATH`，仅对应 macOS bundle 使用其随附字体配置。视觉 QA 与可编辑 PPT 重建复用此接口，缺渲染器仍报告失败。
+- **打开与清理**：显式桌面打开由宿主命令执行；无桌面不妨碍文件生成，打开失败保留文件并报告。清理优先系统回收站，不可用时使用独占恢复目录保留原名与符号链接，不覆盖已有回收项，不永久删除作为失败回退。
+- **验证**：`python3 .scripts/test_platform_compat.py` 使用合成 OOXML 与受控命令验证跨平台分支；实际 LibreOffice 渲染另在宿主上验收。`uv run ran-asks test release` 保持原 16 项顺序并追加此回归，共 17 项。Ubuntu 冻结安装与系统工具见 `operations/UBUNTU.md`。
 
 ### 1.1a `.scripts/ingest_inbox.py`（统一摄入入口）
 
@@ -1086,7 +1094,7 @@ python3 .scripts/test_presentation_delivery.py --render
 - `ingest_paper.py`：inbox 学术论文 PDF 的**代码驱动端到端摄入编排器**（见 §2.1c）。PyMuPDF metadata、PDF pages 1-2、带页码文本备用和 MinerU 只生成候选；Agent 与 API 共用 `paper-agent-workspace-v1` 三段产物协议，前者直接填写，后者通过一次受限 `ingest_paper_workspace` 调用生成。两端共享书目/Wiki/semantic/IR/Graph validator。quiet batch 可并发准备暂存产物；所有 live graph preflight/commit 经 `graph_ingest` 的跨进程 writer lock 串行，逐篇保持原子性；仅 inbox 学术 PDF 适用。
 - `predicate_governance.py`：候选谓词自动治理器；读取 `.scripts/predicate-governance.yaml`，将 `cross-domain/predicate-candidates.jsonl` 归一、聚合并输出 `cross-domain/predicate-governance.json` 与 `.scripts/predicate-registry.json`。只有达到正式阈值的谓词才扩展摄入允许集；不自动创建反向关系或方向 tier。
 - `wg.py ingest` / `ingest_inbox.py`：明确附件摄入的公开入口和统一编排。普通 inbox 待处理文件用 `--file`；对话附件统一使用 `wg.py ingest <path> --keep-source`，不论原件是否位于 inbox；纯正文用 `--stdin` 原样暂存。附件经受管复制、SHA-256 复核和 `inbox-intake-v1` 回执后进入同一事务，原件不清理。`--resume` 按事务保存的 pipeline 恢复，API 路径调用对应 DSH resume tool，Agent 路径调用确定性底层 resume；OCR/复核 task 完成后也必须由此恢复原事务。
-- `ingest_document.py`：通用文档（学术非论文/行政/教学/商业）的**代码驱动端到端摄入编排器**（见 §1.1d）。`--subproject` 指定域，`DOMAIN_CONFIG` 驱动域差异（页面类型/谓词/代词）。`entrypoint=inbox` 记录统一入口来源；事务分别持久化 `semantic_backend`、视觉路由 `image_backend` 与实际 `ocr_backend`，resume 不允许切换 semantic backend。图片默认独立 API 转写和复核，异常只交接文字行动任务，不把图片交给宿主。语义槽在 finalize 前严格拒绝箭头格式、旧 `行政主题/行政关系` 及非空零解析；共享 validator 每次读取最新暂存文件并同步 `slots_content`，职责证据校验不得读旧缓存。流程同 `ingest_paper.py` 但用 textutil/pandoc/OCR/表格提取器。`ingest_admin.py` 是其薄包装。
+- `ingest_document.py`：通用文档（学术非论文/行政/教学/商业）的**代码驱动端到端摄入编排器**（见 §1.1d）。`--subproject` 指定域，`DOMAIN_CONFIG` 驱动域差异（页面类型/谓词/代词）。`entrypoint=inbox` 记录统一入口来源；事务分别持久化 `semantic_backend`、视觉路由 `image_backend` 与实际 `ocr_backend`，resume 不允许切换 semantic backend。图片默认独立 API 转写和复核，异常只交接文字行动任务，不把图片交给宿主。语义槽在 finalize 前严格拒绝箭头格式、旧 `行政主题/行政关系` 及非空零解析；共享 validator 每次读取最新暂存文件并同步 `slots_content`，职责证据校验不得读旧缓存。流程同 `ingest_paper.py` 但用 shared Word/PPTX、PDF、OCR 或表格提取器。`ingest_admin.py` 是其薄包装。
 - `re_ingest.py`：管道版本升级后重新摄入已入库论文（见 §2.11）。raw 不动，重生 wiki + `graph_ingest.py --clean` 清旧边重建。`--outdated` 按节点 `ingest_version` 筛选落后论文；`--manifest` 全量；`--raw` 单篇。旧 wiki 备份至 `temp/inbox-state/`，不重跑 MinerU。
 - `workspace_state.py`：`projects/**` 通用持续工作区内核，允许嵌套路径。`workspace.yaml`、`.workspace/items/*.md`、`.workspace/memories/*.md` 是权威，`events.jsonl` 是审计历史，`notes/status.md`、`profile.json`、`index.sqlite` 是可重建投影。profile 配置位于 `operations/config/workspace-profiles.yaml`；事项写入执行状态条件门。`role_work` 的 `proposal` 仍存为普通事项，薄命令将待提、待讨论、已讨论确定性映射到通用状态并在投影中分组，不创建会议模型。记忆支持有效期、失效和替代链，父层只聚合直接子工作区摘要。`profile --refresh` 的 Agent/API adapter 共用 schema，Agent 只返回 `agent-task-v1`。`doctor` 对损坏记录和事件显式失败。
 - `research_memory.py`：旧研究项目 `.research-memory/` 的兼容门面，保留 `recall/add/list/get/profile`、历史顺序 ID 和 `RESEARCH_BACKEND` 行为；路径解析、严格 JSONL、原子单文件写入、画像 schema 与有界快照复用 `workspace_state`。不自动迁移或改写既有研究记忆；新通用工作区使用 `.workspace/`。

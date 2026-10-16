@@ -30,6 +30,7 @@ RELEASE = FOUNDATION + [
     ".scripts/test_paper_artifact.py",
     ".scripts/paper_artifact.py verify paper-artifacts/v0.2.0",
     "paper-artifacts/v0.2.1/verify.py",
+    ".scripts/test_platform_compat.py",
 ]
 
 

@@ -30,6 +30,7 @@ import agent_task
 import inbox_state
 import image_ocr
 import pptx_document
+import document_text
 import trash_util
 import ingest_common as ic
 import ingest_pipeline
@@ -267,11 +268,7 @@ def extract_doc_text(source_path: Path, extract_dir: Path | None = None) -> str:
     if suffix in (".txt", ".md"):
         return source_path.read_text(encoding="utf-8")
     if suffix in (".docx", ".doc"):
-        result = subprocess.run(
-            ["textutil", "-convert", "txt", "-stdout", str(source_path)],
-            capture_output=True, text=True,
-        )
-        return result.stdout if result.returncode == 0 else ""
+        return document_text.extract_word_text(source_path)
     if suffix == ".pptx":
         return pptx_document.extract(source_path)[0]
     if suffix == ".pdf":
@@ -2046,7 +2043,7 @@ def step_finalize_tail(state: dict) -> tuple[bool, str]:
 
 DOCUMENT_SPEC = {
     "script_name": "ingest_document.py",
-    "preprocess_label": "文档提取（textutil/pandoc/image OCR）",
+    "preprocess_label": "文档提取（Word/演示文稿/PDF/图片 OCR）",
     "completion_label_key": None,
     "cleanup_after": "finalize_tail",
     "rollback_fn": rollback_committed,

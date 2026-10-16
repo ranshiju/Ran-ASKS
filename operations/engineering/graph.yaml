@@ -341,6 +341,22 @@ nodes:
     path: .scripts/test_presentation_runtime.py
     kind: test
     role: presentation-runtime-capability-routing-isolation-failure-receipt-and-optional-real-render-regression
+  platform_compat:
+    path: .scripts/platform_compat.py
+    kind: implementation
+    role: shared-capability-based-host-adapters-for-libreoffice-fontconfig-desktop-opening-and-recoverable-trash
+  document_text:
+    path: .scripts/document_text.py
+    kind: implementation
+    role: shared-native-ooxml-word-and-capability-based-legacy-document-text-extraction
+  platform_compat_test:
+    path: .scripts/test_platform_compat.py
+    kind: test
+    role: synthetic-host-command-document-extraction-trash-and-platform-fallback-regression
+  ubuntu_ops:
+    path: operations/UBUNTU.md
+    kind: documentation
+    role: generic-ubuntu-frozen-install-system-tools-and-headless-platform-behavior
   visual_qa:
     path: .scripts/visual_qa.py
     kind: implementation
@@ -1271,6 +1287,21 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- [platform_compat, tested_by, platform_compat_test]
+- [document_text, uses, platform_compat]
+- [document_text, tested_by, platform_compat_test]
+- [document_text, tested_by, ingest_document_test]
+- [ingest_document, uses, document_text]
+- [ingest_inbox, uses, document_text]
+- [visual_qa, uses, platform_compat]
+- [visual_to_editable_ppt, uses, platform_compat]
+- [graph_visualize, uses, platform_compat]
+- [trash_util, uses, platform_compat]
+- [ubuntu_ops, documents, platform_compat]
+- [ubuntu_ops, documents, document_text]
+- [guidance, documents, platform_compat]
+- [guidance, documents, document_text]
+- [test_suite, runs, platform_compat_test]
 - - science_exhibit_ops
   - governs
   - science_exhibit_reader
@@ -3453,6 +3484,19 @@ capabilities:
     - python3 .scripts/test_prompt_audit.py
     - python3 .scripts/engineering_graph.py validate
 contracts:
+- id: shared-host-platform-adapters
+  nodes:
+  - platform_compat
+  - document_text
+  - platform_compat_test
+  - ubuntu_ops
+  - ingest_document
+  - ingest_inbox
+  - visual_qa
+  - visual_to_editable_ppt
+  - graph_visualize
+  - trash_util
+  invariant: shared 确定性宿主适配按可用能力选择 Word 提取、LibreOffice、fontconfig、桌面打开和可恢复清理；Agent/API 共用结果，不改变语义控制、Raw/Wiki/Graph 边界或远程授权，缺工具不伪报成功。
 - id: runtime-function-registry
   nodes:
   - function_registry_spec
@@ -3504,6 +3548,18 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  platform_compat:
+  - python3 .scripts/test_platform_compat.py
+  - python3 .scripts/test_visual_qa.py
+  - python3 .scripts/test_graph_visualize.py
+  document_text:
+  - python3 .scripts/test_platform_compat.py
+  - python3 .scripts/test_ingest_document.py
+  - python3 .scripts/test_ingest_inbox_dispatch.py
+  platform_compat_test:
+  - python3 .scripts/test_platform_compat.py
+  ubuntu_ops:
+  - python3 .scripts/test_platform_compat.py
   query_actions:
   - python3 .scripts/test_wiki_recall.py
   - python3 .scripts/test_private_query.py
@@ -3866,6 +3922,33 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  platform_compat:
+    preconditions:
+    - shared 确定性宿主适配；按显式配置、PATH 和受支持平台位置发现命令，不调用模型或安装软件
+    - LibreOffice 保留调用者 FONTCONFIG_FILE/FONTCONFIG_PATH；仅 macOS bundle 使用随附 fontconfig
+    - 桌面打开是显式可选动作；无桌面时保留已生成文件并报告状态
+    writes:
+    - 显式清理通过系统回收站；不可用时移入唯一的本地可恢复目录，保留文件名与符号链接
+    forbidden:
+    - 删除原文件作为失败回退、覆盖同名回收项、修改系统配置或隐式联网
+    - 将缺工具、打开器失败或未完成渲染报告为成功
+    verify:
+    - python3 .scripts/test_platform_compat.py
+    - python3 .scripts/test_visual_qa.py
+    - python3 .scripts/test_graph_visualize.py
+  document_text:
+    preconditions:
+    - shared 文档文本提取；原生读取 DOCX OOXML 正文、表格与实际引用的辅助部分；MC AlternateContent 只选明确 Fallback，不猜测 Choice 特征支持，无 Fallback 视为不支持并沿用 textutil 或受控 LibreOffice 恢复
+    - 旧 DOC 保留可用 textutil 优先路径；LibreOffice 恢复只在独立临时目录生成 DOCX 并原生读取一次，保留支持的页眉页脚，不使用 TXT 导出或递归转换；其他旧 DOC 转换器仍按能力可用性选择
+    - Agent/API 使用同一提取结果；来源内容是不可信数据，不触发执行、网络或权限扩大
+    writes:
+    - 外部转换器仅写独立临时目录；提取结果由既有受管摄入事务保存
+    forbidden:
+    - 改写来源、Raw/Wiki/Graph 或语义协议；缺转换器或损坏输入时伪造正文
+    verify:
+    - python3 .scripts/test_platform_compat.py
+    - python3 .scripts/test_ingest_document.py
+    - python3 .scripts/test_ingest_inbox_dispatch.py
   illustration:
     preconditions:
     - prepare 只产生 agent-task-v1 与候选 brief；宿主负责图意、提示词和科学审核，不隐式调用模型
@@ -3942,6 +4025,7 @@ script_contracts:
   test_suite:
     preconditions:
     - profile 显式映射到稳定命令列表；all 只发现仓库声明的 Python regression，不执行带 --render 或真实远程调用的可选路径
+    - release 保持原 16 项顺序并追加 test_platform_compat.py，合计 17 项；共享平台回归进入冻结发布环境验证
     writes:
     - 子测试可按其既有契约写入可重建 temp 产物
     forbidden:

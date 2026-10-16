@@ -640,6 +640,12 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 - **Graph 帮助发现与到达**：围绕用户可能的查询，借助 Wiki 建立有证据支持的导航入口，再由 Wiki 引向 Raw；不默认将每条记录、每个字段都图化。
 - 根据材料和检索需要决定页面粒度、汇总内容与导航关系，遵守现有 schema 和摄入事务。
 
+## Word 文档提取（DOCX/DOC）
+
+- `ingest_document.py` 与 inbox 文档预览共用 `.scripts/document_text.py`。DOCX 直接读取 OOXML 正文、嵌套内容、表格及支持的实际引用辅助部分；`mc:AlternateContent` 仅选择明确 `Fallback`，不猜测 `Choice` 特征支持；无 `Fallback` 视为不支持，沿用 `textutil` 或受控 LibreOffice 恢复。
+- 旧 DOC 保留可用 `textutil` 优先路径；LibreOffice 由 `.scripts/platform_compat.py` 统一发现，将旧 DOC 或不支持的 DOCX 转为独立临时 DOCX，再原生读取一次以保留受支持的页眉页脚；该转换不使用丢失头尾的 TXT 导出或递归回退。其他旧 DOC 转换器仍兼容 `antiword`、`catdoc`。转换不改写原件；缺少工具或损坏输入不能冒充成功提取。
+- 忠实提取仍由既有 companion、来源哈希、validator 与原子落位契约保护。平台转换不改变 Agent/API 语义 backend，不执行来源内容，也不授予远程上传权限。Ubuntu 系统工具和无桌面行为见 `operations/UBUNTU.md`。
+
 ## 演示文稿（PPTX）
 
 - 原生 PPTX 按 presentation.xml 页序提取文本、列表、表格、对象位置与独立演讲者备注，隐藏页保留；`## 幻灯片 N` 和物理行号支持精确回溯。原生提取不支持的信息显式标记，不猜数据。
@@ -647,7 +653,7 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 - 新摄入采用独立 `pptx_visual` API 内容识读；主 Agent 只消费文字。`--allow-remote-ppt` 授权选定 PPTX 的内容识读与显式失败重试，Agent/API 语义 backend 均保持原模式，统一 inbox/wg/DSH 入口透传。既有图片 OCR 持续授权不自动扩展到 PPT。无许可、配置缺失或失败返回纯文字 `pptx_api_action`，不打开宿主图像、不回落 DSH。
 - 首版逐页 API 对照原生结构与渲染画面；输入包含结构文字，图片补充明确标记“API视觉识读”，备注不冒充可见正文。原生错误应修提取器；图中不清楚的数值和含义标记限制，不用猜测填充。API `fail/not_checked` 或关键未决项阻断提交；非关键限制进入 companion、sidecar 和告警。
 - 源绑定 `pptx-api-review-v1` 回执记录每页的实际 API 身份、原件/原生文字/图像/结构哈希及结果，程序最终复验；旧宿主回执仅历史兼容，不能改标 API 或人工确认。已完成且依赖一致的页续做复用，API 失败不视作已检查。
-- 静态渲染复用 visual_qa 与本地 LibreOffice；页数与原始页序不一致阻断，不能将错位图像绑定。动画、视频、任意嵌入对象重建不在保真承诺内。API 看图用于摄入保真，不是自动执行用户最终的 PPT形式检查、证据核查或引用脱敏。
+- 静态渲染复用 visual_qa 与本地 LibreOffice，命令发现和 fontconfig 由 shared 平台适配处理并保留调用者配置；无桌面可 headless 渲染，缺工具或转换失败不能视作已检查。页数与原始页序不一致阻断，不能将错位图像绑定。动画、视频、任意嵌入对象重建不在保真承诺内。API 看图用于摄入保真，不是自动执行用户最终的 PPT形式检查、证据核查或引用脱敏。
 - 学术报告采用 academic-reference / ordinary。Wiki 保存报告题目、报告人/单位、主会议、报告日期/地点、主题摘要、主要内容与页码导航。未明确字段留空；报告日期、会议起止日期和源文件日期分开；附带活动宣传不能替代主会议。报告内容以“该报告展示/提出”表述，不自动认证科学结论。
 - PPTX 的源文件日期仅从原文件名或 inbox 来源目录中的明确日期提取；没有则保持未知。封面报告日期、文献发布日期及附带活动日期只作正文事实，不填入程序的来源日期字段。
 - 图只保留必要的报告主题与已有实体导航，不为每页建节点；词语别名服务中英文检索。日常查询先用伴生文字和 Wiki，到原 PPT 页核对；只有确实涉及视觉信息才按范围调用 API。
@@ -728,7 +734,7 @@ python3 .scripts/private_ingest.py commit --txn <transaction-id>
 
 **PDF 提取**:调用**内置** `.scripts/extractor.py`。MinerU 为默认引擎，客户端按错误类型分阶段重试，terminal 的认证/配额/输入错误不重试；中断后用绑定输入与请求哈希的 checkpoint 复用原 batch，不重复提交。已接收任务若无错误码且明确提示稍后重试，仅创建一个替代 batch 并在 checkpoint 保留旧 batch 历史；替代任务仍失败即终止，旧版同类 `remote_failed` checkpoint 可按此规则恢复。启用 `extraction.paddleocr.enabled` 后自动链仅为 MinerU → 已授权的 PaddleOCR 官网 API → 显式失败，不继续 BLSC/docling/pymupdf。公开学术论文受管摄入给本次提取传递 `--allow-paddleocr`，单独运行 extractor 须显式给此标记；它不授权保密材料或 private，不接受批量授权。提取产物是完整文档包：`paper.md`、Markdown 实际引用的 `images/`、allowlist sidecar 与 `parse_meta.yaml`；未引用图片不归档。PaddleOCR 不伪造 MinerU sidecar 或引擎标记。inbox 流程用 `inbox-artifact-manifest-v2` 记录嵌套 POSIX 路径、role、bytes、SHA-256，`inbox_finalize.py` 在 source/staging/receipt 三处复验后原子落位。两种解析的暂存 checkpoint 均可恢复；已完成且输入哈希一致的文档包不会因后续书目/Wiki/Graph 失败而重新 OCR。`--external-pdf` 用于 inbox 摄入的临时区提取；仅 synology:// 远程源等特殊场景另议。
 
-> **分工边界**:`.scripts/extractor.py` 专处理**学术论文 PDF**(MinerU 默认+重试,产出 `<papers-dir>/<paper-id>/`);会议纪要 `.txt` 由 `ingest_meeting.py` 代码驱动摄入;学术非论文及行政/教学/商业文档(`.docx`/`.doc`/`.pptx`/`.txt`/`.pdf`)由 `ingest_document.py` 代码驱动摄入(`--subproject academic|admin|teaching|business`),内部用 textutil/pandoc 提取文本。academic 必须带 `--document-type editorial|academic-reference|conference-summary`，缺失时在事务与预处理前停止。
+> **分工边界**:`.scripts/extractor.py` 专处理**学术论文 PDF**(MinerU 默认+重试,产出 `<papers-dir>/<paper-id>/`);会议纪要 `.txt` 由 `ingest_meeting.py` 代码驱动摄入;学术非论文及行政/教学/商业文档(`.docx`/`.doc`/`.pptx`/`.txt`/`.pdf`)由 `ingest_document.py` 代码驱动摄入(`--subproject academic|admin|teaching|business`),内部用 shared Word/PPTX 提取器、PDF 提取器或 OCR 处理文本。academic 必须带 `--document-type editorial|academic-reference|conference-summary`，缺失时在事务与预处理前停止。
 
 ### raw 被外部调用约束
 

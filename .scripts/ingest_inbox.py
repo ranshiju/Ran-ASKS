@@ -27,6 +27,8 @@ import re
 import shlex
 import shutil
 import subprocess
+import zipfile
+from xml.etree import ElementTree
 import sys
 import urllib.parse
 import unicodedata
@@ -84,6 +86,8 @@ import inbox_plan
 import ingest_user_assertions
 import source_fingerprints as sf
 import trash_util
+import document_text
+import pptx_document
 INBOX = REPO / "inbox"
 
 
@@ -148,18 +152,19 @@ def read_document_preview(path: Path, max_chars: int = 8000) -> str:
         if suffix in {".txt", ".md"}:
             return path.read_text(encoding="utf-8")[:max_chars]
         if suffix in {".docx", ".doc"}:
-            result = subprocess.run(
-                ["textutil", "-convert", "txt", "-stdout", str(path)],
-                capture_output=True, text=True, timeout=30,
-            )
-            return result.stdout[:max_chars] if result.returncode == 0 else ""
+            return document_text.extract_word_text(path, max_chars=max_chars)
         if suffix == ".pptx":
-            result = subprocess.run(
-                ["pandoc", "-t", "plain", str(path)],
-                capture_output=True, text=True, timeout=30,
-            )
-            return result.stdout[:max_chars] if result.returncode == 0 else ""
-    except (OSError, subprocess.SubprocessError, UnicodeError):
+            text, _manifest = pptx_document.extract(path)
+            return text[:max_chars]
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        UnicodeError,
+        ValueError,
+        KeyError,
+        zipfile.BadZipFile,
+        ElementTree.ParseError,
+    ):
         pass
     return ""
 

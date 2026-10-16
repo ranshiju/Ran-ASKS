@@ -70,3 +70,8 @@ temp/**
 # Explicitly approved, frozen paper artifacts are release content.
 !paper-artifacts/
 !paper-artifacts/**
+# Generic host adapters, synthetic regressions and setup remain controlled source.
+!.scripts/platform_compat.py
+!.scripts/document_text.py
+!.scripts/test_platform_compat.py
+!operations/UBUNTU.md

@@ -99,6 +99,8 @@ from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE  # noqa: E402
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN  # noqa: E402
 from pptx.oxml.xmlchemy import OxmlElement  # noqa: E402
 from pptx.util import Pt  # noqa: E402
+
+import platform_compat  # noqa: E402
 from visual_qa import run_visual_qa  # noqa: E402
 
 
@@ -1370,15 +1372,8 @@ def _build_presentation(page_models: list[dict[str, Any]], output: Path) -> dict
 
 
 def _find_soffice() -> str | None:
-    configured = os.environ.get("SOFFICE_BIN", "").strip()
-    if configured and Path(configured).is_file():
-        return configured
-    candidate = shutil.which("soffice") or shutil.which("libreoffice")
-    if candidate:
-        return candidate
-    bundled = Path.home() / ".cache" / "codex-runtimes"
-    matches = sorted(bundled.glob("*/dependencies/bin/override/soffice"), reverse=True)
-    return str(matches[0]) if matches else None
+    candidate = platform_compat.find_soffice()
+    return str(candidate) if candidate else None
 
 
 def _render_pptx_for_comparison(output: Path, target_dir: Path, dpi: int) -> list[Path]:
@@ -1389,6 +1384,7 @@ def _render_pptx_for_comparison(output: Path, target_dir: Path, dpi: int) -> lis
     process = subprocess.run(
         [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(target_dir), str(output)],
         capture_output=True, text=True, timeout=180, check=False,
+        env=platform_compat.soffice_environment(soffice),
     )
     pdf = target_dir / f"{output.stem}.pdf"
     if process.returncode != 0 or not pdf.is_file():

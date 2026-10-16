@@ -30,6 +30,34 @@ def test_extract_last_json_ignores_domain_status():
     assert parsed["paper_id"] == "p1"
 
 
+def test_pptx_preview_uses_native_extractor_without_pandoc():
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    sentinel = "PPTX native preview sentinel"
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / "preview.pptx"
+        presentation = Presentation()
+        slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(8), Inches(1))
+        box.text_frame.text = sentinel
+        presentation.save(source)
+
+        with patch.object(
+            module.subprocess,
+            "run",
+            side_effect=AssertionError("PPTX preview must not invoke pandoc"),
+        ):
+            preview = module.read_document_preview(source)
+            bounded = module.read_document_preview(source, max_chars=24)
+        assert sentinel in preview
+        assert bounded == preview[:24]
+
+        corrupt = Path(directory) / "corrupt.pptx"
+        corrupt.write_text("not a presentation", encoding="utf-8")
+        assert module.read_document_preview(corrupt) == ""
+
+
 def test_managed_external_file_staging_and_inbox_boundary():
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory) / "attachment.txt"
@@ -2124,4 +2152,5 @@ def main():
 
 
 if __name__ == "__main__":
+    test_pptx_preview_uses_native_extractor_without_pandoc()
     main()
