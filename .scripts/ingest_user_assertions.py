@@ -353,7 +353,6 @@ def apply_transaction(transaction_id: str, repo: Path | None = None) -> dict:
                 "ingest", "--page", page, "--page-file", str(staged_wiki),
                 "--semantic", str(semantic), "--transaction-id", transaction_id,
                 "--knowledge-ir-out", str(ir_path), "--graph-plan-out", str(plan_path),
-                "--clean",
             ]
             completed = _run_command(command, repo)
             if completed.returncode != 0:

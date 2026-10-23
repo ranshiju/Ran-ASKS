@@ -7,6 +7,46 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-23
+
+### Version decision / 版本判断
+
+- MINOR: Add backward-compatible advisory review, bounded paper-to-poster composition and version-bound feedback with shared local visual materials; retain existing Agent/API contracts
+- MINOR（中文）：新增向后兼容的建议型审阅、有限论文展板混排与版本绑定反馈，共用本地视觉材料并保持既有 Agent/API 契约
+
+### Highlights
+
+- Added preview, host-owned advisory review with independently versioned reader
+  and argument reviewers, frozen text/image inputs, bounded feedback validation
+  and recoverable reports. Advice neither approves an artifact nor establishes
+  real-reader understanding; private inputs and implicit API fallback remain
+  unsupported.
+- Extended paper-to-poster collaboration with bounded editable text/graphics and
+  frozen raster compositions, version-bound review decisions and rebuildable
+  before/after comparisons. Existing layouts remain compatible; scientific,
+  visual, user-acceptance and publication decisions remain separate.
+- Shared local slide conversion and traceable overview/detail preparation across
+  visual tools and advisory review, with optional PDF-native details and explicit
+  per-image handoff/readability records. Material preparation calls no model;
+  Agent viewing and API visual QA retain separate control loops.
+- Improved editable-PowerPoint reconstruction, capability-registry consistency,
+  source-bound meeting ingestion and engineering guidance. Public exports contain
+  generic code and synthetic fixtures, not local knowledge or project artifacts.
+
+### 主要更新
+
+- 新增 preview 宿主子 Agent 建议型审阅：读者理解与论证结构角色独立版本化，冻结
+  文本／图片输入，校验有界反馈并生成可恢复报告。建议不代表作品批准或真人理解
+  效果；不支持 private 输入或隐式 API 回退。
+- 扩展论文到科普展板协作：支持有限可编辑文字／图形与冻结位图混排，审阅取舍绑定
+  实际版本，并可重建修改前后对比。旧布局保持兼容，科学、视觉、用户接受和公开
+  许可继续分别判断。
+- 视觉工具与审阅共用本地幻灯片转换及可追溯整图／局部材料准备，支持可选 PDF
+  原生局部与逐图交接／可读性记录。准备材料不调用模型，Agent 看图与 API 视觉
+  QA 保持独立控制循环。
+- 改进可编辑 PowerPoint 重建、功能目录一致性、来源绑定会议摄入及工程指引。
+  公开树只含通用代码和合成样例，不含本地知识或项目产物。
+
 ## [0.17.0] - 2026-10-15
 
 ### Version decision / 版本判断
@@ -517,5 +557,7 @@ manifests and checksums.
 
 [0.16.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.16.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.17.0...HEAD
 [0.17.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.17.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.18.0

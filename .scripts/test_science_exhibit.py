@@ -30,6 +30,19 @@ def test_typographic_units():
         assert renderer.wrap_text('甲乙丙（丁）', width_mm, 100, 1, font) == '甲乙丙\n（丁）'
 
 
+def test_rendered_lines_match_objects_not_overlapping_empty_boxes():
+    import fitz
+    factor = renderer.POINTS_PER_MM
+    objects = [{'id': 'heading', 'type': 'text', 'bbox_mm': [10, 10, 100, 20], 'text': '主标题'},
+               {'id': 'caption', 'type': 'text', 'bbox_mm': [80, 20, 30, 10], 'text': '图注'}]
+    lines = [(fitz.Rect(10, 10, 40, 18) * factor, '主标题'),
+             (fitz.Rect(80, 20, 100, 28) * factor, '图注')]
+    renderer.validate_rendered_lines(objects, lines)
+    fails(lambda: renderer.validate_rendered_lines(objects, lines + [lines[0]]))
+    fails(lambda: renderer.validate_rendered_lines(objects, [(lines[0][0], '主'), lines[1]]))
+    fails(lambda: renderer.validate_rendered_lines(objects, [(fitz.Rect(5, 10, 40, 18) * factor, '主标题'), lines[1]]))
+
+
 @contextmanager
 def fixture():
     with tempfile.TemporaryDirectory() as directory:
@@ -351,6 +364,90 @@ def test_source_drift_and_fsync_failure_during_build():
             assert exhibit.file_hash(store / 'current.json') == state_hash
 
 
+def composition_content(root, source, store):
+    from PIL import Image
+    import science_exhibit_composition as composition
+    image = root / 'projects/fixture/synthetic.png'
+    Image.new('RGB', (160, 80), '#267F86').save(image)
+    asset = composition.import_asset(exhibit, store, image, '合成插图，仅用于工程检查', 'TEST-ONLY，不是实验图或科学结论')
+    texts = [
+        {'id': 'title', 'text': '合成科学展板', 'roles': [], 'claim_ids': []},
+        {'id': 'hook', 'text': '怎样保留理解主线？', 'roles': ['question'], 'claim_ids': ['claim-1']},
+        {'id': 'takeaway', 'text': '仅用于工程检查，不对应真实科学研究。',
+         'roles': ['approach', 'finding', 'boundary'], 'claim_ids': ['claim-1']},
+    ]
+    objects = []
+    for identifier, top, size, height in [('title', 40, 40, 80), ('hook', 160, 28, 70),
+                                           ('takeaway', 300, 24, 100), ('source-label', 1180, 16, 100),
+                                           ('draft-label', 1320, 12, 45)]:
+        objects.append({'id': 'text-' + identifier, 'type': 'text', 'x': 40, 'y': top,
+                        'w': 920, 'h': height, 'size': size, 'color': '#18323B', 'bold': False,
+                        'align': 'left', 'text_ref': identifier, 'claim_ids': []})
+    objects.insert(3, {'id': 'main-image', 'type': 'image', 'x': 40, 'y': 600, 'w': 600, 'h': 300,
+                       'asset_id': asset['id'], 'claim_ids': ['claim-1']})
+    return {'schema': 'science-exhibit-content-v2', 'claims': content(source, root)['claims'],
+            'texts': texts, 'assets': [asset], 'composition': {'schema': 'science-exhibit-composition-v1',
+                'canvas': [1000, 1400], 'background': '#F7FAF8', 'objects': objects}}
+
+
+def test_composition_content_assets_and_legacy_compatibility():
+    import science_exhibit_composition as composition
+    with fixture() as (root, source, store):
+        candidate = composition_content(root, source, store)
+        state = exhibit.load_state(store)
+        exhibit.validate_content(candidate, state)
+        request = exhibit.prepare(store, 0)
+        exhibit.atomic_json(root / request['agent_task']['outputs'][0]['path'], candidate)
+        exhibit.check_or_commit(root / request['request_path'], commit=True)
+        assert exhibit.check_or_commit(root / request['request_path'], commit=True)['already_committed']
+        assert exhibit.load_state(store)['content'] == candidate
+        for change in ('missing_text', 'missing_role', 'stretch', 'lost_qualifier', 'unknown_claim', 'hidden_asset', 'extra_field'):
+            bad = deepcopy(candidate)
+            if change == 'missing_text':
+                bad['composition']['objects'].pop()
+            elif change == 'missing_role':
+                bad['texts'][-1]['roles'].remove('boundary')
+            elif change == 'stretch':
+                bad['composition']['objects'][3]['w'] = 500
+            elif change == 'lost_qualifier':
+                bad['texts'][-1]['text'] = '未保留科学限定'
+            elif change == 'unknown_claim':
+                bad['texts'][-1]['claim_ids'] = ['unknown']
+            elif change == 'hidden_asset':
+                bad['composition']['objects'].pop(3)
+            else:
+                bad['composition']['objects'][0]['script'] = 'untrusted'
+            fails(lambda: exhibit.validate_content(bad, state))
+        asset = root / candidate['assets'][0]['path']
+        asset.write_bytes(b'changed')
+        fails(lambda: exhibit.validate_content(candidate, state))
+        symlink = root / 'projects/fixture/link.png'
+        symlink.symlink_to(root / 'projects/fixture/synthetic.png')
+        fails(lambda: composition.import_asset(exhibit, store, symlink, 'TEST-ONLY', '合成测试'))
+
+
+def test_actual_composition_render(font):
+    import science_exhibit_composition as composition
+    from PIL import Image
+    with fixture() as (root, source, store):
+        state = exhibit.load_state(store)
+        candidate = composition_content(root, source, store)
+        jpeg = root / 'projects/fixture/synthetic.jpg'
+        Image.new('RGB', (160, 80), '#7967A2').save(jpeg)
+        asset = composition.import_asset(exhibit, store, jpeg, '合成JPEG，仅用于工程测试', '显式居中裁切测试，非科学证据')
+        candidate['assets'].append(asset)
+        candidate['composition']['objects'].insert(4, {'id': 'cropped-jpeg', 'type': 'image', 'x': 650, 'y': 600,
+            'w': 300, 'h': 300, 'fit': 'cover', 'asset_id': asset['id'], 'claim_ids': []})
+        state['brief']['font'] = font
+        exhibit.validate_content(candidate, state)
+        directory = store / 'actual-mixed-render'
+        directory.mkdir()
+        result = renderer.render(candidate, state['brief'], directory, canvas_mm=[594, 841])
+        assert result['mechanical_status'] == 'passed' and result['image_object_count'] == 2
+        assert len(result['image_assets']) == 2 and result['image_effective_dpi']
+        assert str(root) not in (directory / 'layout.json').read_text()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--render', action='store_true')
@@ -358,6 +455,7 @@ def main():
     parser.add_argument('--output')
     args = parser.parse_args()
     test_typographic_units()
+    test_rendered_lines_match_objects_not_overlapping_empty_boxes()
     test_visible_acronym_definitions()
     test_creation_validation_and_idempotency()
     test_content_rejections_and_source_drift()
@@ -365,8 +463,10 @@ def main():
     test_path_safety_bad_json_and_snapshot_corruption()
     test_failed_pointer_publish_and_failed_render()
     test_source_drift_and_fsync_failure_during_build()
+    test_composition_content_assets_and_legacy_compatibility()
     if args.render:
         test_actual_render(args.font, args.output)
+        test_actual_composition_render(args.font)
     print('science exhibit regression: PASS' + (' (actual render)' if args.render else ''))
 
 

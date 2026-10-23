@@ -76,12 +76,21 @@ def validate_state_shape(core, state):
                      work['delivery']['output_dir'] == work['preview']['output_dir'], 'Delivery must bind an accepted preview')
     core.require(isinstance(work['feedback'], list) and len(work['feedback']) <= 500, 'Invalid feedback history')
     for item in work['feedback']:
-        core.fields(item, ('id', 'scope', 'text', 'instruction', 'revision'))
+        core.fields(item, ('id', 'scope', 'text', 'instruction', 'revision') +
+                    (('review_binding', 'decisions') if 'review_binding' in item else ()))
         core.require(item['scope'] in {'brief', 'plan', 'content', 'visual'}, 'Invalid feedback scope')
         core.require(isinstance(item['id'], str) and re.fullmatch(r'[a-f0-9]{32}', item['id']), 'Invalid feedback identity')
         core.require(type(item['revision']) is int and 0 <= item['revision'] <= state['revision'], 'Invalid feedback revision')
         core.text(item['text'], 2000)
         core.text(item['instruction'], 2000)
+        if 'review_binding' in item:
+            from science_exhibit_review import validate_decisions
+            core.fields(item['review_binding'], ('run', 'result_sha256', 'manifest_sha256', 'content_sha256'))
+            core.managed_path(item['review_binding']['run'], 'projects')
+            for key in ('result_sha256', 'manifest_sha256', 'content_sha256'):
+                core.require(isinstance(item['review_binding'][key], str) and re.fullmatch('[a-f0-9]{64}', item['review_binding'][key]),
+                             'Invalid review binding')
+            validate_decisions(core, item['decisions'])
 
 
 def binding(core, state):
@@ -103,8 +112,8 @@ def production_blockers(state):
     if plan is None:
         return ['尚未提交创作方案']
     blockers = []
-    if plan['visual']['kind'] not in {'flow', 'concept'}:
-        blockers.append('当前 renderer 仅支持 flow 或有限原生图元 concept 主视觉')
+    if plan['visual']['kind'] not in {'flow', 'concept', 'composition'}:
+        blockers.append('当前 renderer 支持 flow、原生图元 concept 或受控混排 composition')
     import science_exhibit_render
     if tuple(plan['canvas_mm']) not in science_exhibit_render.SUPPORTED_CANVASES:
         blockers.append('当前 renderer 支持 A1/A0 竖版：594 × 841 或 841 × 1189 mm')
@@ -155,7 +164,7 @@ def validate_plan(core, plan, state):
     for key, maximum in (('title', 80), ('goal', 500), ('viewer_question', 300), ('story', 1600), ('layout', 1000)):
         core.text(plan[key], maximum)
     core.fields(plan['visual'], ('kind', 'description'))
-    core.require(plan['visual']['kind'] in {'flow', 'concept'}, 'Unsupported visual kind')
+    core.require(plan['visual']['kind'] in {'flow', 'concept', 'composition'}, 'Unsupported visual kind')
     core.text(plan['visual']['description'], 1200)
     core.require(isinstance(plan['canvas_mm'], list) and len(plan['canvas_mm']) == 2 and
                  all(type(value) is int and 100 <= value <= 2000 for value in plan['canvas_mm']), 'Valid physical canvas required')
@@ -199,6 +208,7 @@ def prepare(core, store, state, expected_revision, kind):
         protocol={'name': template['schema'], 'schema_doc': 'operations/SCIENCE_EXHIBIT.md', 'output_template': template},
         context={'phase': phase(core, state), 'requirements': state['workflow']['requirements'],
                  'authoring_method': 'operations/SCIENCE_EXHIBIT.md#公众叙事制作方法',
+                 'workflow_method': 'operations/SCIENCE_EXHIBIT.md#全流程接续与独立试读',
                  'source_data_trust': 'untrusted', 'confirmation_authority': 'host_transcribes_actual_user_instruction',
                  'feedback': state['workflow']['feedback'][-10:]},
         commands={'check': command.format(action='check'), 'commit': command.format(action='commit')},
@@ -283,6 +293,7 @@ def artifact(core, store, state, output_dir, *, check_runtime=False):
     core.require(checks.get('canvas_mm') == state['workflow']['plan']['canvas_mm'], 'Rendered canvas differs from the confirmed plan')
     if check_runtime:
         import science_exhibit_render as renderer
+        core.validate_content(state['content'], state)
         core.require(checks.get('renderer_sha256') == renderer.compiler_hash(), 'Renderer or artwork validator changed since preview')
         core.require(checks.get('font_sha256') == renderer.font_info(state['brief']['font'])['sha256'], 'Font changed since preview')
     return {'output_dir': str(directory.relative_to(core.REPO)), 'manifest_sha256': core.file_hash(manifest_path),
@@ -298,6 +309,7 @@ def validate_preview(core, store, state, *, check_runtime=False):
 
 
 def describe(core, store, state):
+    import science_exhibit_review
     stage = phase(core, state)
     prefix = f'python3 .scripts/wg.py science-exhibit {{action}} --store {shlex.quote(str(core.store_path(store).relative_to(core.REPO)))} --expected-revision {state["revision"]}'
     actions = []
@@ -340,6 +352,9 @@ def describe(core, store, state):
         'confirmation': work['confirmation'], 'authorization': work['authorization'], 'acceptance': work['acceptance'],
         'delivery': work['delivery'], 'feedback': work['feedback'][-10:], 'next_actions': actions,
         'confirmation_authority': 'host_transcription_not_machine_verified_human_identity',
+        'workflow_method': 'operations/SCIENCE_EXHIBIT.md#全流程接续与独立试读',
+        'input_action': None if state['source'] else 'Use the existing managed academic ingest for a new paper; bind its Raw locator through the brief.',
+        'review_actions': science_exhibit_review.describe(core, store, state),
     }
 
 

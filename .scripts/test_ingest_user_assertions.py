@@ -10,7 +10,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import closing
 from pathlib import Path
+
+import graph_lib
 
 
 SCRIPT = Path(__file__).with_name("ingest_user_assertions.py")
@@ -197,6 +200,58 @@ def test_apply_runs_real_graph_ingest_and_ingest_check_in_isolated_repo():
         assert FACT_LINE in raw.read_text(encoding="utf-8")
         assert FACT_ID in wiki.read_text(encoding="utf-8")
         assert FACT_LINE not in pending.read_text(encoding="utf-8")
+
+
+def test_incremental_assertion_preserves_existing_page_relations():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        pending, raw, graph, wiki = _setup_repo(root)
+        _install_graph_runtime(root)
+        _initialize_graph(root, graph)
+        first = module.prepare_transaction(repo=root)
+        _write_proposal(root, first, wiki, valid_wiki=True)
+        assert module.apply_transaction(first["transaction_id"], repo=root)["status"] == "completed"
+        with closing(graph_lib.connect(graph, read_only=True)) as connection:
+            previous_relations = {
+                tuple(row) for row in connection.execute(
+                    "SELECT predicate, object FROM edges WHERE predicate='advises'"
+                )
+            }
+        assert previous_relations
+        fact_id = "fact-alice-collaborates-carol-20260905"
+        fact_line = f"- [2026-09-05] **Alice collaborates with Carol.** {{: #{fact_id}}}"
+        pending.write_text(f"# Pending\n\n{fact_line}\n", encoding="utf-8")
+        second = module.prepare_transaction(repo=root)
+        locator = f"cross-domain/raw/facts/user-assertions.md#{fact_id}"
+        content = wiki.read_text(encoding="utf-8") + (
+            f"\nAlice collaborates with Carol.[^f2]\n\n[^f2]: {locator}\n"
+        )
+        proposal = {
+            "schema": module.PROPOSAL_SCHEMA,
+            "transaction_id": second["transaction_id"],
+            "handled_fact_ids": [fact_id],
+            "wiki_updates": [{
+                "page": "academic/wiki/authors/alice.md",
+                "before_sha256": hashlib.sha256(wiki.read_bytes()).hexdigest(),
+                "content": content,
+            }],
+            "relations": [{
+                "page": "academic/wiki/authors/alice.md", "fact_id": fact_id,
+                "subject": "Alice", "predicate": "collaborates", "object": "Carol",
+                "confidence": "[可追溯]",
+            }],
+        }
+        (root / second["write_to"]).write_text(json.dumps(proposal), encoding="utf-8")
+        result = module.apply_transaction(second["transaction_id"], repo=root)
+        assert result["status"] == "completed", result
+        with closing(graph_lib.connect(graph, read_only=True)) as connection:
+            current_relations = {
+                tuple(row) for row in connection.execute("SELECT predicate, object FROM edges")
+            }
+        assert previous_relations <= current_relations, (previous_relations, current_relations)
+        assert any(relation[0] == "collaborates" for relation in current_relations)
+        assert FACT_LINE in raw.read_text(encoding="utf-8")
+        assert fact_line in raw.read_text(encoding="utf-8")
 
 
 def main() -> None:

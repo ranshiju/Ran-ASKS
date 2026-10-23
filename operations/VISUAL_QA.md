@@ -43,6 +43,26 @@ python3 .scripts/visual_qa.py path/to/slides.pptx --profile slides --determinist
 
 `raw/`、`inbox/`、`private/`、`sources/` 和 `source-local/` 路径，以及 `profile=paper` 的论文/稿件 PDF，默认禁止远程上传，只执行本地检查并返回部分完成。确认材料允许发送给远程服务后，调用方才可显式传入 `--allow-remote`。API key 不进入 receipt。图件 PDF 可显式使用 `--profile figure`，但路径保护仍优先。
 
+## 共享本地材料准备
+
+`artifact.visual_qa` 同时提供不依赖模型的本地材料接口；这不是 QA 判决，也不是另一个看图 Agent。当前宿主使用原生图片附件或查看工具阅读输出，API/DSH QA 控制循环不参与。
+
+```bash
+python3 .scripts/visual_qa.py <PNG或单页PDF> --prepare-views <regions.json>
+```
+
+区域由当前 Agent 根据实际需要明确选择，不由程序语义评分或自动分块。`regions.json` 示例：
+
+```json
+{"schema":"image-view-spec-v1","regions":[[0.05,0.1,0.45,0.25],[0.5,0.65,0.45,0.25]]}
+```
+
+- 坐标为整图归一化 `[x,y,width,height]`，1–6 个互不重复的有效区域；允许区域相交以保留上下文。
+- 返回 `visual-material-v1`：`status=prepared`、匿名整图/局部 ID、来源及输出哈希、实际整图区域、像素范围与附件路径，`remote_calls=0`，没有质量 verdict。默认写 `temp/visual-qa/materials/<key>/`；`--receipt-root` 仅允许仓库 temp 或已存在项目的 outputs，拒绝 Raw/private、越界和符号链接。重新准备会从来源重建派生文件，不盲信旧缓存。
+- PNG 局部只裁取源像素，必要时缩小，不上采样或恢复不存在的信息。单页 PDF 局部直接从对应区域渲染；局部最长边至多1600像素，渲染密度至多180 dpi，不先把整页做成高分辨率大图。来源至多32 MiB，PNG 至多16 MiB/2400万像素，局部总字节至多32 MiB。
+- 共享 Python 接口：`convert_slides_to_pdf(path,target_pdf,soffice_bin=None)`、`prepare_image_views(png_bytes,spec,detail_pdf=None)`、`prepare_local_views(path,spec,receipt_root=None)`。旧私有转换名称仅保留兼容转发；新调用方用公开名称。带 PDF 的 image-views API 要求单页、无密码且比例与整图一致；跨文件同源性由上层成品绑定校验，不由页面比例推断。
+- 本材料导出入口不支持仓库 private 或 .git 来源；不以复制改变保密范围。局部 pixel_bbox 为原整图的半开像素边界 `[left,top,right,bottom]`，region 是该实际边界对应的归一化范围，可能因取整略大于请求。输出材料不是“已看清”的证明：宿主可能缩放；实际显示尺寸未知就记录未知。显式视觉 QA 仍调用原 QA 路径并读取其 summary，不能用材料准备成功或 Agent 的自由评价代替。
+
 ## 模型选择与候选验证
 
 `operations/config/llm-models.yaml` 将视觉模型分为三类：已进入本地契约的默认/回退模型、OCR 或文档版面专项候选，以及尚未确认图像输入能力的通用模型。这些字段只用于人工选择和配置审计，不是运行时白名单。

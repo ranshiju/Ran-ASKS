@@ -34,7 +34,9 @@ def file_hash(path):
 def compiler_hash():
     import presentation_artwork
     import science_exhibit
-    return hashlib.sha256((file_hash(__file__) + file_hash(presentation_artwork.__file__) + file_hash(science_exhibit.__file__)).encode()).hexdigest()
+    import science_exhibit_composition
+    import review_contract
+    return hashlib.sha256((file_hash(__file__) + file_hash(presentation_artwork.__file__) + file_hash(science_exhibit.__file__) + file_hash(science_exhibit_composition.__file__) + file_hash(review_contract.__file__)).encode()).hexdigest()
 
 
 def font_info(name):
@@ -85,6 +87,9 @@ def compile_layout(content, brief, font, canvas_mm=None):
     canvas = list(CANVAS_MM if canvas_mm is None else canvas_mm)
     if tuple(canvas) not in SUPPORTED_CANVASES:
         raise ValueError('Supported canvases are A1/A0 portrait only')
+    if content.get('schema') == 'science-exhibit-content-v2':
+        import science_exhibit_composition
+        return science_exhibit_composition.compile_layout(content, brief, font, canvas, wrap_text)
     objects = []
 
     def add_text(identifier, text, box, size, color='18323B', bold=False, claim_ids=None, panel_id=None):
@@ -173,6 +178,31 @@ def normalized(text):
     return re.sub(r'\s+', '', unicodedata.normalize('NFKC', text))
 
 
+def validate_rendered_lines(objects, rendered_lines):
+    import fitz
+    assigned = set()
+    for obj in objects:
+        if obj['type'] != 'text':
+            continue
+        left, top, width, height = obj['bbox_mm']
+        rectangle = fitz.Rect(left, top, left + width, top + height) * POINTS_PER_MM
+        rectangle = rectangle + (-0.7, -0.7, 0.7, 0.7)
+        previous_top = -float('inf')
+        for value in obj['text'].split('\n'):
+            if not value.strip():
+                continue
+            candidates = [(index, box) for index, (box, actual) in enumerate(rendered_lines)
+                          if index not in assigned and normalized(actual) == normalized(value) and
+                          box.y0 >= previous_top - 0.7 and rectangle.contains(box)]
+            if not candidates:
+                raise ValueError(f'Unexpected rendered wrapping or clipped text: {obj["id"]}')
+            index, box = min(candidates, key=lambda item: (item[1].y0, item[1].x0))
+            assigned.add(index)
+            previous_top = box.y0
+    if any(index not in assigned and normalized(value) for index, (_, value) in enumerate(rendered_lines)):
+        raise ValueError('PDF contains unexpected or duplicated text lines')
+
+
 def render(content, brief, directory, *, canvas_mm=None):
     compiler_sha256 = compiler_hash()
     import presentation_runtime
@@ -186,21 +216,33 @@ def render(content, brief, directory, *, canvas_mm=None):
     from pptx.oxml.xmlchemy import OxmlElement
     from pptx.util import Mm, Pt
     import visual_qa
+    import science_exhibit
+    import science_exhibit_composition
+    import io
 
     directory = Path(directory)
     font = font_info(brief['font'])
     layout = compile_layout(content, brief, font, canvas_mm)
+    assets = science_exhibit_composition.asset_paths(science_exhibit, content) if content.get('schema') == 'science-exhibit-content-v2' else {}
+    asset_data = {identifier: path.read_bytes() for identifier, path in assets.items()}
+    expected_assets = {item['id']: item for item in content.get('assets', [])}
+    for identifier, data in asset_data.items():
+        if hashlib.sha256(data).hexdigest() != expected_assets[identifier]['sha256']:
+            raise ValueError('Asset changed during rendering')
     canvas = layout['canvas_mm']
     deck = Presentation()
     deck.slide_width, deck.slide_height = [Mm(value) for value in canvas]
     slide = deck.slides.add_slide(deck.slide_layouts[6])
     slide.background.fill.solid()
-    slide.background.fill.fore_color.rgb = RGBColor.from_string('F7FAF8')
+    slide.background.fill.fore_color.rgb = RGBColor.from_string(layout.get('background', 'F7FAF8'))
     native = {}
     for obj in layout['objects']:
         if obj['type'] == 'connector':
             continue
-        if obj['type'] == 'line':
+        if obj['type'] == 'image':
+            shape = slide.shapes.add_picture(io.BytesIO(asset_data[obj['asset_id']]), *[Mm(value) for value in obj['bbox_mm']])
+            shape.crop_left, shape.crop_top, shape.crop_right, shape.crop_bottom = obj.get('crop', [0, 0, 0, 0])
+        elif obj['type'] == 'line':
             shape = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, *[Mm(value) for value in [*obj['start_mm'], *obj['end_mm']]])
             shape.line.color.rgb = RGBColor.from_string(obj['stroke'])
             shape.line.width = Pt(obj['stroke_pt'])
@@ -283,13 +325,19 @@ def render(content, brief, directory, *, canvas_mm=None):
                 raise ValueError(f'Native geometry readback failed: {obj["id"]}')
         if obj['type'] == 'text' and actual_text.get(obj['id']) != obj['text']:
             raise ValueError(f'Native text readback failed: {obj["id"]}')
+        if obj['type'] == 'image' and hashlib.sha256(by_name[obj['id']].image.blob).hexdigest() != expected_assets[obj['asset_id']]['sha256']:
+            raise ValueError(f'Embedded image readback failed: {obj["id"]}')
+        if obj['type'] == 'image' and any(abs(actual - expected) > 0.00002 for actual, expected in zip(
+                (by_name[obj['id']].crop_left, by_name[obj['id']].crop_top, by_name[obj['id']].crop_right, by_name[obj['id']].crop_bottom),
+                obj.get('crop', [0, 0, 0, 0]))):
+            raise ValueError(f'Image crop readback failed: {obj["id"]}')
         if obj['type'] == 'connector':
             for tag, endpoint in (('stCxn', 'start'), ('endCxn', 'end')):
                 binding = by_name[obj['id']].element.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}' + tag)
                 if binding is None or binding.get('id') != str(by_name[obj[endpoint]].shape_id):
                     raise ValueError('Native connector binding readback failed')
     pdf = directory / 'board.pdf'
-    visual_qa._convert_slides_to_pdf(pptx, pdf)
+    visual_qa.convert_slides_to_pdf(pptx, pdf)
     with fitz.open(pdf) as document:
         if document.page_count != 1:
             raise ValueError('PDF page count mismatch')
@@ -312,26 +360,27 @@ def render(content, brief, directory, *, canvas_mm=None):
                 if not page.rect.contains(fitz.Rect(line['bbox'])):
                     raise ValueError('Rendered text outside the page')
                 rendered_lines.append((fitz.Rect(line['bbox']), ''.join(span['text'] for span in line['spans'])))
-        for obj in layout['objects']:
-            if obj['type'] != 'text':
-                continue
-            left, top, width, height = obj['bbox_mm']
-            rectangle = fitz.Rect(left, top, left + width, top + height) * POINTS_PER_MM
-            lines = [value for box, value in rendered_lines if rectangle.contains((box.tl + box.br) / 2)]
-            if [normalized(value) for value in lines] != [normalized(value) for value in obj['text'].split('\n') if value.strip()]:
-                raise ValueError(f'Unexpected rendered wrapping or clipped text: {obj["id"]}')
+        validate_rendered_lines(layout['objects'], rendered_lines)
         page.get_pixmap(matrix=fitz.Matrix(0.6, 0.6), alpha=False).save(directory / 'preview.png')
         font_names = sorted({record[3] for record in fonts})
     if file_hash(font['path']) != font['sha256']:
         raise ValueError('Font changed during rendering')
     if compiler_hash() != compiler_sha256:
         raise ValueError('Compiler changed during rendering')
+    if assets:
+        science_exhibit_composition.asset_paths(science_exhibit, content)
     (directory / 'layout.json').write_text(json.dumps(layout, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return {
         'schema': 'science-exhibit-render-v1', 'mechanical_status': 'passed',
         'canvas_mm': canvas, 'native_object_count': len(layout['objects']),
         'requested_font': font['family'], 'font_sha256': font['sha256'], 'pdf_fonts': font_names,
         'renderer_sha256': compiler_sha256,
+        'image_object_count': sum(obj['type'] == 'image' for obj in layout['objects']),
+        'image_assets': {identifier: {'sha256': item['sha256'], 'width': item['width'], 'height': item['height']}
+                         for identifier, item in expected_assets.items()},
+        'image_effective_dpi': {obj['id']: round(min(expected_assets[obj['asset_id']]['width'] * (1 - obj.get('crop', [0, 0, 0, 0])[0] - obj.get('crop', [0, 0, 0, 0])[2]) / (obj['bbox_mm'][2] / 25.4),
+                                                    expected_assets[obj['asset_id']]['height'] * (1 - obj.get('crop', [0, 0, 0, 0])[1] - obj.get('crop', [0, 0, 0, 0])[3]) / (obj['bbox_mm'][3] / 25.4)), 1)
+                                for obj in layout['objects'] if obj['type'] == 'image'},
         'visual_review': 'not_checked', 'semantic_review': 'pending',
         'public_release': 'not_approved', 'remote_calls': 0,
     }

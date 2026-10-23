@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "retelling": {"type": "string", "minLength": 1, "maxLength": 6000},
+    "mental_picture": {"type": "string", "maxLength": 6000},
+    "comprehension_gaps": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 3000}}
+  },
+  "required": ["retelling", "comprehension_gaps"],
+  "additionalProperties": false
+}

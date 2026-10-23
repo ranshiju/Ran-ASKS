@@ -16,7 +16,7 @@ from unittest.mock import patch
 import science_exhibit as core
 import science_exhibit_render as renderer
 import science_exhibit_workflow as work
-from test_science_exhibit import content, concept_content
+from test_science_exhibit import content, concept_content, composition_content
 
 REAL_RENDER = False
 TEST_INSTRUCTION = 'TEST-ONLY 合成确认，不对应真实用户指令或科学批准'
@@ -95,6 +95,120 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('record_preview', result['commands'])
         self.action('record-preview', output_dir=result['output_dir'])
         return result
+
+    def test_composition_plan_and_content_bind_to_authorized_story(self):
+        self.settle_brief()
+        self.candidate('plan', self.plan('composition'))
+        binding = work.binding(core, self.state())
+        self.action('confirm-plan', binding_sha256=binding, instruction=TEST_INSTRUCTION)
+        self.action('start-making', binding_sha256=binding, instruction=TEST_INSTRUCTION)
+        candidate = composition_content(self.root, self.source, self.store)
+        self.candidate('content', candidate)
+        self.assertEqual(self.state()['content']['schema'], 'science-exhibit-content-v2')
+        self.assertEqual(core.status(self.store)['phase'], 'making')
+        with self.assertRaises(ValueError):
+            self.candidate('content', content(self.source, self.root))
+
+    def test_review_brief_adapts_to_nonphysics_audiences_without_story_answers(self):
+        import review
+        import science_exhibit_review as integration
+        output = self.store / 'outputs/test-only'
+        output.mkdir(parents=True)
+        args = SimpleNamespace(brief=None, reviewer='reader-comprehension', host_capabilities='TEST-ONLY',
+            sensitivity='public', allow_host_processing=True, accept_unenforced_tools=True, require_enforced_tools=False)
+        scenarios = [
+            ('TEST-ONLY 高中生', '生态观察展板，三分钟浏览，不使用类比'),
+            ('TEST-ONLY 社区成人读者', '语言学习研究展板，十分钟浏览，按问题和发现组织'),
+        ]
+        for audience, setting in scenarios:
+            with self.subTest(audience=audience):
+                state = self.state()
+                state['workflow']['requirements']['audience']['value'] = audience
+                state['workflow']['requirements']['setting']['value'] = setting
+                state['workflow']['requirements']['goal']['value'] = 'TEST-ONLY 作者预期答案，不交给盲读者'
+                with patch.object(review, 'REPO', self.root), \
+                        patch.object(work, 'validate_preview', return_value={'output_dir': str(output.relative_to(self.root))}), \
+                        patch.object(review, 'prepare', return_value={}) as prepared:
+                    integration.prepare_review(core, self.store, state, args)
+                brief = core.read_json(prepared.call_args.args[1])
+                self.assertEqual(brief['audience'], audience)
+                self.assertEqual(brief['use_context'], setting)
+                self.assertNotIn('作者预期答案', str(brief))
+                for fixed_story in ('MPE', '深海', '潜艇', '五分钟'):
+                    self.assertNotIn(fixed_story, str(brief))
+
+    def test_review_regions_forward_to_shared_core_with_bound_pdf(self):
+        import review
+        import science_exhibit_review as integration
+        output = self.store / 'outputs/test-only-views'
+        output.mkdir(parents=True)
+        args = SimpleNamespace(brief=None, reviewer='reader-comprehension', host_capabilities='TEST-ONLY',
+            sensitivity='public', allow_host_processing=True, accept_unenforced_tools=True,
+            require_enforced_tools=False, image_regions='temp/TEST-ONLY-regions.json')
+        with patch.object(review, 'REPO', self.root), \
+                patch.object(work, 'validate_preview', return_value={'output_dir': str(output.relative_to(self.root))}), \
+                patch.object(review, 'prepare', return_value={}) as prepared:
+            integration.prepare_review(core, self.store, self.state(), args)
+        self.assertEqual(prepared.call_args.kwargs['image_regions'], args.image_regions)
+        self.assertEqual(prepared.call_args.kwargs['detail_source'], output / 'board.pdf')
+        self.assertEqual(prepared.call_args.kwargs['artifact_manifest'], output / 'manifest.json')
+
+    def test_image_review_decisions_comparison_and_stale_application(self):
+        import shutil
+        import review
+        import science_exhibit_review as integration
+        from test_review import SOURCE, feedback
+        from PIL import Image
+        self.test_composition_plan_and_content_bind_to_authorized_story()
+
+        def fake_render(content_value, brief, directory, *, canvas_mm=None):
+            for name in ('board.pptx', 'board.pdf'):
+                (directory / name).write_bytes(b'TEST-ONLY fake output, no actual rendering')
+            Image.new('RGB', (320, 480), '#267F86').save(directory / 'preview.png')
+            core.atomic_json(directory / 'layout.json', {'objects': [
+                {'id': item['id'], 'type': 'text', 'text': item['text']} for item in content_value['texts']]})
+            return {'mechanical_status': 'passed', 'remote_calls': 0, 'canvas_mm': canvas_mm,
+                    'renderer_sha256': renderer.compiler_hash(), 'font_sha256': 'a' * 64}
+
+        with patch.object(review, 'REPO', self.root), patch.object(renderer, 'render', side_effect=fake_render), \
+                patch.object(renderer, 'font_info', return_value={'sha256': 'a' * 64}):
+            shutil.copytree(SOURCE / 'agents/reviewers', self.root / 'agents/reviewers')
+            first = core.build(self.store, self.state()['revision'])
+            host = self.root / 'temp/host.json'
+            review.write_json(host, {'schema': 'review-host-capabilities-v1', 'host_id': 'TEST-ONLY',
+                'fresh_context': 'observed', 'tools': 'broad', 'tools_enforced': False, 'processing_location': 'unknown',
+                'evidence': 'Synthetic fixture, not an actual host observation', 'limitations': ['No real agent used.']})
+            args = SimpleNamespace(brief=None, reviewer='reader-comprehension', host_capabilities=host,
+                sensitivity='public', allow_host_processing=True, accept_unenforced_tools=True, require_enforced_tools=False)
+            view = integration.prepare_review(core, self.store, self.state(), args)
+            run = self.root / view['run']
+            self.assertNotIn('claims', str(review.packet(run)))
+            review.start(run, 'TEST-ONLY-synthetic-host-agent-call', image_attached=True)
+            candidate = feedback()
+            candidate['material_observation'] = {'image_received': True, 'readability': 'readable'}
+            review.write_json(review.candidate_path(run.name), candidate)
+            review.collect(run)
+            decisions = self.root / 'temp/decisions.json'
+            core.atomic_json(decisions, [{'feedback_id': 'note-1', 'action': 'partly-adopt', 'reason': TEST_INSTRUCTION}])
+            record = SimpleNamespace(run=run, decisions=decisions, instruction=TEST_INSTRUCTION)
+            result = integration.record_review(core, self.store, self.state(), record)
+            self.assertFalse(result['already_recorded'])
+            self.assertTrue(integration.record_review(core, self.store, self.state(), record)['already_recorded'])
+            self.assertEqual(core.status(self.store)['user_preview_acceptance'], 'not_recorded')
+            revised = deepcopy(self.state()['content'])
+            revised['texts'][1]['text'] = '怎样让主线更容易理解？'
+            self.candidate('content', revised)
+            second = core.build(self.store, self.state()['revision'])
+            with self.assertRaises(ValueError):
+                integration.record_review(core, self.store, self.state(), record)
+            comparison = integration.compare(core, self.store, self.state(), first['output_dir'], second['output_dir'])
+            self.assertTrue((self.root / comparison['comparison']).is_file())
+            self.assertIn('hook', comparison['changed_object_ids'])
+            self.assertEqual(integration.compare(core, self.store, self.state(), first['output_dir'], second['output_dir'])['output_dir'],
+                             comparison['output_dir'])
+            (self.root / first['output_dir'] / 'preview.png').write_bytes(b'corrupt')
+            with self.assertRaises(ValueError):
+                integration.compare(core, self.store, self.state(), first['output_dir'], second['output_dir'])
 
     def accept(self):
         with patch.object(renderer, 'font_info', return_value={'sha256': 'a' * 64}):

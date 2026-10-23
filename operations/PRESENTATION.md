@@ -2,7 +2,7 @@
 
 ## 入口与成熟度
 
-`presentation` 是当前 task/state 内按需组合的能力，不是新的工作状态。研究项目内制作汇报继续保持 `research`；接续已有项目时先读取对应 `notes/status.md`，再定位该 PPT 的创作记录。
+`presentation` 是当前工作上下文内按需组合的能力，不是新的持续工作类型。研究项目内制作汇报继续保持 `research`；接续已有项目时先读取对应 `notes/status.md`，再定位该 PPT 的创作记录。
 
 ```bash
 python3 .scripts/route.py --capability presentation --capability-profile create
@@ -41,7 +41,7 @@ python3 .scripts/presentation_runtime.py smoke
 
 ## 单篇论文制作方式选择
 
-三种制作方式是 `presentation` 功能中的协作选项，沿用当前工作状态。用户希望围绕一篇指定论文制作 PPT 时，在内容规划开始前向用户说明以下三种方式，并请用户选择。已有明确选择时简短确认并沿用；接续同一报告时读取既有选择。
+三种制作方式是 `presentation` 功能中的协作选项，沿用当前工作上下文。用户希望围绕一篇指定论文制作 PPT 时，在内容规划开始前向用户说明以下三种方式，并请用户选择。已有明确选择时简短确认并沿用；接续同一报告时读取既有选择。
 
 > 这篇论文的报告 PPT 可以用三种方式制作：
 >

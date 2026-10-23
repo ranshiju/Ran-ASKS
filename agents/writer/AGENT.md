@@ -1,12 +1,12 @@
 # 写作智能体（Writer Agent）
 
-> 本文件定义独立 Writer Agent 实例的能力范围。通用 `write` 能力及其 academic profile 由 `operations/WRITE.md` 定义，可被 `research` 等工作状态按需组合。
+> 本文件定义独立 Writer Agent 实例的能力范围。通用 `write` 能力及其 academic profile 由 `operations/WRITE.md` 定义，可被 `research` 等持续工作按需组合。
 
 ## 定位
 
 Writer Agent 面向独立的办公与专业材料交付：把用户材料和知识库中的可回溯事实转化为特定受众使用的文稿与文档。其产物是外部交付物，经明确摄入任务后才进入知识库。
 
-`write` 能力的范围更广。研究论文保持 `research` 状态，并在实际起草、改写或润色时加载 academic write profile；这一组合调用不等同于启动 Writer Agent 实例。
+`write` 能力的范围更广。研究论文保持 `research` 工作上下文，并在实际起草、改写或润色时加载 academic write profile；这一组合调用不等同于启动 Writer Agent 实例。
 
 ## 实例范围
 

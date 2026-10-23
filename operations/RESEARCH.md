@@ -1,6 +1,6 @@
 # 研究工作流规范
 
-> 研究项目级工作流：在 `projects/<name>/` 下开展研究，过程中产生结构化状态与记忆。新项目使用通用 `workspace_state` 的 `research` profile；已有 `.research-memory` 项目由兼容入口继续支持。研究内容**不入库**（独立于 ingest）。
+> 研究项目级持续工作：在 `projects/<name>/` 下开展研究，过程中保存结构化工作上下文与记忆。新项目使用通用 `workspace_state` 的 `research` profile；已有 `.research-memory` 项目由兼容入口继续支持。研究内容**不入库**（独立于 ingest）。
 
 ## 触发与任务判定
 
@@ -15,7 +15,7 @@
 ### 与其他 task 的边界
 
 - **不路由 ingest**：研究内容是工作过程，不进 raw/wiki/graph。若用户要求把研究产出摄入知识库，切换到 ingest task。
-- **research 是工作状态，write 是按需能力**：研究笔记和论文文稿仍属于本工作流；真正开始起草、改写或润色时，在当前状态内调用 academic write profile，不切换研究上下文。正式公文/讲稿可从顶层直接调用通用 write profile。
+- **research 是持续工作，write 是按需能力**：研究笔记和论文文稿仍属于本项持续工作；真正开始起草、改写或润色时，在当前工作上下文内调用 academic write profile，不切换研究上下文。正式公文/讲稿可从顶层直接调用通用 write profile。
 - **不路由 build**：改 `.scripts/` 或 `operations/` 是建设，走 build。
 
 ## 进入研究项目
@@ -66,7 +66,7 @@ python3 .scripts/research_memory.py profile <project> --refresh  # LLM 重新提
 
 ## 可用能力与工具调用（研究中随时可调）
 
-三层调用语义保持分离：`research` 是当前工作状态；`write` 是落笔时加载的提示与规范能力；`wg.py`/DSH 注册函数是执行检索、读取或计算的工具。
+三层调用语义保持分离：`research` 是当前工作上下文；`write` 是落笔时加载的提示与规范能力；`wg.py`/DSH 注册函数是执行检索、读取或计算的工具。
 
 **落笔写作能力**：当用户要求实际起草、改写、润色论文的标题、摘要、正文、图注、附录或补充材料时，Agent 在落笔前自动调用一次：
 
@@ -74,7 +74,7 @@ python3 .scripts/research_memory.py profile <project> --refresh  # LLM 重新提
 python3 .scripts/route.py --capability write --capability-profile academic
 ```
 
-该调用组合 `WRITE.md` 的共享落笔约定与对应学科写作 overlay；它不改变 `research` 状态。同一连续写作回合已经加载后无需重复调用。论文讨论、数据核对、实验、查询和状态汇报阶段不调用。
+该调用组合 `WRITE.md` 的共享落笔约定与对应学科写作 overlay；它不改变 `research` 工作上下文。同一连续写作回合已经加载后无需重复调用。论文讨论、数据核对、实验、查询和进度汇报阶段不调用。
 
 研究中需要查知识库文献、定位已有结果、回溯 raw 原文核验，或操作研究记忆，调用 `.scripts/wg.py`（统一 JSON 输出，跨功能、回合中可调）：
 

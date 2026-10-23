@@ -269,6 +269,30 @@ nodes:
     path: operations/SCIENCE_EXHIBIT.md
     kind: spec
     role: agent-first-evidence-bound-public-science-exhibit-draft-authoring-and-local-only-delivery-contract
+  review_ops:
+    path: operations/REVIEW.md
+    kind: spec
+    role: agent-first-nonblocking-advisory-review-dual-view-instance-permissions-and-independent-reviewer-contract
+  review_plan:
+    path: operations/engineering/advisory-review-plan.md
+    kind: spec
+    role: shared-agent-only-review-implementation-scope-regression-and-host-validation-record
+  review:
+    path: .scripts/review.py
+    kind: implementation
+    role: shared-offline-snapshot-bound-review-store-and-host-agent-handoff-without-model-control-loop
+  review_contract:
+    path: .scripts/review_contract.py
+    kind: contract
+    role: shared-strict-advisory-envelope-bounded-feedback-schema-and-static-image-byte-validation
+  reviewers:
+    path: agents/reviewers/
+    kind: documentation-family
+    role: trusted-independently-versioned-reviewer-definitions-instructions-and-synthetic-examples
+  review_test:
+    path: .scripts/test_review.py
+    kind: test
+    role: offline-review-snapshot-permissions-versioning-nonblocking-recovery-and-extensibility-regression
   science_exhibit:
     path: .scripts/science_exhibit.py
     kind: implementation
@@ -276,7 +300,15 @@ nodes:
   science_exhibit_render:
     path: .scripts/science_exhibit_render.py
     kind: implementation
-    role: shared-native-physical-size-exhibit-renderer-with-local-pptx-pdf-preview-and-mechanical-readback
+    role: shared-native-and-bitmap-physical-size-exhibit-renderer-with-local-pptx-pdf-preview-and-mechanical-readback
+  science_exhibit_composition:
+    path: .scripts/science_exhibit_composition.py
+    kind: implementation
+    role: shared-bounded-story-composition-and-frozen-image-assets-with-single-source-visible-text
+  science_exhibit_review:
+    path: .scripts/science_exhibit_review.py
+    kind: implementation
+    role: shared-version-bound-image-review-handoff-adoption-and-rebuildable-comparison-without-model-control-loop
   science_exhibit_workflow:
     path: .scripts/science_exhibit_workflow.py
     kind: implementation
@@ -344,7 +376,7 @@ nodes:
   visual_qa:
     path: .scripts/visual_qa.py
     kind: implementation
-    role: resumable-deterministic-and-vision-llm-qa-for-images-pdf-pages-and-slide-pages
+    role: shared-local-rendering-traceable-image-views-and-resumable-optional-vision-api-qa
   visual_qa_ops:
     path: operations/VISUAL_QA.md
     kind: spec
@@ -357,6 +389,10 @@ nodes:
     path: .scripts/visual_to_editable_ppt.py
     kind: implementation
     role: resumable-vector-hybrid-and-raster-visual-reconstruction-to-native-editable-pptx
+  visual_ppt_workflow:
+    path: .scripts/visual_ppt_workflow.py
+    kind: implementation
+    role: agent-only-reconstruction-task-and-shared-source-inventory-validation-hash-bound-publication
   visual_to_editable_ppt_ops:
     path: operations/VISUAL_TO_EDITABLE_PPT.md
     kind: spec
@@ -1271,6 +1307,45 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - review_ops
+  - governs
+  - review
+- - review_plan
+  - documents
+  - review
+- - review
+  - uses
+  - review_contract
+- - review
+  - uses
+  - reviewers
+- - review
+  - uses
+  - agent_task
+- - review
+  - uses
+  - visual_qa
+- - review
+  - tested_by
+  - review_test
+- - review_contract
+  - tested_by
+  - review_test
+- - test_suite
+  - uses
+  - review_test
+- - reviewers
+  - tested_by
+  - review_test
+- - route
+  - uses
+  - review_ops
+- - wg
+  - uses
+  - review
+- - function_registry_spec
+  - governs
+  - review
 - - science_exhibit_ops
   - governs
   - science_exhibit_reader
@@ -1295,6 +1370,39 @@ edges:
 - - science_exhibit_render
   - uses
   - presentation_artwork
+- - science_exhibit_ops
+  - governs
+  - science_exhibit_composition
+- - science_exhibit_ops
+  - governs
+  - science_exhibit_review
+- - science_exhibit
+  - uses
+  - science_exhibit_composition
+- - science_exhibit
+  - uses
+  - science_exhibit_review
+- - science_exhibit_render
+  - uses
+  - science_exhibit_composition
+- - science_exhibit_composition
+  - uses
+  - presentation_artwork
+- - science_exhibit_composition
+  - uses
+  - review_contract
+- - science_exhibit_render
+  - uses
+  - review_contract
+- - science_exhibit_composition
+  - tested_by
+  - science_exhibit_test
+- - science_exhibit_review
+  - uses
+  - review
+- - science_exhibit_review
+  - tested_by
+  - science_exhibit_workflow_test
 - - science_exhibit
   - uses
   - science_exhibit_workflow
@@ -2279,6 +2387,18 @@ edges:
 - - dsh_visual_reconstruction_tools
   - uses
   - visual_to_editable_ppt
+- - visual_to_editable_ppt
+  - uses
+  - visual_ppt_workflow
+- - visual_ppt_workflow
+  - uses
+  - agent_task
+- - visual_ppt_workflow
+  - uses
+  - visual_to_editable_ppt
+- - visual_ppt_workflow
+  - tested_by
+  - visual_to_editable_ppt_test
 - - dsh_visual_reconstruction_agent_loop
   - uses
   - dsh_visual_reconstruction_tools
@@ -3024,6 +3144,24 @@ edges:
   - documents
   - dsh_function_catalog
 capabilities:
+  review:
+    entry: route
+    required:
+    - agents
+    - review_ops
+    - review
+    - review_contract
+    - reviewers
+    optional:
+    - wg
+    - agent_task
+    forbidden:
+    - graph_ingest
+    - llm_structured
+    guardrails:
+    - 宿主持有控制循环，程序只冻结输入和定义、生成双视图任务、校验接收及渲染报告；Agent 路径不调用模型或隐式回退 API。
+    - 审阅只给建议，不构成作品准入；独立上下文、材料可见范围和工具强制权限分别记录，未知不冒充沙箱。
+    - reviewer 通过受信任定义独立演进；支持获授权的非 private 文本或静态 PNG，局部图复用 shared 本地材料接口并绑定整图坐标和来源；结果不改稿、不写事实库、不自动创建事项。
   code-run:
     entry: route
     required:
@@ -3099,6 +3237,7 @@ capabilities:
     - 宿主每轮在最终回复展示 state.banner 与已提交问题；支持下次输入前显式确认上轮实际展示的 message_id，不为抢先确认送达而在后台展示问题。
     - receive 合并显式送达确认、真实输入与内联任务包，commit 保留完整校验；准备阶段定位 Raw 子区域，回合不重复全库查询，不隐式调用模型。
     - 准备固定目标与证据，不固定题目或题序；备选导航仅按明确缺口读取，不自动成为评分依据，旧 probes 保留原记录但不进入正式任务。
+    - 新方案准备时确认私有 scope_design 的知识点、可观察能力点和目标映射；范围图是可重建视图，不是事实源或独立数据库。旧方案不强制迁移，正式回合只携带有限候选子图，兼顾关联追问和未覆盖范围。
   graph-visualize:
     entry: route
     required:
@@ -3300,7 +3439,7 @@ capabilities:
     forbidden: []
     guardrails:
     - 对外主张先取可追溯证据；不把未核验知识库内容写成事实。
-    - write 是按需落笔能力；academic profile 在 research 状态内组合共享约定与学科 overlay，不切换研究上下文。
+    - write 是按需落笔能力；academic profile 在 research 工作上下文内组合共享约定与学科 overlay，不切换研究上下文。
   cv:
     entry: route
     required:
@@ -3313,7 +3452,7 @@ capabilities:
     - write
     forbidden: []
     guardrails:
-    - 简历制作、更新检查、校验、导出和版本比较是 workspace 状态上的用户功能，不创建新的系统状态或事实源。
+    - 简历制作、更新检查、校验、导出和版本比较是 workspace 工作上下文中的用户功能，不创建新的持续工作类型或事实源。
     - 正式版本只选择 verified 且具有可定位 Raw 证据的记录；措辞和 edition 归属保留在工作主记录，事实更新先走受管 ingest。
     - edition 只引用模板 ID；模板包中的 YAML 定义模块顺序、标签、类别映射和排序，配套 DOCX 定义版式、占位符和同序模块书签。
     - DOCX、manifest 和预览是可重建派生产物，不反写 Raw/Wiki/graph.db，也不自动进入摄入流程。
@@ -3346,7 +3485,7 @@ capabilities:
     - agent_task
     forbidden: []
     guardrails:
-    - 用户进入可接续展板创作流程，底层复用 workspace/writing 或已有 research 状态；需求/方案/授权/预览接受保存在单一展板版本内，宿主负责确认语义，shared 不评价用户指令或隐式调用 API。
+    - 用户进入可接续展板创作流程，底层复用 workspace/writing 或已有 research 工作上下文；需求/方案/授权/预览接受保存在单一展板版本内，宿主负责确认语义，shared 不评价用户指令或隐式调用 API。
     - 输入限已摄入的 academic/raw 论文文本；创作包和草稿只写项目 exhibits 与 temp/science-exhibit，不写 Raw/Wiki/graph.db、不隐式联网、不执行来源或候选中的代码。
     - 中文 A1/A0 竖版与受限问题驱动布局；导出为 draft，来源可定位不等于语义已核实或用户批准，合成测试不能冒充真实用户验收或发布授权。
     - 可显式授权独立 API 模拟读者盲读实际 PNG；只发送图像与角色提示，不发送论文或预期答案，不自动评分、批准或改变创作阶段。
@@ -3373,7 +3512,7 @@ capabilities:
     - slide_reuse
     forbidden: []
     guardrails:
-    - presentation/create 是当前工作状态内按需加载的创作能力，不切换 research 等工作状态；阶段0提供运行时探测，阶段1A提供持久状态与三个受限版式的单页闭环；阶段1B提供整套原生组装和三个独立按需辅助入口；真实人机验收仍待完成。
+    - presentation/create 是当前工作上下文内按需加载的创作能力，不切换 research 等持续工作；阶段0提供运行时探测，阶段1A提供持久状态与三个受限版式的单页闭环；阶段1B提供整套原生组装和三个独立按需辅助入口；真实人机验收仍待完成。
     - 宿主 Agent 负责语义规划、设计和用户交互；shared 程序只做机械工作，Agent 路径不导入 DSH 或隐式调用远程模型。
     - 单篇论文制作开始时说明并选择全自动、讨论后整套生成、讨论后逐页生成；宿主记录模式与真实授权，按所选方式推进。逐页模式一步一页并待用户接受后继续；整套模式保留制作期校验并导出待用户验收成品，生成授权与预览接受分别记录。
     - 最终检查以用户为主；PPT形式检查、PPT引用脱敏仅用户明确指令触发，可提醒但不自动执行；PPT证据核查仅用户对具体内容有疑问时按范围执行。三项独立、默认不执行，不作为默认交付门禁；基本机械校验、来源记录与隐私边界保持。
@@ -3399,7 +3538,7 @@ capabilities:
     - 宿主为研究计算优先选择 .env 中登记的 SSH 服务器；shared 程序不自动转发，本地轻量验证须明确为例外，凭据不得进入公开产物。
     - 研究内容不入库（独立于 ingest）；记忆绑定到 projects/<name>/.research-memory/。
     - 进入研究项目先 recall 恢复上下文；研究过程自动保存记忆（decision/insight/literature_judgment/research_direction）。
-    - research 是工作状态；只有实际起草、改写或润色时调用 academic write 能力，查询、实验与状态汇报不加载写作能力。
+    - research 是持续工作；只有实际起草、改写或润色时调用 academic write 能力，查询、实验与进度汇报不加载写作能力。
     - 产出包括研究笔记、论文文稿、源码、测试与 outputs 中的派生运行结果；不自动摄入知识库。
     - 用户显式要求 API 绘图时可调用 comic_generation；生成物只写研究项目 outputs，不进入 raw/wiki/graph.db。
   frontier:
@@ -3464,7 +3603,7 @@ contracts:
   - dsh_visual_tools
   - dsh_comic_tools
   - build_locator_tools
-  invariant: 运行时功能、工作状态、Route、wg 与 DSH 工具共用 canonical function ID；注册表中的 Route task 与按需 capability 完整对应工程能力包；固定管线保留代码控制循环，不由注册表或 DSH 重写。
+  invariant: 运行时功能、持续工作、Route、wg 与 DSH 工具共用 canonical function ID；持续工作的工程语义为工作上下文，state/states、state_operation 与既有类型 ID 保持兼容；注册表中的 Route task 与按需 capability 完整对应工程能力包；固定管线保留代码控制循环，不由注册表或 DSH 重写。
   checks:
   - function_registry_coverage
 - id: graph-write-boundary
@@ -3504,6 +3643,15 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  review:
+  - python3 .scripts/test_review.py
+  - python3 .scripts/test_agent_task.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/test_science_exhibit_reader.py
+  - python3 .scripts/test_open_source_release.py
+  - python3 .scripts/function_registry.py validate --runtime
+  - python3 .scripts/engineering_graph.py validate
   query_actions:
   - python3 .scripts/test_wiki_recall.py
   - python3 .scripts/test_private_query.py
@@ -3652,6 +3800,12 @@ verification:
   - python3 .scripts/engineering_graph.py validate
   science_exhibit_render:
   - python3 .scripts/test_science_exhibit.py --render
+  science_exhibit_composition:
+  - python3 .scripts/test_science_exhibit.py
+  - python3 .scripts/test_science_exhibit.py --render
+  science_exhibit_review:
+  - python3 .scripts/test_science_exhibit_workflow.py
+  - python3 .scripts/test_review.py
   science_exhibit_reader:
   - python3 .scripts/test_science_exhibit_reader.py
   - python3 .scripts/test_visual_qa.py
@@ -3866,6 +4020,20 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  review:
+    preconditions:
+    - 显式声明材料敏感性、当前宿主处理授权及真实能力；仅使用声明的 UTF-8 文本或静态 PNG 和受信任 reviewer。
+    - prepare 冻结材料、有效 brief、定义和本地反馈 schema；审阅者只见净化后的任务包，宿主控制清单不整体转发。
+    - 复用 agent-task-v1 合法 check/commit 命令封装；审阅自有运行存储，不使用摄入事务 advance。
+    writes:
+    - 仅 temp/advisory-review 下声明候选和运行记录，或授权 projects 下 outputs/reviews 的自足记录包。
+    forbidden:
+    - 修改目标、Raw/Wiki/Graph、工作区权威事项，隐式联网或 API 回退，任意代码/schema 远程加载，递归委派。
+    - 把批评、空意见或未采纳意见当作作品失败；把 hash、模型自报或上下文探针当作权限认证。
+    verify:
+    - python3 .scripts/test_review.py
+    - python3 .scripts/function_registry.py validate --runtime
+    - python3 .scripts/engineering_graph.py validate
   illustration:
     preconditions:
     - prepare 只产生 agent-task-v1 与候选 brief；宿主负责图意、提示词和科学审核，不隐式调用模型
@@ -4182,10 +4350,10 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   science_exhibit_render:
     preconditions:
-    - v2 合作创作先验证授权、内容绑定与 flow/concept 类型一致；不支持的物理画布在制作前明确阻断，不降级。
+    - v2 合作创作先验证授权、内容绑定与 flow/concept/composition 类型一致；不支持的物理画布在制作前明确阻断，不降级。
     - shared 确定性 A1/A0 竖版原生编译，v2 物理画布取已确认方案，legacy 默认 A1；等比缩放与居中保留几何、字级和连接关系，不新增尺寸状态。
     - concept 复用 presentation_artwork 的有限 JSON 图元 validator，等比映射原生图形与文字，不新增 API 调用或独立配图状态。
-    - 只消费已校验文案、来源标签和嵌入图元，不重新理解论文、不接受 XML/脚本、外链或外部二进制；编译器指纹含复用 validator。
+    - 只消费已校验文案、来源标签、原生图元和受控冻结 PNG/JPEG，不重新理解论文、不接受 XML/脚本、外链或未校验二进制；编译器指纹含复用 validator、composition 与共享图像契约。
     writes:
     - 调用方的新暂存目录中的 PPTX/PDF/PNG 与布局及机械检查记录；PDF 从同一 PPTX 本地导出，最终发布由创作壳完成。
     forbidden:
@@ -4421,14 +4589,14 @@ script_contracts:
     - private query uses query-topic=auto|general|metaphysics for conditional topic guidance; auto matches explicit topic terms, while the host Agent selects metaphysics for contextual follow-ups and carries it across stages. Topic guidance combines model knowledge with private evidence, without changing storage scope or delegating semantic judgments to code.
     - 通用文档编码及建图阶段按需派发 INGEST「表格型清单与台账」，由 Agent 判断适用性；论文和收尾阶段不加载
     - 已判定 task；ingest 必须提供 subproject 与单个 stage；会议纪要须传 source-kind=meeting；query 按当前阶段传 query-stage
-    - --task 是一次路由标签；工作状态由 workspace/research/frontier 的权威文件承载；状态内按需规范使用 --capability；当前宿主 Agent 直接调用受管脚本或 wg.py，API backend 可经 DSH ToolRegistry
+    - --task 是一次路由标签；持续工作的工作上下文由 workspace/research/frontier/oral_exam 各自的权威文件承载；上下文内按需规范使用 --capability；当前宿主 Agent 直接调用受管脚本或 wg.py，API backend 可经 DSH ToolRegistry
     - build 从 capability guardrails 渲染简洁的 WikiGraph 方法哲学与信息入口；工程细节由 impact 推荐 locator 按需加载
     - build 处理缺陷时须在首次编辑前明确说明，并以复现、代码路径或反事实建立和验证从症状到责任组件的因果链；默认修复责任组件并在该边界回归，局部补偿只用于明确的边界外根因、兼容性、迁移或历史数据修复
     writes: []
     forbidden:
     - 让模型在预热时总结完整 INGEST/SCHEMA/脚本，或把预热状态写成跨上下文共享的仓库/机器标记
     - 绕过路由凭记忆选规范
-    - 把 Route task 或 capability 调用当作工作状态切换，或把提示规范能力伪装成已执行工具
+    - 把 Route task 或 capability 调用当作工作上下文切换，或把提示规范能力伪装成已执行工具
     - build 路由重复展开 shared-conventions 或 code-guidance 正文，把总提示词变成工程手册副本
     - 用重复的禁止事项和流程细节挤占方法判断
     - 按当前 Agent/API backend 缩小 shared 修复范围，或只用 prompt 补丁掩盖确定性共享层缺陷
@@ -4681,6 +4849,7 @@ script_contracts:
   ingest_user_assertions:
     preconditions:
     - 输入只能是 inbox/facts-pending.md，且每条待处理事实有稳定 fact ID、日期、陈述与可确定的目标 Wiki 页面
+    - 用户申明为增量来源；只新增本批关系，保留目标页的既有语义边，不以本批提案清空重建全页关系
     - 事务先在同一文件系统暂存新的 Raw/Wiki/pending 内容和 graph plan；所有结构、locator 与图校验通过后才提交
     - Raw 追加、Wiki 更新、graph.db 写入、pending 清理和 receipt 作为一个受管事务；任一步失败必须恢复事务前字节与图快照
     writes:
@@ -5288,7 +5457,7 @@ script_contracts:
     - 直接入口与统一 inbox 入口均先查询公共 Raw 指纹索引；只有二进制 SHA-256 精确命中可直接返回 duplicate_found，同日、同标题或既有 Raw/Wiki 目录不足以确认重复，不得丢弃不同字节的会议分段来源
     - Meeting Compiler 初次调用返回当前 PREPROCESS/WIKI/MEETING_IR 协议；MEETING_IR 的人物、议题、汇报、决策、待办、扩展关系与学生指导更新均引用程序分配的 Raw evidence_id，API 与 agent handoff/resume 共用同一协议
     - API Meeting Compiler 返回 rejected/协议解析错误时必须保存失败 trace，并在原事务生成 prompt/write_to 后进入 agent_required；不得新建事务或把错误归类为不可恢复 unknown_failure
-    - YYYYMMDD 文件名保留显式年份；仅有 MMDD 或无日期时允许用摄入年分区，但 state 与 Wiki frontmatter 必须标记 date_inferred，禁止把推断年份伪装成 raw 明示事实
+    - YYYY-MM-DD 与 YYYYMMDD 文件名保留显式年份并验证日历合法性；不得将年份前缀误读为 MMDD；仅有 MMDD 或无有效日期时允许用摄入年分区，但 state 与 Wiki frontmatter 必须标记 date_inferred，禁止把推断年份伪装成 raw 明示事实
     - Meeting Compiler META 的非空 title 在落位前生成最终 meeting-id 并重算 raw/wiki 路径；sources 由程序回填最终路径，重试时保持 canonical ID 稳定
     - 会议 sources 按 YAML 结构回填为唯一最终 Raw 来源，覆盖标量、行内列表与多行列表；Wiki validator 必须检查与事务 raw_dir/source_filename 精确一致，缺失或错位不得进入落位
     - Agent task 由共享记录契约提供 META、frontmatter 与 MEETING_IR 完整字段及可解析输出模板；MEETING_IR 顶层字段含固定 protocol_version，与 validator 共用字段定义，不靠重试补契约；人物未解析时以空 canonical 端点保留原称呼、参会、汇报和待办，仅确定身份的角色进入图；正文脚注中的原事务来源随最终目录精确重绑定，不改写其他来源
@@ -5711,11 +5880,14 @@ script_contracts:
   visual_to_editable_ppt:
     preconditions:
     - 输入是现有图片或 PDF；矢量 PDF 优先直接提取文字与路径，位图/扫描页才进入 OCR 与图形检测，不得无条件栅格化
+    - CLI 默认 Agent backend；低覆盖率在装配和回渲染前交还宿主 agent-task-v1，API backend 保持原控制循环，不隐式跨 backend
+    - 精修候选按独立来源内容清单、原生对象、逐页回渲染、字体字形和显式宿主视觉复核校验；执行成功、RGB 相似度或零图片不能单独构成质量通过
     - 默认 balanced 模式以视觉忠实为先；只有高置信度可见元素转为原生文本框、线段、矩形、椭圆或自由曲线，复杂区域允许保留可追踪的局部位图 fallback
     - 远程视觉 API adapter 主模型默认 GLM-5.3-Flash（2026-09-11 用户指定，重建质量未对测），失败时回退 GLM-4.5V；模型配置在 llm-models.yaml 登记，shared 确定性提取与校验不变；敏感路径与 paper-profile 内容只有显式 allow_remote 才可上传
     writes:
     - 仅写显式 output_path 与 temp/visual-to-ppt/<artifact-sha>/<run-key>/ 下 manifest、逐页中间对象、receipt、渲染缓存、差异报告和最终装配 checkpoint
     - 输出 PPTX 使用独立原生对象；fallback 位图必须在对象 manifest 中记录范围、原因和置信度，不得伪报完全可编辑
+    - 精修只通过 visual_ppt_workflow 的 check/commit 发布，最终 sidecar 绑定源、候选、内容清单、复核及输出哈希；候选或输入变化使缓存失效
     forbidden:
     - 修改输入图片/PDF、raw/wiki/graph.db 或科学数据与结论
     - 未经 overwrite 显式授权覆盖既有输出；把远程模型返回的路径、命令、XML 或对象 ID 直接当作可信执行输入
@@ -5725,6 +5897,18 @@ script_contracts:
     - python3 .scripts/test_visual_to_editable_ppt.py
     - python3 dsh/test_visual_reconstruction_tools.py
     - python3 .scripts/test_visual_qa.py
+    - python3 .scripts/engineering_graph.py validate
+  visual_ppt_workflow:
+    preconditions:
+    - prepare 只向当前宿主派发 agent-task-v1，不调用模型、执行候选代码或进入 DSH；check/commit 是共享确定性内核
+    - 来源内容清单先于候选校验；宿主声明逐页来源核对和视觉复核不等于程序独立证明原图语义正确
+    writes:
+    - 仅 temp/visual-to-ppt 下声明的候选、内容清单、复核、渲染和回执，以及显式授权目标 PPTX 与同名 reconstruction.json
+    forbidden:
+    - 未通过内容、原生文本、包结构、回渲染或哈希校验即发布；改动输入或受保护目录；没有 overwrite 授权覆盖目标
+    - 使用旧哈希回执跳过已变化候选或目标；把被 editable 模式丢弃的前景算作成功重建
+    verify:
+    - python3 .scripts/test_visual_to_editable_ppt.py
     - python3 .scripts/engineering_graph.py validate
   dsh_visual_reconstruction_tools:
     preconditions:

@@ -251,6 +251,9 @@ def validate_claims(claims, state):
 
 
 def display_texts(content, brief):
+    if content.get('schema') == 'science-exhibit-content-v2':
+        import science_exhibit_composition
+        return science_exhibit_composition.display_texts(content, brief)
     items = [('title', content['title']), ('hook', content['hook']), ('takeaway.text', content['takeaway']['text'])]
     diagram = content['diagram']
     items.append(('diagram.headline', diagram['headline']))
@@ -294,6 +297,10 @@ def validate_display_acronyms(items):
 
 
 def validate_content(content, state):
+    require(isinstance(content, dict), 'Content object required')
+    if content.get('schema') == 'science-exhibit-content-v2':
+        import science_exhibit_composition
+        return science_exhibit_composition.validate(sys.modules[__name__], content, state)
     fields(content, ('schema', 'title', 'hook', 'takeaway', 'claims', 'panels', 'diagram'))
     require(content['schema'] == 'science-exhibit-content-v1', 'Unsupported content schema')
     text(content['title'], 40)
@@ -414,6 +421,10 @@ def prepare(store, expected_revision, panel=None, audience=None, kind=None):
             template['diagram'] = {'kind': 'concept', 'headline': '', 'claim_ids': ['claim-1'],
                                    'artwork': {'schema': 'presentation-artwork-v1', 'canvas': [1280, 720],
                                                'background': '#F7FAF8', 'rationale': '', 'objects': []}}
+        if state['schema'] == 'science-exhibit-v2' and state['workflow']['plan']['visual']['kind'] == 'composition' and (state['content'] is None or state['content'].get('schema') != 'science-exhibit-content-v2'):
+            template = {'schema': 'science-exhibit-content-v2', 'claims': deepcopy(state['workflow']['plan']['claims']),
+                        'texts': [], 'assets': [], 'composition': {'schema': 'science-exhibit-composition-v1',
+                            'canvas': [1009, 1427], 'background': '#F7FAF8', 'objects': []}}
         request_rel = str((directory / 'request.json').relative_to(REPO))
         command = f'python3 .scripts/science_exhibit.py {{action}} --request {shlex.quote(request_rel)}'
         task = agent_task.make_task(
@@ -421,9 +432,10 @@ def prepare(store, expected_revision, panel=None, audience=None, kind=None):
             inputs=[{'name': 'raw-paper', 'path': state['source']['path'], 'sha256': state['source']['sha256']},
                     {'name': 'request', 'path': request_rel}],
             outputs=[{'name': 'content', 'path': str((directory / 'content.json').relative_to(REPO))}],
-            protocol={'name': 'science-exhibit-content-v1', 'schema_doc': 'operations/SCIENCE_EXHIBIT.md', 'output_template': template},
+            protocol={'name': template['schema'], 'schema_doc': 'operations/SCIENCE_EXHIBIT.md', 'output_template': template},
             context={'audience': request['audience'], 'edit_panel': panel,
                      'authoring_method': 'operations/SCIENCE_EXHIBIT.md#公众叙事制作方法',
+                     'workflow_method': 'operations/SCIENCE_EXHIBIT.md#全流程接续与独立试读',
                      'semantic_review': 'pending', 'source_data_trust': 'untrusted',
                      'current_content': state['content']},
             commands={'check': command.format(action='check'), 'commit': command.format(action='commit')},
@@ -446,6 +458,11 @@ def load_request(path):
 
 def validate_request(request, content, state):
     validate_content(content, state)
+    composed = content['schema'] == 'science-exhibit-content-v2'
+    if composed:
+        import science_exhibit_composition
+        science_exhibit_composition.asset_paths(sys.modules[__name__], content, request['store'])
+        require(request['panel'] is None, 'Composition edits use stable text/object IDs in a whole-content request, not legacy panel edits')
     if state['last_request'] == request['id']:
         require(state['content'] == content and state['brief']['audience'] == request['audience'], 'Committed candidate changed')
         return True
@@ -453,7 +470,8 @@ def validate_request(request, content, state):
     if state['schema'] == 'science-exhibit-v2':
         workflow.require_authorization(sys.modules[__name__], state)
         require(content['claims'] == state['workflow']['plan']['claims'], 'Content evidence differs from the confirmed plan; revise the plan first')
-        require(content['diagram'].get('kind', 'flow') == state['workflow']['plan']['visual']['kind'], 'Content visual differs from the confirmed plan; do not silently downgrade or replace it')
+        visual_kind = 'composition' if composed else content['diagram'].get('kind', 'flow')
+        require(visual_kind == state['workflow']['plan']['visual']['kind'], 'Content visual differs from the confirmed plan; do not silently downgrade or replace it')
         if request['panel']:
             require(state['workflow']['content_binding'] == workflow.binding(sys.modules[__name__], state), 'Changed brief/plan requires a whole-story revision')
     if request['panel']:
@@ -595,6 +613,14 @@ def parser():
             command.add_argument('--kind', choices=('brief', 'plan', 'content'))
     for action in ('check', 'commit'):
         sub.add_parser(action).add_argument('--request', required=True)
+    asset = sub.add_parser('add-asset')
+    asset.add_argument('--store', required=True)
+    asset.add_argument('--expected-revision', type=int, required=True)
+    asset.add_argument('--path', required=True)
+    asset.add_argument('--source-label', required=True)
+    asset.add_argument('--usage', required=True)
+    import science_exhibit_review
+    science_exhibit_review.add_commands(sub)
     workflow.add_commands(sub)
     return root
 
@@ -612,6 +638,17 @@ def main(argv=None):
             result = build(args.store, args.expected_revision)
         elif args.action in {'check', 'commit'}:
             result = check_or_commit(args.request, commit=args.action == 'commit')
+        elif args.action == 'add-asset':
+            import science_exhibit_composition
+            with locked(args.store) as store:
+                state = load_state(store)
+                require(state['revision'] == args.expected_revision, 'Stale expected revision')
+                workflow.require_authorization(sys.modules[__name__], state)
+                result = {'status': 'asset_frozen', 'asset': science_exhibit_composition.import_asset(
+                    sys.modules[__name__], store, args.path, args.source_label, args.usage)}
+        elif args.action in {'prepare-review', 'record-review', 'compare'}:
+            import science_exhibit_review
+            result = science_exhibit_review.act(sys.modules[__name__], args)
         else:
             result = workflow.act(sys.modules[__name__], args)
         print(json.dumps(result, ensure_ascii=False))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -22,7 +23,10 @@ from visual_to_editable_ppt import (
     parse_page_selector,
     run_visual_to_editable_ppt,
     sha256_file,
+    assess_reconstruction_quality,
+    build_parser,
 )
+from visual_ppt_workflow import check_reconstruction, commit_reconstruction, missing_glyphs
 
 
 def _vector_pdf(path: Path) -> None:
@@ -80,6 +84,7 @@ def _vision_stub(
 
 
 def test_page_selector() -> None:
+    assert build_parser().parse_args(["source.png"]).backend == "agent"
     assert parse_page_selector("all", 3) == [1, 2, 3]
     assert parse_page_selector("1,3", 3) == [1, 3]
     try:
@@ -135,6 +140,7 @@ def test_raster_uses_editable_objects_and_honest_fallback(tmp: Path) -> None:
         source,
         output_path=output,
         receipt_root=tmp / "raster-receipts",
+        backend="api",
         deterministic_only=True,
         mode="balanced",
     )
@@ -169,6 +175,7 @@ def test_vision_guidance_is_schema_limited(tmp: Path) -> None:
             output_path=output,
             receipt_root=tmp / "vision-receipts",
             vision_call=call,
+            backend="api",
             mode="faithful",
         )
     assert calls == ["GLM-5.3-Flash"], calls
@@ -200,6 +207,7 @@ def test_reconstruction_model_fallback(tmp: Path) -> None:
             source,
             output_path=tmp / "fallback.pptx",
             receipt_root=tmp / "fallback-receipts",
+            backend="api",
             vision_call=call,
             mode="faithful",
         )
@@ -224,6 +232,219 @@ def test_forbidden_output_area(tmp: Path) -> None:
     assert not forbidden.exists()
 
 
+def _write_json(path: Path, value: dict) -> None:
+    path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+
+
+def _must_fail(action, message: str) -> None:
+    try:
+        action()
+    except VisualReconstructionError as exc:
+        assert message in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected reconstruction failure: {message}")
+
+
+def test_agent_early_handoff_and_no_remote(tmp: Path) -> None:
+    source = tmp / "handoff.png"
+    _raster_figure(source)
+    output = tmp / "handoff.pptx"
+    with patch("visual_to_editable_ppt._build_presentation", side_effect=AssertionError("must not assemble")), \
+         patch("visual_to_editable_ppt._default_vision_call", side_effect=AssertionError("must not call API")), \
+         patch("visual_to_editable_ppt.assess_reconstruction_quality", return_value={
+             "needs_reconstruction": True, "issues": [{"page": 1, "code": "low_editable_coverage"}],
+         }):
+        result = run_visual_to_editable_ppt(source, output_path=output,
+                                          receipt_root=tmp / "handoff")
+    assert not output.exists()
+    assert result["status"] == "prepared"
+    assert result["agent_task"]["schema"] == "agent-task-v1"
+    assert result["agent_task"]["commands"]["commit"]
+    assert len(result["agent_task"]["outputs"]) == 3
+    with patch("visual_to_editable_ppt._analyze_raster_page", side_effect=AssertionError("skip redundant OCR")):
+        forced = run_visual_to_editable_ppt(source, output_path=tmp / "forced.pptx",
+                                          receipt_root=tmp / "forced", backend="agent", strategy="reconstruct")
+    assert forced["status"] == "prepared"
+
+
+def test_editable_mode_reports_discarded_pixels(tmp: Path) -> None:
+    source = tmp / "discarded.png"
+    _raster_figure(source)
+    def residual(rgb, background, recognized, target):
+        Image.new("RGBA", (12, 12), (12, 34, 56, 255)).save(target)
+        return 0.75, 100
+
+    with patch("visual_to_editable_ppt._make_residual_layer", side_effect=residual):
+        result = run_visual_to_editable_ppt(source, output_path=tmp / "discarded.pptx",
+                                          receipt_root=tmp / "discarded", deterministic_only=True,
+                                          mode="editable", backend="api")
+    assert result["fallback_objects"] == 0
+    assert result["content_loss"] is True
+    assert result["fully_editable"] is False
+    assert result["status"] == "partial"
+    assert result["editable_foreground_coverage_mean"] < 1
+    assert result["quality"]["needs_reconstruction"]
+    assert assess_reconstruction_quality([{"page": 1, "source_mode": "vector", "metrics": {}}])["issues"] == []
+
+
+def test_managed_reconstruction_validation_and_publish(tmp: Path) -> None:
+    source = tmp / "vector.pdf"
+    output = tmp / "managed.pptx"
+    prepared = run_visual_to_editable_ppt(source, output_path=output, backend="agent",
+                                        strategy="reconstruct", receipt_root=tmp / "managed")
+    state_path = Path(prepared["state_path"])
+    folder = state_path.parent
+    candidate = folder / "candidate.pptx"
+    shutil.copyfile(tmp / "vector-editable.pptx", candidate)
+    inventory_path = folder / "source-inventory.json"
+    inventory = {"source_sha256": sha256_file(source), "pages": [
+        {"page": 1, "texts": ["VECTOR ONE 1"]}, {"page": 2, "texts": ["VECTOR TWO 2"]},
+    ]}
+    _write_json(inventory_path, inventory)
+    checked = check_reconstruction(state_path)
+    assert checked["passed"] and not checked["cached"]
+    with patch("visual_to_editable_ppt._render_pptx_for_comparison", side_effect=AssertionError("must reuse render")):
+        assert check_reconstruction(state_path)["cached"]
+    review_path = folder / "review.json"
+    review = {"source_sha256": sha256_file(source), "candidate_sha256": sha256_file(candidate),
+              "inventory_sha256": sha256_file(inventory_path), "pages": [
+                  {"page": page, "source_checked": True, "visual_checked": True, "pictures": []}
+                  for page in [1, 2]
+              ]}
+    _write_json(review_path, review)
+    bad_review = {**review, "candidate_sha256": "stale"}
+    _write_json(review_path, bad_review)
+    _must_fail(lambda: commit_reconstruction(state_path), "review hashes")
+    assert not output.exists()
+    _write_json(review_path, review)
+    with patch("visual_to_editable_ppt._render_pptx_for_comparison", side_effect=AssertionError("must reuse render")):
+        result = commit_reconstruction(state_path)
+        repeated = commit_reconstruction(state_path)
+    assert result["output_sha256"] == sha256_file(output)
+    assert repeated["resumed"]
+    assert result["input_unchanged"] and result["fully_editable"]
+    sidecar = json.loads(output.with_suffix(".reconstruction.json").read_text())
+    assert sidecar["output_sha256"] == sha256_file(output)
+    with patch("visual_to_editable_ppt._analyze_pdf_page", side_effect=AssertionError("must skip published source")):
+        resumed = run_visual_to_editable_ppt(source, output_path=output, backend="agent",
+                                            strategy="reconstruct", receipt_root=tmp / "managed")
+    assert resumed["resumed"]
+    inventory["pages"][0]["texts"].append("MISSING SOURCE CONTENT")
+    _write_json(inventory_path, inventory)
+    missing = check_reconstruction(state_path)
+    assert not missing["passed"] and not missing["cached"]
+    assert {issue["layer"] for issue in missing["issues"]} == {"native", "rendered"}
+    _must_fail(lambda: commit_reconstruction(state_path), "failed validation")
+    output.write_bytes(b"changed after publication")
+    _must_fail(lambda: run_visual_to_editable_ppt(source, output_path=output, backend="agent",
+                                                strategy="reconstruct", receipt_root=tmp / "managed"), "already exists")
+
+
+def test_publication_rollback_and_output_conflict(tmp: Path) -> None:
+    source = tmp / "vector.pdf"
+    output = tmp / "rollback.pptx"
+    output.write_bytes(b"previous output")
+    prepared = run_visual_to_editable_ppt(source, output_path=output, backend="agent", strategy="reconstruct",
+                                        overwrite=True, receipt_root=tmp / "rollback")
+    state_path = Path(prepared["state_path"])
+    folder = state_path.parent
+    candidate = folder / "candidate.pptx"
+    shutil.copyfile(tmp / "vector-editable.pptx", candidate)
+    inventory_path = folder / "source-inventory.json"
+    _write_json(inventory_path, {"source_sha256": sha256_file(source), "pages": [
+        {"page": 1, "texts": ["VECTOR ONE 1"]}, {"page": 2, "texts": ["VECTOR TWO 2"]},
+    ]})
+    checked = check_reconstruction(state_path)
+    _write_json(folder / "review.json", {"source_sha256": sha256_file(source),
+        "candidate_sha256": checked["candidate_sha256"], "inventory_sha256": checked["inventory_sha256"],
+        "pages": [{"page": page, "source_checked": True, "visual_checked": True, "pictures": []} for page in [1, 2]],
+    })
+    with patch("visual_ppt_workflow.core._write_json_atomic", side_effect=OSError("sidecar publication failure")):
+        try:
+            commit_reconstruction(state_path)
+        except OSError:
+            pass
+        else:
+            raise AssertionError("publication must fail")
+    assert output.read_bytes() == b"previous output"
+    assert not output.with_suffix(".reconstruction.json").exists()
+    output.write_bytes(b"concurrent change")
+    _must_fail(lambda: commit_reconstruction(state_path), "output changed")
+
+
+def test_automatic_render_is_reused(tmp: Path) -> None:
+    source = tmp / "vector.pdf"
+    with patch("visual_to_editable_ppt._render_pptx_for_comparison", side_effect=AssertionError("must not convert twice")):
+        result = run_visual_to_editable_ppt(source, output_path=tmp / "single-render.pptx",
+                                          receipt_root=tmp / "single-render", deterministic_only=True)
+    assert len(result["visual_comparison"]) == 2
+
+
+def test_batch_preparation_and_partial_failure(tmp: Path) -> None:
+    source = tmp / "batch-a.png"
+    _raster_figure(source)
+    second = tmp / "batch-b.png"
+    shutil.copyfile(source, second)
+    command = [sys.executable, str(REPO / ".scripts/visual_to_editable_ppt.py"), str(source), str(second),
+               "--strategy", "reconstruct", "--output-dir", str(tmp / "batch-outputs"),
+               "--receipt-root", str(tmp / "batch-receipts")]
+    process = subprocess.run(command, capture_output=True, text=True, cwd=REPO, timeout=60)
+    assert process.returncode == 0, process.stderr + process.stdout
+    result = json.loads(process.stdout)
+    assert result["counts"] == {"prepared": 2}
+    assert all(item["agent_task"]["schema"] == "agent-task-v1" for item in result["items"])
+    command[3] = str(tmp / "missing-input.png")
+    process = subprocess.run(command, capture_output=True, text=True, cwd=REPO, timeout=60)
+    assert process.returncode == 2, process.stderr + process.stdout
+    result = json.loads(process.stdout)
+    assert result["counts"] == {"prepared": 1, "failed": 1}
+    assert result["items"][0]["resumed"]
+
+
+def test_bitmap_fallback_requires_review(tmp: Path) -> None:
+    source = tmp / "hybrid.pdf"
+    image = tmp / "hybrid-photo.png"
+    Image.new("RGB", (120, 80), "#6699CC").save(image)
+    with fitz.open() as document:
+        page = document.new_page(width=720, height=420)
+        page.insert_text((50, 60), "BITMAP CASE", fontsize=24)
+        page.insert_image(fitz.Rect(50, 100, 350, 300), filename=str(image))
+        document.save(source)
+    original = tmp / "hybrid-original.pptx"
+    run_visual_to_editable_ppt(source, output_path=original, deterministic_only=True,
+                              receipt_root=tmp / "hybrid-original", backend="api")
+    output = tmp / "hybrid-managed.pptx"
+    prepared = run_visual_to_editable_ppt(source, output_path=output, strategy="reconstruct",
+                                        receipt_root=tmp / "hybrid-managed")
+    state_path = Path(prepared["state_path"])
+    folder = state_path.parent
+    shutil.copyfile(original, folder / "candidate.pptx")
+    _write_json(folder / "source-inventory.json", {"source_sha256": sha256_file(source),
+                                                 "pages": [{"page": 1, "texts": ["BITMAP CASE"]}]})
+    checked = check_reconstruction(state_path)
+    assert checked["passed"]
+    review = {"source_sha256": sha256_file(source), "candidate_sha256": checked["candidate_sha256"],
+              "inventory_sha256": checked["inventory_sha256"], "pages": [
+                  {"page": 1, "source_checked": True, "visual_checked": True, "pictures": []},
+              ]}
+    _write_json(folder / "review.json", review)
+    _must_fail(lambda: commit_reconstruction(state_path), "every bitmap")
+    review["pages"][0]["pictures"] = [{"name": name, "reason": "source photo"} for name in checked["pages"][0]["pictures"]]
+    _write_json(folder / "review.json", review)
+    result = commit_reconstruction(state_path)
+    assert result["status"] == "partial" and result["fully_editable"] is False
+    source.write_bytes(b"changed source")
+    _must_fail(lambda: check_reconstruction(state_path), "source changed")
+
+
+def test_missing_glyphs_are_not_text_success() -> None:
+    class MissingGlyphPage:
+        def get_texttrace(self):
+            return [{"chars": [(ord("中"), 0), (ord("A"), 12), (ord(" "), 0)]}]
+
+    assert missing_glyphs(MissingGlyphPage()) == ["中"]
+
+
 def main() -> None:
     test_page_selector()
     (REPO / "temp").mkdir(parents=True, exist_ok=True)
@@ -234,6 +455,14 @@ def main() -> None:
         test_vision_guidance_is_schema_limited(tmp)
         test_reconstruction_model_fallback(tmp)
         test_forbidden_output_area(tmp)
+        test_agent_early_handoff_and_no_remote(tmp)
+        test_editable_mode_reports_discarded_pixels(tmp)
+        test_managed_reconstruction_validation_and_publish(tmp)
+        test_publication_rollback_and_output_conflict(tmp)
+        test_automatic_render_is_reused(tmp)
+        test_batch_preparation_and_partial_failure(tmp)
+        test_bitmap_fallback_requires_review(tmp)
+        test_missing_glyphs_are_not_text_success()
     print("visual to editable ppt regression: PASS")
 
 

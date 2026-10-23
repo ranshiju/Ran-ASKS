@@ -1,6 +1,6 @@
 # Write（写作）操作规范
 
-> `write` 是按需调用的**落笔能力**：使用可回溯事实与当前工作上下文生成文稿。它可以服务于独立办公写作，也可以作为 `research` 等工作状态中的组合能力；写作产物不自动成为知识库事实。智能体能力定义见 `agents/writer/AGENT.md`，其流程须与本规范一致。
+> `write` 是按需调用的**落笔能力**：使用可回溯事实与当前工作上下文生成文稿。它可以服务于独立办公写作，也可以作为 `research` 等持续工作中的组合能力；写作产物不自动成为知识库事实。智能体能力定义见 `agents/writer/AGENT.md`，其流程须与本规范一致。
 
 ---
 
@@ -12,11 +12,11 @@
 - 学术简历、个人简介、项目申报辅助材料、合作交流材料、会议介绍等专业材料；
 - 用户明确指定的 Markdown、Word、PDF、PPT 文字内容或版式文档。
 
-明确要求逐页协作制作原生可编辑 PPT 时，在当前状态内另加载 `python3 .scripts/route.py --capability presentation --capability-profile create`，其成熟度与当前可执行动作以 `operations/PRESENTATION.md` 为准；当前阶段1B已提供单页状态、整套导出与三个独立按需辅助入口，真实用户验收尚待完成。仅写 PPT 文字提纲或讲稿仍用本规范，图片/PDF 重建沿用独立重建能力。
+明确要求逐页协作制作原生可编辑 PPT 时，在当前工作上下文内另加载 `python3 .scripts/route.py --capability presentation --capability-profile create`，其成熟度与当前可执行动作以 `operations/PRESENTATION.md` 为准；当前阶段1B已提供单页状态、整套导出与三个独立按需辅助入口，真实用户验收尚待完成。仅写 PPT 文字提纲或讲稿仍用本规范，图片/PDF 重建沿用独立重建能力。
 
-研究论文仍以 `research` 作为工作状态。Agent 真正开始起草、改写或润色论文正文时，在该状态内调用 `write` 的 academic profile；讨论研究问题、核对数据和运行实验时继续保持 `research`，无需加载写作能力。
+研究论文仍以 `research` 作为持续工作。Agent 真正开始起草、改写或润色论文正文时，在该工作上下文内调用 `write` 的 academic profile；讨论研究问题、核对数据和运行实验时继续保持 `research`，无需加载写作能力。
 
-用户要求进入“论文到科普展板”创作或先讨论主题/受众/需求时，加载 `python3 .scripts/route.py --capability science-exhibit --capability-profile discuss`；这是可持续的协作创作流程，底层复用 writing 工作区或已有 research 状态。接续展板先读取目标项目 notes/status.md，再加载该能力的 resume profile 并调用 `wg.py science-exhibit resume --store <store>`；以当前受管记录恢复，不重新假设需求、批准方案或直接生成成品。精确边界见 `operations/SCIENCE_EXHIBIT.md`。
+用户要求进入“论文到科普展板”创作或先讨论主题/受众/需求时，加载 `python3 .scripts/route.py --capability science-exhibit --capability-profile discuss`；这是可持续的协作创作流程，底层复用 writing 工作区或已有 research 工作上下文。接续展板先读取目标项目 notes/status.md，再加载该能力的 resume profile 并调用 `wg.py science-exhibit resume --store <store>`；以当前受管记录恢复，不重新假设需求、批准方案或直接生成成品。精确边界见 `operations/SCIENCE_EXHIBIT.md`。
 
 先判定工作模式，而非机械依赖单个触发词：
 
@@ -47,7 +47,7 @@
 
 ## 共享落笔约定（可组合能力）
 
-本节适用于所有文体，也是其他工作状态调用 `write` 时的最小共享风格包。
+本节适用于所有文体，也是其他持续工作调用 `write` 时的最小共享风格包。
 
 1. **正面说明作用与范围**：优先写清本文、文稿或系统做了什么，产生了什么可检查产物，以及证据覆盖哪些对象、条件和时间范围。
 2. **用范围限定表达科学边界**：必要边界写成 evaluated scope、适用条件、已验证对象和后续验证层。让边界直接界定当前主张，避免用连续的否定式句子组织防御。
@@ -97,7 +97,7 @@
 
 - 发言稿、公文：读取对应 `agents/writer/templates/` 模板与 `memory/MEMORY.md` 风格规则；
 - 简历、个人简介、申报/合作材料：采用“定位—代表成果—相关经历—能力/贡献”结构，优先展示与目标岗位或场景直接相关的证据；
-- 学术论文正文：保持 `research` 工作状态，调用 academic write profile，并同时应用 `operations/research/physics-manuscript-editing.md` 等相应学科写作 overlay。
+- 学术论文正文：保持 `research` 工作上下文，调用 academic write profile，并同时应用 `operations/research/physics-manuscript-editing.md` 等相应学科写作 overlay。
 
 ### 3. 形成内容稿
 
@@ -160,7 +160,7 @@
 | 能做 | 不能做 |
 |------|--------|
 | 基于可追溯材料生成公文、讲稿、简历、简介和合作材料 | 编造不可追溯的经历、数据、资质或国际影响 |
-| 在 research 状态中按需起草或修改论文，并组合学科写作 overlay | 把写作能力当作研究证据、实验结果或事实来源 |
+| 在 research 工作上下文中按需起草或修改论文，并组合学科写作 overlay | 把写作能力当作研究证据、实验结果或事实来源 |
 | 生成并验证 Word/PDF 等用户明确要求的格式 | 自动发送、提交、签署或代表用户作出承诺 |
 | 将多项事实压缩为保守的能力概括 | 把学术服务经历夸大为国际组织任职或政策制定经历 |
 | 修改既有文稿并保留未涉及内容 | 未经明确指令将写作材料摄入知识库 |

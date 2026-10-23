@@ -1,8 +1,8 @@
 schema: function-registry-v1
 version: 1
 purpose: >-
-  WikiGraph 运行时功能目录。统一管理用户功能、Agent 工具、固定管线、工作状态操作与 API worker；
-  不保存工作状态，不替代工程元图，也不把固定管线改造成动态 DSH 工作流。
+  WikiGraph 运行时功能目录。统一管理用户功能、Agent 工具、固定管线、持续工作管理操作与 API worker；
+  不保存具体工作上下文，不替代工程元图，也不把固定管线改造成动态 DSH 工作流。
 
 adapters:
   dsh:
@@ -23,29 +23,29 @@ adapters:
 states:
   oral_exam:
     title: 智能口试
-    summary: 持续讨论并确认可复用的口试方案，进行有明确边界、完整留痕和可恢复的文字口试。
+    summary: 围绕口试开展持续工作，讨论并确认可复用方案，进行有明确边界、完整留痕和可恢复的文字口试。
     authority: private/oral-exams/state.json
     route_tasks: [oral_exam]
   workspace:
     title: 持续工作区
-    summary: 项目事项、提案、记忆和可重建投影的工作状态。
+    summary: 项目事项、提案、记忆和可重建投影的工作上下文。
     authority: projects/<path>/workspace.yaml + .workspace/items + .workspace/memories
     route_tasks: []
   research:
     title: 研究工作
-    summary: 研究项目中的持续判断、实验、笔记和论文推进状态。
+    summary: 研究项目中的持续判断、实验、笔记和论文推进上下文。
     authority: projects/<path>/workspace.yaml + research profile
     route_tasks: [research]
   frontier:
     title: 研究前沿
-    summary: 开放问题、部分答案、残余缺口、思路和验证轨迹的工作状态。
+    summary: 开放问题、部分答案、残余缺口、思路和验证轨迹的工作上下文。
     authority: academic/frontier/questions + academic/frontier/trajectories
     route_tasks: [frontier]
 
 functions:
   system.function_catalog:
     title: 功能目录
-    summary: 列出、查看和按调用者、后端、工作状态解析 canonical 功能。
+    summary: 列出、查看和按调用者、后端、持续工作类型解析 canonical 功能。
     kind: tool
     audience: [user, agent]
     control_owners: [code]
@@ -196,6 +196,24 @@ functions:
         write: [general, academic]
       executor: host_agent
 
+  artifact.review:
+    title: 独立建议型审阅
+    summary: 对冻结的授权材料委派独立审阅视角，接收有依据的建议，不作作品准入裁决或自动改稿。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, temp, project]
+    maturity: preview
+    bindings:
+      route_capabilities:
+        review: [general]
+      wg: [review]
+      cli: [.scripts/review.py]
+      implementations: [.scripts/review_contract.py]
+    protocols: [advisory-review-content-v1, reviewer-definition-v1, review-host-capabilities-v1, image-view-set-v1]
+
   artifact.slide_library:
     title: PPT模板管理与复用
     summary: 检索、核验和收藏页面组件，区分直接使用与套用填充，保留来源版本并生成独立单页实例。
@@ -252,7 +270,7 @@ functions:
 
   artifact.science_exhibit:
     title: 论文到公众科普展板
-    summary: 可接续的人机协作展板创作：讨论需求与方案、记录真实制作授权和实际预览反馈，复用绘画/版本内核本地导出原生 A1/A0 草稿；不自动公开发布。
+    summary: 从论文与对话需求到科学故事、A1/A0可编辑图文混排、独立图片试读、建议取舍、修订对比与本地交付；复用版本内核，不自动批准或公开发布。
     kind: pipeline
     audience: [user, agent]
     control_owners: [host_agent, code]
@@ -267,7 +285,7 @@ functions:
       wg: [science-exhibit]
       cli: [.scripts/science_exhibit.py]
       pipelines: [.scripts/science_exhibit.py]
-    protocols: [agent-task-v1, science-exhibit-v1, science-exhibit-v2, science-exhibit-brief-v1, science-exhibit-plan-v1, science-exhibit-content-v1, science-exhibit-layout-v1, science-exhibit-delivery-v1]
+    protocols: [agent-task-v1, science-exhibit-v1, science-exhibit-v2, science-exhibit-brief-v1, science-exhibit-plan-v1, science-exhibit-content-v1, science-exhibit-content-v2, science-exhibit-composition-v1, science-exhibit-layout-v1, science-exhibit-layout-v2, science-exhibit-delivery-v1, science-exhibit-comparison-v1]
 
   artifact.presentation:
     title: 演示文稿制作与辅助检查
@@ -357,7 +375,7 @@ functions:
 
   artifact.visual_qa:
     title: 视觉产物 QA
-    summary: 检查图片、PDF 和 PPT 页面中的可见缺陷，不修改输入产物。
+    summary: 提供本地渲染与可追溯整图/局部材料准备，按需检查可见缺陷；材料准备不调用模型、不作QA判决，不修改输入产物。
     kind: tool
     audience: [user, agent]
     control_owners: [host_agent, api_controller, code]
@@ -368,6 +386,7 @@ functions:
     bindings:
       dsh: [visual_check]
       cli: [.scripts/visual_qa.py]
+    protocols: [visual-material-v1, image-view-set-v1]
 
   artifact.visual_reconstruction:
     title: 图片或 PDF 转可编辑 PPT
@@ -400,7 +419,7 @@ functions:
       cli: [.scripts/comic_generation.py, .scripts/illustration.py]
 
   state.workspace.manage:
-    title: 工作区状态管理
+    title: 持续工作区管理
     summary: 初始化、接续和管理事项、提案、记忆与可重建投影。
     kind: state_operation
     audience: [user, agent]

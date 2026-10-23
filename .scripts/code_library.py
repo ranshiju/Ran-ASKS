@@ -142,7 +142,7 @@ def validate_structure(data):
             raise CatalogError(f"{node_id}: 无效节点字段")
         if (not isinstance(node["kind"], str) or node["kind"] not in NODE_KINDS
                 or not isinstance(node["status"], str) or node["status"] not in {"available", "planned"}):
-            raise CatalogError(f"{node_id}: 无效类型或工作状态")
+            raise CatalogError(f"{node_id}: 无效类型或可用性状态")
         text_field(node["title"], "node.title", 200)
         text_field(node["summary"], "node.summary")
         string_list(node["aliases"], "node.aliases")

@@ -25,7 +25,9 @@ def test_registry_and_runtime_have_exact_coverage():
     data = registry.load_registry()
     assert registry.validate_registry(data) == []
     assert registry.validate_runtime(data) == []
-    assert len(data["functions"]) == 31
+    assert len(data["functions"]) == 32
+    assert data["functions"]["artifact.review"]["backends"] == ["agent"]
+    assert data["functions"]["artifact.review"]["allowed_callers"] == ["main_agent"]
     assert data["functions"]["artifact.science_exhibit"]["backends"] == ["agent"]
     assert set(data["states"]) == {"workspace", "research", "frontier", "oral_exam"}
     assert len(registry.observed_dsh_tools()) == 38
@@ -171,7 +173,7 @@ def test_route_and_wg_use_registry_discovery():
         [sys.executable, str(SCRIPTS / "route.py"), "--list"],
         cwd=REPO, capture_output=True, text=True, check=True,
     ).stdout
-    assert "工作状态:" in route and "可路由任务:" in route and "按需能力:" in route
+    assert "持续工作:" in route and "可路由任务:" in route and "按需能力:" in route
     assert "task/state" not in route
 
     proc = subprocess.run(
@@ -182,6 +184,66 @@ def test_route_and_wg_use_registry_discovery():
     assert payload["ok"] is True
     assert payload["result"]["id"] == "knowledge.query"
     assert payload["sources"] == ["operations/config/function-registry.yaml"]
+
+
+def test_ongoing_work_terminology_preserves_state_protocol():
+    data = registry.load_registry()
+    assert data["schema"] == "function-registry-v1"
+    assert {state_id: record["authority"] for state_id, record in data["states"].items()} == {
+        "oral_exam": "private/oral-exams/state.json",
+        "workspace": "projects/<path>/workspace.yaml + .workspace/items + .workspace/memories",
+        "research": "projects/<path>/workspace.yaml + research profile",
+        "frontier": "academic/frontier/questions + academic/frontier/trajectories",
+    }
+    for state_id in data["states"]:
+        assert data["functions"][f"state.{state_id}.manage"]["kind"] == "state_operation"
+
+    for script_args in (
+        ["function_registry.py", "resolve", "knowledge.query", "--format", "json"],
+        ["wg.py", "functions", "resolve", "knowledge.query"],
+    ):
+        process = subprocess.run(
+            [sys.executable, str(SCRIPTS / script_args[0]), *script_args[1:],
+             "--caller", "main_agent", "--backend", "agent", "--state", "research"],
+            cwd=REPO, capture_output=True, text=True, check=True,
+        )
+        payload = json.loads(process.stdout)
+        resolved = payload["result"] if script_args[0] == "wg.py" else payload
+        assert resolved["schema"] == "function-resolution-v1"
+        assert resolved["state"] == "research"
+        assert resolved["function_id"] == "knowledge.query"
+        assert "dsh" not in resolved["bindings"]
+
+
+def test_ongoing_work_cli_and_definition_use_new_terminology():
+    listing = registry.render_route_listing()
+    assert listing.startswith("持续工作:\n")
+    assert "工作状态:" not in listing
+    for script_args in (
+        ["function_registry.py", "resolve", "--help"],
+        ["wg.py", "functions", "resolve", "--help"],
+    ):
+        process = subprocess.run(
+            [sys.executable, str(SCRIPTS / script_args[0]), *script_args[1:]],
+            cwd=REPO, capture_output=True, text=True, check=True,
+        )
+        assert "--state" in process.stdout
+        assert "持续工作类型 ID（兼容参数名）" in process.stdout
+        assert "工作状态" not in process.stdout
+
+    try:
+        registry.resolve("knowledge.query", caller="main_agent", backend="agent", state="active")
+    except registry.RegistryError as exc:
+        assert "未知持续工作类型: active" in str(exc)
+    else:
+        raise AssertionError("lifecycle status was accepted as an ongoing-work type")
+
+    definition = (REPO / "operations/engineering/adr/007-runtime-function-registry.md").read_text(encoding="utf-8")
+    assert "**持续工作（工程语义：工作上下文）**" in definition
+    assert "不迁移既有记录" in definition
+    oral = (REPO / "operations/ORAL_EXAM.md").read_text(encoding="utf-8")
+    assert "`oral_exam` 是一种持续工作" in oral
+    assert "准备中、待开始、口试中、已暂停、已结束五种明确状态" in oral
 
 
 if __name__ == "__main__":

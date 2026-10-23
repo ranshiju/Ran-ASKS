@@ -252,6 +252,25 @@ normalized PDF pages contain the same addendum; earlier reviewed pages remain.
 只新增精确批准的通用口试快路径，不包含个人记忆。Markdown 与 Word 导出并标准化的
 追加 PDF 页面同步，保留原已审阅页面；论文实验和冻结数据产物保持不变。
 
+The 2026-10-23 `v0.18.0` update adds generic advisory review over frozen
+text/static-image packets, independently versioned reviewer roles, bounded
+poster compositions, version-bound review decisions and before/after comparison.
+Local overview/detail preparation and slide conversion share a deterministic
+visual-material layer; host Agent viewing does not call the project's remote
+visual API, whose control loop remains independent. Material preparation and
+self-reported readability do not certify actual delivery or reader understanding.
+Editable-PowerPoint reconstruction and source-bound ingestion also improve.
+These compatible capabilities warrant a MINOR increment. The Markdown and newly
+appended, normalized PDF pages contain the same addendum; the earlier reviewed
+24 PDF pages and frozen paper artifacts remain unchanged.
+
+2026年10月23日的 `v0.18.0` 更新新增基于冻结文本／静态图片包的通用建议型审阅、
+独立版本化角色、有限展板混排、版本绑定的意见取舍与前后对比。本地转换和整图／
+局部材料共用确定性视觉底座；Agent 原生看图不转交项目远程视觉 API，两种控制循环
+保持独立。准备成功和自报可读性不认证实际交付或读者理解，同时改进可编辑
+PowerPoint 重建及来源绑定摄入。这是兼容新增能力，按 MINOR 排号；Markdown 与
+新增并标准化的 PDF 补充页同步，保留既有24页与冻结论文产物。
+
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
 | 核心方法与56篇论文的时间序列展示 | `v0.2.0` | `1.0.0` | arXiv:2608.29612 v1 的冻结边界 |

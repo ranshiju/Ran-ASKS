@@ -12,7 +12,7 @@ canonical function 为 `artifact.extract_data`，成熟度 preview。首版聚�
 shared 内核复用 `image_ocr.read_image` 做格式/大小/帧数、EXIF 归一和源 SHA-256 检查；
 坐标拟合、RGB 分割、逐列轨迹/散点标记提取、CSV、回绘和元数据均离线执行，不调用模型。
 Agent-only adapter 返回 `agent-task-v1`；当前宿主确认图片语义并填写规格，再调用同一 check/extract。
-不经过 DSH，不隐式转 API，不新增研究工作状态。曲线需要 Pillow 和 NumPy，散点另需 SciPy（均在项目 visual extra 中）。
+不经过 DSH，不隐式转 API，不新增持续工作类型。曲线需要 Pillow 和 NumPy，散点另需 SciPy（均在项目 visual extra 中）。
 
 Raw/Wiki/Graph 只读；暂存写 `temp/`，持久数据只能写 `projects/.../outputs/` 的新子目录。
 拒绝覆盖已有目录、通过 symlink 逃逸写入边界，以及 private 域图片。private 支持留待独立隔离设计。
@@ -20,7 +20,7 @@ Raw/Wiki/Graph 只读；暂存写 `temp/`，持久数据只能写 `projects/.../
 
 ## 使用流程
 
-加载 capability 不改变当前 research/workspace 状态：
+加载 capability 不改变当前 research/workspace 工作上下文：
 
 ```bash
 python3 .scripts/route.py --capability extract-data --capability-profile general

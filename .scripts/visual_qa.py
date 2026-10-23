@@ -14,7 +14,9 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import io
 import json
+import math
 import os
 import re
 import shutil
@@ -54,6 +56,10 @@ PROFILES = {"auto", "figure", "paper", "slides", "document"}
 RENDER_VERSION = "visual-qa-render-v1"
 PROMPT_VERSION = "visual-qa-prompt-v2"
 SCHEMA_VERSION = "visual-qa-schema-v1"
+MAX_VIEW_REGIONS = 6
+MAX_VIEW_SOURCE_BYTES = 32 * 1024 * 1024
+MAX_VIEW_TOTAL_BYTES = 32 * 1024 * 1024
+MAX_VIEW_EDGE = 1600
 
 
 class VisualQAError(RuntimeError):
@@ -244,8 +250,8 @@ def _soffice_env(soffice: Path) -> dict[str, str]:
     return env
 
 
-def _convert_slides_to_pdf(path: Path, target_pdf: Path,
-                           soffice_bin: str | None = None) -> None:
+def convert_slides_to_pdf(path: Path, target_pdf: Path,
+                          soffice_bin: str | None = None) -> None:
     soffice = _find_soffice(soffice_bin)
     target_pdf.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="visual-qa-slides-") as tmp_dir:
@@ -263,6 +269,160 @@ def _convert_slides_to_pdf(path: Path, target_pdf: Path,
         tmp_target = target_pdf.with_name(f".{target_pdf.name}.{os.getpid()}.tmp")
         shutil.copyfile(converted, tmp_target)
         os.replace(tmp_target, target_pdf)
+
+
+def _convert_slides_to_pdf(path: Path, target_pdf: Path,
+                           soffice_bin: str | None = None) -> None:
+    return convert_slides_to_pdf(path, target_pdf, soffice_bin=soffice_bin)
+
+
+def validate_view_spec(spec: dict) -> list[list[float]]:
+    if not isinstance(spec, dict) or set(spec) != {"schema", "regions"} or spec["schema"] != "image-view-spec-v1":
+        raise VisualQAError("Expected image-view-spec-v1 with explicit regions")
+    regions = spec["regions"]
+    if not isinstance(regions, list) or not 1 <= len(regions) <= MAX_VIEW_REGIONS:
+        raise VisualQAError("Request between one and six image regions")
+    for region in regions:
+        if not isinstance(region, list) or len(region) != 4 or any(
+                type(value) not in {int, float} or not math.isfinite(value) for value in region):
+            raise VisualQAError("Regions must contain finite x,y,width,height numbers")
+        left, top, width, height = region
+        if not (0 <= left < 1 and 0 <= top < 1 and width > 0 and height > 0 and
+                left + width <= 1 and top + height <= 1):
+            raise VisualQAError("Image regions must lie inside the normalized whole image")
+    if len({tuple(region) for region in regions}) != len(regions):
+        raise VisualQAError("Duplicate image regions are not useful")
+    return regions
+
+
+def prepare_image_views(image_bytes: bytes, spec: dict, *, detail_pdf: bytes | None = None) -> list[tuple[dict, bytes]]:
+    regions = validate_view_spec(spec)
+    if Image is None or not 0 < len(image_bytes) <= 16 * 1024 * 1024:
+        raise VisualQAError("PNG dependency missing or image exceeds its byte budget")
+    with Image.open(io.BytesIO(image_bytes)) as original:
+        if (original.format != "PNG" or getattr(original, "n_frames", 1) != 1 or
+                not 0 < original.width * original.height <= 24_000_000 or original.getexif().get(274, 1) != 1):
+            raise VisualQAError("Expected a bounded, upright, single-frame PNG")
+        original.load()
+        source = original.convert("RGBA" if "A" in original.getbands() or "transparency" in original.info else "RGB")
+    document = None
+    try:
+        if detail_pdf is not None:
+            if fitz is None or not 0 < len(detail_pdf) <= MAX_VIEW_SOURCE_BYTES:
+                raise VisualQAError("PDF dependency missing or detail source exceeds its byte budget")
+            document = fitz.open(stream=detail_pdf, filetype="pdf")
+            if document.needs_pass or document.page_count != 1:
+                raise VisualQAError("Detail PDF must be an unencrypted single page")
+            page = document[0]
+            if abs(page.rect.width / page.rect.height / (source.width / source.height) - 1) > 0.005:
+                raise VisualQAError("Detail PDF and overview have different page proportions")
+        views = []
+        total = 0
+        for index, region in enumerate(regions, 1):
+            left, top, width, height = region
+            box = [math.floor(left * source.width), math.floor(top * source.height),
+                   min(source.width, math.ceil((left + width) * source.width)),
+                   min(source.height, math.ceil((top + height) * source.height))]
+            actual = [box[0] / source.width, box[1] / source.height,
+                      (box[2] - box[0]) / source.width, (box[3] - box[1]) / source.height]
+            if document is not None:
+                rectangle = fitz.Rect(actual[0] * page.rect.width, actual[1] * page.rect.height,
+                                      (actual[0] + actual[2]) * page.rect.width,
+                                      (actual[1] + actual[3]) * page.rect.height)
+                scale = min(180 / 72, MAX_VIEW_EDGE / max(rectangle.width, rectangle.height))
+                pixels = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rectangle,
+                                         colorspace=fitz.csRGB, alpha=False)
+                view = Image.frombytes("RGB", (pixels.width, pixels.height), pixels.samples)
+            else:
+                view = source.crop(box)
+            view.thumbnail((MAX_VIEW_EDGE, MAX_VIEW_EDGE), Image.Resampling.LANCZOS)
+            stream = io.BytesIO()
+            view.save(stream, format="PNG", optimize=True)
+            data = stream.getvalue()
+            total += len(data)
+            if total > MAX_VIEW_TOTAL_BYTES:
+                raise VisualQAError("Prepared views exceed their total byte budget")
+            metadata = {"attachment_id": f"detail-{index}", "media_type": "image/png",
+                        "sha256": hashlib.sha256(data).hexdigest(), "width": view.width, "height": view.height,
+                        "parent_sha256": hashlib.sha256(image_bytes).hexdigest(),
+                        "source_sha256": hashlib.sha256(detail_pdf if detail_pdf is not None else image_bytes).hexdigest(),
+                        "source_kind": "pdf-page-region" if document is not None else "png-crop",
+                        "region": actual, "pixel_bbox": box,
+                        "representation": "local PDF region render" if document is not None else "source crop, optional downsampling; no upsampling"}
+            views.append((metadata, data))
+        return views
+    finally:
+        if document is not None:
+            document.close()
+
+
+def prepare_local_views(path: str | Path, spec: dict, *, receipt_root: str | Path | None = None) -> dict:
+    source = Path(path).expanduser()
+    if source.is_symlink() or not source.is_file() or source.suffix.lower() not in {".png", ".pdf"}:
+        raise VisualQAError("Local view preparation requires a regular PNG or single-page PDF")
+    resolved = source.resolve()
+    if resolved.is_relative_to(REPO.resolve()) and {"private", ".git"}.intersection(resolved.relative_to(REPO.resolve()).parts):
+        raise VisualQAError("Private or protected sources are not supported by material export")
+    if not 0 < source.stat().st_size <= MAX_VIEW_SOURCE_BYTES:
+        raise VisualQAError("Material source exceeds its byte budget")
+    with source.open("rb") as stream:
+        source_bytes = stream.read(MAX_VIEW_SOURCE_BYTES + 1)
+    if len(source_bytes) > MAX_VIEW_SOURCE_BYTES:
+        raise VisualQAError("Material source exceeds its byte budget")
+    detail_pdf = source_bytes if source.suffix.lower() == ".pdf" else None
+    if detail_pdf is not None:
+        if fitz is None:
+            raise VisualQAError("PyMuPDF is required for local PDF views")
+        with fitz.open(stream=detail_pdf, filetype="pdf") as document:
+            if document.needs_pass or document.page_count != 1:
+                raise VisualQAError("Material PDF must be an unencrypted single page")
+            page = document[0]
+            scale = min(1, MAX_VIEW_EDGE / max(page.rect.width, page.rect.height))
+            image_bytes = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False).tobytes("png")
+    else:
+        image_bytes = source_bytes
+    views = prepare_image_views(image_bytes, spec, detail_pdf=detail_pdf)
+    folder = Path(receipt_root) if receipt_root is not None else REPO / "temp/visual-qa/materials"
+    folder = folder if folder.is_absolute() else REPO / folder
+    if ".." in folder.parts or any(part.is_symlink() for part in (folder, *folder.parents)):
+        raise VisualQAError("Material output cannot traverse parents or symbolic links")
+    try:
+        parts = folder.relative_to(REPO.resolve()).parts
+    except ValueError as error:
+        raise VisualQAError("Material output must stay in repository temp or project outputs") from error
+    if (not parts or {"raw", "private", ".git", "sources", "source-local"}.intersection(parts) or
+            not (parts[0] == "temp" or len(parts) >= 3 and parts[0] == "projects" and
+                 parts[2] == "outputs" and (REPO / "projects" / parts[1]).is_dir())):
+        raise VisualQAError("Material output must stay in repository temp or existing project outputs")
+    key = hashlib.sha256(source_bytes + json.dumps(spec, sort_keys=True).encode() + b"image-view-set-v1").hexdigest()
+    folder = folder / key
+    if folder.is_symlink():
+        raise VisualQAError("Material output cannot be a symbolic link")
+    folder.mkdir(parents=True, exist_ok=True)
+    overview = {"attachment_id": "document-1", "media_type": "image/png", "sha256": hashlib.sha256(image_bytes).hexdigest(),
+                "region": [0, 0, 1, 1], "representation": "PDF overview" if detail_pdf is not None else "original PNG"}
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        overview.update(width=image.width, height=image.height)
+    files = [("document-1.png", image_bytes), *((meta["attachment_id"] + ".png", data) for meta, data in views)]
+    if detail_pdf is not None:
+        files.append(("source.pdf", detail_pdf))
+    manifest = {"schema": "visual-material-v1", "status": "prepared", "view_protocol": "image-view-set-v1",
+                "source": {"path": str(source.resolve()), "sha256": hashlib.sha256(source_bytes).hexdigest()},
+                "spec": spec, "views": [overview, *(meta for meta, _ in views)], "remote_calls": 0,
+                "notice": "Local material preparation only; not visual QA, review or a native-resolution guarantee."}
+    for name, data in files:
+        target = folder / name
+        if target.is_symlink():
+            raise VisualQAError("Material file cannot be a symbolic link")
+        descriptor, temporary = tempfile.mkstemp(prefix=".material-", dir=folder)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+        os.replace(temporary, target)
+    if (folder / "manifest.json").is_symlink():
+        raise VisualQAError("Material manifest cannot be a symbolic link")
+    _write_json_atomic(folder / "manifest.json", manifest)
+    return {**manifest, "output_dir": str(folder), "attachments": [str(folder / (meta["attachment_id"] + ".png"))
+                                                                    for meta in manifest["views"]]}
 
 
 def _image_frame_count(path: Path) -> int:
@@ -295,7 +455,7 @@ def _prepare_source(path: Path, render_dir: Path,
     if suffix in {".ppt", ".pptx"}:
         converted_pdf = render_dir / "source-slides.pdf"
         if not converted_pdf.is_file():
-            _convert_slides_to_pdf(path, converted_pdf, soffice_bin=soffice_bin)
+            convert_slides_to_pdf(path, converted_pdf, soffice_bin=soffice_bin)
         return "slides", converted_pdf, _pdf_page_count(converted_pdf)
     raise VisualQAError(
         f"unsupported extension {suffix or '<none>'}; supported: "
@@ -1010,12 +1170,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument("--dpi", type=int, default=170)
     parser.add_argument("--soffice-bin", default=None)
+    parser.add_argument("--prepare-views", metavar="SPEC_JSON", help="prepare local PNG/PDF overview and regions only; no QA or model call")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.prepare_views:
+            specification = Path(args.prepare_views)
+            if specification.stat().st_size > 65536:
+                raise VisualQAError("View specification exceeds its byte budget")
+            result = prepare_local_views(args.path, json.loads(specification.read_text(encoding="utf-8")),
+                                         receipt_root=args.receipt_root)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
         result = run_visual_qa(
             args.path,
             pages=args.pages,
@@ -1044,6 +1213,9 @@ def main(argv: list[str] | None = None) -> int:
             "verdict": "not_checked",
             "error": f"{type(exc).__name__}: {str(exc)}",
         }
+        if args.prepare_views:
+            error.pop("verdict")
+            error.update(schema="visual-material-v1", remote_calls=0)
         print(json.dumps(error, ensure_ascii=False, indent=2))
         return 2
 

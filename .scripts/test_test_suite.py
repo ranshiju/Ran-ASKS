@@ -20,6 +20,7 @@ def test_profiles_are_nonempty_and_release_extends_foundation() -> None:
     assert foundation
     assert set(foundation) < set(release)
     assert ".scripts/test_workspace_doctor.py" in foundation
+    assert ".scripts/test_review.py" in foundation
     assert "dsh/test_weak_model_governance_eval.py" in foundation
 
 

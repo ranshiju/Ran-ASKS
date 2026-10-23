@@ -2,7 +2,7 @@
 
 ## 功能边界
 
-Canonical ID：`knowledge.visualize`，成熟度 preview。输入主题关键词、节点或关系筛选，输出本地交互 HTML / 静态 PNG 与 JSON 导航清单，完成后即可结束。它是可组合功能，沿用调用方的工作状态。
+Canonical ID：`knowledge.visualize`，成熟度 preview。输入主题关键词、节点或关系筛选，输出本地交互 HTML / 静态 PNG 与 JSON 导航清单，完成后即可结束。它是可组合功能，沿用调用方的持续工作。
 
 先加载 `python3 .scripts/route.py --capability graph-visualize --capability-profile general`。统一入口 `python3 .scripts/wg.py graph-visualize` 返回 WG JSON envelope；确定性底层入口 `graph_visualize.py` 同样可用。代码通过 `graph_lib.connect(read_only=True)` 读取已有图的一致性快照，生成派生产物。
 

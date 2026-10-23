@@ -26,7 +26,7 @@ python3 .scripts/wg.py code-library read code.tt_matvec
 科研论断回溯 Raw；源码和测试只证明其包含何种实现或检查，不能替代论文或运行结果。
 需要将代码知识正式发布到 Raw/Wiki/Graph 时，另经受管摄入事务；本工具没有发布或自动摄入动作。
 
-节点的 available/planned 是工作状态；available 不表示数值结论已验证。
+节点的 available/planned 是可用性状态；available 不表示数值结论已验证。
 关系的 proposed/documented 表示声明状态和是否有定位依据；不接受 verified 一类科学正确性标签。
 同一对节点可以保留不同 scope、不同来源的关系，不将某篇论文的条件或某次验证推广到其他场景。
 测试节点表示检查定义，不能因为其存在而声称测试已运行或论文实验已复现。

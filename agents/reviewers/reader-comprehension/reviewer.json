@@ -1,0 +1,16 @@
+{
+  "schema": "reviewer-definition-v1",
+  "id": "reader-comprehension",
+  "version": 3,
+  "feedback_version": 2,
+  "title": "目标读者理解试读",
+  "configurable": ["goal", "audience", "use_context", "focus", "constraints", "assumptions", "parameters"],
+  "required_brief": ["audience"],
+  "defaults": {
+    "goal": "发现目标读者的理解障碍，提供有依据、可讨论的建议",
+    "use_context": "独立阅读",
+    "context_mode": "blind",
+    "focus": [], "constraints": [], "assumptions": [], "parameters": {}
+  },
+  "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": false}
+}

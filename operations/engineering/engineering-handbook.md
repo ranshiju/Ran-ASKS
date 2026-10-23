@@ -38,7 +38,7 @@ WikiRan 是一个**文件型、跨域、可回溯的知识库**。其主链路�
 
 建设 Agent 读取工程文件时采用独立的按需 locator，不混用 Raw/Wiki 证据语义：Markdown heading path、YAML JSON Pointer、Python qualified symbol 和显式行段均由代码精确截取。读取失败、歧义或超预算时直接拒绝，不回退全文；不为此维护索引或 companion。功能性任务只调用封装函数，工程 locator 不进入通用 query/DSH 工具面。具体调用见 `code-guidance.md` 的 `engineering_locator.py` 段。
 
-运行时明确区分工作状态与一次性功能。`workspace`、`research`、`frontier` 是跨调用持续存在的用户工作状态；摄入、查询、写作、检查、同步、PPT 制作等是一次调用后产生结果、产物或一次受管状态更新的功能。Route task、按需 capability、`wg.py`、DSH、CLI、固定 pipeline 和 API worker 是这些功能面向不同调用者与后端的绑定，不是彼此独立的功能目录。`operations/config/function-registry.yaml` 统一管理 canonical function ID、调用策略和绑定；工程元图继续只管理组件责任、影响关系和验证。
+运行时明确区分持续工作与有边界的功能。`workspace`、`research`、`frontier`、`oral_exam` 是跨调用持续存在的用户持续工作；摄入、查询、写作、检查、同步、PPT 制作等是一次有边界的执行后产生结果、产物或受管状态更新的功能。Route task、按需 capability、`wg.py`、DSH、CLI、固定 pipeline 和 API worker 是这些功能面向不同调用者与后端的绑定，不是彼此独立的功能目录。`operations/config/function-registry.yaml` 统一管理 canonical function ID、调用策略和绑定；工程元图继续只管理组件责任、影响关系和验证。
 
 PPT 新创作采用 `presentation/create` 按需能力，保持当前项目状态；阶段0保留固定合成页的运行时探测；阶段1A已提供持久 session/revision、严格批准/锁定、三个受限版式的单页本地 renderer，阶段1B已增加 presentation_delivery 的整套原生组装与独立按需 task/check/commit；真实人机验收与 PowerPoint GUI 编辑检查待完成。最终检查以用户为主；PPT形式检查、PPT引用脱敏仅用户明确指令触发，可提醒；PPT证据核查仅用户对具体内容有疑问时按范围执行。三项独立、默认不执行，不作为默认交付门禁，基本机械校验与隐私边界保持。学术报告现增加原生结构提取、独立 API 内容/版式/形式分析与模板受管收藏；主 Agent 仅消费文字结果，Agent 语义控制循环不交给 DSH。伴生 MD 与原件受管归档，模板为派生组件；现支持直接使用型（原样内容+用途约束）与套用填充型（显式文字/图片槽位+容量规则），可按类型检索并生成独立填充实例，旧组件保留未分类。新预览检查经 review-api，最终形式检查仍按需。长期边界见 `operations/PRESENTATION.md`，分阶段验收见 `operations/engineering/presentation-test-plan.md`。创作记录通过进程锁内完整 revision 写入和 current.json 原子切换持久保存于所属项目，temp 仅作暂存；锁定只绑定实际哈希快照且不能由手写 QA-pass 回执冒充。同一包仅支持单设备写入，不将 POSIX 锁宣传为同步盘分布式锁。源敏感性沿派生产物继承；既有素材库与视觉重建不迁移。工程覆盖校验以功能注册表为管理入口，并与 Route 和工程能力包做精确对账。
 
@@ -196,14 +196,14 @@ Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群
 | 图表结构与写边 | `.scripts/graph_lib.py`、`.scripts/graph_ingest.py` |
 | Hub 细节 | `operations/HUB.md`、`hub_semantics.py`；`direction_matcher.py`/`cluster_keywords.py`/`hub_split.py` 仅 legacy 兼容 |
 | 查询协议 | `operations/QUERY.md`、`query_orchestrate.py`、`query_actions.py`、`dsh/` |
-| 项目研究状态与落笔能力 | `operations/RESEARCH.md`、`operations/WRITE.md` |
+| 研究工作上下文与落笔能力 | `operations/RESEARCH.md`、`operations/WRITE.md` |
 | 研究前沿问题与轨迹 | `operations/FRONTIER.md`、`.scripts/frontier.py` |
 | API 漫画与文章配图生成 | `operations/COMIC_GENERATION.md`、`.scripts/comic_generation.py`、`dsh/comic_tools.py` |
 | 图片、PDF、PPT/PPTX 视觉检查 | `operations/VISUAL_QA.md`、`.scripts/visual_qa.py` |
 | 图片/PDF 转可编辑 PPT | `operations/VISUAL_TO_EDITABLE_PPT.md`、`.scripts/visual_to_editable_ppt.py` |
 | 健康/同步 | `operations/LINT.md`、`operations/SYNC.md`、`graph_metrics.py` |
 | 当前架构/规模 | `.project/META.md` |
-| 论文研究状态 | `projects/kr-wiki-paper/notes/status.md` |
+| 论文研究进度 | `projects/kr-wiki-paper/notes/status.md` |
 | 设计理念 | `projects/知识结构涌现/idea-deltas.md` |
 | 脚本何时、如何安全调用 | `operations/engineering/code-guidance.md`（按任务定向读取） |
 | 工程影响面、当前入口与任务卡 | `operations/engineering/graph.yaml`、`.scripts/engineering_graph.py` |

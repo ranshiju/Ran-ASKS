@@ -54,7 +54,7 @@ DEFAULT_OUTPUT_ROOT = REPO / "projects" / "visual-reconstruction" / "outputs"
 SUPPORTED_IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 SUPPORTED_INPUTS = SUPPORTED_IMAGES | {".pdf"}
 SCHEMA_VERSION = "1.0"
-ENGINE_VERSION = "0.1.0"
+ENGINE_VERSION = "0.2.0"
 DEFAULT_MODEL = "GLM-5.3-Flash"
 DEFAULT_FALLBACK_MODEL = "GLM-4.5V"
 POINT_PATH_SCALE = 1000
@@ -99,7 +99,7 @@ from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE  # noqa: E402
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN  # noqa: E402
 from pptx.oxml.xmlchemy import OxmlElement  # noqa: E402
 from pptx.util import Pt  # noqa: E402
-from visual_qa import run_visual_qa  # noqa: E402
+from visual_qa import VisualQAError, _convert_slides_to_pdf, run_visual_qa  # noqa: E402
 
 
 def _utc_now() -> str:
@@ -1004,6 +1004,7 @@ def _analyze_raster_page(
     residual_ratio, foreground_pixels = _make_residual_layer(
         rgb, background, recognized, residual_path
     )
+    discarded_ratio = 0.0
     if residual_path.is_file() and mode != "editable":
         # Insert immediately after the background; editable objects stay above it.
         objects.insert(1, {
@@ -1017,7 +1018,7 @@ def _analyze_raster_page(
         })
     elif residual_path.is_file():
         residual_path.unlink()
-        residual_ratio = 0.0
+        discarded_ratio = residual_ratio
 
     editable_coverage = max(0.0, min(1.0, 1.0 - residual_ratio))
     z_priority = {
@@ -1041,6 +1042,7 @@ def _analyze_raster_page(
             "editable_object_count": sum(item["kind"] != "image" for item in objects),
             "fallback_object_count": sum(item["kind"] == "image" for item in objects),
             "editable_foreground_coverage": editable_coverage,
+            "discarded_foreground_ratio": discarded_ratio,
             "foreground_pixels": foreground_pixels,
             "detected_text_lines": len(accepted_ocr_lines),
             "detected_lines": len(line_candidates),
@@ -1369,29 +1371,12 @@ def _build_presentation(page_models: list[dict[str, Any]], output: Path) -> dict
     }
 
 
-def _find_soffice() -> str | None:
-    configured = os.environ.get("SOFFICE_BIN", "").strip()
-    if configured and Path(configured).is_file():
-        return configured
-    candidate = shutil.which("soffice") or shutil.which("libreoffice")
-    if candidate:
-        return candidate
-    bundled = Path.home() / ".cache" / "codex-runtimes"
-    matches = sorted(bundled.glob("*/dependencies/bin/override/soffice"), reverse=True)
-    return str(matches[0]) if matches else None
-
-
 def _render_pptx_for_comparison(output: Path, target_dir: Path, dpi: int) -> list[Path]:
-    soffice = _find_soffice()
-    if not soffice:
-        return []
     target_dir.mkdir(parents=True, exist_ok=True)
-    process = subprocess.run(
-        [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(target_dir), str(output)],
-        capture_output=True, text=True, timeout=180, check=False,
-    )
     pdf = target_dir / f"{output.stem}.pdf"
-    if process.returncode != 0 or not pdf.is_file():
+    try:
+        _convert_slides_to_pdf(output, pdf)
+    except (VisualQAError, OSError, subprocess.TimeoutExpired):
         return []
     rendered: list[Path] = []
     with fitz.open(pdf) as document:
@@ -1419,6 +1404,24 @@ def _comparison_metrics(reference: Path, candidate: Path) -> dict[str, Any]:
     }
 
 
+def assess_reconstruction_quality(page_models: list[dict[str, Any]]) -> dict[str, Any]:
+    issues = []
+    for page in page_models:
+        metrics = page.get("metrics", {})
+        if page.get("source_mode") in {"vector", "hybrid"}:
+            continue
+        coverage = float(metrics.get("editable_foreground_coverage", 0.0))
+        if coverage < 0.65:
+            issues.append({"page": page["page"], "code": "low_editable_coverage", "coverage": coverage})
+        if metrics.get("discarded_foreground_ratio", 0.0) > 0:
+            issues.append({"page": page["page"], "code": "discarded_foreground"})
+        if page.get("ocr", {}).get("status") not in {"checked", "complete"}:
+            issues.append({"page": page["page"], "code": "ocr_unavailable"})
+    return {"needs_reconstruction": bool(issues), "issues": issues,
+            "coverage_review_threshold": 0.65,
+            "note": "Routing heuristic, not a quality score; source and visual review remain necessary."}
+
+
 def run_visual_to_editable_ppt(
     path: str | Path,
     *,
@@ -1437,6 +1440,8 @@ def run_visual_to_editable_ppt(
     dpi: int = 180,
     timeout: int = 120,
     vision_call: VisionCall | None = None,
+    backend: str = "agent",
+    strategy: str = "auto",
 ) -> dict[str, Any]:
     """Convert an image/PDF to editable PPTX and return a resumable summary."""
     source = Path(path).expanduser().resolve()
@@ -1448,6 +1453,11 @@ def run_visual_to_editable_ppt(
         raise VisualReconstructionError("mode must be faithful, balanced, or editable")
     if profile not in {"auto", "figure", "paper", "slides", "document"}:
         raise VisualReconstructionError("invalid profile")
+    if backend not in {"agent", "api"} or strategy not in {"auto", "reconstruct"}:
+        raise VisualReconstructionError("invalid backend or strategy")
+    if strategy == "reconstruct" and backend != "agent":
+        raise VisualReconstructionError("reconstruct strategy requires the current host Agent")
+    deterministic_only = deterministic_only or backend == "agent"
     if not 96 <= int(dpi) <= 400:
         raise VisualReconstructionError("dpi must be between 96 and 400")
 
@@ -1494,6 +1504,8 @@ def run_visual_to_editable_ppt(
         "fallback_model": chosen_fallback,
         "deterministic_only": bool(deterministic_only),
         "allow_remote": bool(allow_remote),
+        "backend": backend,
+        "strategy": strategy,
     }
     run_key = _stable_hash(run_inputs)[:20]
     root = Path(receipt_root).expanduser().resolve() if receipt_root else DEFAULT_RECEIPT_ROOT
@@ -1509,6 +1521,11 @@ def run_visual_to_editable_ppt(
     final_receipt_path = run_dir / "final.json"
 
     if output.exists() and not overwrite:
+        if resume:
+            from visual_ppt_workflow import published_result
+            published = published_result(output, source, selected_pages)
+            if published:
+                return published
         if resume and final_receipt_path.is_file():
             prior = json.loads(final_receipt_path.read_text(encoding="utf-8"))
             if (
@@ -1541,6 +1558,11 @@ def run_visual_to_editable_ppt(
         "api_key_present": bool(api_key),
     }
     _write_json_atomic(manifest_path, manifest)
+
+    if strategy == "reconstruct":
+        from visual_ppt_workflow import prepare_reconstruction
+        return prepare_reconstruction(source, output, run_dir, selected_pages,
+                                      overwrite=overwrite, dpi=int(dpi), issues=[])
 
     page_models: list[dict[str, Any]] = []
     page_receipts: list[dict[str, Any]] = []
@@ -1647,6 +1669,12 @@ def run_visual_to_editable_ppt(
         page_models.append(page_model)
         page_receipts.append(receipt)
 
+    quality = assess_reconstruction_quality(page_models)
+    if backend == "agent" and quality["needs_reconstruction"]:
+        from visual_ppt_workflow import prepare_reconstruction
+        return prepare_reconstruction(source, output, run_dir, selected_pages,
+                                      overwrite=overwrite, dpi=int(dpi), issues=quality["issues"])
+
     output.parent.mkdir(parents=True, exist_ok=True)
     build_target = output.with_name(f".{output.stem}.{os.getpid()}.tmp.pptx")
     if build_target.exists():
@@ -1654,12 +1682,6 @@ def run_visual_to_editable_ppt(
     assembly = _build_presentation(page_models, build_target)
     os.replace(build_target, output)
     output_sha = sha256_file(output)
-
-    rendered_output = _render_pptx_for_comparison(output, qa_dir, int(dpi))
-    comparisons = []
-    for page_number, candidate in zip(selected_pages, rendered_output):
-        reference = renders_dir / f"page-{page_number:04d}.png"
-        comparisons.append({"page": page_number, **_comparison_metrics(reference, candidate)})
 
     try:
         final_visual_qa = run_visual_qa(
@@ -1678,6 +1700,16 @@ def run_visual_to_editable_ppt(
             "error": f"{type(exc).__name__}: {str(exc)[:500]}",
         }
 
+    qa_receipts = final_visual_qa.get("receipt_dir")
+    rendered_output = ([Path(qa_receipts) / "renders" / f"page-{number:04d}.png"
+                        for number in range(1, len(selected_pages) + 1)] if qa_receipts else [])
+    if len(rendered_output) != len(selected_pages) or not all(path.is_file() for path in rendered_output):
+        rendered_output = _render_pptx_for_comparison(output, qa_dir, int(dpi))
+    comparisons = []
+    for page_number, candidate in zip(selected_pages, rendered_output):
+        reference = renders_dir / f"page-{page_number:04d}.png"
+        comparisons.append({"page": page_number, **_comparison_metrics(reference, candidate)})
+
     fallback_objects = sum(
         int(page_model.get("metrics", {}).get("fallback_object_count", 0))
         for page_model in page_models
@@ -1686,7 +1718,9 @@ def run_visual_to_editable_ppt(
         float(page_model.get("metrics", {}).get("editable_foreground_coverage", 0.0))
         for page_model in page_models
     ]
-    status = "complete" if fallback_objects == 0 else "partial"
+    content_loss = any(page.get("metrics", {}).get("discarded_foreground_ratio", 0) > 0
+                       for page in page_models)
+    status = "complete" if fallback_objects == 0 and not content_loss else "partial"
     summary = {
         "schema_version": SCHEMA_VERSION,
         "state": "complete",
@@ -1704,7 +1738,9 @@ def run_visual_to_editable_ppt(
         "assembly": assembly,
         "fallback_objects": fallback_objects,
         "editable_foreground_coverage_mean": float(sum(coverage) / max(len(coverage), 1)),
-        "fully_editable": fallback_objects == 0,
+        "fully_editable": fallback_objects == 0 and not content_loss,
+        "content_loss": content_loss,
+        "quality": quality,
         "visual_comparison": comparisons,
         "visual_qa": final_visual_qa,
         "remote_allowed": remote_allowed,
@@ -1723,8 +1759,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Convert an image or PDF into a resumable, editable PowerPoint reconstruction"
     )
-    parser.add_argument("path")
+    parser.add_argument("path", nargs="+")
     parser.add_argument("--output")
+    parser.add_argument("--output-dir")
+    parser.add_argument("--backend", choices=["agent", "api"], default="agent")
+    parser.add_argument("--strategy", choices=["auto", "reconstruct"], default="auto")
     parser.add_argument("--pages", default="all")
     parser.add_argument("--mode", choices=["faithful", "balanced", "editable"], default="balanced")
     parser.add_argument("--profile", choices=["auto", "figure", "paper", "slides", "document"], default="auto")
@@ -1744,29 +1783,52 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     arguments = build_parser().parse_args()
     try:
-        summary = run_visual_to_editable_ppt(
-            arguments.path,
-            output_path=arguments.output,
-            pages=arguments.pages,
-            mode=arguments.mode,
-            profile=arguments.profile,
-            receipt_root=arguments.receipt_root,
-            ocr_language=arguments.ocr_language,
-            dpi=arguments.dpi,
-            timeout=arguments.timeout,
-            model=arguments.model,
-            fallback_model=arguments.fallback_model,
-            resume=not arguments.no_resume,
-            overwrite=arguments.overwrite,
-            allow_remote=arguments.allow_remote,
-            deterministic_only=arguments.deterministic_only,
-        )
+        if arguments.output and (len(arguments.path) != 1 or arguments.output_dir):
+            raise VisualReconstructionError("--output requires one input and cannot be combined with --output-dir")
+        outputs = [str(Path(arguments.output_dir).expanduser().resolve() / f"{Path(path).stem}-editable.pptx")
+                   if arguments.output_dir else None for path in arguments.path]
+        if len(outputs) > 1 and len({Path(path).stem for path in arguments.path}) != len(outputs):
+            raise VisualReconstructionError("batch input stems must be unique to prevent output collisions")
+        results = []
+        for source, output in zip(arguments.path, outputs):
+            try:
+                result = run_visual_to_editable_ppt(
+                    source,
+                    output_path=arguments.output or output,
+                    pages=arguments.pages,
+                    mode=arguments.mode,
+                    profile=arguments.profile,
+                    receipt_root=arguments.receipt_root,
+                    ocr_language=arguments.ocr_language,
+                    dpi=arguments.dpi,
+                    timeout=arguments.timeout,
+                    model=arguments.model,
+                    fallback_model=arguments.fallback_model,
+                    resume=not arguments.no_resume,
+                    overwrite=arguments.overwrite,
+                    allow_remote=arguments.allow_remote,
+                    deterministic_only=arguments.deterministic_only,
+                    backend=arguments.backend,
+                    strategy=arguments.strategy,
+                )
+            except VisualReconstructionError as exc:
+                if len(arguments.path) == 1:
+                    raise
+                result = {"source": str(Path(source).expanduser().resolve()), "status": "failed", "error": str(exc)}
+            results.append(result)
+        if len(results) == 1:
+            summary = results[0]
+        else:
+            counts = Counter(item.get("status") for item in results)
+            status = "failed" if counts["failed"] else "prepared" if counts["prepared"] else "partial" if counts["partial"] else "complete"
+            summary = {"status": status, "counts": dict(counts), "items": results}
     except VisualReconstructionError as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False))
         return 2
     print(json.dumps(summary, ensure_ascii=False, separators=(",", ":")))
-    return 0
+    return 2 if summary.get("status") == "failed" else 0
 
 
 if __name__ == "__main__":
+    sys.modules.setdefault("visual_to_editable_ppt", sys.modules[__name__])
     raise SystemExit(main())

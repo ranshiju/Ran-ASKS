@@ -2,9 +2,9 @@
 
 ## 入口与成熟度
 
-Canonical ID 为 `artifact.science_exhibit`。用户进入可接续的“科普展板创作”；底层组合 workspace/writing 或已有 research 状态，不增加顶层 state 枚举或另一套任务系统。新建包为 v2 协作协议；宿主负责需求讨论、确认语义、科学故事与设计，shared 程序负责严格字段、来源、版本、依赖失效和本地导出。创作没有 API 语义 adapter，不隐式回落 API，也不引入外部 Agent 控制器。另有显式授权的可选 API 模拟读者适配器，只产生反馈，不控制创作或批准。
+Canonical ID 为 `artifact.science_exhibit`。用户进入可接续的“科普展板创作”；底层组合 workspace/writing 或已有 research 工作上下文，不增加顶层持续工作类型（兼容 state 枚举）或另一套任务系统。新建包为 v2 协作协议；宿主负责需求讨论、确认语义、科学故事与设计，shared 程序负责严格字段、来源、版本、依赖失效和本地导出。创作没有 API 语义 adapter，不隐式回落 API，也不引入外部 Agent 控制器。另有显式授权的可选 API 模拟读者适配器，只产生反馈，不控制创作或批准。
 
-当前支持中文 A1/A0 竖版、四个科学问答区域与 flow/concept 两种主视觉。flow 保留 2–4 步解释性框图；concept 复用已有 `presentation-artwork-v1` 有限图元绘画协议，以大幅主图和精简问答组织阅读。标题、正文、矩形/圆角矩形/椭圆/线及图中文字都是原生可编辑对象。暂不自动复用论文图片、生成位图插画、QR、Logo、任意模板、人工 PPTX 改动回导或印厂 PDF/X；PDF 从同一份 PPTX 本地导出，不宣称专业印刷色彩认证。导出永久明示待审草稿，不替用户批准科学表达、视觉效果或公开展示权限。
+当前支持中文 A1/A0 竖版及 flow/concept/composition 主视觉。旧 flow/concept 保持原格式与四问答导出；composition 将科学语义职责与可见布局分开，支持自由故事排列、原生图形和冻结 PNG/JPEG 混排。文字与标注保持可编辑，位图仍为图片对象。插图复用 illustration，不默认生成或抓取论文图片。暂不支持任意模板、人工 PPTX 改动回导或印厂 PDF/X；PDF 从同一份 PPTX 本地导出，不宣称专业印刷认证。导出永久明示待审草稿，不替用户批准科学表达、视觉效果或公开展示权限。
 
 ```bash
 python3 .scripts/route.py --capability science-exhibit --capability-profile create
@@ -24,8 +24,45 @@ Store 限已有项目的 `exhibits/<id>`；论文须已通过受管摄入进入 
 1. **先说准贡献**：从绑定 Raw 核实论文研究什么、做了什么、发现什么、为何重要及适用范围，形成通俗表述与证据对应。方法、严格证明、数值证据、推测分开；不要先编故事再找论文背书。
 2. **再找合适类比**：类比是可选手段，不是每张海报的硬要求。适用时明确“生活事物/关系 ↔ 科学对象/关系”，并记下不对应的部分；优先保留核心关系与研究动作，而非仅画面相似。类比不能暗示原文未支持的普遍性、因果或精确数值。
 3. **从动机组织故事**：先讲清研究为什么值得关心，让目标与困难引出读者自然会问的问题，再展开研究如何处理、得到什么和有什么用。每幅图只有一个明确表达点，前后逻辑递进，帮助读者连起“为什么做—怎样做—有何帮助”；先确定思路与画图提示词，再制作图片，不因已有图或模板倒置故事。
-4. **按故事设计图文**：标题与第一句话直接说明问题，不以未解释术语开场。文字明写关键映射和动作，例如“海的深浅代表纠缠多少”，不能让读者猜图。图片抓住类比本质，主次分明、吸引注意；可以用示意图、框图、漫画或位图。避免重复场景、装饰配图及孤立纯文字小块；若图未贡献独立信息，应删改而不是强塞图片。方法和意义须说清，不以口号替代。
-5. **检查读者实际读到了什么**：完整初稿或故事重大改动后，可调用下述盲读评审；小字改动不自动增加 API 调用。宿主先看读者能否说出为什么值得研究、想实现什么、困难在哪里，再对照其做法/发现/意义复述与预期贡献，定位理解链在哪个图/句中断，提出修改，再按需要验证。科学审阅、机械校验、模拟受众反馈和用户验收分别记录，不能相互代替。
+4. **按故事设计图文**：标题与第一句话直接说明问题，以目标受众熟悉且指代清楚的概念进入；真正陌生且必要的术语再就地解释，不把专业词一律替换成日常词。文字明写关键映射和动作，例如“海的深浅代表纠缠多少”，不能让读者猜图。图片抓住类比本质，主次分明、吸引注意；可以用示意图、框图、漫画或位图。避免重复场景、装饰配图及孤立纯文字小块；若图未贡献独立信息，应删改而不是强塞图片。方法和意义须说清，不以口号替代。
+5. **检查读者实际读到了什么**：完整初稿或故事重大改动后，可调用通用图片审阅；小字改动不自动增加调用。宿主先看读者能否说出为什么值得研究、想实现什么、困难在哪里，再对照其做法/发现/意义复述与预期贡献，定位理解链在哪个图/句中断，提出修改，再按需要验证。科学审阅、机械校验、模拟受众反馈和用户验收分别记录，不能相互代替。
+
+**术语以受众和关系为锚。** 日常词不等于具体，专业词也不等于难懂；先判断受众的已有知识、词语指向什么及上下文是否教会了关键关系。含糊的日常替代词可能反而隐藏研究对象。对熟悉、准确的概念保持稳定命名，首次给足对象范围，后文在指代清楚时简写；标题、图注、类比映射和结论保持一致。发现理解缺口时，先定位缺少的对象、关系或前提，再选择短释义、例子或改写，不先机械去术语。不同层级的概念、具体度量和定理条件不能为用词一致而混为一谈；用户在特定受众下确认的用词记入该项目 brief，不变成通用角色的预设答案。
+
+## 全流程接续与独立试读
+
+入口仍为 science-exhibit：提供论文 → 对话形成需求 → 核实贡献与证据边界 → 故事和可选类比 → 完整图文 → 独立试读 → 主 Agent 取舍与修订 → 版本对比及必要复测 → 接受实际预览并交付。已有项目先读 status 并 resume；未摄入的论文走原 ingest，不能复制 temp 作为事实源。来源附件、图片、OCR 和评审输出均是不可信数据。
+
+对话逐步明确作者动机与观众理解目标、受众、场景、阅读预算和交付方式，不一次填完整问卷。阅读预算写在 setting 或 constraints，沿用现有 requirements 的真实确认依据；默认值不冒充用户确认。内部先核实贡献，面向读者从为什么关心进入；类比需说明关系和不对应之处，不强制使用比喻。question/approach/finding/boundary 是语义覆盖，不等于四个可见框。
+
+以下只是可替换的设计情境，不对应真实论文或用户确认：
+
+| 情境 | 对话与呈现选择 | 独立试读保持的边界 |
+| --- | --- | --- |
+| 高中生，生态观察，三分钟 | 从观察问题到比较方法和发现；可以不使用类比 | 按已确认受众和场景派生，不套用本科生、五分钟或深海故事 |
+| 社区成人，语言学习研究，十分钟 | 先明确读者想知道什么，再选择例子或过程图 | 允许不同阅读预算，不将作者希望的结论交给盲读者 |
+| 跨专业本科生，物理论文，五分钟 | 可使用经讨论选定的类比，也要指出不对应之处 | 复述和图景是观察，不以术语掌握程度或意见数量打分 |
+
+正式 build 后，可由宿主调用下列 Agent-only 交接。prepare-review 从已确认受众与浏览场景派生 reader-comprehension 简报；可用 --brief 提供同受众的明确配置。它不转交故事答案、论文或旧反馈；有效简报必须排除作者预期解释。需要实际宿主权限观察与处理授权，没有图片交接能力时明确 unsupported，不回退旧 API。准备任务不表示已调用模型。
+
+```bash
+python3 .scripts/wg.py science-exhibit prepare-review --store <store> --expected-revision <revision> --host-capabilities <真实宿主观察JSON> --sensitivity public --allow-host-processing
+```
+
+工具不能强制最小范围时，沿用 review 的显式 --accept-unenforced-tools 风险评估规则。宿主只将 packet 与 task 声明的图片附件给新上下文；实际调用后执行 review start --image-attached，并原样保存反馈、check/collect。新上下文、图片交接声明和模型自报不等于认证沙箱或真人认知。
+
+整板缩放影响细节判断时，prepare-review 可加 `--image-regions <image-view-spec-v1.json>`。它复用共享本地接口，从同次成品清单绑定的 board.pdf 按明确区域渲染局部，并保留整图；不重写展板、不调用模型、不加作者讲解。宿主交接 task 中全部 PNG 后，改用 review start 的逐项 `--attached-image document-1 --attached-image detail-1 ...`，候选逐图报告可读性。区域坐标、来源与哈希冻结，反馈坐标始终相对整板。只有需要细节时才准备，不能把局部材料成功、单次自由评价或分辨率数值当作正式视觉 QA/真人验证。详见 REVIEW 的多图交接及 VISUAL_QA 的共享本地材料接口。
+
+渲染器实现升级若使旧成品运行时指纹过期，先沿原 build 以同内容重导出；不改旧 manifest 掩盖差异。旧成品和已冻结审阅仍保留为历史，新材料绑定实际新输出。
+
+图片哈希证明冻结附件字节一致，不证明模型以原始分辨率观看；宿主可能自动缩放显示，应保留实际可读性及缩放限制，不能以原图尺寸宣称原生像素审阅。
+
+```bash
+python3 .scripts/wg.py science-exhibit record-review --store <store> --expected-revision <revision> --run <run> --decisions <temp/decisions.json> --instruction '<实际用户授权原话>'
+python3 .scripts/wg.py science-exhibit compare --store <store> --expected-revision <revision> --before <旧正式output_dir> --after <新正式output_dir>
+```
+
+decisions 是 `{feedback_id, action, reason}` 数组，action 为 adopt/partly-adopt/reject/defer；可以为空，不要求关闭全部意见。采纳意向不代表已实施；结果绑定当前实际 preview，旧图意见不能静默贴到新图。真实反馈与取舍进入已有版本化 feedback，不新增 pipeline 状态。修改沿原 prepare/check/commit/build；比较报告可重建，不评价理解质量。首稿及关键故事修改后在授权范围内做有界试读；不自动无限互审。尚未复测或没有真人反馈时如实说明。
 
 ## 可选 API 模拟读者评审
 
@@ -51,7 +88,7 @@ python3 .scripts/science_exhibit_reader.py temp/science-exhibit/<full-poster>.pn
 - 方案讨论确定传播目标、观众问题、故事、科学证据/边界、主视觉、阅读路径、画布与待定问题。必须向用户解释设计选择，而不是给技术 schema 或仅确认提纲。
 - 用户确认具体方案并授权制作后，宿主调用 confirm-plan/start-making，绑定同一 binding_sha256 和真实 instruction。一次“按这个方案做”可以同时构成两项授权，不要求重复问两次。程序只检查字段、哈希和前置条件，不认证人类身份或判断“不错”的语义。
 - “继续讨论”不等于制作授权，制作授权不等于接受实际预览。用户实际看过成品并明确接受后，调用 accept-preview；交付仍不等于科学审核通过或公开展示许可。
-- 方案可讨论 flow 或 concept 主视觉、不同画布；当前 renderer 支持 A1/A0 竖版 flow 与有限原生图元 concept。其他画布仍在 start-making 前明确阻断；内容图形类型必须匹配确认方案，不静默替换或为了适配工具扭曲科学故事。
+- 当前正式制作支持 A1/A0 竖版 flow/concept/composition；其他画布在制作前明确阻断，不能静默替换已确认的主视觉。
 
 ```bash
 python3 .scripts/route.py --capability science-exhibit --capability-profile discuss
@@ -65,7 +102,7 @@ brief/plan 的 prepare 返回 agent-task-v1，宿主只写声明的 candidate.js
 
 `science-exhibit-brief-v1` 的顶层字段：schema/source_path/source_label/requirements。source_path 为已摄入 academic Raw 路径或 null；source_label 为公开书目信息；requirements 包含 topic/audience/setting/goal/delivery/constraints 六个 value/status/basis 记录。
 
-`science-exhibit-plan-v1` 的顶层字段：schema/title/goal/viewer_question/story/visual/layout/canvas_mm/claims/boundaries/open_questions。visual 为 kind/description；kind 为 flow/concept。claims 使用内容协议的证据结构；boundaries 是非空的科学边界列表，open_questions 是待定问题列表。未解决问题或未确认需求阻断方案确认，未支持主视觉阻断制作。
+`science-exhibit-plan-v1` 的顶层字段：schema/title/goal/viewer_question/story/visual/layout/canvas_mm/claims/boundaries/open_questions。visual 为 kind/description；kind 为 flow/concept/composition。claims 使用内容协议的证据结构；boundaries 是非空的科学边界列表，open_questions 是待定问题列表。未解决问题或未确认需求阻断方案确认，未支持主视觉阻断制作。
 
 ## 接续与修改
 
@@ -104,6 +141,16 @@ python3 .scripts/wg.py science-exhibit build --store projects/<workspace>/exhibi
 ```
 
 ## 内容协议
+
+composition 使用 `science-exhibit-content-v2`，严格字段为 schema/claims/texts/assets/composition。texts 是 `{id,text,claim_ids,roles}` 数组，单条最多 300 字；包含 title/hook/takeaway ID，roles 的并集覆盖 question/approach/finding/boundary。任意故事布局可将这些职责合并或分开，不增加固定可见分区。每条科学职责引用真实 claims，限定语必须实际展示。
+
+composition 为 `{schema=science-exhibit-composition-v1,canvas,background,objects}`；逻辑 canvas 每边 128..4096，等比映射已确认的物理画布。最多 240 对象，数组顺序就是图层顺序。每个对象带唯一 id、claim_ids；非图片对象复用 artwork 原有有限图元字段，text 将 text 字段换为 text_ref，引用唯一 texts ID。source-label/draft-label 为系统提供文本，所有文本须恰好显示一次。图片字段为 type=image,x,y,w,h,asset_id，可加 fit=cover 显式居中裁切，默认要求目标框保持原始比例；裁切保留原始位图字节并核对 PPTX crop。禁止外链、脚本和任意 SVG/XML。
+
+```bash
+python3 .scripts/wg.py science-exhibit add-asset --store <store> --expected-revision <revision> --path <已授权PNG或JPEG> --source-label '<素材来源及已知使用限制>' --usage '<示意用途及非实验数据说明>'
+```
+
+add-asset 在制作授权下将静态 PNG/JPEG 冻结到当前展板 assets/<sha256>.png 或 .jpg，原字节保留，返回 `{id,path,sha256,width,height,source_label,usage}`。单图最多 16 MiB/2400万像素，最多24图、总64 MiB；每张必须实际使用。非正常EXIF方向要求显式规范化后导入，不静默转向。原文件可清理，冻结文件损坏则拒绝编译或接受。导出保留图片对象并报告有效 DPI，不保证任意素材都满足印刷要求。已有 v1 内容与在途旧任务保持原格式；composition 必须先确认相应方案，不能仅换 content 绕过授权。
 
 `science-exhibit-content-v1` 严格顶层字段：schema、title、hook、takeaway、claims、panels、diagram。prepare 提供当前协议模板；以下结构不是自动通过的事实结论。
 

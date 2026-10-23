@@ -22,6 +22,7 @@ FOUNDATION = [
     ".scripts/test_engineering_graph.py",
     ".scripts/test_engineering_locator.py",
     ".scripts/test_wg.py",
+    ".scripts/test_review.py",
     "dsh/test_weak_model_governance_eval.py",
 ]
 RELEASE = FOUNDATION + [

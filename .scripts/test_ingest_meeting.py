@@ -322,7 +322,14 @@ def test_agent_path_prepares_task_without_entering_api_adapter():
 
 def test_date_context_preserves_explicit_year_and_marks_mmdd_inference():
     assert meeting.extract_meeting_date("20250901-lab.txt") == "20250901"
+    assert meeting.extract_meeting_date("2025-09-01-lab.txt") == "20250901"
+    assert meeting.extract_meeting_date("2026-10-22-巴黎联合国教科文组织会议纪要.txt") == "20261022"
+    assert meeting.extract_meeting_date("2024-02-29_meeting.txt") == "20240229"
+    assert meeting.extract_meeting_date("0229-meeting.txt") == "0229"
+    for filename in ("2026-meeting.txt", "2026-02-29-meeting.txt", "20260229-meeting.txt", "1332-meeting.txt"):
+        assert meeting.extract_meeting_date(filename) == ""
     assert meeting.generate_meeting_id("20250901-lab.txt", "组会") == "0901-组会"
+    assert meeting.generate_meeting_id("2025-09-01-lab.txt", "组会") == "0901-组会"
     explicit = meeting.meeting_date_context("20250901", today="2026-09-04")
     assert explicit == {
         "date": "2025-09-01", "storage_year": "2025",

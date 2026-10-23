@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "argument_map": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 3000}}
+  },
+  "additionalProperties": false
+}

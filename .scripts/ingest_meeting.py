@@ -93,14 +93,24 @@ def slugify(text: str) -> str:
 
 
 def extract_meeting_date(filename: str) -> str:
-    """从文件名提取 YYYYMMDD 或 MMDD，显式年份不得丢失。"""
+    """从文件名提取有效 YYYY-MM-DD、YYYYMMDD 或 MMDD，返回紧凑日期。"""
     stem = Path(filename).stem
-    m = re.match(r"^(\d{8})(?:[-_]|$)", stem)
-    if m:
-        return m.group(1)
-    m = re.match(r"^(\d{4})(?:[-_]|$)", stem)
-    if m:
-        return m.group(1)
+    for pattern, date_format in (
+        (r"^(\d{4}-\d{2}-\d{2})(?:[-_]|$)", "%Y-%m-%d"),
+        (r"^(\d{8})(?:[-_]|$)", "%Y%m%d"),
+        (r"^(\d{4})(?:[-_]|$)", "%m%d"),
+    ):
+        match = re.match(pattern, stem)
+        if match:
+            date_value = match.group(1)
+            try:
+                datetime.strptime(
+                    "2000" + date_value if date_format == "%m%d" else date_value,
+                    "%Y%m%d" if date_format == "%m%d" else date_format,
+                )
+            except ValueError:
+                return ""
+            return date_value.replace("-", "")
     return ""
 
 

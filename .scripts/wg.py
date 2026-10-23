@@ -664,6 +664,17 @@ def cmd_science_exhibit(args):
                     error=result.get("error", error.strip())[:500] if failed else "")
 
 
+def cmd_review(args):
+    code, output, error = run_script([sys.executable, str(SCRIPTS / "review.py"), *args.review_args])
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        return envelope("review", None, status="error", error=(error or output).strip()[:500])
+    failed = code != 0 or result.get("status") == "error"
+    return envelope("review", result, status="error" if failed else "ok", ok=not failed,
+                    error=result.get("error", error.strip())[:500] if failed else "")
+
+
 def cmd_extract_data(args):
     code, output, error = run_script([sys.executable, str(SCRIPTS / "extract_data.py"), *args.extract_args])
     try:
@@ -760,7 +771,7 @@ def build_parser():
     p.add_argument("--tags", default="")
     p.set_defaults(func=cmd_remember)
 
-    p = sub.add_parser("workspace", help="通用持续工作区状态、事项、记忆与投影")
+    p = sub.add_parser("workspace", help="通用持续工作区：事项、记忆与投影")
     p.add_argument("workspace_args", nargs=argparse.REMAINDER,
                    help="传给 workspace_state.py 的子命令与参数")
     p.set_defaults(func=cmd_workspace)
@@ -821,6 +832,9 @@ def build_parser():
     p = sub.add_parser("science-exhibit", help="论文到公众科普展板：源绑定创作、局部修订与本地草稿导出")
     p.add_argument("exhibit_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_science_exhibit)
+    p = sub.add_parser("review", help="独立建议型审阅：准备任务、接收反馈和报告，不改稿或作内容门禁")
+    p.add_argument("review_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_review)
     p = sub.add_parser("extract-data", help="离线图片曲线/散点数据提取：准备、校准检查与数字化")
     p.add_argument("extract_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_extract_data)
@@ -835,7 +849,7 @@ def build_parser():
                        help='按主题或节点生成有向知识图及来源清单')
     p.set_defaults(func=cmd_library_or_graph)
 
-    p = sub.add_parser("functions", help="统一功能、工作状态和调用策略目录")
+    p = sub.add_parser("functions", help="统一功能、持续工作和调用策略目录")
     functions_sub = p.add_subparsers(dest="functions_cmd", required=True)
 
     fp = functions_sub.add_parser("list", help="列出功能")
@@ -848,11 +862,11 @@ def build_parser():
     fp.add_argument("function_id")
     fp.set_defaults(func=cmd_functions)
 
-    fp = functions_sub.add_parser("resolve", help="按调用者、后端和工作状态解析可用入口")
+    fp = functions_sub.add_parser("resolve", help="按调用者、后端和持续工作类型解析可用入口")
     fp.add_argument("function_id")
     fp.add_argument("--caller", required=True, choices=sorted(fr.VALID_CALLERS))
     fp.add_argument("--backend", required=True, choices=sorted(fr.VALID_BACKENDS))
-    fp.add_argument("--state", default="", help="工作状态类型 ID")
+    fp.add_argument("--state", default="", help="持续工作类型 ID（兼容参数名）")
     fp.set_defaults(func=cmd_functions)
 
     fp = functions_sub.add_parser("validate", help="校验功能注册表")

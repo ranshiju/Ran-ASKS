@@ -1,0 +1,17 @@
+{
+  "schema": "reviewer-definition-v1",
+  "id": "argument-structure",
+  "version": 1,
+  "feedback_version": 1,
+  "title": "论证结构与取舍审阅",
+  "configurable": ["goal", "audience", "use_context", "context_mode", "focus", "constraints", "assumptions", "parameters"],
+  "required_brief": [],
+  "defaults": {
+    "goal": "检查论点与证据、推理关系、隐含前提和组织取舍，提供建议而非裁决",
+    "audience": "具备材料声明的先备知识的读者",
+    "use_context": "独立阅读",
+    "context_mode": "blind",
+    "focus": [], "constraints": [], "assumptions": [], "parameters": {}
+  },
+  "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": false}
+}

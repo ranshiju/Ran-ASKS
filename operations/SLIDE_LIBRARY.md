@@ -2,7 +2,7 @@
 
 ## 功能边界
 
-Canonical ID：`artifact.slide_library`，成熟度 preview。模板库是资源存储；围绕它的检索、收藏、查看和实例化构成可单独调用的功能，可由 workspace 或 research 工作状态调用。当前主 Agent 负责语义选择与槽位设计，共享确定性脚本负责校验与文件操作。
+Canonical ID：`artifact.slide_library`，成熟度 preview。模板库是资源存储；围绕它的检索、收藏、查看和实例化构成可单独调用的功能，可由 workspace 或 research 工作上下文调用。当前主 Agent 负责语义选择与槽位设计，共享确定性脚本负责校验与文件操作。
 
 先加载 `python3 .scripts/route.py --capability slide-library --capability-profile general`。统一入口为 `python3 .scripts/wg.py slide-library <子命令>`，返回 WG JSON envelope；底层 `slide_library.py` 命令保持兼容。
 

@@ -455,12 +455,132 @@ def test_bundled_soffice_font_environment(tmp: Path) -> None:
                 visual_qa._convert_slides_to_pdf(tmp / "deck.pptx", tmp / "rendered.pdf")
 
 
+def test_traceable_image_views_and_local_materials(tmp: Path) -> None:
+    target = tmp / "view-source.png"
+    image = Image.new("RGB", (320, 480), "white")
+    ImageDraw.Draw(image).rectangle((80, 120, 239, 359), fill="red")
+    image.save(target)
+    original = target.read_bytes()
+    spec = {"schema": "image-view-spec-v1", "regions": [[0.25, 0.25, 0.5, 0.5]]}
+    metadata, data = visual_qa.prepare_image_views(original, spec)[0]
+    assert metadata["pixel_bbox"] == [80, 120, 240, 360]
+    assert metadata["region"] == spec["regions"][0]
+    assert (metadata["width"], metadata["height"]) == (160, 240)
+    with Image.open(io.BytesIO(data)) as region:
+        assert region.getpixel((20, 20)) == (255, 0, 0)
+    assert visual_qa.prepare_image_views(original, spec)[0] == (metadata, data)
+    pdf = tmp / "view-source.pdf"
+    with fitz.open() as document:
+        page = document.new_page(width=320, height=480)
+        page.draw_rect(fitz.Rect(80, 120, 240, 360), fill=(1, 0, 0), color=(1, 0, 0))
+        document.save(pdf)
+    native, _ = visual_qa.prepare_image_views(original, spec, detail_pdf=pdf.read_bytes())[0]
+    assert native["source_kind"] == "pdf-page-region" and native["width"] > metadata["width"]
+    with patch.object(visual_qa, "REPO", tmp.resolve()), \
+            patch.object(visual_qa, "run_visual_qa", side_effect=AssertionError("No QA or remote path")), \
+            patch.object(visual_qa, "load_visual_env", side_effect=AssertionError("No API configuration")):
+        prepared = visual_qa.prepare_local_views(pdf, spec)
+        assert prepared["status"] == "prepared" and prepared["remote_calls"] == 0 and "verdict" not in prepared
+        assert len(prepared["attachments"]) == 2
+        assert all(Path(path).is_file() for path in prepared["attachments"])
+        repeated = visual_qa.prepare_local_views(pdf, spec)
+        assert repeated == prepared
+        Path(prepared["attachments"][1]).write_bytes(b"corrupt")
+        assert visual_qa.prepare_local_views(pdf, spec) == prepared
+        assert Path(prepared["attachments"][1]).read_bytes() != b"corrupt"
+        specification = tmp / "view-spec.json"
+        specification.write_text(json.dumps(spec))
+        with patch("builtins.print"):
+            assert visual_qa.main([str(target), "--prepare-views", str(specification)]) == 0
+        specification.write_text('{}')
+        with patch("builtins.print") as printed:
+            assert visual_qa.main([str(target), "--prepare-views", str(specification)]) == 2
+        failure = json.loads(printed.call_args.args[0])
+        assert failure['schema'] == 'visual-material-v1' and 'verdict' not in failure
+        protected = tmp / "raw/forbidden-output"
+        for folder in (protected, tmp.parent / "outside-views"):
+            try:
+                visual_qa.prepare_local_views(target, spec, receipt_root=folder)
+            except VisualQAError:
+                pass
+            else:
+                raise AssertionError("Unsafe material output was accepted")
+        assert not protected.exists()
+        private = tmp / "private/material.png"
+        private.parent.mkdir(exist_ok=True)
+        private.write_bytes(original)
+        try:
+            visual_qa.prepare_local_views(private, spec)
+        except VisualQAError:
+            pass
+        else:
+            raise AssertionError("Private material was exported")
+        link = tmp / "temp/linked-materials"
+        link.parent.mkdir(exist_ok=True)
+        link.symlink_to(tmp, target_is_directory=True)
+        try:
+            visual_qa.prepare_local_views(target, spec, receipt_root=link)
+        except VisualQAError:
+            pass
+        else:
+            raise AssertionError("Symlink material output was accepted")
+    assert target.read_bytes() == original
+    for regions in ([], [[0, 0, 1, 1]] * 7, [[0, 0, 1, 1]] * 2, [[True, 0, 1, 1]],
+                    [[0, 0, float("nan"), 1]], [[0.9, 0, 0.2, 1]], [[0, 0, 0, 1]]):
+        try:
+            visual_qa.prepare_image_views(original, {"schema": "image-view-spec-v1", "regions": regions})
+        except VisualQAError:
+            pass
+        else:
+            raise AssertionError("Invalid image regions were accepted")
+    with patch.object(visual_qa, "MAX_VIEW_TOTAL_BYTES", 1):
+        try:
+            visual_qa.prepare_image_views(original, spec)
+        except VisualQAError:
+            pass
+        else:
+            raise AssertionError("View byte budget was not enforced")
+    with fitz.open() as document:
+        document.new_page(width=320, height=480)
+        document.new_page(width=320, height=480)
+        multiple = document.tobytes()
+    for invalid_pdf in (b'not a PDF', multiple):
+        try:
+            visual_qa.prepare_image_views(original, spec, detail_pdf=invalid_pdf)
+        except (VisualQAError, RuntimeError):
+            pass
+        else:
+            raise AssertionError("Invalid detail PDF was accepted")
+    with fitz.open() as document:
+        document.new_page(width=480, height=320)
+        wrong_proportions = document.tobytes()
+    try:
+        visual_qa.prepare_image_views(original, spec, detail_pdf=wrong_proportions)
+    except VisualQAError:
+        pass
+    else:
+        raise AssertionError("Unrelated PDF proportions were accepted")
+    transparent = io.BytesIO()
+    Image.new("RGBA", (320, 480), (10, 20, 30, 40)).save(transparent, format="PNG")
+    _, alpha = visual_qa.prepare_image_views(transparent.getvalue(), spec)[0]
+    with Image.open(io.BytesIO(alpha)) as region:
+        assert region.getpixel((10, 10)) == (10, 20, 30, 40)
+
+
+def test_public_conversion_keeps_legacy_adapter(tmp: Path) -> None:
+    with patch.object(visual_qa, "convert_slides_to_pdf") as public:
+        visual_qa._convert_slides_to_pdf(tmp / "legacy.pptx", tmp / "legacy.pdf")
+        public.assert_called_once_with(tmp / "legacy.pptx", tmp / "legacy.pdf", soffice_bin=None)
+
+
 def main() -> None:
     assert visual_qa.DEFAULT_MODEL == "GLM-5.3-FlashX"
     test_page_selector()
     with tempfile.TemporaryDirectory(prefix="visual-qa-test-") as tmp_dir:
         tmp = Path(tmp_dir)
         test_bundled_soffice_font_environment(tmp)
+        test_traceable_image_views_and_local_materials(tmp)
+        test_public_conversion_keeps_legacy_adapter(tmp)
         test_deterministic_checks(tmp)
         test_visual_env_reuses_main_llm_credentials(tmp)
         test_image_receipt_resume_and_input_hash(tmp)

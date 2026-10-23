@@ -1,10 +1,10 @@
 # CV（简历制作与维护）操作规范
 
-> `artifact.cv` 是 `workspace` 工作状态上的用户功能。它读取双语履历工作主记录，执行状态检查、正式版校验、DOCX 渲染和版本比较；不创建新的工作状态或事实源。
+> `artifact.cv` 是 `workspace` 工作上下文中的用户功能。它读取双语履历工作主记录，执行状态检查、正式版校验、DOCX 渲染和版本比较；不创建新的持续工作类型或事实源。
 
 ## 功能边界
 
-- `projects/<workspace>/cv-records.yaml` 保存选材、双语表述、核验状态和 edition 归属，是工作状态而非事实权威。
+- `projects/<workspace>/cv-records.yaml` 保存选材、双语表述、核验状态和 edition 归属，属于工作上下文而非事实权威。
 - `projects/<workspace>/templates/<id>.template.yaml` 是模块顺序、双语标签、类别映射、必备类别和组内排序的唯一配置；同名 `.docx` 保存版式、占位符与模块书签。edition 只引用模板 ID，不重复声明栏目。
 - 学历、任职、论文、项目、奖励和学术服务等事实仍以 Raw 为准；Wiki 与 Graph 只负责发现和到达。
 - 新事实或事实状态变化先经过受管 ingest。简历功能只消费已经落入 Raw 的证据，不直接修改 Raw、Wiki 或 `graph.db`。

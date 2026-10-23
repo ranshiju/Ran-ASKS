@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.17.0
+> Current main version: v0.18.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -82,7 +82,7 @@ and agent sessions.
 | Preserved source record (`raw/`) | Stable facts and source-addressable derivatives | Primary evidence for what the received record states |
 | Wiki view (`wiki/`) | Human- and LLM-readable compiled knowledge | Revisable interpretation linked to source evidence |
 | Graph and Hubs (`graph.db`, `cross-domain/`) | Relations, aliases, research regions, and navigation | Approximate knowledge structure for deciding where to look |
-| Research and Frontier state (`projects/`, `frontier/`) | Open questions, trajectories, and provisional work | Working state that remains separate from established evidence |
+| Research and Frontier work (`projects/`, `frontier/`) | Open questions, trajectories, and provisional work | Work contexts that remain separate from established evidence |
 
 Wiki and graph are sibling compiled surfaces. The Wiki bridges source material
 and structured navigation; graph edges and Hubs express the evolving knowledge
@@ -93,7 +93,7 @@ resolve back to the preserved source record.
 
 ASKS does not replace retrieval. It governs what happens before and after a
 retrieval call: preserving evidence, retaining revisable interpretation,
-maintaining navigation and research state, and publishing reusable artifacts.
+maintaining navigation and research contexts, and publishing reusable artifacts.
 
 | Concern | Retrieval systems commonly provide | Ran-ASKS adds |
 | --- | --- | --- |
@@ -169,10 +169,16 @@ that adapter does not switch the semantic backend or imply human review.
 ## Registered artifact workflows
 
 The canonical runtime function registry keeps task routing, CLI exposure,
-backend ownership, and validation aligned. It distinguishes persistent states,
-such as research and frontier work, from one-shot user functions that create or
-update governed artifacts. This lets the same capability contract remain
-inspectable without treating every operation as a long-lived state.
+backend ownership, and validation aligned. It distinguishes ongoing work,
+such as research and frontier exploration, from bounded user functions that
+create or update governed artifacts. This lets the same capability contract remain
+inspectable without treating every operation as independent ongoing work.
+
+Ongoing work retains a goal, constraints, decisions, artifacts, and progress
+across operations and conversations. Its technical representation is a work
+context. State refers to lifecycle or execution progress, such as an examination
+being prepared, paused, or finished. Existing `state` / `states` fields, type IDs,
+command arguments, and storage paths remain compatible.
 
 The template-driven CV function uses a workspace record for wording and edition
 selection, while managed Raw remains the factual authority. A DOCX template
@@ -210,9 +216,17 @@ explicitly authorize production and review actual previews. First establish the
 paper's contribution accurately; tell the public-facing story from the
 motivation, helping readers connect the goal, difficulty, approach and value.
 Analogies are optional and must state their mappings and limits. Visible English
-acronyms require definitions. The current native renderer supports A1/A0 portrait
-layouts and bounded editable diagrams; it is not a general multi-image poster
-compositor. See the [poster contract](operations/SCIENCE_EXHIBIT.md).
+acronyms require definitions. A1/A0 portrait layouts now support bounded
+compositions of editable text/native graphics and frozen PNG/JPEG assets, with
+PPTX, same-source PDF and preview outputs. Raster assets remain image objects;
+arbitrary templates and lossless reimport of manual PPTX edits are unsupported.
+See the [poster contract](operations/SCIENCE_EXHIBIT.md).
+
+The poster workflow can prepare version-bound advisory review, record reasoned
+adopt/partly-adopt/reject/defer decisions and rebuild before/after comparisons.
+Preparing a task does not execute a reviewer, and an intention to adopt feedback
+does not prove a revision was implemented. Existing flow/concept layouts and the
+optional API poster-reader adapter remain compatible.
 
 The shared [illustration capability](operations/ILLUSTRATION.md) reuses native
 SVG/HTML artwork and the existing explicitly authorized raster API. Define each
@@ -230,6 +244,33 @@ breaks down. Execution completion is not scientific approval, real-user evidence
 preview acceptance or publication permission. Article feedback must use its own
 actual paragraph/image context, not claim the outdoor-poster prompt evaluates a
 mobile article. These workflows do not change frozen paper artifacts.
+
+## Generic advisory review (preview)
+
+`wg.py review` prepares a frozen text or static-image packet for a fresh-context host subagent,
+then validates, stores and reports its advice without approving or rewriting the
+work. Reader-comprehension and argument-structure definitions evolve separately
+from the generic core; additional reviewers need no new executor branch. Empty
+feedback, strengths and unresolved disagreements are all valid outcomes.
+
+Only explicitly authorized non-private material is supported. Optional overview
+and detail images reuse the local visual-material helpers; an artifact-bound
+PDF can supply native-resolution detail renders. Each image has its own identity,
+source hash and handoff/readability record. Coordinates remain relative to the
+whole image, and self-reported readability is not transport certification.
+
+Context, provided material and enforced tool access are recorded separately; a
+fresh context is not a sandbox or evidence from real readers. Local material
+preparation calls no model. The host owns review execution, with no implicit API
+fallback or added visual-model call; existing API visual QA remains separate.
+The existing PNG poster reader is unchanged.
+See the [review contract](operations/REVIEW.md) and
+[reviewer definitions](agents/reviewers/README.md).
+
+Editable-PowerPoint reconstruction also retains source-bound plans, bounded
+local asset preparation and validation. It is distinct from poster authoring;
+mechanical checks do not certify visual fidelity. See the
+[reconstruction contract](operations/VISUAL_TO_EDITABLE_PPT.md).
 
 ## Scientific-code and image-data workflows (preview)
 
@@ -489,8 +530,8 @@ department and responsibility claims require explicit source wording.
   with Agent-confirmed overrides recorded as durable, transaction-linked origins.
 - Project-scoped research memory and a Frontier overlay for open questions and
   evolving trajectories.
-- A canonical runtime function registry that separates persistent working
-  states from one-shot user functions and validates their CLI/backend bindings.
+- A canonical runtime function registry that separates ongoing work contexts
+  from bounded user functions and validates their CLI/backend bindings.
 - On-demand academic writing capability that combines shared writing conventions
   with project and disciplinary context at the moment of composition.
 - Template-driven bilingual CV generation with evidence-gated records, anonymous
@@ -537,10 +578,11 @@ without re-ingestion or embedding calls. See `operations/INBOX.md` and
 
 ## Intelligent oral examination (preview)
 
-Oral examination is a persistent state, with preparation, confirmed readiness,
-active examination, pause, and explicit completion. Prepare a reusable scope
-and Raw-backed objectives with `/oral prepare <topic>`, confirm the plan with
-`/oral confirm`, and begin with `/oral start`. Use `/oral pause`, `/oral resume`,
+Oral examination is ongoing work with its own saved context. Its lifecycle
+includes preparation, confirmed readiness, active examination, pause, and explicit
+completion. Prepare a reusable scope and Raw-backed objectives with
+`/oral prepare <topic>`, confirm the plan with `/oral confirm`, and begin with
+`/oral start`. Use `/oral pause`, `/oral resume`,
 and `/oral end` for lifecycle control; `/oral status` reads the recorded state.
 Natural-language discussion does not substitute for these control commands.
 

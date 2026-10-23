@@ -17,6 +17,7 @@ from dsh.function_catalog import bind_tools
 def _visual_to_editable_ppt(arguments: dict) -> str:
     result = run_visual_to_editable_ppt(
         arguments.get("path", ""),
+        backend="api",
         output_path=arguments.get("output_path") or None,
         pages=arguments.get("pages", "all"),
         mode=arguments.get("mode", "balanced"),

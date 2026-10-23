@@ -139,7 +139,7 @@ API 论文批次的每项结果在所有状态都保留 `transaction_id`、`sour
 - **每条事实带**：时间戳 + 申明原文 + 锚点（`{: #fact-<简写>-<日期>}`），供 wiki 引用精确定位
 - **source_type**：`user-assertion`（新增来源类型，属事实源，见 INGEST.md source_type 取值）；confidence 默认 medium（无第二来源，可质疑）
 - **摄入流程一致**：Agent 根据申明内容选择受管 Wiki 页面，在 proposal 的 `wiki_updates` 中提交带精确 Raw locator 的完整页面内容，并在独立 `relations` 中提交关系；程序分别校验页面与关系，再经 staged `graph_ingest` 写入 graph.db，不把关系嵌入 Wiki 正文
-- **受管事务**：proposal 必须逐条覆盖 manifest 的 fact ID，并为每条关系指定受管 Wiki 页；Wiki 正文须含 `cross-domain/raw/facts/user-assertions.md#fact-*` 精确引用。程序在副本图上执行 `graph_ingest --clean`，提交后逐页运行 `ingest_check --graph`，任何失败均补偿回滚并写 `temp/user-assertions/<transaction-id>/receipt.json`
+- **受管事务**：proposal 必须逐条覆盖 manifest 的 fact ID，并为每条关系指定受管 Wiki 页；Wiki 正文须含 `cross-domain/raw/facts/user-assertions.md#fact-*` 精确引用。程序在副本图上增量执行 `graph_ingest`，保留目标页既有语义边，不以本批申明清空重建全页关系；提交后逐页运行 `ingest_check --graph`，任何失败均补偿回滚并写 `temp/user-assertions/<transaction-id>/receipt.json`
 - **wiki 页类型按内容定**（按通用流程）：人物关系更新对应 people 页正文；新概念/项目建对应页；多条关联内容可建摘要页。关系仍单独进入 proposal `relations`，不因"事实"另建碎页
 
 **raw/facts/ 定位**：放 `cross-domain/raw/facts/`（跨域事实，cross-domain 跨域定位一致）。`user-assertions.md` 是累积型 raw，随用户申明持续追加，是事实来源之一。
