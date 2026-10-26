@@ -3,6 +3,7 @@
 import sqlite3
 import sys
 import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -472,6 +473,196 @@ def test_semantic_lexical_degradation_keeps_version_filter():
     finally:
         ns._embed_queries = original_queries
         conn.close()
+
+
+def test_batch_identity_preserves_decisions_and_reduces_embedding_roundtrips():
+    conn = make_db()
+    add_node(conn, "mps", "matrix product state", "state representation")
+    add_node(conn, "mpo", "matrix product state operator", "operator representation")
+    requests = [{"name": "matrix-product-state", "context": context}
+                for context in ("one-dimensional state", "chain state")]
+    calls = []
+
+    def vectors(texts):
+        calls.append(list(texts))
+        return np.array([[0.6, 0.8] if "operator" in text else [1.0, 0.0] for text in texts])
+
+    def cached(texts):
+        return {text: np.array([0.6, 0.8] if "operator" in text else [1.0, 0.0])
+                for text in texts if text in {"matrix product state", "matrix product state operator"}}
+
+    try:
+        with patch.object(ns, "_embed_queries", side_effect=vectors), \
+                patch.object(ns, "_cached_vectors", side_effect=cached):
+            expected = [ns.resolve_node(conn, **request) for request in requests]
+            original_calls = len(calls)
+            calls.clear()
+            actual = ns.resolve_nodes(conn, requests)
+            assert actual == expected
+            assert all(item["decision"] == "resolved" for item in actual)
+            assert original_calls == 4 and len(calls) == 1
+            assert len(calls[0]) == len(set(calls[0]))
+    finally:
+        conn.close()
+
+
+def test_batch_identity_keeps_fast_paths_and_falls_back_on_incomplete_vectors():
+    conn = make_db()
+    add_node(conn, "mps", "matrix product state", "state representation")
+    add_node(conn, "tensor", "张量网络", "张量表示")
+    ns.record_identity_distinction(conn, "谱张量网络", "张量网络", source="test", reason="distinct")
+    try:
+        with patch.object(ns, "_embed_queries", side_effect=AssertionError("unexpected embedding")):
+            results = ns.resolve_nodes(conn, [
+                {"name": "matrix product state"}, {"name": "谱张量网络"}, {"name": "unknown concept"},
+            ])
+            assert results[0]["decision"] == "resolved"
+            assert results[1]["reason"] == "persisted_distinct"
+            assert results[2]["reason"] == "no_lexical_identity_candidate"
+        requests = [{"name": "matrix-product-state", "context": context}
+                    for context in ("state", "chain")]
+        with patch.object(ns, "_embed_queries", return_value=None), \
+                patch.object(ns, "_cached_vectors", return_value={}):
+            expected = [ns.resolve_node(conn, **request) for request in requests]
+            assert ns.resolve_nodes(conn, requests) == expected
+        with patch.object(ns, "_embed_queries", side_effect=[np.array([[1.0, 0.0]]), None, None]) as embed, \
+                patch.object(ns, "_cached_vectors", return_value={}):
+            assert ns.resolve_nodes(conn, requests) == expected
+            assert embed.call_count == 3
+    finally:
+        conn.close()
+
+
+def test_batch_identity_preserves_sequential_cache_visibility_and_description_limit():
+    conn = make_db()
+    count = ns.DESCRIPTION_WARM_LIMIT + 8
+    for index in range(count):
+        add_node(conn, f"node-{index:02}", f"spectral method {index:02}", f"description {index:02}")
+    requests = [{"name": "spectral-method", "context": context} for context in ("one", "two")]
+
+    def run(batch):
+        cache = {f"spectral method {index:02}": np.array([1.0, 0.0]) for index in range(count)}
+        calls = []
+
+        def embed(texts):
+            calls.append(list(texts))
+            for text in texts:
+                cache[text] = np.array([0.6, 0.8] if "\n含义:" in text else [1.0, 0.0])
+            return np.array([cache[text] for text in texts])
+
+        with patch.object(ns, "_embed_queries", side_effect=embed), \
+                patch.object(ns, "_cached_vectors", side_effect=lambda texts: {
+                    text: cache[text] for text in texts if text in cache}):
+            result = ns.resolve_nodes(conn, requests) if batch else [
+                ns.resolve_node(conn, **request) for request in requests]
+        return result, calls
+
+    try:
+        expected, sequential_calls = run(False)
+        actual, batch_calls = run(True)
+        assert actual == expected
+        assert expected[0]["candidates"][0]["node_id"] == f"node-{ns.DESCRIPTION_WARM_LIMIT:02}"
+        assert expected[1]["candidates"][0]["node_id"] == "node-00"
+        assert list(map(len, sequential_calls)) == [2, ns.DESCRIPTION_WARM_LIMIT, 2, 8]
+        assert len(batch_calls) == 1
+        assert len(batch_calls[0]) == count + 3
+    finally:
+        conn.close()
+
+
+def test_identity_query_warms_its_label_at_original_sequential_position():
+    conn = make_db()
+    add_node(conn, "first", "spectral method 00", "first description")
+    add_node(conn, "second", "spectral method 00", "second description")
+    requests = [{"name": name, "context": "context", "thresholds": {"candidate_floor": 0.1}}
+                for name in ("spectral-method", "spectral method 00")]
+
+    def run(batch):
+        cache = {}
+
+        def embed(texts):
+            cache.update({text: np.array([1.0, 0.0]) for text in texts})
+            return np.array([cache[text] for text in texts])
+
+        with patch.object(ns, "_embed_queries", side_effect=embed), \
+                patch.object(ns, "_cached_vectors", side_effect=lambda texts: {
+                    text: cache[text] for text in texts if text in cache}):
+            return ns.resolve_nodes(conn, requests) if batch else [
+                ns.resolve_node(conn, **request) for request in requests]
+
+    try:
+        expected = run(False)
+        assert run(True) == expected
+        assert all(candidate["label_score"] == 0.0 for candidate in expected[0]["candidates"])
+        assert expected[1]["decision"] == "ambiguous"
+        assert all(candidate["label_score"] == 1.0 for candidate in expected[1]["candidates"])
+    finally:
+        conn.close()
+
+
+def test_batch_reuses_name_processing_and_keeps_graph_decisions_fresh():
+    from collections import Counter
+
+    conn = make_db()
+    titles = [f"unrelated topic {index:02}" for index in range(12)]
+    for index, title in enumerate(titles):
+        add_node(conn, f"candidate-{index}", title)
+    requests = [{"name": f"missing query {index:02}"} for index in range(3)]
+    original = gl.decompose_name_to_aliases
+    counts = Counter()
+
+    def decompose(name):
+        counts[name] += 1
+        return original(name)
+
+    try:
+        with patch.object(gl, "decompose_name_to_aliases", side_effect=decompose), \
+                patch.object(ns, "_embed_queries", side_effect=AssertionError("unexpected embedding")):
+            expected = [ns.resolve_node(conn, **request) for request in requests]
+            assert all(counts[title] == len(requests) for title in titles)
+            counts.clear()
+            assert ns.resolve_nodes(conn, requests) == expected
+            assert all(counts[title] == 1 for title in titles)
+            counts.clear()
+            assert ns.resolve_nodes(conn, requests) == expected
+            assert all(counts[title] == 1 for title in titles)
+            gl.insert_aliases(conn, "candidate-0", [requests[0]["name"]])
+            current = ns.resolve_nodes(conn, requests)
+            assert current[0]["decision"] == "resolved"
+            assert current[0]["node_id"] == "candidate-0"
+            ns.record_identity_distinction(
+                conn, requests[0]["name"], titles[0], source="test", reason="separate identities",
+            )
+            current = ns.resolve_nodes(conn, requests)
+            assert current[0]["reason"] == "persisted_distinct"
+    finally:
+        conn.close()
+
+
+def test_batch_name_processing_scope_restores_after_nested_failure():
+    scopes = []
+
+    def resolve(conn, requests):
+        scope = ns._NAME_VIEW_MEMO.get()
+        assert isinstance(scope, dict)
+        scopes.append(scope)
+        if requests[0]["name"] == "outer":
+            scope["outer"] = True
+            assert ns.resolve_nodes(conn, [{"name": "inner"}]) == []
+            assert ns._NAME_VIEW_MEMO.get() is scope
+            raise RuntimeError("resolution failed")
+        assert "outer" not in scope
+        return []
+
+    with patch.object(ns, "_resolve_nodes", side_effect=resolve):
+        try:
+            ns.resolve_nodes(None, [{"name": "outer"}])
+        except RuntimeError as error:
+            assert str(error) == "resolution failed"
+        else:
+            raise AssertionError("Resolution failure must propagate")
+    assert scopes[0] is not scopes[1]
+    assert ns._NAME_VIEW_MEMO.get() is None
 
 
 def main():

@@ -1132,6 +1132,41 @@ def test_graph_connection_sets_busy_timeout():
     assert timeout == gl.GRAPH_BUSY_TIMEOUT_MS
 
 
+def test_batched_document_attachment_is_identical_to_individual_resolution():
+    import numpy as np
+    conn = make_db()
+    add_node(conn, "mps", "matrix product state")
+    add_node(conn, "mpo", "matrix product operator")
+    delta = gd.build_document_delta(
+        "academic/wiki/papers/example", {"title": "Example"},
+        [{"subject": "本论文", "predicate": "核心方法", "object": "matrix-product-state"},
+         {"subject": "本论文", "predicate": "涉及", "object": "matrix-product-operator"}],
+    )
+    calls = []
+
+    def embed(texts):
+        calls.append(list(texts))
+        return np.array([[0.0, 1.0] if "operator" in text else [1.0, 0.0] for text in texts])
+
+    def cached(texts):
+        return {text: np.array([0.0, 1.0] if "operator" in text else [1.0, 0.0]) for text in texts}
+
+    try:
+        with patch.object(gd.ns, "_embed_queries", side_effect=embed), \
+                patch.object(gd.ns, "_cached_vectors", side_effect=cached):
+            with patch.object(gd.ns, "resolve_nodes", side_effect=lambda db, requests: [
+                    gd.ns.resolve_node(db, **request) for request in requests]):
+                expected = gd.plan_attachment(conn, delta)
+                previous_calls = len(calls)
+            calls.clear()
+            actual = gd.plan_attachment(conn, delta)
+            assert actual == expected
+            assert previous_calls == 2 and len(calls) == 1
+            assert conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

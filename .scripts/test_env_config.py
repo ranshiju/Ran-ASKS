@@ -7,6 +7,7 @@ import sqlite3
 import io
 import urllib.error
 from pathlib import Path
+from unittest.mock import patch
 
 import env_config
 
@@ -119,10 +120,92 @@ def test_embedding_default_and_provider_error_detail() -> None:
     assert "model not found: bad-model" in detail
 
 
+def test_embedding_match_batches_required_followup_without_new_candidates() -> None:
+    import numpy as np
+    import embed_helper
+
+    vectors = {
+        "merge": [1.0, 0.0], "link": [0.95, 0.3122499],
+        "distinct": [-1.0, -1.0], "existing": [1.0, 0.0],
+        "other": [0.0, 1.0], "route": [-1.0, -1.0],
+    }
+    new_texts = ["merge", "link", "distinct", "merge"]
+    existing_texts = ["existing", "other", "existing"]
+    batches = []
+
+    def embed_batch(texts):
+        batches.append(list(texts))
+        return np.asarray([vectors[text] for text in texts], dtype=np.float32)
+
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(embed_helper, "EMBED_DB", Path(directory) / "baseline.db"), \
+                patch.object(embed_helper, "embed_batch", side_effect=embed_batch):
+            baseline = embed_helper.match_by_embedding(new_texts, existing_texts)
+        batches.clear()
+        with patch.object(embed_helper, "EMBED_DB", Path(directory) / "combined.db"), \
+                patch.object(embed_helper, "embed_batch", side_effect=embed_batch):
+            combined = embed_helper.match_by_embedding(
+                new_texts, existing_texts, extra_texts=["route", "existing", "route"],
+            )
+            followup = embed_helper.embed_cached_batch(["route", "existing"])
+        assert combined == baseline
+        assert set(combined) == {"merge", "link"}
+        assert combined["merge"][1] > 0.98
+        assert 0.9 <= combined["link"][1] <= 0.98
+        assert batches == [["merge", "link", "distinct", "existing", "other", "route"]]
+        assert np.array_equal(followup, [vectors["route"], vectors["existing"]])
+
+
+def test_embedding_match_joint_failure_preserves_original_failure_policy() -> None:
+    import numpy as np
+    import embed_helper
+
+    vectors = np.asarray([[1.0, 0.0], [1.0, 0.0]])
+    with patch.object(embed_helper, "embed_cached_batch", side_effect=[RuntimeError("joint"), vectors]) as cached:
+        matches = embed_helper.match_by_embedding(["new"], ["old"], extra_texts=["route"])
+        assert matches["new"][0] == "old"
+        assert [call.args[0] for call in cached.call_args_list] == [["new", "old", "route"], ["new", "old"]]
+    with patch.object(embed_helper, "embed_cached_batch", side_effect=RuntimeError("original")) as cached:
+        try:
+            embed_helper.match_by_embedding(["new"], ["old"])
+        except RuntimeError as error:
+            assert str(error) == "original"
+        else:
+            raise AssertionError("Original matching failures must propagate")
+        assert cached.call_count == 1
+    with patch.object(embed_helper, "embed_cached_batch") as cached:
+        assert embed_helper.match_by_embedding([], ["old"], extra_texts=["route"]) == {}
+        assert not cached.called
+
+
+def test_embedding_match_does_not_repeat_rejected_provider_requests() -> None:
+    import embed_helper
+
+    for status_code in (401, 403, 429):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(embed_helper, "EMBED_DB", Path(directory) / "embeddings.db"), \
+                patch.object(embed_helper, "_embedding_endpoint", return_value="https://provider.invalid/v1/embeddings"), \
+                patch.object(embed_helper.urllib.request, "urlopen", side_effect=urllib.error.HTTPError(
+                    "https://provider.invalid/v1/embeddings", status_code, "Rejected", {},
+                    io.BytesIO(b'{"error":"provider rejected"}'),
+                )) as request, patch.object(embed_helper.time, "sleep"):
+            try:
+                embed_helper.match_by_embedding(["new"], ["old"], extra_texts=["route"])
+            except embed_helper.EmbeddingAPIError as error:
+                assert isinstance(error, RuntimeError)
+                assert error.status_code == status_code
+            else:
+                raise AssertionError("Rejected requests must preserve the provider failure")
+            assert request.call_count == 2
+
+
 if __name__ == "__main__":
     test_dotenv_syntax_and_comments()
     test_precedence_and_expansion()
     test_api_url_join()
     test_embedding_cache_migrates_and_isolates_models()
     test_embedding_default_and_provider_error_detail()
+    test_embedding_match_batches_required_followup_without_new_candidates()
+    test_embedding_match_joint_failure_preserves_original_failure_policy()
+    test_embedding_match_does_not_repeat_rejected_provider_requests()
     print("test_env_config: ok")

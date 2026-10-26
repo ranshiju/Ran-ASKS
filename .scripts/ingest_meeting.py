@@ -286,14 +286,14 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
 
 [要求]
 1. PREPROCESS 只列必要、证据明确的 exact replacements；original 必须是原文中的连续原串，replacement 不得含换行。没有可靠纠错就返回空数组。不要输出整份改写后的原文。
-2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved。未解析人物仍保留明确的参会、汇报与责任任务，person/assignee 为空串、label/person_label/assignee_label 保留原称呼，不创建或猜测全局人物身份。
+2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved。未解析人物仍保留明确的参会、汇报与责任任务，person/assignee 为空串、label/person_label/assignee_label 保留原称呼，不创建或猜测全局人物身份。叙事正文同样区分不同原称呼及其来源，不把待确认身份写成同一人。
 3. Wiki 和 MEETING_IR 必须基于同一组纠错与实体判断，禁止使用相互矛盾的人名或术语。
 4. 撰写 conference-summary 类型 wiki 页面，含 frontmatter 和正文。
 5. frontmatter 必须包含: title, type: conference-summary, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: current, created（今日日期）, updated（今日日期）。
 6. 正文结构: # 标题 → ## Navigation（2-4 句导航概述）→ ## Content（保留研究问题、关键观察、方法限制和未决矛盾，避免重复叙述结构化清单；来源限制简明表述）。参会者、议题、汇报、决策、待办和学生指导更新由程序从 MEETING_IR 统一生成。
 7. Wiki 简写、纠错、去口语化，但忠实于原文，不编造。
 8. 原文每个非空行前有程序分配的 [sNNNN] evidence_id。MEETING_IR 每个事实必须引用至少一个真实 evidence_id；不得编造路径、行号或 evidence_id。
-9. 议题使用规范学术概念名，格式优先「中文英文(缩写)」；决策只保留会议结束时仍有效的最终判断。先提出后被纠正、否决或替换的方案只能作为 Wiki 背景，不得与最终结论压成同一 decision；尚未确定的选择进入待办并明确“待确认”。待办保留可执行动作，不把决策和待办压缩成关键词。
+9. 议题保留有来源依据的学术概念名。英文全称和缩写仅在原文明确给出时使用；原文只有缩写且含义未确认时保留原称呼，不为双语格式猜测或补造全称、替换缩写。决策只保留会议结束时仍有效的最终判断。先提出后被纠正、否决或替换的方案只能作为 Wiki 背景，不得与最终结论压成同一 decision；尚未确定的选择进入待办并明确“待确认”。待办保留可执行动作，不把决策和待办压缩成关键词。
 10. attendees/reports/decisions/tasks/topics 各自独占对应事实。relations 只容纳议题间的涉及/紧密相关于或人物间的指导/师从/受指导于，不得重复参会、汇报、决策、待办或会议议题，不得使用“本会议”等指代词。
 11. person_updates 只提取目录中已有学生的明确研究进展、下一步、阻塞、决定、里程碑或方向变化。person 必须精确复制 student_key，person_label 必须与目录一致；不提取出席信息、能力或态度评价、个人隐私、未明确归属的任务和推测性内容。
 12. 会议纪要主要用于学术灵感与构思，抽取密度宜低，只保留能支持发现、到达和后续行动的核心导航事实。
@@ -596,6 +596,7 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
                 "sections": [field for field in ir_template if field != "protocol_version"],
                 "template": ir_template,
                 "evidence": "every item references evidence_catalog IDs",
+                "term_provenance": "preserve source terms; English full names and acronyms require explicit source support; never guess an expansion",
                 "records": meeting_ir_record_contract(),
                 "topic_predicates": ["讨论", "涉及", "规划"],
                 "relation_predicates": ["涉及", "紧密相关于", "指导", "师从", "受指导于"],
@@ -906,6 +907,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         catalog, _catalog_path = _write_evidence_catalog(state, source_text)
         ir_errors = validate_meeting_ir(
             meeting_ir, {row["evidence_id"] for row in catalog},
+            evidence_catalog=catalog,
         )
         ir_errors.extend(sgp.validate_person_updates(
             meeting_ir.get("person_updates"), guidance_catalog,
@@ -1250,6 +1252,11 @@ def main() -> None:
             "wiki_path": state.get("wiki_path"),
             "graph_report": state.get("graph_report"),
             "transaction_id": state["transaction_id"],
+            "quality_status": state.get("quality_status") or (
+                "degraded" if state.get("quality_warnings") else "complete"
+            ),
+            "quality_warnings": state.get("quality_warnings", []),
+            "quality_warning_history": state.get("quality_warning_history", []),
         }
         if state.get("maintenance") is not None:
             payload["maintenance"] = state["maintenance"]

@@ -271,6 +271,19 @@ appended, normalized PDF pages contain the same addendum; the earlier reviewed
 PowerPoint 重建及来源绑定摄入。这是兼容新增能力，按 MINOR 排号；Markdown 与
 新增并标准化的 PDF 补充页同步，保留既有24页与冻结论文产物。
 
+The 2026-10-26 `v0.19.0` update improves ingestion source reading, matching,
+embedding transport and timing receipts, and adds bounded Frontier paper-answer
+concurrency. Independent answer validation, serial application and the managed
+ingestion transaction remain. A full ingestion-time halving and 20 seconds per
+knowledge page after high-quality Markdown extraction are not yet demonstrated.
+The Markdown and newly appended normalized PDF page contain the same addendum;
+the earlier reviewed pages and frozen paper artifacts remain unchanged.
+
+2026年10月26日的 `v0.19.0` 更新改进摄入来源读取、名称匹配、向量传输与耗时回执，
+并新增有界的 Frontier 论文回答并发。独立回答校验、串行应用和受管摄入事务继续执行。
+尚未证实完整摄入时间减半，也未达到高质量 Markdown 提取后每知识页 20 秒。
+Markdown 与新增并标准化的 PDF 补充页同步；原已审阅页面及冻结论文产物不变。
+
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
 | 核心方法与56篇论文的时间序列展示 | `v0.2.0` | `1.0.0` | arXiv:2608.29612 v1 的冻结边界 |

@@ -12,6 +12,7 @@
   不传 sections 时默认截取: Abstract Introduction Method Results Conclusions Discussion
   section 名支持模糊匹配(大小写/编号前缀/中英文等价)。
 """
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -59,7 +60,7 @@ def normalize_heading_for_match(title):
 
 
 def parse_sections(paper_path):
-    """解析 paper.md 的所有 ## section,返回 [(title, start_line, end_line)]。"""
+    """解析 paper.md 的二至六级 section，返回原始行号范围。"""
     text = Path(paper_path).read_text(encoding="utf-8")
     lines = text.split('\n')
     sections = []
@@ -68,7 +69,7 @@ def parse_sections(paper_path):
 
     for i, line in enumerate(lines):
         # ## 标题(含编号,如 "## I. INTRODUCTION" / "## 1 Introduction")
-        m = re.match(r'^##\s+(.+)', line)
+        m = re.match(r'^#{2,6}\s+(.+)', line)
         if m:
             if current_title is not None:
                 sections.append((current_title, current_start, i - 1))
@@ -101,58 +102,55 @@ def section_match_score(requested, title):
     return max(scores) if scores else 0
 
 
-def _expand_shallow_numbered_section(sections, lines, idx, content, req,
-                                          min_chars=200, max_chars=8000):
-    """父标题无正文时，向下吸收同号子节，避免命中空 results/method 段。"""
-    if len(content.strip()) >= min_chars:
-        return content
+def _section_ranges(sections, lines, idx, req, max_chars=8000):
+    """Select original inclusive ranges before rendering or adding handles."""
+    ranges = [(sections[idx][1], sections[idx][2])]
+    content = '\n'.join(lines[ranges[0][0]:ranges[0][1] + 1])
+    deep = req.lower() == "method"
+    if not deep and len(content.strip()) >= 200:
+        return ranges
     title = sections[idx][0]
-    m = re.match(r'^(\d+)(?:[ .:])', title)
-    if not m:
-        return content
-    prefix = m.group(1) + "."
-    parts = [content]
+    numbered = re.match(r'^(\d+)(?:[ .:])', title)
+    roman = re.match(r'^[IVXLCDM]+\.\s+', title)
+    heading = re.match(r'^(#{2,6})\s+', lines[sections[idx][1]])
+    level = len(heading.group(1)) if heading else 2
+    prefix = numbered.group(1) + "." if numbered else None
     total = len(content)
+    next_letter = "A"
     for j in range(idx + 1, len(sections)):
         next_title = sections[j][0]
-        if not next_title.startswith(prefix):
+        next_heading = re.match(r'^(#{2,6})\s+', lines[sections[j][1]])
+        nested = next_heading is not None and len(next_heading.group(1)) > level
+        letter = re.match(r'^([A-Z])\.\s+', next_title)
+        roman_child = roman is not None and letter is not None
+        if re.match(r'^[IVXLCDM]+\.\s+', next_title) and (
+                letter is None or letter.group(1) != next_letter):
+            roman_child = False
+        if not (nested or roman_child or (prefix and next_title.startswith(prefix))):
             break
-        if req and section_match_score(req, next_title) < 100:
+        if not (nested or roman_child) and req and section_match_score(req, next_title) < (60 if deep else 100):
+            if deep:
+                continue
             break
         part = '\n'.join(lines[sections[j][1]:sections[j][2] + 1])
-        parts.append(part)
+        ranges.append((sections[j][1], sections[j][2]))
+        if roman_child:
+            next_letter = chr(ord(letter.group(1)) + 1)
         total += len(part) + 2
         if total >= max_chars:
             break
-    return "\n\n".join(parts)
+    return ranges
 
 
-def _expand_deep_method_section(sections, lines, idx, content, req,
-                                        min_child_score=60, max_chars=8000):
-    """method 命中父标题后，向下吸收同号相关子节。
-
-    例如命中了 `## 3 SELF-RAG`，应把 `## 3.1 Problem Formulation`、
-    `## 3.2 Training`、`## 3.3 Inference` 一并纳入，而不是只读概览段。
-    """
-    title = sections[idx][0]
-    m = re.match(r'^(\d+)(?:[ .:])', title)
-    if not m:
-        return content
-    prefix = m.group(1) + "."
-    parts = [content]
-    total = len(content)
-    for j in range(idx + 1, len(sections)):
-        next_title = sections[j][0]
-        if not next_title.startswith(prefix):
-            break
-        if section_match_score(req, next_title) < min_child_score:
-            continue
-        part = '\n'.join(lines[sections[j][1]:sections[j][2] + 1])
-        parts.append(part)
-        total += len(part) + 2
-        if total >= max_chars:
-            break
-    return "\n\n".join(parts)
+def _render_ranges(lines, ranges, source_path=None):
+    return "\n\n".join(
+        "\n".join(
+            f"<{source_path}#L{number + 1}> {lines[number]}"
+            if source_path else lines[number]
+            for number in range(start, end + 1)
+        )
+        for start, end in ranges
+    )
 
 
 def is_appendix_section(title):
@@ -168,7 +166,7 @@ def match_section(requested, title):
     return section_match_score(requested, title) > 0
 
 
-def _narrow_abstract_from_preamble(lines):
+def _abstract_range(lines):
     """从 preamble(无 ## Abstract)中收窄提取摘要。
     边界:received/published 行之后 → DOI 行或正文开头。
     找不到边界标记则返回 None；调用方不得把 preamble 全量冒充摘要。"""
@@ -189,33 +187,47 @@ def _narrow_abstract_from_preamble(lines):
             break
     if abs_start is not None:
         end = abs_end if abs_end is not None else min(abs_start + 40, len(lines))
-        content = '\n'.join(lines[abs_start:end])
-        return content.strip()
+        while end > abs_start and not lines[end - 1].strip():
+            end -= 1
+        if end == abs_start:
+            return None
+        return abs_start, end - 1
     return None
 
 
-def _extract_references_fallback(lines):
+def _narrow_abstract_from_preamble(lines):
+    selected = _abstract_range(lines)
+    return _render_ranges(lines, [selected]).strip() if selected else None
+
+
+def _reference_indices(lines):
     """无 ## References 段时,按 [N] 编号格式提取引文(从第一个 [N] 到文末或下一个非引文段)。"""
-    ref_lines = []
+    indices = []
     in_refs = False
-    for line in lines:
+    for number, line in enumerate(lines):
         if re.match(r'^\[\d+\]\s', line) or re.match(r'^\d+\.\s+', line):
             in_refs = True
-            ref_lines.append(line)
+            indices.append(number)
         elif in_refs:
             # 续行(非空、非新编号)
             if line.strip() and not re.match(r'^\[\d+\]', line) and not re.match(r'^\d+\.\s', line):
-                ref_lines.append(line)
+                indices.append(number)
             elif not line.strip():
-                ref_lines.append("")  # 空行保留
+                indices.append(number)
             else:
                 break  # 下一段开始
-    return '\n'.join(ref_lines) if ref_lines else None
+    return indices
 
 
-def extract_sections(paper_path, requested_sections):
+def _extract_references_fallback(lines):
+    indices = _reference_indices(lines)
+    return '\n'.join(lines[number] if lines[number].strip() else "" for number in indices) if indices else None
+
+
+def extract_sections(paper_path, requested_sections, *, source_lines=False, source_path=None):
     """截取请求的 sections,返回 (hits, misses, total_chars)。"""
     sections, lines = parse_sections(paper_path)
+    source = str(source_path or paper_path) if source_lines else None
 
     hits = []   # [(requested, title, content)]
     misses = []  # [requested]
@@ -235,11 +247,7 @@ def extract_sections(paper_path, requested_sections):
             # 优先非附录；同类中权重高者优先；同权取先出现者。
             candidates.sort(key=lambda item: (item[1], -item[0], item[2]))
             _, _, idx, title, start, end = candidates[0]
-            content = '\n'.join(lines[start:end + 1])
-            if req.lower() == "method":
-                content = _expand_deep_method_section(sections, lines, idx, content, req)
-            else:
-                content = _expand_shallow_numbered_section(sections, lines, idx, content, req)
+            content = _render_ranges(lines, _section_ranges(sections, lines, idx, req), source)
             hits.append((req, title, content))
             used_indices.add(idx)
             found = True
@@ -253,6 +261,9 @@ def extract_sections(paper_path, requested_sections):
                     # 尝试收窄:从 preamble 提取摘要段
                     narrowed = _narrow_abstract_from_preamble(preamble_lines)
                     if narrowed:
+                        if source:
+                            first, last = _abstract_range(preamble_lines)
+                            narrowed = _render_ranges(lines, [(start + first, start + last)], source)
                         hits.append((req, "(narrowed: abstract after received line)", narrowed))
                         used_indices.add(idx)
                         found = True
@@ -262,6 +273,11 @@ def extract_sections(paper_path, requested_sections):
             if req.lower() in ("references", "reference", "bibliography", "引文", "参考文献"):
                 ref_content = _extract_references_fallback(lines)
                 if ref_content:
+                    if source:
+                        ref_content = '\n'.join(
+                            f"<{source}#L{number + 1}> {lines[number]}"
+                            for number in _reference_indices(lines)
+                        )
                     hits.append((req, "(fallback: [N] numbered references)", ref_content))
                     found = True
             if not found:
@@ -272,20 +288,36 @@ def extract_sections(paper_path, requested_sections):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("用法: read_paper.py <paper.md路径> [sections...]")
-        print("  sections: abstract introduction method results conclusions discussion")
-        print("  默认: 全部 6 段")
-        sys.exit(1)
-
-    paper_path = sys.argv[1]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("paper_path")
+    parser.add_argument("sections", nargs="*", default=DEFAULT_SECTIONS)
+    parser.add_argument("--source-lines", action="store_true")
+    parser.add_argument("--source-path", help="Raw handle 基址；不改变实际读取路径")
+    parser.add_argument("--full", action="store_true")
+    parser.add_argument("--start-line", type=int)
+    parser.add_argument("--end-line", type=int)
+    args = parser.parse_intermixed_args()
+    if not args.full and (args.start_line is not None or args.end_line is not None):
+        parser.error("--start-line/--end-line require --full")
+    paper_path = args.paper_path
     if not Path(paper_path).exists():
         print(f"ERROR: 文件不存在: {paper_path}", file=sys.stderr)
         sys.exit(1)
 
-    requested = sys.argv[2:] if len(sys.argv) > 2 else DEFAULT_SECTIONS
+    if args.full:
+        lines = Path(paper_path).read_text(encoding="utf-8").split('\n')
+        start = args.start_line if args.start_line is not None else 1
+        end = args.end_line if args.end_line is not None else len(lines)
+        if not 1 <= start <= end <= len(lines):
+            parser.error("line range must be inside the original file")
+        print(_render_ranges(lines, [(start - 1, end - 1)],
+                             str(args.source_path or paper_path) if args.source_lines else None))
+        return
+    requested = args.sections or DEFAULT_SECTIONS
 
-    hits, misses, total_chars = extract_sections(paper_path, requested)
+    hits, misses, total_chars = extract_sections(
+        paper_path, requested, source_lines=args.source_lines, source_path=args.source_path,
+    )
     approx_tokens = total_chars // 3  # 中文+英文混合粗估
 
     # stderr: 诊断报告(命中哪些/未命中哪些/合计 token)
@@ -311,7 +343,11 @@ def main():
             output = full[:cap] if len(full) > cap else full
             tag = f"头部截取({cap}/{len(full)})" if len(full) > cap else f"全文({len(output)})"
             print(f"[read_paper] 未命中 {len(misses)}, 本文无 section 标题, {tag}, ≈{len(output)//3} tokens", file=sys.stderr)
-            print(output)
+            if args.source_lines:
+                print(_render_ranges(output.split('\n'), [(0, len(output.split('\n')) - 1)],
+                                     str(args.source_path or paper_path)))
+            else:
+                print(output)
         else:
             print(f"[read_paper] 未命中 {len(misses)}:", file=sys.stderr)
             for m in misses:

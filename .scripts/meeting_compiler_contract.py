@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 
 
 PROTOCOL_VERSION = "meeting-compiler-v3"
@@ -246,8 +247,33 @@ def _validate_meeting_ir(value, evidence_ids: set[str] | None = None, *,
     return errors
 
 
-def validate_meeting_ir(value, evidence_ids: set[str] | None = None) -> list[str]:
-    return _validate_meeting_ir(value, evidence_ids=evidence_ids)
+def validate_meeting_ir(value, evidence_ids: set[str] | None = None, *,
+                        evidence_catalog: list[dict] | None = None) -> list[str]:
+    errors = _validate_meeting_ir(value, evidence_ids=evidence_ids)
+    if errors or evidence_catalog is None:
+        return errors
+    evidence = {row["evidence_id"]: str(row["text"]) for row in evidence_catalog}
+    for section, fields in {
+        "topics": ("label",), "reports": ("topic",), "relations": ("subject", "object"),
+    }.items():
+        for index, row in enumerate(value[section]):
+            source = unicodedata.normalize(
+                "NFKC", "\n".join(evidence.get(key, "") for key in row["evidence_ids"]),
+            )
+            for field in fields:
+                for acronym in sorted(set(re.findall(
+                    r"(?<![A-Za-z0-9])[A-Z]{2,}[0-9]*(?![A-Za-z0-9])",
+                    unicodedata.normalize("NFKC", row[field]),
+                ))):
+                    if not re.search(
+                        r"(?<![A-Za-z0-9])" + re.escape(acronym) + r"(?![A-Za-z0-9])",
+                        source, re.IGNORECASE | re.ASCII,
+                    ):
+                        errors.append(
+                            f"MEETING_IR.{section}[{index}].{field} contains unsupported acronym "
+                            f"{acronym!r}; preserve the source term or cite explicit source support"
+                        )
+    return errors
 
 
 def parse_proposal(text: str) -> tuple[dict | None, str]:

@@ -112,7 +112,8 @@ def normalize_raw_footnote_locator(value: str) -> str:
     return locator
 
 
-def normalize_raw_footnotes(text: str, *, reuse_inline: bool = False) -> str:
+def normalize_raw_footnotes(text: str, *, reuse_inline: bool = False,
+                            supplied_locators: tuple[str, ...] = ()) -> str:
     """Canonicalize definitions and optionally reuse exact inline Raw citations."""
     def replace(match):
         value = match.group("locator")
@@ -133,12 +134,11 @@ def normalize_raw_footnotes(text: str, *, reuse_inline: bool = False) -> str:
         raw_path, fragment = raw_locator.split_locator(locator)
         if "/raw/" in f"/{raw_path}" and re.fullmatch(r"L[1-9]\d*(?:-L[1-9]\d*)?", fragment):
             citations.setdefault(locator, footnote_id)
-    if not citations:
-        return normalized
-    addresses = "|".join(re.escape(locator) for locator in sorted(citations, key=len, reverse=True))
-    inline_pattern = re.compile(r"(?<![\w/`\[\(<\"'])" + f"(?:{addresses})" + r"(?![\w/#-]|\.[\w])")
     frontmatter_end = _frontmatter_end([line.rstrip("\r\n") for line in lines])
     fence_marker = ""
+    body_lines = []
+    source_sections = []
+    top_level_headings = []
     for index, line in enumerate(lines):
         if index < frontmatter_end:
             continue
@@ -151,10 +151,48 @@ def normalize_raw_footnotes(text: str, *, reuse_inline: bool = False) -> str:
                   and not line[fence.end():].strip()):
                 fence_marker = ""
             continue
+        if not fence_marker and line.strip() == "## Sources":
+            source_sections.append(index)
+        if not fence_marker and re.match(r"^#{1,2}\s+", line):
+            top_level_headings.append(index)
         if (fence_marker or FOOTNOTE_DEF_RE.fullmatch(line.strip())
                 or HEADING_RE.fullmatch(line.strip()) or "`" in line or "[[" in line or "](" in line):
             continue
-        lines[index] = inline_pattern.sub(lambda match: f"[^{citations[match.group(0)]}]", line)
+        body_lines.append(index)
+    allowed = set()
+    if len(source_sections) == 1 and not fence_marker:
+        for locator in supplied_locators:
+            path, fragment = raw_locator.split_locator(locator)
+            if ("/raw/" in f"/{path}" and not any(char in locator for char in "`[]<>|\r\n ")
+                    and re.fullmatch(r"L[1-9]\d*(?:-L[1-9]\d*)?", fragment)):
+                allowed.add(locator)
+    if not citations and not allowed:
+        return normalized
+    addresses = "|".join(re.escape(locator) for locator in sorted(set(citations) | allowed, key=len, reverse=True))
+    inline_pattern = re.compile(r"(?<![\w/`\[\(<\"'])" + f"(?:{addresses})" + r"(?![\w/#-]|\.[\w])")
+    reserved = set(FOOTNOTE_REF_RE.findall(normalized))
+    created = []
+
+    def replace_inline(match):
+        locator = match.group(0)
+        if locator not in citations:
+            number = 1
+            while f"r{number}" in reserved:
+                number += 1
+            footnote_id = f"r{number}"
+            reserved.add(footnote_id)
+            citations[locator] = footnote_id
+            created.append(f"[^{footnote_id}]: {locator}\n")
+        return f"[^{citations[locator]}]"
+
+    for index in body_lines:
+        lines[index] = inline_pattern.sub(replace_inline, lines[index])
+    if created:
+        end = next((index for index in top_level_headings
+                    if index > source_sections[0]), len(lines))
+        if end and not lines[end - 1].endswith("\n"):
+            lines[end - 1] += "\n"
+        lines[end:end] = ["\n", *created, "\n"]
     return "".join(lines)
 
 

@@ -1273,11 +1273,15 @@ nodes:
   read_paper:
     path: .scripts/read_paper.py
     kind: implementation
-    role: paper-md-directed-excerpt-reader-with-hierarchical-method-expansion
+    role: paper-md-directed-excerpt-reader-with-original-line-handles-and-budgeted-batch-reading
   read_paper_test:
     path: .scripts/test_read_paper.py
     kind: test
     role: read-paper-directed-excerpt-regression
+  ingest_performance_benchmark:
+    path: .scripts/benchmark_ingest_performance.py
+    kind: implementation
+    role: isolated-equal-output-ingest-network-latency-replay-not-live-end-to-end-benchmark
   ingest_inbox_dispatch_test:
     path: .scripts/test_ingest_inbox_dispatch.py
     kind: test
@@ -1307,6 +1311,15 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - ingest_performance_benchmark
+  - uses
+  - node_semantics
+- - ingest_performance_benchmark
+  - uses
+  - frontier
+- - ingest_performance_benchmark
+  - uses
+  - graph_lib
 - - review_ops
   - governs
   - review
@@ -3983,6 +3996,11 @@ verification:
   - python3 .scripts/test_ingest_document.py
   - python3 .scripts/test_ingest_admin.py
   - python3 .scripts/test_ingest_pipeline.py
+  ingest_performance_benchmark:
+  - python3 .scripts/benchmark_ingest_performance.py --delay-sec 0 --repeats 1
+  read_paper:
+  - python3 .scripts/test_read_paper.py
+  - python3 .scripts/test_ingest_paper.py
   open_source_release:
   - python3 .scripts/test_open_source_release.py
   open_source_publish:
@@ -4203,6 +4221,7 @@ script_contracts:
     - automatic retirement of canonical or referenced Hubs, public paths, or unreviewed targets
     - backups or reports outside private; Git history changes or publication
     verify:
+    - python3 .scripts/test_env_config.py
     - python3 .scripts/test_private_isolation.py
   private_ingest:
     preconditions:
@@ -4239,6 +4258,7 @@ script_contracts:
   embed_helper:
     preconditions:
     - shared Agent/API graph scope is context-local and restored on exit; private cache selection precedes any provider call
+    - match_by_embedding 可把 caller 已确定且后续必需的 extra_texts 附加到原请求预热同一 namespace 文本缓存；匹配只使用原新/旧文本及原阈值，联合请求失败回退原匹配请求，但 provider 401/403/429 明确拒绝时直接保留原失败，不重复同服务请求；EmbeddingAPIError 保持 RuntimeError 兼容并携带最后 HTTP status，默认无附加文本行为不变
     - embedding endpoint 由 EMBED_API_BASE 与 EMBED_API_PATH（默认 /v1/embeddings）规范化拼接；默认模型为区分大小写的 provider code `GLM-Embedding-3`，HTTP 错误须保留受限长度的 provider 响应以供诊断
     - embedding cache identity 至少绑定规范化 endpoint 与 model；旧 text-only cache 可迁移但不得跨未知 provider/model 复用
     writes:
@@ -4471,6 +4491,7 @@ script_contracts:
     - python3 .scripts/test_open_source_release.py
   ingest_inbox:
     preconditions:
+    - shared 统一结果适配同时透传嵌套 agent_task 与合法顶层 agent-task-v1，首次 prepared 回执保留 inputs/outputs/protocol/commands/control，不为找回已生成任务要求再次 inspect
     - API agent_required 的单项与 batch reason 优先保留具体校验诊断；无诊断时仅说明等待宿主复核或修正，不从状态名推断自动恢复耗尽
     - inbox_plan 与执行扫描共用隐藏控制项/系统元数据过滤契约；这些条目不得进入分类、batch eligibility 或摄入队列
     - 对话文件使用 --keep-source 复制后分发；纯正文使用 --stdin 原样 UTF-8 暂存；两者共用现有分类、校验、去重与事务，正常 inbox 清理语义不变
@@ -4890,6 +4911,8 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   graph_ingest:
     preconditions:
+    - shared 单次 add_knowledge_edges 对同一既有/已确认 concept surface 复用 ASCII 词边界 pattern，CJK 保留原文包含；缓存仅在本页 writer 内存生效，不改变候选快照、单字过滤、大小写/词边界或歧义排除，不跨文档缓存图或语义裁决
+    - shared 论文命题对齐可在同一 writer lock 内合并随后方向路由已需的 profile/Hub Scope 向量；路由仍运行原 canonical/floor/margin/子方向特异性与 Agent override 规则，身份解析仍在两者之后，不额外预热身份候选或改变候选可见性
     - shared --validate-page 在暂存页最终逻辑路径下复用 ingest_check 结构/来源检查，并在同一未提交连接上检查预期图的作者、venue、Raw 直连等跨层一致性；--plan-only 返回集中诊断后回滚，正式提交失败同样回滚。该入口用于旧 Wiki 局部更新预检，不触发全文重编译或替调用者覆盖 Wiki
     - shared --metadata-only 复用既有语义关系与方向，只从已审核 frontmatter 同步机械元数据边；和 semantic/triples/IR 输入互斥，禁止 --clean。关系有变化时仍用原语义增量或受管撤销流程，不把 metadata-only 当删边或重编译
     - academic/wiki/references 与 academic/wiki/editorials 使用通用学术文档导航谓词；本文档/本文件替换为本页 canonical ID，主题边直接连接本页，不走论文方向推断；论文与会议路径保留各自语义
@@ -4972,6 +4995,7 @@ script_contracts:
     - python3 .scripts/test_graph_delta.py
   graph_delta:
     preconditions:
+    - shared 文档级身份解析批量预取仅覆盖原解析器实际请求的 query/description 向量；精确匹配、distinct、类型过滤与阈值不变，批量失败退回原解析路径，不写事实图
     - Wiki page、Raw 文档包候选与受限 triples 已由摄入管线提供；GraphDelta 仅是内存事务对象
     - shared Agent/API attach plan 在唯一名称快路径与语义解析前统一检查端点类型；普通概念 surface mention 只匹配 entity，纯引用标题匹配 page/entity，纯人物角色匹配 people/page/entity；人物角色由共享 Knowledge IR 与 writer 一致判定，显式 canonical ID 保留原解析边界
     - 普通知识/非 scoped 命题计划本地新建时，若原文路径已被非 entity 占用则软 abstain，禁止借 create_local 改写既有节点类型；派生 keyword/proposition ID 与非 entity 冲突时 writer 回退经计划检查的原文名称
@@ -4993,6 +5017,8 @@ script_contracts:
     - python3 .scripts/test_graph_delta.py
   node_semantics:
     preconditions:
+    - shared resolve_nodes 只在一次同步调用内复用名称规范化、组成部分与末尾缩写处理的纯文本结果；memo 使用 context-local 作用域并在异常/嵌套退出时恢复，不缓存节点、alias、distinct 裁决、候选或向量，不跨预检/提交保留结果
+    - shared resolve_nodes 对同一只读图快照批量收集原身份门所需向量，再复用 resolve_node 逐项决策；按原顺序固定每项缓存可见范围与描述预热上限，后项预取不得扩大前项候选；不为无名称证据、唯一精确名称或已判 distinct 的项请求 embedding，向量不完整时沿原逐项路径处理
     - graph.db 已初始化；nodes.path 是稳定 node_id；description 可空；aliases 是确定性名称入口
     - shared semantic_search 默认在排名及 top-k 前排除图中 deprecated 的页面；include_deprecated 只接受布尔值，显式历史搜索可开启。hybrid 可包含旧页作为内部图定位种子，最终 Wiki 候选仍经统一准入；身份解析的身份判断不等于页面现行性。
     - graph_lib.ensure_node 对已有节点省略 status 时保留原生命周期，新节点省略时默认为 current；显式 status 可更新。不得因普通引用复用把废弃节点恢复为 current。
@@ -5023,6 +5049,7 @@ script_contracts:
     - keyword 使用 title+description，proposition 使用 canonical statement，People page 只在存在可定位
     - 默认 Hub 页面根为仓库根；隔离实验只能由受控 caller 显式配置 page root，并同时提供隔离 graph 与 embedding cache
     - membership 规划先跨目标 profile 汇总并去重 profile、Scope 与同类成员 prototype 文本，再单次进入 embedding cache；底层可按 provider batch 上限分块，禁止逐 profile 发起 API 请求
+    - shared 多 Hub split 分析在原 membership 规划/应用完成后，按原 Hub 顺序收集同一快照的 member_profiles，只对达到原成员数门槛的已需文本去重合批；再还原每个 Hub 原成员顺序并沿用原二分、阈值及代表排序，不提前越过 membership 或自动写生命周期。联合临时失败回退原逐 Hub 分析；EmbeddingAPIError 的 401/403/429 明确拒绝不追加 fallback 请求，单 Hub 分析入口保持原行为
     - academic Hub membership 只接受 academic/wiki 下的普通节点；非 academic 摄入页必须在候选生成前直接跳过
     - refresh_after_ingest 优先接受 graph_ingest 提供的本页 origin 关系差量端点；更新已有页面不得退化为扫描并重算全部历史邻居
     writes:
@@ -5163,6 +5190,7 @@ script_contracts:
     - python3 .scripts/test_query_graph_temporal.py
   ingest_pipeline:
     preconditions:
+    - shared step spans 逐次追加耗时、状态和异常结果；恢复和重试保留所有尝试，不把子步骤累计时间冒充端到端墙钟时间，也不改变任何 validator、控制循环或提交边界
     - shared 语义校验每次先从 semantic_path 读取当前暂存文本并同步 slots_content，再执行领域职责校验；resume 不信任旧缓存，不要求 Agent 手改事务 JSON，缺失/非法文件仍阻断
     - 所有来源清理延后到 validate_completion 通过且 completed 状态持久化之后；清理失败保留 cleanup_pending 并可通过 completed resume 只重试清理，不重写 Wiki/图或重复收尾
     - preprocess 允许返回 prepared 的 agent-task-v1；恢复后回到 preprocess 校验源绑定 OCR，再进入 write_wiki，不能把等待图片转写误判为 failed
@@ -5186,6 +5214,8 @@ script_contracts:
     - python3 .scripts/test_ingest_admin.py
   ingest_common:
     preconditions:
+    - API 长论文证据包在既有总预算内优先保留正文明确概率、充分条件与局限语句的完整原始行，仍绑定原始行号；首段摘要能在单节预算内完整保留时不因平均分配而丢掉整行；匹配只是补读候选，不证明条件完整或语义蕴含，不扩大预算或增加模型调用
+    - shared 耗时记录只追加当前事务 telemetry，不充当事实证据或恢复控制状态；子进程保留兼容的最近结果并追加逐次执行记录
     - 有界论文上下文在 section 部分命中或全部缺失时，以原文正文的分散窗口补足；在明确参考文献标题、带发表证据的连续编号参考条目或末尾非科研材料边界截断窗口，章节选段同样排除可识别参考文献；保留整行证据，尾部长行在总预算内时重新分配头尾份额，Raw handle、标题与省略标记均计入预算，不要求论文必须具有全部标准章节
     - 共享摄入器只接收事务内 staged Wiki/semantic、结构化 validator issues 与受限候选目录
     - Agent backend 生成 agent-task-v1 并等待当前宿主提交；API backend 才调用 semantic patch Worker
@@ -5302,6 +5332,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   meeting_compiler_contract:
     preconditions:
+    - shared 有证据目录时检查 topics/reports/relations 中的新增大写缩写须在该项引用的原文中出现；无依据的全称扩写保留原称呼，不因双语格式偏好补造名称，常规摄入与受管修复共用此门
     - API adapter 与当前 Agent 产物共同使用 meeting-compiler-v3 delimiter、context hash、parser、preprocess schema、evidence-bound typed MEETING_IR/person_updates 与非级联 replacement 规则；v2 会议 IR 和 v1 slots 只解析在途兼容产物
     - MEETING_IR 空模板、Agent 顶层字段清单与 validator 共用 MEETING_IR_RECORD_FIELDS；模板包含固定 protocol_version，不自动补齐非法实际产物
     - shared 的 parse_proposal_detailed 返回 proposal、兼容错误摘要与结构化诊断；JSON 位置相对去除外围空白及标准 fence 后的 PREPROCESS，保留严格解析，不吞掉尾部结束标签
@@ -5316,6 +5347,9 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_paper:
     preconditions:
+    - API 书目规则区分空 DOI/arXiv 可选标识与必要字段未决；可选缺失保留 ambiguous 不猜补，真实候选冲突仍由原 schema/证据门阻断，不根据全局状态自动放行
+    - shared combined workspace 的 bibliographic_review_required 交接可在原事务重读已修正书目段，经原输入哈希、schema、证据和下游 validator 后恢复；prepared/agent_required 书目草稿仍受原门控，completed/failed 不得重新开启，不新增模型调用
+    - agent-only 阅读契约一次批量读取已明确需要的章节并携带原始来源行号；shared reader 识别二至六级标题与短父节的层级/罗马数字字母子节，主文优先于同名显式附录；总阅读预算与证据缺口补读责任不变，展开子节和非连续片段不得重编号；短文全文也使用原始行号
     - shared 版式增强复用现有 ACM 模板族定位器，支持首页 self-citation 独立/同行 marker 与解析标签；仅在 PDF 前部布局块与 Markdown 的 DOI、完整有序作者名单一致时补充尚缺姓名候选；缺少 PDF 证据、OCR 分歧、References/正文之后、截断作者或题名冲突均不补充，不建立逐刊状态机或放宽自动锁定与原 validator
     - API candidate catalog 的有损字段裁剪禁止触及 id/value/evidence/year-kind 与排除机构证据；只省略已在协议统一声明的重复 provider/authority 元数据，完整目录仍保存在事务，Agent 取证与 schema 不变；效率以离线跨文档输入长度和语义字段保真对照验收，不把字符数冒充模型 token/账单或已验证的线上错误率
     - API candidate-id-v2 及旧 Agent 兼容协议共享字段级 schema 诊断；authors 候选经原文核验可完整覆盖时优先有序候选 ID，proposed 项严格使用 value/evidence，错误键不得静默转换；既有 evidence-bibliography-v1 Agent 契约保持独立
@@ -5331,7 +5365,7 @@ script_contracts:
     - agent workspace 返回明确 write_to；书目协议同时携带由同一运行时代码生成且自身通过 schema 的完整严格模板，避免 prose shape 与 validator 漂移；程序按 bibliography → wiki → semantics 顺序物化为独立暂存产物并逐层校验，resume 不重跑 MinerU 或已通过阶段
     - Agent 只经 paper_workspace_read/refresh/check/commit 四个类型化动作接管事务；公开 workflow_status 仅允许 awaiting_agent、ready_to_commit、completed、failed，内部细粒度 status 只作为 internal_status 返回
     - 单篇与 batch item 均经 inbox_state 输出 ingest-result-v1；completed 必须同时报告 committed=true 与可定位的 Raw/Wiki 产物，awaiting_agent 的本次产物是 agent-task-v1，不以进程退出码冒充事务完成
-    - Wiki 物化可显式复用已定义脚注，把正文中完全相同的裸 Raw 行 locator 转成对应脚注；只改变引用表示，不推断地址、不改事实文本，不处理代码/链接/来源定义，随后仍通过原 locator 与结构 validator
+    - Wiki 物化可显式复用已定义脚注，把正文中完全相同的裸 Raw 行 locator 转成对应脚注；API 还可对本次已提供的精确 Raw handle 白名单确定性分配新脚注并在既有 Sources 节补定义；只改变引用表示，不推断地址、不改事实文本，不处理代码/链接/来源定义，重复 Sources 或脚注冲突不自动转换，随后仍通过原 locator 与结构 validator
     - batch 顶层 workflow_status、terminal、committed 与 counts 只从 items 派生；prepared/partial 等旧顶层状态只保留为兼容 status，不得覆盖 item 四态或产生独立统计口径
     - 确定性 PDF metadata、首页规则与 MinerU 解析器仍在后台注册带 provenance 的 candidate provider；API 由 candidate-id-v2 锁定，Agent 不接收候选目录且以原始证据直接提取，程序仅把候选用于 fast path、去重和字段冲突诊断
     - bibliographic-candidate-provider-v8 保留 PDF 前两页 layout block 的 self DOI、完整 venue 和 candidate_only 作者，affiliation 单列排除，日期候选绑定 published/published_online/accepted/received/revised/preprint kind；ACM self-citation 作者补充须通过上述双来源一致性检查，冲突仍交同一 candidate-id-v2 workspace 裁决
@@ -5453,6 +5487,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_meeting:
     preconditions:
+    - shared completed 输出保留 canonical state 的 quality_status、当前告警与历史告警；统一 maintenance 发布从同一状态同步质量，不把缺失输出误报为零告警
     - inbox 会议纪要仅接受 .txt 与显式 subproject=academic|admin|business；去重后先生成 entity-candidates.json，不提前 apply 最终纠错
     - 直接入口与统一 inbox 入口均先查询公共 Raw 指纹索引；只有二进制 SHA-256 精确命中可直接返回 duplicate_found，同日、同标题或既有 Raw/Wiki 目录不足以确认重复，不得丢弃不同字节的会议分段来源
     - Meeting Compiler 初次调用返回当前 PREPROCESS/WIKI/MEETING_IR 协议；MEETING_IR 的人物、议题、汇报、决策、待办、扩展关系与学生指导更新均引用程序分配的 Raw evidence_id，API 与 agent handoff/resume 共用同一协议
@@ -5579,6 +5614,8 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   frontier:
     preconditions:
+    - shared Markdown frontmatter 读取优先使用 PyYAML CSafeLoader，不可用时回退 SafeLoader；仅替换安全 YAML 解析实现，不缓存记录、不缩减扫描、不改变 schema、实时快照检查或索引重建
+    - api-only capture-paper 对独立问题的模型回答最多三路并行；证据包与原回答快照在主线程准备，回答仍逐项经原 apply_answer 验证并串行写页/重建索引，全部完成后才返回；Agent 不启用并行模型工作
     - 学术问题、论文明确开放问题、研究思路或验证记录已进入 Frontier 触发范围
     - 用户问题须先完成知识库召回、重复候选检查与 kb_state 评估；模型不可用时保留 captured/pending
     - Agent backend 生成 agent-task-v1，输入为有界 KB packet、输出为 temp JSON；API backend 才调用 llm_structured。二者的输出经过同一 assessment_schema/answer_schema 与 Raw locator 白名单校验

@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextvars import ContextVar
 from difflib import SequenceMatcher
+from functools import wraps
 from pathlib import Path
 
 import graph_lib as gl
@@ -25,6 +27,27 @@ DEFAULT_IDENTITY = {
 DEFAULT_SEARCH_FLOOR = 0.45
 MAX_TOP_K = 20
 DESCRIPTION_WARM_LIMIT = 32
+_NAME_VIEW_MEMO = ContextVar("node_name_view_memo", default=None)
+
+
+def _memoized_name_view(function):
+    @wraps(function)
+    def evaluate(value):
+        views = _NAME_VIEW_MEMO.get()
+        if views is None:
+            return function(value)
+        cached = views.setdefault(function.__name__, {})
+        key = (type(value), value)
+        try:
+            return cached[key]
+        except KeyError:
+            result = function(value)
+            cached[key] = result
+            return result
+        except TypeError:
+            return function(value)
+
+    return evaluate
 
 
 def _configured_identity() -> dict:
@@ -59,6 +82,7 @@ def query_semantic_text(name: str, context: str = "") -> str:
     return f"名称: {name}\n上下文: {context}" if context else name
 
 
+@_memoized_name_view
 def _normalize(value: str) -> str:
     return re.sub(r"[^0-9a-z\u3400-\u9fff]+", "", str(value or "").casefold())
 
@@ -104,6 +128,7 @@ def _persisted_distinct_result(name: str, candidates: list[dict]) -> dict:
     }
 
 
+@_memoized_name_view
 def _meaningful_components(value: str) -> set[str]:
     parts = {value, *gl.decompose_name_to_aliases(value)}
     return {
@@ -113,6 +138,7 @@ def _meaningful_components(value: str) -> set[str]:
     }
 
 
+@_memoized_name_view
 def _without_trailing_acronym(value: str) -> str:
     return re.sub(
         r"\s*[(（][A-Z][A-Za-z0-9+.-]{1,11}[)）]\s*$", "", str(value or "")
@@ -404,21 +430,41 @@ def _identity_rows(conn, node_types: list[str] | None = None) -> list[dict]:
     return [_row_dict(row) for row in rows]
 
 
-def _rank_with_embeddings(name: str, context: str, rows: list[dict]) -> tuple[list[dict], str]:
+def _rank_with_embeddings(name: str, context: str, rows: list[dict], *,
+                          embedding_plan=None, embedding_vectors=None) -> tuple[list[dict], str]:
     if not rows:
         return [], "empty_index"
-    query_vectors = _embed_queries([label_text(name), query_semantic_text(name, context)])
-    if query_vectors is None or len(query_vectors) < 2:
-        return [], "embedding_unavailable"
+    queries = [label_text(name), query_semantic_text(name, context)]
     labels = [label_text(row["title"]) for row in rows]
     semantics = [semantic_text(row["title"], row["description"]) for row in rows]
-    cached = _cached_vectors(labels + semantics)
+    planning = embedding_plan is not None and embedding_vectors is None
+    query_vectors = None if planning else (
+        [embedding_vectors[text] for text in queries]
+        if embedding_vectors is not None else _embed_queries(queries)
+    )
+    if not planning and (query_vectors is None or len(query_vectors) < 2):
+        return [], "embedding_unavailable"
+    if embedding_plan is not None and not planning:
+        cached = {text: vector if vector is not None else embedding_vectors[text]
+                  for text, vector in embedding_plan["cached"].items()}
+    else:
+        cached = _cached_vectors(labels + semantics)
+    if planning:
+        embedding_plan["available"].update(queries)
+        cached.update({text: None for text in labels + semantics
+                       if text in embedding_plan["available"] and text not in cached})
     # description 是稀疏可选字段；只为少量尚未缓存的描述视图懒生成，绝不在
     # 一次 Agent 调用中重算全图 title 向量。
     missing_descriptions = list(dict.fromkeys(
         semantic for row, semantic in zip(rows, semantics)
         if row["description"] and semantic not in cached
-    ))[:DESCRIPTION_WARM_LIMIT]
+    ))[:DESCRIPTION_WARM_LIMIT] if planning or embedding_plan is None else []
+    if planning:
+        embedding_plan["texts"].extend(queries + missing_descriptions)
+        embedding_plan["available"].update(missing_descriptions)
+        cached.update({text: None for text in missing_descriptions})
+        embedding_plan["cached"] = cached
+        return [], "embedding_deferred"
     if missing_descriptions:
         generated = _embed_queries(missing_descriptions)
         if generated is not None:
@@ -469,12 +515,21 @@ def resolve_node(
     node_types: list[str] | None = None,
     top_k: int = 5,
     thresholds: dict | None = None,
+    embedding_plan: dict | None = None,
+    embedding_vectors: dict | None = None,
 ) -> dict:
     """解析表述到 canonical node_id；只返回计划，不修改图。"""
     name = str(name or "").strip()
     if not name:
         return {"decision": "invalid", "reason": "empty_name", "candidates": []}
     top_k = max(1, min(int(top_k), MAX_TOP_K))
+    def rank(rows):
+        if embedding_plan is None and embedding_vectors is None:
+            return _rank_with_embeddings(name, context, rows)
+        return _rank_with_embeddings(
+            name, context, rows, embedding_plan=embedding_plan, embedding_vectors=embedding_vectors,
+        )
+
     exact = _exact_candidates(conn, name, node_types)
     exact_path = [candidate for candidate in exact if candidate["node_id"] == name]
     blocked_exact = [
@@ -499,7 +554,7 @@ def resolve_node(
     if len(exact) > 1:
         ranked, mode = ([], "deterministic")
         if context and any(candidate.get("description") for candidate in exact):
-            ranked, mode = _rank_with_embeddings(name, context, exact)
+            ranked, mode = rank(exact)
         if context and len(ranked) >= 1:
             first = ranked[0]
             second_score = ranked[1]["semantic_score"] if len(ranked) > 1 else 0.0
@@ -593,7 +648,7 @@ def resolve_node(
             "candidates": _lexical_rank(name, all_rows, top_k),
             "allowed_actions": ["create_local", "review_later"],
         }
-    ranked, mode = _rank_with_embeddings(name, context, rows)
+    ranked, mode = rank(rows)
     cfg = {**_configured_identity(), **(thresholds or {})}
     candidates = [item for item in ranked if item["combined_score"] >= cfg["candidate_floor"]]
     if candidates:
@@ -630,6 +685,44 @@ def resolve_node(
         "candidates": _lexical_rank(name, all_rows, top_k),
         "allowed_actions": ["create_local", "review_later"],
     }
+
+
+@gl.graph_scoped
+def resolve_nodes(conn, requests: list[dict]) -> list[dict]:
+    """Batch only the vectors requested by the unchanged per-node identity gate."""
+    token = _NAME_VIEW_MEMO.set({})
+    try:
+        return _resolve_nodes(conn, requests)
+    finally:
+        _NAME_VIEW_MEMO.reset(token)
+
+
+def _resolve_nodes(conn, requests: list[dict]) -> list[dict]:
+    if len(requests) < 2:
+        return [resolve_node(conn, **request) for request in requests]
+    texts = []
+    available = set()
+    pending = []
+    results = []
+    for index, request in enumerate(requests):
+        plan = {"texts": texts, "available": available}
+        results.append(resolve_node(conn, **request, embedding_plan=plan))
+        if "cached" in plan:
+            pending.append((index, plan))
+    if not texts:
+        return results
+    unique = list(dict.fromkeys(texts))
+    vectors = _embed_queries(unique)
+    prefetched = (
+        dict(zip(unique, vectors))
+        if vectors is not None and len(vectors) == len(unique) else None
+    )
+    for index, plan in pending:
+        results[index] = resolve_node(
+            conn, **requests[index], embedding_plan=plan if prefetched is not None else None,
+            embedding_vectors=prefetched,
+        )
+    return results
 
 
 @gl.graph_scoped

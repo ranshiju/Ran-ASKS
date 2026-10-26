@@ -335,7 +335,7 @@ def list_hubs(conn, include_legacy: bool = True, subtype: str = "") -> list[HubD
     return [item for item in definitions if item.status not in {"retired", "archived"}]
 
 
-def _embed(texts: list[str]):
+def _embed(texts: list[str], *, strict: bool = False):
     try:
         from embed_helper import embed_cached_batch
         values = embed_cached_batch(texts, cache_type="hub-scope")
@@ -344,6 +344,8 @@ def _embed(texts: list[str]):
             array = array[None, :]
         return array
     except Exception:
+        if strict:
+            raise
         return None
 
 
@@ -1398,6 +1400,43 @@ def analyze_split(conn, hub_path: str) -> dict:
     if len(profiles) < SPLIT_MIN_MEMBERS:
         return {"decision": "no_split", "reason": "insufficient_profiles", "count": len(profiles)}
     vectors = _embed([item.text for item in profiles])
+    return _analyze_split_profiles(conn, hub_path, profiles, vectors)
+
+
+@gl.graph_scoped
+def analyze_splits(conn, hub_paths: Iterable[str]) -> list[dict]:
+    """Batch independent split vectors after the caller's membership boundary."""
+    paths = list(hub_paths)
+    if len(paths) < 2:
+        return [analyze_split(conn, path) for path in paths]
+    profiles_by_hub = [member_profiles(conn, path) for path in paths]
+    texts = list(dict.fromkeys(
+        item.text for profiles in profiles_by_hub if len(profiles) >= SPLIT_MIN_MEMBERS
+        for item in profiles
+    ))
+    vectors_by_text = {}
+    if texts:
+        try:
+            vectors = _embed(texts, strict=True)
+            if vectors is None or len(vectors) != len(texts):
+                raise RuntimeError("split embedding batch is incomplete")
+            vectors_by_text = dict(zip(texts, vectors))
+        except Exception as error:
+            if getattr(error, "status_code", None) not in {401, 403, 429}:
+                return [analyze_split(conn, path) for path in paths]
+    return [
+        _analyze_split_profiles(
+            conn, path, profiles,
+            np.asarray([vectors_by_text[item.text] for item in profiles])
+            if vectors_by_text and len(profiles) >= SPLIT_MIN_MEMBERS else None,
+        )
+        for path, profiles in zip(paths, profiles_by_hub)
+    ]
+
+
+def _analyze_split_profiles(conn, hub_path: str, profiles, vectors) -> dict:
+    if len(profiles) < SPLIT_MIN_MEMBERS:
+        return {"decision": "no_split", "reason": "insufficient_profiles", "count": len(profiles)}
     if vectors is None:
         return {"decision": "no_split", "reason": "embedding_unavailable", "count": len(profiles)}
     units = _unit(vectors)
@@ -1575,11 +1614,8 @@ def dynamics_plan(conn, node_ids: Iterable[str] | None = None,
     apply_report = apply_membership_plan(conn, membership) if apply_membership else {"applied": False}
     hubs = sorted({hub for item in membership.get("nodes", [])
                    for hub in item.get("memberships", [])})
-    split_candidates = []
-    for hub in hubs:
-        result = analyze_split(conn, hub)
-        if result.get("decision") == "agent_definition_required":
-            split_candidates.append(result)
+    split_candidates = [result for result in analyze_splits(conn, hubs)
+                        if result.get("decision") == "agent_definition_required"]
     unassigned = [item["node_id"] for item in membership.get("nodes", [])
                   if item.get("decision") == "unassigned"]
     return {
@@ -1629,11 +1665,8 @@ def refresh_after_ingest(
     membership = plan_memberships(conn, eligible)
     applied = apply_membership_plan(conn, membership)
     hubs = sorted({hub for item in membership.get("nodes", []) for hub in item.get("memberships", [])})
-    splits = []
-    for hub in hubs:
-        candidate = analyze_split(conn, hub)
-        if candidate.get("decision") == "agent_definition_required":
-            splits.append(candidate)
+    splits = [candidate for candidate in analyze_splits(conn, hubs)
+              if candidate.get("decision") == "agent_definition_required"]
     unassigned = [item["node_id"] for item in membership.get("nodes", [])
                   if item.get("decision") == "unassigned"]
     return {
@@ -1910,10 +1943,9 @@ def _eligible_auto_splits(conn, overloaded_hubs: list[dict]) -> tuple[list[dict]
     """Promote stable overload splits to the inbox-tail Agent handoff."""
     eligible = []
     backlog_count = 0
-    for overload in overloaded_hubs:
-        if overload.get("action") != "split_candidate":
-            continue
-        candidate = analyze_split(conn, str(overload.get("hub", "")))
+    targets = [item for item in overloaded_hubs if item.get("action") == "split_candidate"]
+    candidates = analyze_splits(conn, [str(item.get("hub", "")) for item in targets])
+    for overload, candidate in zip(targets, candidates):
         if candidate.get("decision") != "agent_definition_required":
             backlog_count += 1
             continue

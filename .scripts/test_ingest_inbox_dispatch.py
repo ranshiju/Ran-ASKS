@@ -30,6 +30,28 @@ def test_extract_last_json_ignores_domain_status():
     assert parsed["paper_id"] == "p1"
 
 
+def test_result_entry_preserves_top_level_agent_task():
+    task = module.agent_task.make_task(
+        kind="ingest_paper", transaction_id="task-forwarding",
+        inputs=[{"name": "paper", "path": "temp/paper.md"}],
+        outputs=[{"name": "workspace", "path": "temp/workspace.txt"}],
+        protocol={"name": "paper-agent-workspace-v1"},
+        commands={"check": "python3 .scripts/wg.py task check task-forwarding"},
+    )
+    entry = module._result_entry("paper.pdf", "paper", task)
+    assert entry["status"] == "prepared"
+    assert entry["agent_task"] == task
+    nested = module._result_entry("paper.pdf", "paper", {
+        "status": "prepared", "transaction_id": "task-forwarding", "agent_task": task,
+    })
+    assert nested["agent_task"] == task
+    report = {"files": [entry], "total": 1, "backend": "agent", "maintenance": {},
+              **module._report_counts([entry])}
+    compact = module._compact_summary(report, module.REPO / "cross-domain/ingest-reports/test-task.json")
+    assert compact["files"][0]["agent_task"] == task
+    assert compact["items"][0]["agent_task"] == task
+
+
 def test_managed_external_file_staging_and_inbox_boundary():
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory) / "attachment.txt"
@@ -2064,7 +2086,41 @@ def test_maintenance_publication_recounts_current_quality():
                 assert json.loads(report_path.read_text(encoding="utf-8")) == persisted
 
 
+def test_maintenance_recovers_quality_omitted_from_legacy_completed_output():
+    import inbox_state
+
+    for backend in ("agent", "api"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            with patch.object(module, "REPO", root), patch.object(inbox_state, "REPO", root):
+                warning = {"issue": "meeting_entity_unresolved", "mention": "unknown person"}
+                state = {"status": "completed", "transaction_id": "legacy-meeting",
+                         "wiki_path": "academic/wiki/conferences/legacy",
+                         "quality_status": "degraded", "quality_warnings": [warning]}
+                inbox_state.save(state["transaction_id"], state)
+                maintenance = {"status": "completed", "actions": [], "errors": [],
+                               "receipt_path": "temp/inbox-maintenance/quality.json",
+                               "components": {"abbreviations": {
+                                   "status": "completed", "remaining_occurrences": 0}}}
+                module._write_json_atomic(root / maintenance["receipt_path"], maintenance)
+                report = {"total": 1, "backend": backend, "maintenance": maintenance,
+                          "files": [{"file": "legacy.txt", "status": "completed", "ok": True,
+                                     "transaction_id": state["transaction_id"],
+                                     "wiki_path": state["wiki_path"]}]}
+                report_path = root / "cross-domain/ingest-reports/legacy.json"
+                report.update(module._report_counts(report["files"]))
+                assert module.publish_maintenance_report(report_path, report)
+                persisted = json.loads(report_path.read_text())
+                assert persisted["degraded"] == 1
+                assert persisted["files"][0]["quality_warnings"] == [warning]
+                compact = module._compact_summary(persisted, report_path)
+                assert compact["files"][0]["quality_warning_count"] == 1
+                assert compact["files"][0]["quality_warning_history_count"] == 1
+
+
 def main():
+    test_maintenance_recovers_quality_omitted_from_legacy_completed_output()
+    test_result_entry_preserves_top_level_agent_task()
     test_extract_last_json_ignores_domain_status()
     test_managed_external_file_staging_and_inbox_boundary()
     test_managed_external_file_rejects_symlink_target()

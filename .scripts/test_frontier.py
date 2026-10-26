@@ -255,6 +255,58 @@ def test_kb_packet_uses_recall_and_relations():
                 shutil.rmtree(TEMP_REPO_AREA)
 
 
+def test_record_safe_loaders_preserve_history_sources_and_fallback():
+    document = """---
+id: Q-parser
+kind: question
+title: 中文与 Unicode α
+status: captured
+origin_kind: paper_explicit
+kb_state: partial
+scientific_state: unverified
+created_at: 2026-10-25
+updated_at: '2026-10-25T10:00:00+02:00'
+anchors: &anchors
+  raw: ['academic/raw/references/demo/paper.md#L10-L12']
+  wiki: []
+  graph: []
+answer_history:
+  - revision: 1
+    answer: |-
+      第一行
+      second line
+    evidence_scope: *anchors
+    change: {kind: initial, reason: 首次记录}
+optional: null
+---
+
+# Body
+"""
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "record.md"
+        path.write_text(document, encoding="utf-8")
+        expected = frontier.yaml.safe_load(document.split("---\n", 2)[1])
+        parsed, body = frontier.parse_record(path)
+        assert parsed == expected and body == "# Body\n"
+        frontier.validate_record(parsed)
+        fallback = SimpleNamespace(load=frontier.yaml.load, SafeLoader=frontier.yaml.SafeLoader)
+        with patch.object(frontier, "yaml", fallback):
+            assert frontier.parse_record(path) == (parsed, body)
+
+
+def test_record_safe_loader_rejects_object_construction_and_malformed_yaml():
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "record.md"
+        for text in ("object: !!python/object:builtins.object {}", "history: [unclosed"):
+            path.write_text(f"---\n{text}\n---\n", encoding="utf-8")
+            try:
+                frontier.parse_record(path)
+            except frontier.yaml.YAMLError:
+                pass
+            else:
+                raise AssertionError("Unsafe or malformed YAML must be rejected")
+
+
 def test_fact_locator_normalizes_legacy_path_and_bad_anchor():
     if TEMP_REPO_AREA.exists():
         shutil.rmtree(TEMP_REPO_AREA)
@@ -661,7 +713,8 @@ def test_capture_related_question_never_marks_stale_or_auto_answers_it():
             frontier.answer_question = lambda _root, record_id, _topk: (
                 calls.append(record_id) or {"id": record_id, "status": "pending"})
             output = io.StringIO()
-            with contextlib.redirect_stdout(output):
+            with contextlib.redirect_stdout(output), \
+                    patch.object(frontier.agent_task, "query_backend", return_value="agent"):
                 frontier.cmd_capture_paper(SimpleNamespace(root=str(root), page=str(wiki), limit=3,
                                                           topk=6, no_answer=False))
             result = json.loads(output.getvalue())
@@ -982,6 +1035,107 @@ def test_frontier_api_calls_keep_transaction_identity():
         frontier.run_answer(packet(), transaction_id="ingest-parent")
     assert [call["transaction_id"] for call in calls] == ["ingest-parent", "ingest-parent"]
     assert [call["operation"] for call in calls] == ["frontier_assess", "frontier_answer"]
+
+
+def test_capture_answers_parallelize_only_generation_and_keep_serial_validation():
+    import threading
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        records = [frontier.new_question(f"question {index}", "user_proposed", packet())
+                   for index in range(3)]
+        for record in records:
+            frontier.write_record(root, record)
+        main_thread = threading.get_ident()
+        barrier = threading.Barrier(3, timeout=5)
+        transactions = []
+        original_write = frontier.write_record
+
+        def generate(evidence_packet, **kwargs):
+            assert threading.get_ident() != main_thread
+            transactions.append(kwargs["transaction_id"])
+            barrier.wait()
+            return {"ok": True, "parsed": good_answer()}
+
+        def write(*args, **kwargs):
+            assert threading.get_ident() == main_thread
+            return original_write(*args, **kwargs)
+
+        with patch.object(frontier.agent_task, "query_backend", return_value="api"), \
+                patch.object(frontier, "build_kb_packet", side_effect=lambda *args, **kwargs: packet()), \
+                patch.object(frontier, "run_answer", side_effect=generate), \
+                patch.object(frontier, "write_record", side_effect=write):
+            attempts = frontier.capture_answer_attempts(root, [item["id"] for item in records], 6, "parent")
+        assert [item["id"] for item in attempts] == [item["id"] for item in records]
+        assert all(item["status"] == "completed" for item in attempts), attempts
+        assert transactions == ["parent"] * 3
+        for record in records:
+            saved, _ = frontier.find_record(root, record["id"])
+            assert len(saved["answer_history"]) == 1
+
+
+def test_capture_parallel_answers_keep_invalid_evidence_pending():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        records = [frontier.new_question(f"question {index}", "user_proposed", packet())
+                   for index in range(2)]
+        for record in records:
+            frontier.write_record(root, record)
+        invalid = good_answer(supported_claims=[{"claim": "invented", "evidence": ["raw/invented.md#L1"]}])
+        with patch.object(frontier.agent_task, "query_backend", return_value="api"), \
+                patch.object(frontier, "build_kb_packet", side_effect=lambda *args, **kwargs: packet()), \
+                patch.object(frontier, "run_answer", return_value={"ok": True, "parsed": invalid}):
+            attempts = frontier.capture_answer_attempts(root, [item["id"] for item in records], 6)
+        assert all(item["status"] == "pending" for item in attempts)
+        for record in records:
+            saved, _ = frontier.find_record(root, record["id"])
+            assert not saved.get("answer_history")
+
+
+def test_capture_agent_answers_preserve_host_control_loop():
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(frontier.agent_task, "query_backend", return_value="agent"), \
+                patch.object(frontier, "run_answer", side_effect=AssertionError("API must not run")), \
+                patch.object(frontier, "answer_question", return_value={"status": "prepared"}) as answer:
+            attempts = frontier.capture_answer_attempts(Path(directory), ["Q-one", "Q-two"], 6, "parent")
+        assert len(attempts) == 2 and answer.call_count == 2
+
+
+def test_capture_api_worker_limit_can_keep_generation_serial():
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(frontier.agent_task, "query_backend", return_value="api"), \
+                patch.object(frontier, "ThreadPoolExecutor", side_effect=AssertionError("must stay serial")), \
+                patch.object(frontier, "answer_question", return_value={"status": "completed"}) as answer:
+            attempts = frontier.capture_answer_attempts(
+                Path(directory), ["Q-one", "Q-two"], 6, "parent", workers=1,
+            )
+        assert len(attempts) == 2 and answer.call_count == 2
+
+
+def test_capture_parallel_generation_does_not_overwrite_a_changed_question():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        records = [frontier.new_question(f"question {index}", "user_proposed", packet())
+                   for index in range(2)]
+        for record in records:
+            frontier.write_record(root, record)
+        original_find = frontier.find_record
+        read_count = 0
+
+        def find(*args, **kwargs):
+            nonlocal read_count
+            read_count += 1
+            record, path = original_find(*args, **kwargs)
+            if read_count > 2:
+                record["question"] += " changed"
+            return record, path
+
+        with patch.object(frontier.agent_task, "query_backend", return_value="api"), \
+                patch.object(frontier, "build_kb_packet", side_effect=lambda *args, **kwargs: packet()), \
+                patch.object(frontier, "find_record", side_effect=find), \
+                patch.object(frontier, "run_answer", return_value={"ok": True, "parsed": good_answer()}), \
+                patch.object(frontier, "write_record", side_effect=AssertionError("stale generation must not write")):
+            attempts = frontier.capture_answer_attempts(root, [item["id"] for item in records], 6)
+        assert all(item["reason"] == "question_changed_during_generation" for item in attempts)
 
 
 def test_capture_paper_passes_parent_transaction_to_answer():

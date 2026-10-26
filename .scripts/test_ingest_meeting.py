@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 import shutil
 import sys
@@ -563,6 +565,8 @@ def test_prompt_requires_one_coherent_protocol():
     assert "person_updates" in prompt
     assert "已有学生研究记录目录" in prompt
     assert "避免重复叙述" in prompt
+    assert "不为双语格式猜测或补造全称" in prompt
+    assert "不把待确认身份写成同一人" in prompt
 
 
 def test_person_updates_are_projected_into_cited_meeting_navigation():
@@ -1022,7 +1026,62 @@ def test_body_source_rebinding_survives_title_change_in_both_backends():
             shutil.rmtree(work)
 
 
+def test_completed_meeting_output_preserves_current_and_historical_quality():
+    warning = {"issue": "meeting_entity_unresolved", "mention": "unknown person"}
+    state = {"status": "completed", "transaction_id": "quality-test",
+             "quality_status": "degraded", "quality_warnings": [warning],
+             "quality_warning_history": [warning]}
+    output = io.StringIO()
+    with patch.object(sys, "argv", ["ingest_meeting.py", "--resume", "quality-test", "--verbose"]), \
+            patch.object(meeting.inbox_state, "load", return_value=state), \
+            patch.object(meeting, "run_pipeline", return_value=state), \
+            patch.object(meeting.ic, "run_resume_post_maintenance", return_value=None), \
+            redirect_stdout(output):
+        meeting.main()
+    result = json.loads(output.getvalue())
+    assert result["quality_status"] == "degraded"
+    assert result["quality_warnings"] == [warning]
+    assert result["quality_warning_history"] == [warning]
+
+
+def test_meeting_term_acronyms_require_their_own_cited_source():
+    proposal = _proposal()
+    meeting_ir = proposal["meeting_ir"]
+    catalog = [{"evidence_id": "s0001", "text": "使用 tbd 讨论动力学。"},
+               {"evidence_id": "s0002", "text": "另一个独立议题 TTD。"}]
+    meeting_ir["topics"][0]["label"] = "TBD 动力学"
+    assert meeting.validate_meeting_ir(meeting_ir, {"s0001", "s0002"}, evidence_catalog=catalog) == []
+    catalog[0]["text"] = "使用 ｔｂｄ 讨论动力学。"
+    assert meeting.validate_meeting_ir(meeting_ir, {"s0001", "s0002"}, evidence_catalog=catalog) == []
+    meeting_ir["topics"][0]["label"] = "TBD 动力学 (Transfer tensor dynamics, TTD)"
+    errors = meeting.validate_meeting_ir(meeting_ir, {"s0001", "s0002"}, evidence_catalog=catalog)
+    assert len(errors) == 1 and "unsupported acronym 'TTD'" in errors[0]
+    meeting_ir["topics"][0]["evidence_ids"].append("s0002")
+    assert meeting.validate_meeting_ir(meeting_ir, {"s0001", "s0002"}, evidence_catalog=catalog) == []
+
+
+def test_unsupported_acronym_is_rejected_before_meeting_staging():
+    work = _workspace()
+    try:
+        state = _state(work)
+        proposal = _proposal()
+        proposal["meeting_ir"]["topics"][0]["label"] = "知识库 (Invented project, XYZ)"
+        result = SimpleNamespace(status="compiled", reason="proposal_ready", proposal=proposal,
+                                 trace=lambda: {"status": "compiled"})
+        with patch.object(meeting, "ingest_mode", return_value="api"), \
+                patch.object(meeting, "run_api_meeting_compiler", return_value=result) as runner:
+            ok, error = meeting.step_write_wiki(state)
+        assert not ok and "unsupported acronym 'XYZ'" in error
+        assert runner.call_count == 1
+        assert not (work / "corrected.txt").exists()
+    finally:
+        shutil.rmtree(work)
+
+
 def main():
+    test_completed_meeting_output_preserves_current_and_historical_quality()
+    test_meeting_term_acronyms_require_their_own_cited_source()
+    test_unsupported_acronym_is_rejected_before_meeting_staging()
     test_body_source_rebinding_survives_title_change_in_both_backends()
     test_unresolved_roles_preserve_wiki_without_global_identity()
     test_source_binding_rebases_only_transaction_footnotes()

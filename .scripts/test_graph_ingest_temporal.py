@@ -509,6 +509,73 @@ def test_derived_concept_use_records_origin_and_survives_creator_cleanup():
     conn.close()
 
 
+def test_proposition_alignment_shares_only_required_paper_route_texts():
+    from types import SimpleNamespace
+    import embed_helper
+
+    conn = make_db()
+    gl.ensure_node(conn, "old-merge", "Old merge", "entity", entity_subtype="proposition")
+    gl.ensure_node(conn, "old-link", "Old link", "entity", entity_subtype="proposition")
+    page = "academic/wiki/papers/demo"
+    triples = [
+        {"subject": page, "predicate": "核心创新点", "object": "New merge"},
+        {"subject": page, "predicate": "局限性", "object": "New link"},
+    ]
+    profile = SimpleNamespace(text="Direction profile")
+    hubs = [SimpleNamespace(scope="First scope"), SimpleNamespace(scope="Second scope")]
+    with patch.object(module.hs, "read_paper_profile", return_value=profile) as reader, \
+            patch.object(module.hs, "list_hubs", return_value=hubs), \
+            patch.object(embed_helper, "match_by_embedding", return_value={
+                "New merge": ("Old merge", 0.99), "New link": ("Old link", 0.95),
+            }) as match:
+        result = module._align_propositions(triples, conn, page, route_page_file=Path("temp/wiki.md"))
+        reader.assert_called_once_with(Path("temp/wiki.md"))
+        assert match.call_args.kwargs == {
+            "threshold": 0.9,
+            "extra_texts": ["Direction profile", "First scope", "Second scope"],
+        }
+        assert result["merged"] == 1 and result["linked"] == 1
+        assert triples[0]["object"] == "Old merge"
+        assert triples[-1]["subject"] == "New link" and triples[-1]["object"] == "Old link"
+    with patch.object(module.hs, "read_paper_profile") as reader, \
+            patch.object(embed_helper, "match_by_embedding", return_value={}) as match:
+        module._align_propositions(triples, conn, page)
+        assert not reader.called
+        assert match.call_args.kwargs["extra_texts"] == []
+        module._align_propositions([], conn, page, route_page_file=Path("temp/wiki.md"))
+        assert not reader.called
+    with patch.object(module.hs, "read_paper_profile", return_value=None), \
+            patch.object(module.hs, "list_hubs") as hubs, \
+            patch.object(embed_helper, "match_by_embedding", return_value={}) as match:
+        module._align_propositions(triples, conn, page, route_page_file=Path("temp/wiki.md"))
+        assert not hubs.called
+        assert match.call_args.kwargs["extra_texts"] == []
+    conn.close()
+
+
+def test_sparse_surface_reuse_preserves_boundaries_and_confirmed_candidates():
+    confirmed = {
+        "矩阵乘积态matrix product state(MPS)": "mps",
+        "shared": "confirmed-shared",
+    }
+    existing = {"MPS": "mps", "C++": "cpp", "shared": "existing-shared", "单": "single", "café": "accent"}
+    cases = [
+        ("mPs and C++", {"mps", "cpp"}),
+        ("XMPS MPS2 C+++", {"cpp"}),
+        ("采用矩阵乘积态进行计算", {"mps"}),
+        ("matrix product state with MPS_extra", {"mps"}),
+        ("shared", {"confirmed-shared", "existing-shared"}),
+        ("CAFÉ 单", set()),
+        ("café", {"accent"}),
+    ]
+    surface_patterns = {}
+    for text, expected in cases:
+        assert module._sparse_proposition_targets(text, confirmed, existing) == expected
+        assert module._sparse_proposition_targets(
+            text, confirmed, existing, surface_patterns=surface_patterns,
+        ) == expected
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
     for test in tests:

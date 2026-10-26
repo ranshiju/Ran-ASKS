@@ -19,6 +19,13 @@ import env_config
 EMBED_DB = None  # embeddings 独立 db 路径(由 embed_init 设置)
 _OFFLINE = ContextVar("embedding_offline", default=False)
 
+
+class EmbeddingAPIError(RuntimeError):
+    def __init__(self, message, *, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 @contextmanager
 def offline():
     """Explicit local-only operation: no provider calls or cache mutations."""
@@ -149,6 +156,7 @@ def embed_batch(texts, batch_size=64, timeout=60):
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i+batch_size]
         last_err = None
+        last_status = None
         for attempt in range(2):
             req = urllib.request.Request(
                 _embedding_endpoint(),
@@ -163,11 +171,15 @@ def embed_batch(texts, batch_size=64, timeout=60):
                 break
             except Exception as e:
                 last_err = _provider_error_detail(e)
+                last_status = getattr(e, "code", None)
                 if attempt == 0:
                     print(f"[embed_batch] batch {i} fail: {e}, 重试一次...", file=sys.stderr)
                     time.sleep(1)
         if last_err is not None:
-            raise RuntimeError(f"embed_batch 批次 {i}（{len(batch)} 条）API 两次均失败: {last_err}")
+            raise EmbeddingAPIError(
+                f"embed_batch 批次 {i}（{len(batch)} 条）API 两次均失败: {last_err}",
+                status_code=last_status,
+            )
     return np.array(all_embs)
 
 
@@ -372,20 +384,31 @@ if __name__ == "__main__":
     print(f"  采中: {[f'{names[i]}={probs[i]:.3f}' for i in picked]}")
 
 
-def match_by_embedding(new_texts, existing_texts, threshold=0.9):
+def match_by_embedding(new_texts, existing_texts, threshold=0.9, *, extra_texts=()):
     """通用 embedding 匹配：新文本批量对比已有文本，返回超阈值的配对。
 
     统一对齐框架的基础设施：keyword/proposition/people 等所有颗粒度的
     节点对齐都经此函数做 embedding 相似度匹配。
 
     返回 {new_text: (existing_text, cosine_score)} 仅含命中(>=threshold)的。
+    extra_texts 仅预热 caller 后续必需的文本，不参与当前候选或评分；失败回退原请求，401/403/429 保留失败。
     """
     if not new_texts or not existing_texts:
         return {}
     new_texts = list(dict.fromkeys(new_texts))
     existing_texts = list(dict.fromkeys(existing_texts))
     all_texts = new_texts + existing_texts
-    vecs = embed_cached_batch(all_texts)
+    required = set(all_texts)
+    additional = [text for text in dict.fromkeys(extra_texts) if text not in required]
+    if additional:
+        try:
+            vecs = embed_cached_batch(all_texts + additional)[:len(all_texts)]
+        except Exception as error:
+            if isinstance(error, EmbeddingAPIError) and error.status_code in {401, 403, 429}:
+                raise
+            vecs = embed_cached_batch(all_texts)
+    else:
+        vecs = embed_cached_batch(all_texts)
     if vecs.ndim == 1:
         vecs = vecs[None, :]
     new_vecs = vecs[:len(new_texts)]

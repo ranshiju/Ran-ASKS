@@ -100,7 +100,7 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
 3. **一个 specialist 一次理解全文**：程序先把 Raw 非空行编成稳定的 `sNNNN` evidence catalog，并列出 `projects/学生指导/students/` 中已有研究记录；`dsh/meeting_compiler_agent.py` 接收只读原文、证据目录、人物候选、学生记录候选、程序生成的 meeting ID/目标 sources 和 validator 错误，在同一上下文中返回 `meeting-compiler-v3`：
    - `<<<PREPROCESS>>>`：仅包含原文精确片段替换和人物 resolved/unchanged/unresolved 决策；证据不足必须 unresolved。
    - `<<<WIKI>>>`：conference-summary Wiki 草稿，Navigation 和 Content 保留研究问题、关键观察、方法限制与未决矛盾，不重复结构化清单；来源限制简明表述，不挤占研究背景。
-   - `<<<MEETING_IR>>>`：顶层固定 `protocol_version: meeting-compiler-v3`，以及参会者、议题、汇报、决策、待办、受限扩展关系和 `person_updates`；每项必须引用 evidence ID。`person_updates` 只能指向候选目录中的已有学生记录，类别限进展、下一步、阻塞、决定、里程碑与方向变化。
+   - `<<<MEETING_IR>>>`：顶层固定 `protocol_version: meeting-compiler-v3`，以及参会者、议题、汇报、决策、待办、受限扩展关系和 `person_updates`；每项必须引用 evidence ID。学术术语保留原文有依据的名称，不为双语格式猜测英文全称或替换缩写；topics/reports/relations 的大写缩写须可在该项引用的原文中定位，常规摄入与受管修复共用此校验。`person_updates` 只能指向候选目录中的已有学生记录，类别限进展、下一步、阻塞、决定、里程碑与方向变化。
    - Agent task 的 `protocol.template` 提供可由共享 parser 解析的完整语法骨架：META 使用逐行 `key: value`，PREPROCESS/MEETING_IR 使用 JSON，Wiki 含当前 frontmatter 与必需标题。`meeting_ir.fields/template` 与 validator 共用字段定义；Agent 根据原文填充叙事与有证据的记录，不能把空骨架当作语义完成，不通过静默补字段容忍非法输出。
 4. **程序编译派生物**：所有 replacement 必须命中原文，按一次非级联替换生成 staged `corrected.txt`；候选目录与 specialist 决策合并为 `entity-resolution.json`。程序从同一 MEETING_IR 确定性生成 `## Content` 内的 `### 会议导航`、`学生指导更新` 证据块与 semantic slots，使默认 `read-section #content` 能直接返回精确 Raw 引用。人物未解析不删除角色事实：attendees/reports 的 person、tasks 的 assignee 使用空串，原称呼与明确动作仍带证据投影到 Wiki，仅已解析人物角色进入 Graph，不以网名创建全局身份。概念保持全局可解析，决策和待办生成页面作用域 proposition/task，不进入全局 keyword 池；`decisions` 只允许最终仍有效的决定，禁止把已否定提案与后续纠正合并成同一决策。重叠、重复、无命中、无证据、相互冲突的决策或协议不完整均拒绝，不静默降级。
 5. **产物与导航校验**：MEETING_IR、Wiki、semantic、knowledge IR 和 graph plan 逐层校验集合一致；typed Meeting Compiler 核心语义边必须 100% 具备 Wiki section locator，并经脚注抵达精确 Raw 行号。任一硬错误带精确错误回到同一个 Meeting Compiler 做一次定向修订；warning 继续走局部确定性修复。
@@ -273,6 +273,7 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
 
 **用脚本截取**:`.scripts/read_paper.py <paper.md路径> [sections...]`
 - 默认截 6 段(abstract/introduction/method/results/discussion/conclusions),模糊匹配标题写法(罗马数字/编号/中英文)
+- 识别二至六级 Markdown 标题；短父节合并实际层级子节及罗马数字父节下的字母子节，保留原始行号，避免同名附录取代主文。API 长文上下文在原有总预算内补入明确概率、充分条件与适用范围的完整来源行，并保留预算内可完整容纳的首段摘要；这些只是取证候选，不替代逐项条件核对。
 - 一次调用替代多次 grep+sed,省工具调用;报告命中/未命中(防漏读)。`A B S T R A C T`、`C O N C L U S I O N S` 等全大写单字母间隔标题仅在折叠后命中已知 section 名时参与匹配，输出仍保留原始标题和行位置。Abstract 无 `##` 时只接受可机械识别的 preamble 摘要边界；没有边界即报告 missing，不得把标题、作者或机构地址冒充摘要
 - stderr 输出诊断(命中哪些/未命中哪些/合计 token),stdout 只输出 section 正文
 - **禁止 `sed -n '1,Np'` 头部切片冒充定向读取**——头部切片靠"论文核心前装"运气,长综述(如 RMP/AIP 综述,正文数百节)会漏掉方法/结果段,产生无 raw 证据的论断(违反可追溯原则)
@@ -826,7 +827,7 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 
 ### 受限结构化输出契约（v9）
 
-**Agent 论文交接与验收（2026-10-12）**：`paper-agent-workspace-task-v6` 保持原产物协议，书目 task 直接列出共享 schema 的合法枚举及空字段的 `ambiguous` 状态；schema 失败按字段返回实际非法值、合法集合与局部修复范围。语义协议直接声明独立成行的 `三元组:`、`概念说明:` 标题、pipe 字段格式与可解析示例；Wiki 协议给出 `[^r1]: raw/path.md#Lx[-Ly]` 脚注示例，并与 API adapter 共享定义、符号、条件和比较基准逐项回溯的要求。结构校验不替代事实核对。`agent-paper-reading-v2` 提供单节命令，协议一次读取复用，长文按具体证据缺口渐进读取。`--agent-commit` 返回状态、质量问题、Graph 与维护摘要、完整 state/report 地址；详细 Graph 计划和 validator 哈希仍在原事务中，按需读取，不重复展开大型 JSON。API 预算与事实证据门不变。
+**Agent 论文交接与验收（2026-10-12）**：`paper-agent-workspace-task-v6` 保持原产物协议，书目 task 直接列出共享 schema 的合法枚举及空字段的 `ambiguous` 状态；schema 失败按字段返回实际非法值、合法集合与局部修复范围。语义协议直接声明独立成行的 `三元组:`、`概念说明:` 标题、pipe 字段格式与可解析示例；Wiki 协议给出 `[^r1]: raw/path.md#Lx[-Ly]` 脚注示例，并与 API adapter 共享定义、符号、条件和比较基准逐项回溯的要求。结构校验不替代事实核对。`agent-paper-reading-v3` 为全文和章节提供原始来源行号，长文一次读取已明确需要的多个章节，再按具体证据缺口补读；非连续子节不得重编号，证据预算与覆盖责任不变，协议一次读取复用。`--agent-commit` 返回状态、质量问题、Graph 与维护摘要、完整 state/report 地址；详细 Graph 计划和 validator 哈希仍在原事务中，按需读取，不重复展开大型 JSON。API 预算与事实证据门不变。
 
 结构化语义任务按后端进入不同 adapter。Query 由 `QUERY_BACKEND=agent|api` 控制，ingest 由 `INGEST_BACKEND=agent|api` 控制，均默认 `agent`。Agent 后端通过 `agent-task-v1` 或其专用 workspace 把受限任务交给当前宿主 Agent；程序物化并校验结果。API 后端通过 `.scripts/llm_structured.py` 调用外部 `LLM_MODEL`，复杂任务可由 DSH、worker 或 sub-agent 组织执行。两后端共用 schema、证据、状态机、机械编译器和提交边界；语义执行主体负责语义质量，确定性内核独立决定结果能否提交。
 

@@ -553,6 +553,42 @@ def test_inline_raw_citation_reuse_preserves_prose_and_protected_markup():
     assert definitions == {"r1": address, "r2": longer}
     duplicate = text + f"[^r1]: {unknown}\n"
     assert module.wl.normalize_raw_footnotes(duplicate, reuse_inline=True) == duplicate
+    promoted = module.wl.normalize_raw_footnotes(
+        text, reuse_inline=True, supplied_locators=(unknown,),
+    )
+    assert f"未知地址 [^r3]" in promoted
+    assert f"[^r3]: {unknown}" in promoted
+    assert module.wl.normalize_raw_footnotes(
+        promoted, reuse_inline=True, supplied_locators=(unknown,),
+    ) == promoted
+    assert module.wl.normalize_raw_footnotes(
+        duplicate, reuse_inline=True, supplied_locators=(unknown,),
+    ) == duplicate
+    unprovided = text.replace(f"[^r2]: {longer}\n", "")
+    converted = module.wl.normalize_raw_footnotes(
+        unprovided, reuse_inline=True, supplied_locators=(unknown,),
+    )
+    assert f"保留条件 {longer}" in converted
+    missing_sources = f"## Content\n\n引用 {unknown}。\n"
+    assert module.wl.normalize_raw_footnotes(
+        missing_sources, reuse_inline=True, supplied_locators=(unknown,),
+    ) == missing_sources
+    duplicate_sources = text + "\n## Sources\n"
+    assert "[^r3]:" not in module.wl.normalize_raw_footnotes(
+        duplicate_sources, reuse_inline=True, supplied_locators=(unknown,),
+    )
+    reserved = f"## Content\n\n未定义 [^r1]，精确地址 {unknown}。\n\n## Sources\n"
+    assigned = module.wl.normalize_raw_footnotes(
+        reserved, reuse_inline=True, supplied_locators=(unknown,),
+    )
+    assert f"[^r2]: {unknown}" in assigned
+    assert "未定义 [^r1]" in assigned
+    with_code = reserved + "\n```text\n## Sample\n```\n\n## Tail\nTail prose.\n"
+    assigned_code = module.wl.normalize_raw_footnotes(
+        with_code, reuse_inline=True, supplied_locators=(unknown,),
+    )
+    assert assigned_code.index(f"[^r2]: {unknown}") > assigned_code.index("## Sample")
+    assert assigned_code.index(f"[^r2]: {unknown}") < assigned_code.index("## Tail")
 
 
 def test_raw_footnote_wrappers_preserve_evidence_and_query_locators():

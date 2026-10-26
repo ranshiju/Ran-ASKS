@@ -7,6 +7,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -1339,6 +1340,141 @@ def test_refresh_after_ingest_skips_non_academic_pages_before_graph_scan():
     assert report["membership"]["decision"] == "skipped_non_academic"
     assert report["new_hubs"]["decision"] == "skipped_non_academic"
     assert report["membership_apply"]["applied"] is False
+
+
+def split_fixture():
+    count = max(6, hs.SPLIT_MIN_MEMBERS)
+    count += count % 2
+    first = [hs.NodeProfile(f"left-{index}", "keyword", f"topic-{index}")
+             for index in range(count)]
+    second = [hs.DirectionProfile(f"paper-{index}", f"paper-{index}#profile",
+                                  f"topic-{index}", ("raw/paper.md#L10",))
+              for index in reversed(range(count))]
+    groups = {"left": first, "right": second, "small": first[:hs.SPLIT_MIN_MEMBERS - 1]}
+
+    def vectors(texts, **_kwargs):
+        return np.asarray([[1.0, 0.0] if int(text.split("-")[-1]) < count // 2
+                           else [0.0, 1.0] for text in texts], dtype=np.float32)
+
+    return groups, vectors
+
+
+def test_split_batch_preserves_complete_typed_candidates_and_order():
+    conn = make_db()
+    groups, vectors = split_fixture()
+    calls = []
+
+    def embed(texts, **kwargs):
+        calls.append(list(texts))
+        return vectors(texts)
+
+    with patch.object(hs, "member_profiles", side_effect=lambda _conn, path: groups[path]), \
+            patch.object(hs, "read_hub_scope", return_value="研究不同主题的对象与方法。"), \
+            patch.object(hs, "_embed", side_effect=embed):
+        paths = ["right", "small", "left"]
+        serial = [hs.analyze_split(conn, path) for path in paths]
+        assert len(calls) == 2
+        calls.clear()
+        batched = hs.analyze_splits(conn, paths)
+    assert batched == serial
+    assert len(calls) == 1
+    assert calls[0] == [item.text for item in groups["right"]]
+    assert batched[0]["decision"] == "agent_definition_required"
+    assert batched[1]["reason"] == "insufficient_profiles"
+
+
+def test_split_batch_empty_single_and_insufficient_do_not_add_requests():
+    conn = make_db()
+    groups, vectors = split_fixture()
+    with patch.object(hs, "member_profiles", side_effect=lambda _conn, path: groups[path]) as members, \
+            patch.object(hs, "read_hub_scope", return_value="研究不同主题的对象与方法。"), \
+            patch.object(hs, "_embed", side_effect=vectors) as embed:
+        assert hs.analyze_splits(conn, []) == []
+        assert not members.called and not embed.called
+        result = hs.analyze_splits(conn, ["small", "small"])
+        assert all(item["reason"] == "insufficient_profiles" for item in result)
+        assert not embed.called
+        single = hs.analyze_splits(conn, ["left"])
+        assert single[0]["decision"] == "agent_definition_required"
+        assert embed.call_count == 1
+        assert embed.call_args.kwargs == {}
+
+
+def test_split_batch_transient_failure_or_incomplete_result_replays_original_calls():
+    conn = make_db()
+    groups, vectors = split_fixture()
+    for failure in [RuntimeError("temporary"), None, np.zeros((1, 2))]:
+        calls = []
+
+        def embed(texts, *, strict=False):
+            calls.append((list(texts), strict))
+            if strict:
+                if isinstance(failure, Exception):
+                    raise failure
+                return failure
+            return vectors(texts)
+
+        with patch.object(hs, "member_profiles", side_effect=lambda _conn, path: groups[path]), \
+                patch.object(hs, "read_hub_scope", return_value="研究不同主题的对象与方法。"), \
+                patch.object(hs, "_embed", side_effect=embed):
+            expected = [hs.analyze_split(conn, path) for path in ["left", "right"]]
+            calls.clear()
+            actual = hs.analyze_splits(conn, ["left", "right"])
+        assert actual == expected
+        assert [strict for _texts, strict in calls] == [True, False, False]
+
+
+def test_split_batch_explicit_provider_rejection_does_not_retry_each_hub():
+    from embed_helper import EmbeddingAPIError
+    conn = make_db()
+    groups, _vectors = split_fixture()
+    for status in [401, 403, 429]:
+        with patch.object(hs, "member_profiles", side_effect=lambda _conn, path: groups[path]), \
+                patch.object(hs, "_embed", side_effect=EmbeddingAPIError("rejected", status_code=status)) as embed:
+            results = hs.analyze_splits(conn, ["left", "small", "right"])
+        assert embed.call_count == 1
+        assert [item["reason"] for item in results] == [
+            "embedding_unavailable", "insufficient_profiles", "embedding_unavailable",
+        ]
+
+
+def test_embed_strict_preserves_typed_failure_and_default_soft_state():
+    from embed_helper import EmbeddingAPIError
+    error = EmbeddingAPIError("rejected", status_code=429)
+    with patch("embed_helper.embed_cached_batch", side_effect=error):
+        assert hs._embed(["text"]) is None
+        try:
+            hs._embed(["text"], strict=True)
+        except EmbeddingAPIError as actual:
+            assert actual is error
+        else:
+            raise AssertionError("strict embedding must retain the provider failure")
+
+
+def test_split_batch_preparation_runs_after_membership_apply():
+    conn = make_db()
+    groups, vectors = split_fixture()
+    events = []
+    plan = {"nodes": [{"node_id": "example", "memberships": ["right", "left"]}]}
+
+    def apply(_conn, _plan):
+        events.append("applied")
+        return {"applied": True}
+
+    def profiles(_conn, path):
+        assert events == ["applied"]
+        return groups[path]
+
+    with patch.object(hs, "plan_memberships", return_value=plan), \
+            patch.object(hs, "apply_membership_plan", side_effect=apply), \
+            patch.object(hs, "member_profiles", side_effect=profiles), \
+            patch.object(hs, "_embed", side_effect=vectors), \
+            patch.object(hs, "read_hub_scope", return_value="研究不同主题的对象与方法。"), \
+            patch.object(hs, "analyze_new_hubs", return_value={}), \
+            patch.object(hs, "_check_hub_overload", return_value=[]):
+        result = hs.refresh_after_ingest(conn, "academic/wiki/papers/example", affected_nodes=[])
+    assert result["membership_apply"]["applied"]
+    assert [item["hub"] for item in result["splits"]] == ["left", "right"]
 
 
 def main():

@@ -1625,7 +1625,7 @@ def assign_keyword_hubs(conn, keywords, direction_predicates, page_path):
 
 
 
-def _align_propositions(sem_triples, conn, page_path):
+def _align_propositions(sem_triples, conn, page_path, *, route_page_file=None):
     """proposition 对齐（统一对齐框架覆盖 proposition 颗粒度）。
 
     双阈值梯度（比 keyword 更保守，因误合并会污染事实层）：
@@ -1658,7 +1658,16 @@ def _align_propositions(sem_triples, conn, page_path):
     except Exception:
         return {"merged": 0, "linked": 0, "mapping": {}}
     # 先用低阈值(0.9)找出所有候选，再按分数分档
-    matches = match_by_embedding(new_props, existing_props, threshold=0.9)
+    extra_texts = []
+    if route_page_file is not None:
+        profile = hs.read_paper_profile(route_page_file)
+        if profile is not None:
+            hubs = hs.list_hubs(conn, subtype="research-direction")
+            if hubs:
+                extra_texts = [profile.text.strip(), *[hub.scope for hub in hubs]]
+    matches = match_by_embedding(
+        new_props, existing_props, threshold=0.9, extra_texts=extra_texts,
+    )
     if not matches:
         return {"merged": 0, "linked": 0, "mapping": {}}
     merge_map = {}   # new -> existing (>0.98 合并)
@@ -2075,16 +2084,22 @@ def _revisit_bare_abbreviations(warns, conn, title_idx, alias_idx, suffix_idx):
     return out
 
 
-def _surface_occurs(text, surface):
+def _surface_occurs(text, surface, *, surface_patterns=None):
     """精确检查概念 surface 是否出现在命题中；ASCII 使用词边界。"""
     surface = (surface or "").strip()
     if not surface or len(surface) < 2:
         return False
-    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .+_\-/]*", surface):
-        return re.search(
-            rf"(?<![A-Za-z0-9]){re.escape(surface)}(?![A-Za-z0-9])", text,
-            flags=re.IGNORECASE,
-        ) is not None
+    if surface_patterns is not None and surface in surface_patterns:
+        pattern = surface_patterns[surface]
+    else:
+        pattern = (
+            re.compile(rf"(?<![A-Za-z0-9]){re.escape(surface)}(?![A-Za-z0-9])", re.IGNORECASE)
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .+_\-/]*", surface) else None
+        )
+        if surface_patterns is not None:
+            surface_patterns[surface] = pattern
+    if pattern is not None:
+        return pattern.search(text) is not None
     return surface in text
 
 
@@ -2112,15 +2127,17 @@ def _existing_concept_surface_index(conn):
     }
 
 
-def _sparse_proposition_targets(prop_text, confirmed_concepts, existing_surfaces):
+def _sparse_proposition_targets(
+    prop_text, confirmed_concepts, existing_surfaces, *, surface_patterns=None,
+):
     """确定性找 proposition 的概念目标，不创建新节点、不返回歧义候选。"""
     targets = set()
     for name, node_path in confirmed_concepts.items():
         surfaces = [name, *gl.decompose_name_to_aliases(name)]
-        if any(_surface_occurs(prop_text, surface) for surface in surfaces):
+        if any(_surface_occurs(prop_text, surface, surface_patterns=surface_patterns) for surface in surfaces):
             targets.add(node_path)
     for surface, node_path in existing_surfaces.items():
-        if _surface_occurs(prop_text, surface):
+        if _surface_occurs(prop_text, surface, surface_patterns=surface_patterns):
             targets.add(node_path)
     return targets
 
@@ -2450,9 +2467,11 @@ def add_knowledge_edges(
         for name in confirmed_concept_names
         if name in concept_map and gl.node_exists(conn, concept_map[name])
     }
+    surface_patterns = {}
     for prop_path, prop_text in dict.fromkeys(propositions):
         for concept_path in _sparse_proposition_targets(
-                prop_text, confirmed_concepts, existing_concept_surfaces):
+                prop_text, confirmed_concepts, existing_concept_surfaces,
+                surface_patterns=surface_patterns):
             if concept_path == prop_path or not gl.node_exists(conn, concept_path):
                 continue
             exists = conn.execute(
@@ -3008,7 +3027,12 @@ def _cmd_ingest_locked(args):
         sem_format_warns = detect_inline_section_headers(sem_text) if sem_text else []
         # proposition 对齐: 统一对齐框架覆盖 proposition 颗粒度
         # >0.98 合并节点, 0.9-0.98 建关联边(比 keyword 更保守,防污染事实层)
-        _prop_report = _align_propositions(sem_triples, conn, page)
+        route_page_file = (
+            page_file if _is_paper and not getattr(args, "metadata_only", False) else None
+        )
+        _prop_report = _align_propositions(
+            sem_triples, conn, page, route_page_file=route_page_file,
+        )
         if _prop_report["merged"] or _prop_report["linked"]:
             report["proposition_align"] = _prop_report
         # 作者角色替换:从机械边中移除第一作者/通讯作者的"作者"边(已有专属谓词)

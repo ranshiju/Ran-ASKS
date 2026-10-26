@@ -876,6 +876,8 @@ def _result_entry(file_name: str, file_type: str, parsed: dict, content: str = "
         ):
             if parsed.get(key) is not None:
                 entry[key] = parsed[key]
+        if parsed.get("schema") == agent_task.SCHEMA_VERSION:
+            entry["agent_task"] = agent_task.payload({"agent_task": parsed})
         return entry
     reason = (
         content.splitlines()[0][:200]
@@ -1770,6 +1772,9 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
                 item_page = str(item.get("wiki_path") or "").removesuffix(".md")
                 if not state_page or state_page != item_page:
                     raise ValueError(f"maintenance transaction page mismatch: {transaction_id}")
+                if "quality_warnings" in state:
+                    item["quality_warnings"] = list(state["quality_warnings"])
+                    item["quality_warning_history"] = list(state.get("quality_warning_history", []))
                 _reconcile_quality_after_maintenance(item, maintenance)
                 _reconcile_quality_after_maintenance(state, maintenance)
                 state["maintenance"] = linked

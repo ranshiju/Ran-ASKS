@@ -302,7 +302,7 @@ def test_reopen_agent_workspace_reuses_original_output_and_review_gate():
     assert state["slots_content"] == ""
 
 
-def test_resume_agent_workspace_materializes_review_and_combined_output_once():
+def _assert_workspace_bibliography_resume(initial_status, review_status, decision_status="clean"):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         extract_dir = root / "temp" / "inbox-extract" / "txn"
@@ -331,7 +331,7 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
         }
         decision = {
             "protocol_version": module.BIBLIOGRAPHIC_DECISION_PROTOCOL,
-            "doc_type": "paper", "review_status": "clean",
+            "doc_type": "paper", "review_status": decision_status,
             "selections": {
                 "title": {"candidate_id": "title-01", "status": "confirmed"},
                 "authors": {"accepted_ids": ["author-01"], "rejected_ids": [], "proposed": [], "status": "confirmed"},
@@ -350,11 +350,11 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
             encoding="utf-8",
         )
         state = {
-            "transaction_id": "txn", "status": "agent_required", "agent_required": True,
+            "transaction_id": "txn", "status": initial_status, "agent_required": True,
             "extract_dir": str(extract_dir.relative_to(root)),
             "bibliographic_meta": {"venue": "npj Quantum Information"},
             "bibliographic_review": {
-                "status": "agent_required", "candidates": candidates, "catalog": catalog,
+                "status": review_status, "candidates": candidates, "catalog": catalog,
                 "input_hash": "input", "worker": {},
                 "draft_path": str((extract_dir / "bibliographic-review.json").relative_to(root)),
             },
@@ -371,6 +371,10 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
             assert module.resume_agent_workspace(state)
         finally:
             module.REPO = original_repo
+    if decision_status in {"ambiguous", "manual_required"}:
+        assert state["status"] == "bibliographic_review_required"
+        assert not state.get("_awaiting_agent_wiki_slots")
+        return
     assert state["status"] == "write_wiki"
     assert state["bibliographic_meta"]["venue"] == "npj Quantum Information"
     assert state["_awaiting_agent_wiki_slots"] is True
@@ -379,6 +383,62 @@ def test_resume_agent_workspace_materializes_review_and_combined_output_once():
     assert state["agent_workspace"]["artifact_bundle_sha256"] == state[
         "artifact_bundle_sha256"
     ]
+
+
+def test_resume_agent_workspace_materializes_review_and_combined_output_once():
+    _assert_workspace_bibliography_resume("agent_required", "agent_required")
+
+
+def test_resume_bibliographic_review_required_workspace_uses_existing_gates():
+    for review_status in ("prepared", "agent_required"):
+        _assert_workspace_bibliography_resume("bibliographic_review_required", review_status)
+
+
+def test_unresolved_bibliography_still_blocks_workspace_downstream():
+    for decision_status in ("ambiguous", "manual_required"):
+        _assert_workspace_bibliography_resume(
+            "bibliographic_review_required", "prepared", decision_status,
+        )
+
+
+def test_resume_workspace_does_not_reopen_terminal_state():
+    for status in ("completed", "failed"):
+        assert not module.resume_agent_workspace({
+            "status": status,
+            "agent_workspace": {"protocol_version": module.AGENT_WORKSPACE_PROTOCOL},
+        })
+
+
+def test_prepare_routes_bibliography_workspace_back_to_shared_validator():
+    original_resume = module.resume_agent_workspace
+    original_refresh = module.refresh_agent_workspace_handoff
+    original_save = module.inbox_state.save
+    calls = []
+
+    def reject_workspace(state, **kwargs):
+        calls.append(state["transaction_id"])
+        state["errors"] = ["bibliography remains unresolved"]
+        return False
+
+    state = {
+        "transaction_id": "txn", "status": "bibliographic_review_required",
+        "agent_workspace": {
+            "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+            "status": "awaiting_output", "execution_backend": "api",
+        },
+    }
+    try:
+        module.resume_agent_workspace = reject_workspace
+        module.refresh_agent_workspace_handoff = lambda state: False
+        module.inbox_state.save = lambda *args: None
+        module.run_prepare(state)
+    finally:
+        module.resume_agent_workspace = original_resume
+        module.refresh_agent_workspace_handoff = original_refresh
+        module.inbox_state.save = original_save
+    assert calls == ["txn"]
+    assert state["status"] == "bibliographic_review_required"
+    assert state["errors"] == ["bibliography remains unresolved"]
 
 
 def test_agent_workspace_bibliography_defers_without_api_call():
@@ -713,6 +773,7 @@ def test_agent_reading_contract_uses_full_short_and_sections_long():
             short = module._agent_reading_contract(paper)
             assert short["mode"] == "full"
             assert short["primary"]["action"] == "read_full"
+            assert "--source-lines" in short["primary"]["command"]
 
             paper.write_text("x" * (module.AGENT_FULL_TEXT_MAX_CHARS + 1), encoding="utf-8")
             long = module._agent_reading_contract(paper)
@@ -720,9 +781,40 @@ def test_agent_reading_contract_uses_full_short_and_sections_long():
             assert long["primary"]["action"] == "read_sections"
             assert ".scripts/read_paper.py" in long["primary"]["command"]
             assert "Method" in long["primary"]["command"]
+            assert "--source-lines" in long["primary"]["command"]
+            assert long["read_policy"]["sections"] == "batch_known_sections_then_follow_specific_evidence_gaps"
             assert long["fallback_rules"][0]["action"] == "read_relevant_source_ranges"
         finally:
             module.REPO = original_repo
+
+
+def test_agent_reading_batches_include_handles_and_preserve_complete_coverage():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        paper = root / "temp/inbox-extract/txn/paper.md"
+        paper.parent.mkdir(parents=True)
+        text = "# Paper\n" + "Evidence line\n" * 20
+        paper.write_text(text, encoding="utf-8")
+        original_repo, original_budget = module.REPO, module.AGENT_READING_BATCH_MAX_CHARS
+        try:
+            module.REPO = root
+            module.AGENT_READING_BATCH_MAX_CHARS = 200
+            contract = module._agent_reading_contract(paper)
+            batches = contract["primary"]["batches"]
+            assert len(batches) > 1
+            assert all(batch["required_output_chars"] <= 200 and not batch["over_budget"] for batch in batches)
+            covered = [number for batch in batches
+                       for number in range(batch["start_line"], batch["end_line"] + 1)]
+            assert covered == list(range(1, len(text.split('\n')) + 1))
+            paper.write_text("x" * 1000, encoding="utf-8")
+            oversized = module._agent_reading_contract(paper)["primary"]["batches"]
+            assert len(oversized) == 1 and oversized[0]["over_budget"] is True
+            assert oversized[0]["required_output_chars"] > 1000
+            paper.write_text("## Abstract\nAbstract evidence\n\n## Method\nMethod evidence\n", encoding="utf-8")
+            adaptive = module._agent_reading_contract(paper, {"reading_strategy": "adaptive_sections"})
+            assert [section for batch in adaptive["primary"]["batches"] for section in batch["sections"]] == list(module.AGENT_READING_SECTIONS)
+        finally:
+            module.REPO, module.AGENT_READING_BATCH_MAX_CHARS = original_repo, original_budget
 
 
 def test_agent_check_telemetry_does_not_apply_to_api_workspace():
@@ -6067,6 +6159,9 @@ def test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor(
             ) = originals
         assert not ok and message == "Agent task prepared"
         assert (extract_dir / "images/a.png").read_bytes() == b"image"
+        extraction_spans = [span for span in state["telemetry"]["step_spans"]
+                            if span["name"] == "pdf_extraction"]
+        assert len(extraction_spans) == 1 and extraction_spans[0]["cache_hit"] is True
         manifest = json.loads((extract_dir / "manifest.json").read_text(encoding="utf-8"))
         assert "images/a.png" in [item["path"] for item in manifest["raw_artifacts"]]
         assert state["artifact_bundle_sha256"]
@@ -6130,6 +6225,9 @@ def test_step_extract_preserves_only_mineru_checkpoint_before_retry():
             ) = originals
         assert not ok and message == "Agent task prepared"
         assert (extract_dir / ".mineru/mineru-job-v1.json").is_file()
+        extraction_spans = [span for span in state["telemetry"]["step_spans"]
+                            if span["name"] == "pdf_extraction"]
+        assert len(extraction_spans) == 1 and extraction_spans[0]["cache_hit"] is False
 
 
 def test_agent_bibliography_schema_reports_independent_field_errors():
@@ -6233,6 +6331,38 @@ def test_frontier_tail_respects_ingest_backend_and_parent_transaction():
             assert command[command.index("--transaction-id") + 1] == "ingest-parent"
             assert kwargs["env"]["QUERY_BACKEND"] == backend
             assert state["frontier_capture"]["backend"] == backend
+
+
+def test_api_condition_evidence_keeps_complete_probability_and_scope_lines():
+    import ingest_common as common
+    abstract = "Abstract evidence, including its scope. " * 65
+    lines = ["# Paper", "## Abstract", abstract, "## Results"]
+    lines.extend("Ordinary result evidence " * 25 for _index in range(90))
+    lines.extend([
+        "The argument works with probability approaching one for sufficiently large dimensions.",
+        "The construction applies when the physical dimension scales as a power of the bond dimension, with probability approaching one.",
+        "## Discussion",
+        "Our results do not conclusively answer the general problem; optimization remains an important open question.",
+        "## References",
+        "Reference-only result with probability one must not be selected.",
+    ])
+    source = "\n".join(lines)
+    details = {}
+    with tempfile.TemporaryDirectory() as directory:
+        source_path = Path(directory) / "paper.md"
+        source_path.write_text(source)
+        context = module._api_paper_context(
+            source, source_path, "academic/raw/references/example/paper.md", details,
+        )
+    assert len(context) <= module.REDUCED_CONTEXT_MAX_CHARS
+    assert abstract.strip() in context
+    assert "Reference-only result" not in context
+    for number in details["condition_evidence_lines"]:
+        assert f"<academic/raw/references/example/paper.md#L{number}> {lines[number - 1]}" in context
+    assert "with probability approaching one for sufficiently large dimensions" in context
+    assert "do not conclusively answer the general problem" in context
+    assert len(details["condition_evidence_lines"]) == 3
+    assert common._paper_condition_evidence("No explicit conditions.", "raw/paper.md") == ("", [])
 
 
 def test_api_partial_paper_sections_supplement_body_with_real_bounded_handles():
@@ -6427,8 +6557,19 @@ def test_api_wiki_body_patch_tracks_fact_changes_and_rejects_boundary_changes():
     meaning_change = _local_patch_decision(catalog, ["Changed study object. [^r1]\n\n"])
     _patched, changed = module._apply_api_wiki_patch(wiki, meaning_change, catalog, set())
     assert changed is True
+    combined = module._api_wiki_patch_catalog(
+        wiki, ["研究方向定位没有精确 Raw locator 脚注", "脚注未定义: [^r9]"],
+    )
+    address = "academic/raw/references/example/paper.md#L2"
+    replacements = ["Stable study. [^r9]\n\n" if target["scope"] == "body"
+                    else f"[^r9]: {address}\n" for target in combined["targets"]]
+    combined_result, changed = module._apply_api_wiki_patch(
+        wiki, _local_patch_decision(combined, replacements), combined, {address},
+    )
+    assert f"[^r9]: {address}" in combined_result
+    assert changed is False
     for replacement in ("---\ntitle: stolen\n---\n", "## Content\nChanged\n", "[^r9]: fake\n",
-                        "<<<SLOTS>>>\nHijacked\n", "Unprovided RAW#L999 evidence.\n"):
+                        "<<<SLOTS>>>\nHijacked\n", "Unprovided RAW#L999 evidence.\n", "Stable study. [^r9]\n"):
         try:
             module._apply_api_wiki_patch(wiki, _local_patch_decision(catalog, [replacement]), catalog, set())
         except ValueError:

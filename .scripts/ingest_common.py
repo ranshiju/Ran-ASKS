@@ -18,7 +18,9 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 import agent_task
 import recovery_policy as rp
@@ -216,6 +218,10 @@ def _assemble_reduced_context(profile: dict, sections: list[tuple[str, str]]) ->
         if available <= 0:
             break
         cap = min(profile["section_char_cap"], available // (len(sections) - index))
+        if (index == 0 and profile.get("extractor") == "read_paper"
+                and re.search(r"\babstract\b|摘要", title, re.I)
+                and len(content) <= profile["section_char_cap"]):
+            cap = min(available, len(content))
         part = header + _clip_context_section(content, cap, preserve_lines=profile.get("extractor") == "read_paper")
         parts.append(part)
         budget -= len(part) + separator_size
@@ -319,6 +325,42 @@ def _paper_body_windows(text: str, selected: list[tuple[str, str]]) -> tuple[lis
     return result, reference_start + 1 if reference_start is not None else None
 
 
+def _paper_condition_evidence(text: str, raw_source: str | None, budget: int = 6000) -> tuple[str, list[int]]:
+    lines = text.splitlines()
+    reference_start = _paper_reference_start(lines)
+    end = reference_start if reference_start is not None else len(lines)
+    candidates = []
+    for line_number, line in enumerate(lines[:end], 1):
+        if re.match(r"^#{1,6}\s+(?:acknowledg(?:e)?ments|data availability)\b", line.strip(), re.I):
+            break
+        if not line.strip() or re.match(r"^(?:#{1,6}\s|<div|!\[)", line):
+            continue
+        probability = re.search(r"\bwith probability\b", line, re.I)
+        condition = re.search(
+            r"\b(?:sufficiently|provided that|assuming|only if|under (?:the )?(?:conditions?|assumptions?))\b",
+            line, re.I,
+        )
+        scope = re.search(
+            r"\b(?:do(?:es)? not conclusively|does not (?:apply|cover)|not (?:valid|applicable) in general|"
+            r"remains? (?:an? )?(?:important )?open (?:problem|question))\b",
+            line, re.I,
+        )
+        score = 3 * bool(probability) + 3 * bool(scope) + bool(condition)
+        if score:
+            rendered = f"<{raw_source}#L{line_number}> {line}" if raw_source else line
+            candidates.append((score, line_number, rendered))
+    header = "--- [条件与适用范围补读候选；不表示已覆盖所有限定条件] ---\n"
+    remaining = budget - len(header)
+    selected = []
+    for _score, line_number, rendered in sorted(candidates, key=lambda item: (-item[0], item[1])):
+        if len(rendered) + 1 <= remaining:
+            selected.append((line_number, rendered))
+            remaining -= len(rendered) + 1
+    selected.sort()
+    return (header + "\n".join(line for _number, line in selected),
+            [number for number, _line in selected]) if selected else ("", [])
+
+
 def build_source_context(kind: str, text: str, *, source_path: Path | str | None = None,
                          force_reduced: bool = False, diagnostics: dict | None = None,
                          raw_source: str | None = None) -> str:
@@ -386,6 +428,15 @@ def build_source_context(kind: str, text: str, *, source_path: Path | str | None
             sections.extend(windows)
             details.update(mode="sections+body_windows" if hits else "body_windows",
                            reference_start_line=reference_start)
+        conditions, condition_lines = _paper_condition_evidence(text, raw_source)
+        details["condition_evidence_lines"] = condition_lines
+        if conditions:
+            remaining_profile = {
+                **profile,
+                "reduced_context_max_chars": profile["reduced_context_max_chars"] - len(conditions) - 2,
+            }
+            regular = _assemble_reduced_context(remaining_profile, annotate_sections(sections))
+            return finish(conditions + ("\n\n" + regular if regular else ""))
         return finish(_assemble_reduced_context(profile, annotate_sections(sections)))
 
     if kind == "document":
@@ -1349,15 +1400,48 @@ def _ensure_telemetry(state: dict) -> dict:
     return telemetry
 
 
+@contextmanager
+def ingest_span(state: dict, label: str):
+    """Record one real attempt while preserving the caller's persistence boundary."""
+    span = {"name": label, "started_at": datetime.now(timezone.utc).isoformat(),
+            "status_before": state.get("status"), "outcome": "returned"}
+    started = time.monotonic()
+    try:
+        yield span
+    except BaseException as exc:
+        span.update(outcome="exception", error_type=type(exc).__name__)
+        raise
+    finally:
+        span.update(duration_ms=round((time.monotonic() - started) * 1000, 3),
+                    status_after=state.get("status"))
+        _ensure_telemetry(state).setdefault("step_spans", []).append(span)
+
+
+def timed_ingest_step(step, label=None):
+    """Append each real attempt without changing execution or persistence ownership."""
+    if getattr(step, "_ingest_timed", False):
+        return step
+
+    @wraps(step)
+    def measured(state, *args, **kwargs):
+        with ingest_span(state, str(label or step.__name__)):
+            return step(state, *args, **kwargs)
+
+    measured._ingest_timed = True
+    return measured
+
+
 def record_subprocess(state: dict, label: str, command: list[str],
                       returncode: int, duration_ms: int) -> None:
     """记录子进程调用结果（returncode/duration），不替代 run 的异常传播。"""
     telemetry = _ensure_telemetry(state)
-    telemetry["subprocesses"][label] = {
+    execution = {
         "returncode": returncode,
         "duration_ms": duration_ms,
         "command": " ".join(str(part) for part in command),
     }
+    telemetry["subprocesses"][label] = execution
+    telemetry.setdefault("subprocess_history", []).append({"name": label, **execution})
 
 
 def validate_completion(state: dict, REPO: Path) -> list[str]:
@@ -2311,6 +2395,8 @@ def step_finalize_tail(state: dict, REPO: Path, config: dict) -> tuple[bool, str
         )
         cmd = [sys.executable, str(REPO / ".scripts/frontier.py"),
                "capture-paper", wiki_page, "--limit", str(config.get("frontier_capture_limit", 3))]
+        if backend == "api":
+            cmd.extend(["--answer-workers", str(config.get("frontier_answer_workers", 3))])
         if state.get("transaction_id"):
             cmd.extend(["--transaction-id", state["transaction_id"]])
         if backend == "agent" or not config.get("frontier_answer", True):

@@ -7,6 +7,25 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-26
+
+### Version decision / 版本判断
+
+- MINOR: Add backward-compatible bounded answer concurrency to public capture-paper while preserving ingestion validation and managed transactions
+- MINOR（中文）：公开 capture-paper 新增向后兼容的有界回答并发，保持摄入校验与受管事务契约
+
+### Highlights
+
+- Reduced repeated embedding transport and deterministic name matching in ingestion and Hub maintenance. Frontier uses equivalent safe YAML parsing and bounded `capture-paper --answer-workers` concurrency; answers still validate independently and apply serially.
+- Improved source reading, exact citation handling, workspace handoffs, and timing diagnostics across paper, meeting, and ordinary-document intake while preserving Agent/API controller separation, source evidence, validation, and rollback.
+- The full ingestion time has not been verified to halve, and the target of 20 seconds per knowledge page after high-quality Markdown extraction has not been met. Output reuse and input-sharing experiments remain disabled pending quality and net-benefit evidence.
+
+### 主要更新
+
+- 摄入与 Hub 维护减少重复向量传输和确定性名称匹配；Frontier 使用等价的安全 YAML 解析，并为 `capture-paper --answer-workers` 增加有界并发。回答仍逐条校验、串行应用。
+- 改进论文、会议和普通文档的来源读取、精确引用、工作区交接与耗时诊断，保持 Agent/API 控制循环、来源证据、校验和回滚边界。
+- 尚未证实完整摄入时间减半，也未达到高质量 Markdown 提取后每知识页 20 秒。输出复用与输入共享实验仍未启用，须先验证质量与净收益。
+
 ## [0.18.0] - 2026-10-23
 
 ### Version decision / 版本判断
@@ -559,5 +578,7 @@ manifests and checksums.
 
 [0.17.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.17.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.18.0...HEAD
 [0.18.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.18.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.19.0

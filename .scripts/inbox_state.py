@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import statistics
 import tempfile
 from collections import Counter
 from datetime import datetime, timezone
@@ -832,6 +833,50 @@ def supersede_transaction(transaction_id: str, completed_by: str) -> dict:
     }
 
 
+def _duration_distribution(values: list[float]) -> dict:
+    if not values:
+        return {"samples": 0, "p50_sec": None, "p95_sec": None, "total_sec": 0.0}
+    ordered = sorted(values)
+    index95 = max(0, (len(ordered) * 95 + 99) // 100 - 1)
+    return {"samples": len(ordered), "p50_sec": round(statistics.median(ordered), 3),
+            "p95_sec": round(ordered[index95], 3), "total_sec": round(sum(ordered), 3)}
+
+
+def summarize_performance(states: list[dict]) -> dict:
+    """Separate persisted transaction wall time from nested step-attempt durations."""
+    walls = []
+    by_pipeline = {}
+    spans = {}
+    for state in states:
+        telemetry = state.get("telemetry") or {}
+        events = telemetry.get("events") or []
+        completed = next((event for event in events if event.get("to") == "completed"), None)
+        if state.get("status") == "completed" and events and completed:
+            try:
+                duration = (datetime.fromisoformat(completed["at"])
+                            - datetime.fromisoformat(events[0]["at"])).total_seconds()
+                if duration >= 0:
+                    walls.append(duration)
+                    pipeline = str(state.get("pipeline_script") or "unrecorded")
+                    backend = str(state.get("semantic_backend") or state.get("execution_backend") or "unrecorded")
+                    by_pipeline.setdefault(f"{pipeline}:{backend}", []).append(duration)
+            except (KeyError, ValueError, TypeError):
+                pass
+        for span in telemetry.get("step_spans") or []:
+            duration_ms = span.get("duration_ms")
+            if isinstance(duration_ms, (int, float)) and duration_ms >= 0:
+                name = str(span.get("name") or "unrecorded")
+                spans.setdefault(name, []).append(duration_ms / 1000)
+    return {
+        "transaction_wall": _duration_distribution(walls),
+        "by_pipeline_backend": {key: _duration_distribution(values)
+                                for key, values in sorted(by_pipeline.items())},
+        "step_attempts": {key: _duration_distribution(values) for key, values in sorted(spans.items())},
+        "wall_scope": "first_persisted_event_to_first_completed_including_host_wait; excludes_route_and_later_inbox_maintenance",
+        "step_scope": "all_recorded_attempts_including_nested_steps; totals_are_not_end_to_end_wall_time",
+    }
+
+
 def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = None) -> dict:
     """Read-only aggregate of resumable transactions and canonical API events."""
     states_root = Path(state_dir or (REPO / "temp" / "inbox-state"))
@@ -842,6 +887,7 @@ def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = N
     transactions: set[str] = set()
     degraded = 0
     invalid_state_files = 0
+    timed_states = []
     for path in sorted(states_root.glob("*.json")) if states_root.is_dir() else []:
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
@@ -853,6 +899,7 @@ def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = N
         if not transaction_id or status not in KNOWN_STATUSES:
             continue
         transactions.add(transaction_id)
+        timed_states.append(state)
         statuses[status] += 1
         if state.get("quality_warnings"):
             degraded += 1
@@ -921,6 +968,7 @@ def summarize_runtime(state_dir: Path | None = None, events_dir: Path | None = N
         "transactions": len(transactions),
         "by_status": dict(sorted(statuses.items())),
         "degraded": degraded,
+        "performance": summarize_performance(timed_states),
         "failures_by_category": dict(sorted(failures.items())),
         "recovery_attempts": dict(sorted(recovery.items())),
         "api": {

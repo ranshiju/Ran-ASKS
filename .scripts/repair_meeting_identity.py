@@ -231,7 +231,7 @@ def repair(args: argparse.Namespace) -> dict:
     catalog, _ = meeting._write_evidence_catalog(state, source_text)
     evidence_ids = {row["evidence_id"] for row in catalog}
     guidance.prepare_candidate_catalog(state, REPO)
-    errors = validate_meeting_ir(repaired_ir, evidence_ids)
+    errors = validate_meeting_ir(repaired_ir, evidence_ids, evidence_catalog=catalog)
     errors.extend(guidance.validate_person_updates(
         repaired_ir["person_updates"], guidance.load_candidate_catalog(state, REPO)
     ))

@@ -110,6 +110,8 @@ python3 .scripts/wg.py task status <transaction-id> | jq '.result | {workflow_st
 
 执行授权后应连续完成当前文件的“落位 → 巩固 → 校验 → 清理”；只有校验失败、目标冲突、需要用户确认的高风险实体或用户主动插话时才暂停。状态更新只报告已完成阶段与下一项阻塞，不把正常阶段切换当作暂停点。
 
+**论文书目未决恢复**：combined workspace 返回 `bibliographic_review_required` 后，仍沿同一事务的 `--agent-workspace → --agent-check → --agent-commit` 接管。宿主只修正声明的 workspace 段；恢复重新检查输入哈希、书目 schema/证据及 Wiki、语义和 Graph preflight，不重跑 PDF 提取或新增模型调用。可选 DOI/arXiv 缺失继续保留空值和 `ambiguous`，不能猜补；整体是否可裁决须依据已核验字段判断。已完成或失败事务不能借此重新开启。
+
 ## 约束
 
 - inbox 受管副本仅作中转；用户原先放置的受保护原件不属于可清理队列

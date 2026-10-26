@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.18.0
+> Current main version: v0.19.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -138,6 +138,13 @@ enforce predicate roles and keep program-owned author, venue, and paper-topic
 edges out of model-authored slots before the same transaction can commit.
 Reviewed concept-name distinctions are persisted as governance metadata and
 applied before embedding-based identity resolution.
+
+Recent ingestion updates reduce repeated embedding transport and local matching,
+and improve source reading and timing receipts without relaxing source or
+transaction checks. Frontier paper capture can bound independent API answers
+with `--answer-workers 1`, `2`, or `3`; each answer is validated before serial
+application. The measured work does not establish a halving of complete ingestion
+time or a 20-second-per-page result after high-quality Markdown extraction.
 
 ## Chat documents and presentation ingestion
 

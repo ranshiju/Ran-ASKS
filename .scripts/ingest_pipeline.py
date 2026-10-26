@@ -69,7 +69,8 @@ def _revisionable_protocol_error(message: str) -> bool:
 
 def run_pipeline(state: dict, spec: dict, progress) -> dict:
     """运行全流程，处理修复循环。progress 为进度打印函数。"""
-    steps = spec["steps"]
+    steps = {label: ic.timed_ingest_step(step, label)
+             for label, step in spec["steps"].items()}
     txn = state["transaction_id"]
     state.setdefault("pipeline_script", spec["script_name"])
     recovery_limits = rp.limits_from_spec(spec)

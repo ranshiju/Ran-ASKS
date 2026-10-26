@@ -310,6 +310,25 @@ def _deterministic_metadata_candidates(conn, mention: str, kind: str) -> list[st
 def plan_attachment(conn, delta: GraphDelta) -> dict:
     """形成只读 attach plan；显式 ID 与 surface mention 使用不同解析入口。"""
     title_idx, alias_idx, suffix_idx = gl.build_name_index(conn)
+    requests = []
+    for mention in delta.boundary_mentions:
+        if (mention in delta.deterministic_metadata_endpoints
+                or mention in delta.canonical_endpoints
+                or _mention_is_task(delta, mention)
+                or _mention_is_proposition(delta, mention)):
+            continue
+        node_types = _mention_node_types(delta, mention)
+        candidates = [
+            row for candidate in _exact_candidates(mention, title_idx, alias_idx, suffix_idx)
+            if (row := conn.execute("SELECT type FROM nodes WHERE path=?", (candidate,)).fetchone())
+            is not None and row["type"] in node_types
+        ]
+        if len(candidates) != 1:
+            requests.append({"name": mention, "context": _mention_context(delta, mention),
+                             "node_types": node_types, "top_k": 5})
+    resolutions = dict(zip(
+        [request["name"] for request in requests], ns.resolve_nodes(conn, requests),
+    ))
     decisions = []
     merge_map = {}
     ambiguous = []
@@ -451,10 +470,7 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
             })
             merge_map[mention] = resolved
         elif len(candidates) > 1:
-            resolution = ns.resolve_node(
-                conn, mention, _mention_context(delta, mention),
-                node_types=node_types, top_k=5
-            )
+            resolution = resolutions[mention]
             if resolution.get("decision") == "resolved":
                 target = resolution["node_id"]
                 decisions.append({
@@ -476,10 +492,7 @@ def plan_attachment(conn, delta: GraphDelta) -> dict:
             decisions.append(item)
             ambiguous.append(item)
         else:
-            resolution = ns.resolve_node(
-                conn, mention, _mention_context(delta, mention),
-                node_types=node_types, top_k=5
-            )
+            resolution = resolutions[mention]
             if resolution.get("decision") == "resolved":
                 target = resolution["node_id"]
                 semantic_candidates = resolution.get("candidates", [])

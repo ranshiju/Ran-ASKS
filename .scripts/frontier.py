@@ -16,6 +16,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterator
@@ -297,7 +298,7 @@ def parse_record(path: Path) -> tuple[dict, str]:
     parts = text.split("---\n", 2)
     if len(parts) != 3:
         raise ValueError(f"Frontier frontmatter 未闭合: {path}")
-    data = yaml.safe_load(parts[1]) or {}
+    data = yaml.load(parts[1], Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Frontier frontmatter 必须为对象: {path}")
     return data, parts[2].lstrip("\n")
@@ -1489,27 +1490,84 @@ def cmd_show(args) -> int:
     return print_json({"record": record, "source_file": rel})
 
 
+def _capture_answer_pending(root: Path, record_id: str, exc: Exception) -> dict:
+    record, _ = find_record(root, record_id)
+    record["answer_status"] = "pending"
+    record["answer_checked_at"] = now_iso()
+    record["updated_at"] = now_iso()
+    write_record(root, record)
+    return {"id": record_id, "status": "pending", "reason": type(exc).__name__}
+
+
+def capture_answer_attempts(root: Path, record_ids: list[str], topk: int,
+                            transaction_id: str = "", workers: int = 3) -> list[dict]:
+    """Generate independent API answers concurrently; validate and write serially."""
+    attempts = []
+    if workers not in {1, 2, 3}:
+        raise ValueError("answer workers must be 1, 2 or 3")
+    if workers == 1 or len(record_ids) < 2 or agent_task.query_backend() != "api":
+        for record_id in record_ids:
+            try:
+                attempts.append(answer_question(
+                    root, record_id, topk,
+                    **({"transaction_id": transaction_id} if transaction_id else {}),
+                ))
+            except Exception as exc:
+                attempts.append(_capture_answer_pending(root, record_id, exc))
+        return attempts
+
+    prepared = {}
+    with ThreadPoolExecutor(max_workers=min(workers, len(record_ids))) as executor:
+        for record_id in record_ids:
+            try:
+                record, _ = find_record(root, record_id)
+                packet = build_kb_packet(
+                    record.get("question") or record["title"], root, topk,
+                    source_locators=question_source_locators(record),
+                )
+                packet["previous_answer"] = current_answer_snapshot(record)
+                packet["question_sources"] = question_source_locators(record)
+                future = (
+                    executor.submit(run_answer, packet,
+                                    transaction_id=transaction_id or f"frontier-answer-{record_id}")
+                    if packet.get("candidates") or packet.get("raw_evidence") else None
+                )
+                prepared[record_id] = (record, packet, future)
+            except Exception as exc:
+                prepared[record_id] = exc
+
+        for record_id in record_ids:
+            try:
+                item = prepared[record_id]
+                if isinstance(item, Exception):
+                    raise item
+                previous_record, packet, future = item
+                generated = future.result() if future is not None else None
+                current, _ = find_record(root, record_id)
+                if current != previous_record:
+                    attempts.append({"id": record_id, "status": "pending",
+                                     "reason": "question_changed_during_generation"})
+                    continue
+                attempts.append(answer_question(
+                    root, record_id, topk, packet=packet,
+                    answer_fn=lambda _packet, answer=generated: answer,
+                    transaction_id=transaction_id,
+                ))
+            except Exception as exc:
+                attempts.append(_capture_answer_pending(root, record_id, exc))
+    return attempts
+
+
 def cmd_capture_paper(args) -> int:
     root = resolve_root(args.root)
     result = extract_paper_candidates(root, args.page, args.limit)
     attempts = []
     if not args.no_answer:
-        for record_id in list(dict.fromkeys(result["captured"] + result.get("reused", [])))[:args.limit]:
-            try:
-                attempts.append(answer_question(
-                    root, record_id, args.topk,
-                    **({"transaction_id": args.transaction_id}
-                       if getattr(args, "transaction_id", "") else {}),
-                ))
-            except Exception as exc:
-                # 回答是非阻断后处理；Question Page 已保存，失败只保持 pending。
-                record, _ = find_record(root, record_id)
-                record["answer_status"] = "pending"
-                record["answer_checked_at"] = now_iso()
-                record["updated_at"] = now_iso()
-                write_record(root, record)
-                attempts.append({"id": record_id, "status": "pending",
-                                 "reason": type(exc).__name__})
+        record_ids = list(dict.fromkeys(result["captured"] + result.get("reused", [])))[:args.limit]
+        attempts = capture_answer_attempts(
+            root, record_ids, args.topk, getattr(args, "transaction_id", ""),
+            getattr(args, "answer_workers", 3),
+        )
         rebuild_index(root)
     result["answer_attempts"] = attempts
     return print_json(result)
@@ -1715,7 +1773,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("list"); p.add_argument("--kind", choices=sorted(KINDS), default=""); p.add_argument("--status", choices=sorted(STATUSES), default=""); p.add_argument("--all", action="store_true"); p.add_argument("--limit", type=int, default=50); p.set_defaults(func=cmd_list)
     p = sub.add_parser("search"); p.add_argument("query"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_search)
     p = sub.add_parser("show"); p.add_argument("record_id"); p.set_defaults(func=cmd_show)
-    p = sub.add_parser("capture-paper"); p.add_argument("page"); p.add_argument("--limit", type=int, default=3); p.add_argument("--topk", type=int, default=6); p.add_argument("--no-answer", action="store_true"); p.add_argument("--transaction-id", default=""); p.set_defaults(func=cmd_capture_paper)
+    p = sub.add_parser("capture-paper"); p.add_argument("page"); p.add_argument("--limit", type=int, default=3); p.add_argument("--topk", type=int, default=6); p.add_argument("--no-answer", action="store_true"); p.add_argument("--transaction-id", default=""); p.add_argument("--answer-workers", type=int, choices=(1, 2, 3), default=3); p.set_defaults(func=cmd_capture_paper)
 
     p = sub.add_parser("add-trajectory"); p.add_argument("--title", required=True); p.add_argument("--scope", required=True); p.add_argument("--origin", choices=sorted(ORIGIN_KINDS), default="ai_synthesis"); p.add_argument("--events-file", default=""); p.add_argument("--thread", action="append"); p.add_argument("--raw-anchor", action="append"); p.add_argument("--wiki-anchor", action="append"); p.add_argument("--graph-anchor", action="append"); p.set_defaults(func=cmd_add_trajectory)
     p = sub.add_parser("add-entry"); p.add_argument("record_id"); p.add_argument("--kind", choices=sorted(ENTRY_KINDS), required=True); p.add_argument("--content", required=True); p.add_argument("--origin", choices=sorted(ORIGIN_KINDS), default="user_proposed"); p.add_argument("--epistemic", choices=sorted(EPISTEMIC), default="untested"); p.add_argument("--evidence", action="append"); p.set_defaults(func=cmd_add_entry)

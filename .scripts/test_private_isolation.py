@@ -187,6 +187,25 @@ class PrivateIsolationTests(unittest.TestCase):
         self.assertEqual(set(observed), {self.private.parent / 'embeddings.db'})
         self.assertIsNone(gl.scoped_graph_path())
 
+    def test_batched_node_resolution_keeps_private_embedding_scope(self):
+        conn = self.connect()
+        gl.ensure_node(conn, 'mps', 'matrix product state', 'entity')
+        conn.commit()
+        observed = []
+
+        def fake(texts):
+            observed.append(eh._get_embed_db())
+            return None
+
+        with patch.object(ns, '_embed_queries', side_effect=fake):
+            ns.resolve_nodes(conn, [
+                {'name': 'matrix-product-state', 'context': 'state'},
+                {'name': 'matrix-product-state', 'context': 'chain'},
+            ])
+        self.assertTrue(observed)
+        self.assertEqual(set(observed), {self.private.parent / 'embeddings.db'})
+        self.assertIsNone(gl.scoped_graph_path())
+
     def test_private_abbreviation_resolution_leaves_public_todo_unchanged(self):
         conn = self.connect()
         gl.ensure_node(conn, 'Synthetic Private(SPR)', 'Synthetic', 'entity')

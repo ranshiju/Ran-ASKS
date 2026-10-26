@@ -458,6 +458,7 @@ def test_query_stage_dispatch():
         "python3", ".scripts/route.py", "--task", "query", "--query", "关系如何", "--format", "json"
     ).stdout)
     assert "首轮定位步骤" in start["prompt"]
+    assert "## section 读取" not in start["prompt"]
     assert "证据下钻步骤" not in start["prompt"]
     assert "回环规则" not in start["prompt"]
     assert "交付步骤" not in start["prompt"]
@@ -468,6 +469,7 @@ def test_query_stage_dispatch():
         "--query-stage", "evidence", "--format", "json"
     ).stdout)
     assert "证据下钻步骤" in evidence["prompt"]
+    assert "## section 读取" in evidence["prompt"]
     assert "首轮定位步骤" not in evidence["prompt"]
     assert "回环规则" not in evidence["prompt"]
 

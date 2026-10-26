@@ -89,9 +89,10 @@ SLOTS_DELIMITER = "<<<SLOTS>>>"
 BIBLIOGRAPHIC_DELIMITER = "<<<BIBLIOGRAPHIC>>>"
 AGENT_WORKSPACE_PROTOCOL = "paper-agent-workspace-v1"
 AGENT_WORKSPACE_TASK_VERSION = "paper-agent-workspace-task-v6"
-AGENT_READING_CONTRACT_VERSION = "agent-paper-reading-v2"
+AGENT_READING_CONTRACT_VERSION = "agent-paper-reading-v3"
 AGENT_BIBLIOGRAPHIC_PROTOCOL = "evidence-bibliography-v1"
 AGENT_FULL_TEXT_MAX_CHARS = 40_000
+AGENT_READING_BATCH_MAX_CHARS = 18_000
 AGENT_VALIDATION_RECEIPT_VERSION = "paper-agent-validation-receipt-v1"
 BIBLIOGRAPHIC_VALIDATOR_VERSION = "bibliographic-review-validator-v3"
 WIKI_VALIDATOR_VERSION = "paper-wiki-validator-v2"
@@ -3155,7 +3156,7 @@ def build_bibliographic_review_prompt(catalog: dict, md_text: str) -> str:
 4. 按原文核验全部作者与次序；逐人候选可完整覆盖时优先使用 accepted_ids，proposed=[]。仅在候选无法完整覆盖时使用 proposed，每项 value 必须逐字出现在 evidence 指向的前 40 行窗口。
 5. proposed 不得包含 et al、机构或多人合并值；使用 proposed 时 authors.status 与 review_status 都必须为 corrected。
 6. rejected_ids 只标记候选目录中误识别为作者的机构或多人合并值；候选外机构仅可在 review_notes 描述。
-7. 无法裁决时对应 status=ambiguous 且 review_status=manual_required；不要猜测。
+7. 必要书目或已有候选的真实冲突无法裁决时，对应 status=ambiguous 且 review_status=manual_required；不要猜测。doi/arxiv_id 无候选是可选标识缺失，保留空 candidate_id 与 ambiguous；其余字段均已核验时整体可为 clean/corrected，不仅因空可选标识转人工。
 8. 一次返回所有字段，禁止建议后续逐字段调用。"""
 
 
@@ -3386,7 +3387,7 @@ def _resume_bibliographic_review(state: dict) -> bool:
         else:
             review = review_state["review"]
     else:
-        if (state.get("status") not in {"prepared", "agent_required"}
+        if (state.get("status") not in {"prepared", "agent_required", "bibliographic_review_required"}
                 or review_state.get("status") not in {"prepared", "agent_required"}):
             return False
         draft_path = _bibliographic_review_draft_path(state)
@@ -3688,6 +3689,7 @@ def _current_artifact_bundle_sha256(extract_dir: Path) -> str:
 TITLE_DEDUP_GATE = 0.95  # 标题相似度门槛：超过此值才作为候选进入 metadata 判断
 
 
+@ic.timed_ingest_step
 def step_dedup_check(state: dict) -> tuple[bool, str]:
     """判断论文是否已被摄入：标题提取 + 查图 + 查 raw 目录。
 
@@ -3860,6 +3862,7 @@ def _review_pending_relationship_after_bibliography(
     return True, ""
 
 
+@ic.timed_ingest_step
 def step_extract(state: dict) -> tuple[bool, str]:
     """封装 extractor.py，提取 PDF 为 paper.md；书目预审通过后写 manifest/persist。"""
     import shutil
@@ -3888,20 +3891,21 @@ def step_extract(state: dict) -> tuple[bool, str]:
         except (OSError, ValueError, TypeError, yaml.YAMLError):
             return False
 
-    if not reusable_extraction():
-        # Preserve only remote extraction workspaces across an interrupted extract.
-        for child in extract_dir.iterdir():
-            if child.name in {".mineru", ".paddleocr"} and not child.is_symlink():
-                continue
-            if child.is_dir() and not child.is_symlink():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-        command = [sys.executable, str(REPO / ".scripts/extractor.py"), "--external-pdf", str(pdf_path),
-                   "--paper", txn, "--papers-dir", "temp/inbox-extract"]
-        if not pdf_path.is_relative_to((REPO / "private").resolve()):
-            command.append("--allow-paddleocr")
-        run(command)
+    with ic.ingest_span(state, "pdf_extraction") as extraction_span:
+        extraction_span["cache_hit"] = reusable_extraction()
+        if not extraction_span["cache_hit"]:
+            for child in extract_dir.iterdir():
+                if child.name in {".mineru", ".paddleocr"} and not child.is_symlink():
+                    continue
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+            command = [sys.executable, str(REPO / ".scripts/extractor.py"), "--external-pdf", str(pdf_path),
+                       "--paper", txn, "--papers-dir", "temp/inbox-extract"]
+            if not pdf_path.is_relative_to((REPO / "private").resolve()):
+                command.append("--allow-paddleocr")
+            run(command)
     paper_md = extract_dir / "paper.md"
     if not paper_md.is_file():
         return False, "提取未生成 paper.md"
@@ -3920,10 +3924,11 @@ def step_extract(state: dict) -> tuple[bool, str]:
     state["extract_dir"] = str(extract_dir.relative_to(REPO))
     state["engine"] = engine
     md_text = paper_md.read_text(encoding="utf-8")
-    review_result = review_bibliographic_metadata(
-        state.get("bibliographic_meta"), md_text, state.get("transaction_id", ""),
-        agent_workspace=True,
-    )
+    with ic.ingest_span(state, "bibliographic_evidence"):
+        review_result = review_bibliographic_metadata(
+            state.get("bibliographic_meta"), md_text, state.get("transaction_id", ""),
+            agent_workspace=True,
+        )
     if (ingest_mode() == "api"
             and review_result.get("status") in {"ok", "prepared"}):
         workspace_ok, workspace_message = execute_api_paper_workspace(
@@ -4232,7 +4237,7 @@ def build_api_paper_workspace_prompt(
 1. 输出 {BIBLIOGRAPHIC_DECISION_PROTOCOL} JSON，一次裁决 title/authors/year/venue/doi/arxiv_id；除 authors.proposed 外只能引用对应字段的候选 ID。
 2. 标量候选为空时 candidate_id="" 且 status="ambiguous"；year 还须保留 kind="unknown"，authors 保留完整数组字段。不得附加 value 或 evidence。
 3. authors.accepted_ids/rejected_ids 只能引用 author-* 且不得交叉；按原文核验作者及次序后优先选择完整逐人候选组。候选确实不完整时 accepted_ids=[]，authors.proposed 按原文顺序逐人给 value 与 evidence，evidence 为前 40 行 paper.md#Lx[-Ly]。
-4. 无法裁决时字段 status=ambiguous 且 review_status=manual_required，不猜测；published/published_online 优先于 accepted/received/revised/preprint。
+4. title/authors/year 等必要书目或已有候选的真实冲突无法裁决时，字段 status=ambiguous 且 review_status=manual_required，不猜测。doi/arxiv_id 无候选时是可选标识缺失：保留空 candidate_id 和 ambiguous，不因此单独将整体判为 manual_required；其余字段均已核验时整体使用 clean 或 corrected。published/published_online 优先于 accepted/received/revised/preprint。
 5. 合法枚举（每次只选一个值，不输出竖线拼接）：
 {json.dumps(BIBLIOGRAPHIC_ENUMS, ensure_ascii=False)}
 JSON 必须严格填写以下已通过 schema 的未决模板，不增删 key；candidate_id 从本次目录选取，不虚构 ID：
@@ -4322,8 +4327,10 @@ def _agent_reading_contract(paper_md: Path, workspace: dict | None = None) -> di
     """Describe how the host Agent should read one extracted paper."""
     workspace = workspace or {}
     source_chars = int(workspace.get("source_character_count") or 0)
+    source_text = ""
     if paper_md.is_file():
-        source_chars = len(paper_md.read_text(encoding="utf-8"))
+        source_text = paper_md.read_text(encoding="utf-8")
+        source_chars = len(source_text)
     mode = str(workspace.get("reading_strategy") or "")
     if mode not in {"full", "adaptive_sections"}:
         mode = "full" if source_chars <= AGENT_FULL_TEXT_MAX_CHARS else "adaptive_sections"
@@ -4331,30 +4338,86 @@ def _agent_reading_contract(paper_md: Path, workspace: dict | None = None) -> di
         relative_path = str(paper_md.relative_to(REPO))
     except ValueError:
         relative_path = str(paper_md)
-    section_command = " ".join([
+    source_base = str(workspace.get("raw_source_placeholder") or relative_path)
+    command_prefix = [
         "python3", ".scripts/read_paper.py", shlex.quote(relative_path),
-        *AGENT_READING_SECTIONS,
-    ])
+        "--source-lines", "--source-path", shlex.quote(source_base),
+    ]
+    batches = []
+    if mode == "full":
+        first_line = 1
+        output_chars = 0
+        for line_number, line in enumerate(source_text.split('\n'), 1):
+            cost = len(f"<{source_base}#L{line_number}> {line}\n")
+            if output_chars and output_chars + cost > AGENT_READING_BATCH_MAX_CHARS:
+                batches.append({"start_line": first_line, "end_line": line_number - 1,
+                                "required_output_chars": output_chars})
+                first_line = line_number
+                output_chars = 0
+            output_chars += cost
+        batches.append({"start_line": first_line, "end_line": line_number,
+                        "required_output_chars": output_chars})
+        for batch in batches:
+            batch["command"] = " ".join(command_prefix + [
+                "--full", "--start-line", str(batch["start_line"]),
+                "--end-line", str(batch["end_line"]),
+            ])
+    else:
+        import read_paper
+        hits = read_paper.extract_sections(
+            paper_md, AGENT_READING_SECTIONS, source_lines=True, source_path=source_base,
+        )[0] if paper_md.is_file() else []
+        sizes = {requested: len(content) + len(title) + len(requested) + 16
+                 for requested, title, content in hits}
+        if not hits and not any(line.lstrip().startswith("## ") for line in source_text.splitlines()):
+            sizes[AGENT_READING_SECTIONS[0]] = sum(
+                len(f"<{source_base}#L{number}> {line}\n")
+                for number, line in enumerate(source_text[:9000].split('\n'), 1)
+            )
+        selected = []
+        output_chars = 0
+        for section in AGENT_READING_SECTIONS:
+            cost = sizes.get(section, 0)
+            if selected and output_chars + cost > AGENT_READING_BATCH_MAX_CHARS:
+                batches.append({"sections": selected, "required_output_chars": output_chars})
+                selected = []
+                output_chars = 0
+            selected.append(section)
+            output_chars += cost
+        if selected:
+            batches.append({"sections": selected, "required_output_chars": output_chars})
+        for batch in batches:
+            batch["command"] = " ".join(command_prefix + [shlex.quote(section) for section in batch["sections"]])
+    for batch in batches:
+        batch["over_budget"] = batch["required_output_chars"] > AGENT_READING_BATCH_MAX_CHARS
+    section_command = batches[0]["command"]
     return {
         "version": AGENT_READING_CONTRACT_VERSION,
         "mode": mode,
         "source_character_count": source_chars,
         "full_text_threshold": AGENT_FULL_TEXT_MAX_CHARS,
+        "batch_output_budget_chars": AGENT_READING_BATCH_MAX_CHARS,
         "read_policy": {
             "protocol": "read_once_then_reuse",
-            "sections": "read_one_section_per_call_then_follow_specific_evidence_gaps",
+            "sections": "batch_known_sections_then_follow_specific_evidence_gaps",
+            "source_lines": "original_file_lines_preserved_across_discontinuous_ranges",
+            "completion": "read_every_primary_batch; oversized_batches_require_original_line_windows_or_larger_output_budget_not_truncation",
             "reports": "read_status_diagnostics_and_next_actions_before_detail",
         },
         "primary": (
-            {"action": "read_full", "path": relative_path}
+            {"action": "read_full", "path": relative_path,
+             "command": section_command, "batches": batches}
             if mode == "full"
             else {
                 "action": "read_sections",
                 "sections": list(AGENT_READING_SECTIONS),
                 "command": section_command,
+                "batches": batches,
                 "section_commands": {
                     section: " ".join([
                         "python3", ".scripts/read_paper.py", shlex.quote(relative_path),
+                        "--source-lines", "--source-path",
+                        shlex.quote(source_base),
                         shlex.quote(section),
                     ]) for section in AGENT_READING_SECTIONS
                 },
@@ -4537,10 +4600,10 @@ def _api_telemetry_payload(state: dict) -> dict:
 def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: Path) -> None:
     """Create one prompt-free Agent task after extraction without final writes."""
     extract_dir = paper_md.parent
-    reading = _agent_reading_contract(paper_md)
     skeleton_path, _skeleton, raw_placeholder = _write_workspace_skeleton(
         state, paper_md,
     )
+    reading = _agent_reading_contract(paper_md, {"raw_source_placeholder": raw_placeholder})
     output_path = extract_dir / "agent-workspace.txt"
     bibliographic_pages_path = extract_dir / "first-two-pages.txt"
     if not bibliographic_pages_path.is_file():
@@ -4774,6 +4837,7 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
     )
 
 
+@ic.timed_ingest_step
 def execute_api_paper_workspace(
     state: dict,
     review_result: dict,
@@ -5209,7 +5273,7 @@ def resume_agent_workspace(
 ) -> bool:
     """Validate the combined output and route it through existing stage gates."""
     workspace = state.get("agent_workspace") or {}
-    if (state.get("status") not in {"prepared", "agent_required"}
+    if (state.get("status") not in {"prepared", "agent_required", "bibliographic_review_required"}
             or workspace.get("protocol_version") != AGENT_WORKSPACE_PROTOCOL):
         return False
     paper_md = REPO / state["extract_dir"] / "paper.md"
@@ -5613,6 +5677,7 @@ def build_agent_validation_receipt(state: dict, graph_preflight=None) -> dict:
     }
 
 
+@ic.timed_ingest_step
 def run_agent_graph_preflight(state: dict) -> tuple[list[str], dict]:
     """Compile and simulate the staged page through the sole Graph writer."""
     transaction_id = str(state.get("transaction_id") or "")
@@ -5869,6 +5934,7 @@ Miguel Frías-Pérez | 所属 | Max-Planck-Institut für Quantenoptik
 # parse_delimited → ic.parse_delimited (shared)
 
 
+@ic.timed_ingest_step
 def step_write_wiki(state: dict) -> tuple[bool, str]:
     """3.3 第一阶段：生成 paper-id + 骨架并物化 workspace Wiki。
 
@@ -6026,7 +6092,13 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     wiki_content = re.sub(
         r'(sources:\s*\n\s*-\s*)(?:path:\s*)?"?[^\n]+"?',
         f'\\1"{correct_source}"', wiki_content, count=1)
-    wiki_content = wl.normalize_raw_footnotes(wiki_content, reuse_inline=True)
+    supplied_locators = ()
+    if ingest_mode() == "api":
+        context = _api_paper_context(md_text, paper_md, correct_source, {})
+        supplied_locators = tuple(re.findall(r"^<([^>\n]+#L\d+)>[ \t]", context, re.M))
+    wiki_content = wl.normalize_raw_footnotes(
+        wiki_content, reuse_inline=True, supplied_locators=supplied_locators,
+    )
     (extract_dir / "wiki.md").write_text(wiki_content, encoding="utf-8")
     state["wiki_content"] = wiki_content
     # agent 模式：合并任务已同时产出语义槽，提前存入 state 供第二阶段跳过
@@ -6042,6 +6114,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@ic.timed_ingest_step
 def step_write_slots(state: dict) -> tuple[bool, str]:
     """3.3 第二阶段：物化 workspace slots，必要时只定向重抽语义槽。
 
@@ -6272,6 +6345,7 @@ def _apply_api_wiki_patch(wiki: str, decision: dict, catalog: dict,
         raise ValueError("Wiki patch 必须且只能覆盖已有 target ID")
     replacements = {}
     facts_changed = False
+    body_references = set()
     for patch in patches:
         target = by_id[patch["target_id"]]
         replacement = patch["replacement_text"]
@@ -6293,6 +6367,7 @@ def _apply_api_wiki_patch(wiki: str, decision: dict, catalog: dict,
             elif re.match(r"^#{1,2}[ \t]+|^---\s*$|^\[\^.*\]:", line):
                 raise ValueError("Wiki 正文补丁不得改动章节边界、frontmatter 或脚注定义")
         if target["scope"] == "body":
+            body_references.update(wl.FOOTNOTE_REF_RE.findall(replacement))
             if re.search(r"(?:RAW|[A-Za-z0-9_/.-]+\.md)#L\d+", replacement):
                 raise ValueError("Wiki 正文补丁只能引用脚注，不得插入 Raw 地址")
             original_headings = re.findall(r"^#{3,6}[ \t]+.*$", target["current_text"], re.M)
@@ -6303,6 +6378,8 @@ def _apply_api_wiki_patch(wiki: str, decision: dict, catalog: dict,
     result = wiki
     for target in reversed(catalog["targets"]):
         result = result[:target["start"]] + replacements[target["target_id"]] + result[target["end"]:]
+    if body_references - set(wl.parse_wiki_text(result)[1]):
+        raise ValueError("Wiki 正文补丁不得使用未定义脚注")
     return result, facts_changed
 
 
@@ -6411,6 +6488,7 @@ def _sync_api_workspace_content(state: dict) -> None:
 
 # parse_check_errors → ic.parse_check_errors (shared)
 
+@ic.timed_ingest_step
 def step_validate_wiki(state: dict) -> list[str]:
     """运行 ingest_check.py（结构校验，无 --graph），返回 ERROR 列表。"""
     extract_dir = REPO / state["extract_dir"]
@@ -6540,6 +6618,7 @@ def is_clearly_descriptive(obj: str) -> bool:
     return graph_ingest.is_descriptive_phrase(obj)
 
 
+@ic.timed_ingest_step
 def step_validate_semantics(state: dict) -> tuple[list[str], list[dict]]:
     """校验语义槽合法性。返回 (hard_errors, slot_warnings)。
 
@@ -7014,6 +7093,7 @@ FINALIZE_TAIL_CONFIG = {
     "frontier_capture": True,
     "frontier_capture_limit": 3,
     "frontier_answer": True,
+    "frontier_answer_workers": 3,
     "fingerprint_artifact": _fingerprint_artifact,
     "build_log_entry": lambda ctx: (
         "\n## [" + ctx["today"] + "] ingest | ingest_paper.py 摄入 " + ctx["doc_id"] + "\n"
@@ -7216,7 +7296,7 @@ def run_prepare(state: dict) -> dict:
     if refresh_agent_workspace_handoff(state):
         inbox_state.save(state["transaction_id"], state)
         return state
-    if (state["status"] in {"prepared", "agent_required"}
+    if (state["status"] in {"prepared", "agent_required", "bibliographic_review_required"}
             and (state.get("agent_workspace") or {}).get("protocol_version") == AGENT_WORKSPACE_PROTOCOL
             and (state.get("agent_workspace") or {}).get("status") == "awaiting_output"):
         workspace_backend = str(
@@ -7872,6 +7952,7 @@ def _check_agent_workspace_once(state: dict) -> dict:
     }
 
 
+@ic.timed_ingest_step
 def check_agent_workspace(state: dict) -> dict:
     """Run the dry-run checks without changing hash-bound input artifacts."""
     extract_dir = REPO / str(state.get("extract_dir") or "")
