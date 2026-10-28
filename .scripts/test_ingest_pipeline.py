@@ -2629,6 +2629,48 @@ def test_resolve_abbreviations_list_reports_unresolved_warnings():
         conn.close()
 
 
+
+def test_exact_person_identity_is_not_a_global_abbreviation_exemption():
+    import resolve_abbreviations as ra
+    import ingest_common as ic
+    from unittest.mock import patch
+    gl = graph_ingest.gl
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "cross-domain").mkdir()
+        conn = gl.connect(root / "cross-domain/graph.db")
+        gl.init_schema(conn)
+        for path, name, kind in [("person/ada", "Ada LOVELACE", "person"),
+                                 ("person/grace", "Grace HOPPER", "person"),
+                                 ("concept/mpi", "Message Passing MPI", "keyword")]:
+            gl.ensure_node(conn, path, name, "entity", entity_subtype=kind)
+        conn.commit()
+        assert gl.exact_person_identity(conn, "Ada LOVELACE") == "person/ada"
+        assert gl.exact_person_identity(conn, "person/grace") == "person/grace"
+        for text in ("LOVELACE", "Ada LOVELACE discusses MPI", "Message Passing MPI", "Unknown PERSON"):
+            assert gl.exact_person_identity(conn, text) is None
+        ti, ai, si = gl.build_name_index(conn)
+        assert graph_ingest.bare_tokens_resolvable("Ada LOVELACE", conn, ti, ai, si)
+        assert not graph_ingest.bare_tokens_resolvable("Ada LOVELACE discusses MPI", conn, ti, ai, si)
+        entries = [{"token": "LOVELACE", "object": "Ada LOVELACE", "field": "object", "page": "demo"},
+                   {"token": "LOVELACE", "object": "LOVELACE algorithm", "field": "object", "page": "demo"}]
+        with patch.object(ra, "_raw_definitions", return_value={}):
+            pending = ra._collect_pending(conn, entries)
+        assert len(pending) == 1 and len(pending[0]["occurrences"]) == 1
+        assert pending[0]["occurrences"][0]["path"] == "LOVELACE algorithm"
+        todo = root / "cross-domain/abbreviation-todo.jsonl"
+        todo.write_text("".join(json.dumps(e) + "\n" for e in entries))
+        with patch.object(gl, "connect", return_value=conn):
+            result = ic.lightweight_abbr_resolve(root)
+        assert result["resolved"] == 1 and result["remaining"] == 1
+        assert result["details"][0]["method"] == "exact_person_identity"
+        assert "LOVELACE algorithm" in todo.read_text() and "Ada LOVELACE" not in todo.read_text()
+        assert conn.execute("SELECT COUNT(*) FROM aliases WHERE alias='LOVELACE'").fetchone()[0] == 0
+        gl.ensure_node(conn, "concept/collision", "Ada LOVELACE", "entity", entity_subtype="keyword")
+        assert gl.exact_person_identity(conn, "Ada LOVELACE") is None
+        conn.close()
+
+
 def test_runtime_summary_reports_api_breakdown_and_unmetered_costs():
     import inbox_state
     with tempfile.TemporaryDirectory() as directory:

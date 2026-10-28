@@ -126,6 +126,22 @@ def test_wiki_claim_sections_accept_substantive_cited_prose():
     assert wl.validate_claim_sections(page, ("研究方向定位", "Content")) == []
 
 
+def test_wiki_claim_sections_distinguish_uncertainty_from_empty_placeholders():
+    import wiki_locator as wl
+    body = (
+        "## Content\n作者认为该机制可能成立，但独立重复实验的证据仍待补充。[^r1]\n"
+        "目前暂无证据支持该材料在室温下超导。[^r1]\n"
+        "字段名为 `[待补充]`，模板说明如下：\n~~~markdown\n结论待巩固。\n~~~\n"
+        "## Sources\n[^r1]: academic/raw/example.md#L1\n"
+    )
+    page = setup_temp_file("uncertain-claim", body)
+    assert wl.validate_claim_sections(page, ("Content",)) == []
+    for placeholder in ("结论待巩固。[^r1]", "暂无证据。", "TBD", "unknown", "[insert conclusion here]",
+                        "1. 待补充。", "5. （待补充其他不足，比如人才培养的师范特色等）"):
+        page.write_text(body.replace("## Sources", placeholder + "\n## Sources"), encoding="utf-8")
+        assert wl.validate_claim_sections(page, ("Content",)) == ["Content 含明确占位陈述"]
+
+
 # ============ build_parser ============
 
 def test_hybrid_wrapper_forwards_explicit_history_flag():
@@ -589,6 +605,35 @@ def test_inline_raw_citation_reuse_preserves_prose_and_protected_markup():
     )
     assert assigned_code.index(f"[^r2]: {unknown}") > assigned_code.index("## Sample")
     assert assigned_code.index(f"[^r2]: {unknown}") < assigned_code.index("## Tail")
+
+
+def test_single_bracket_raw_citations_reuse_only_exact_unprotected_addresses():
+    address = "academic/raw/references/demo/paper.md#L11"
+    supplied = "academic/raw/references/demo/paper.md#L12"
+    unknown = "academic/raw/references/demo/paper.md#L111"
+    text = (f"## Content\n有条件的结论[{address}]，同一来源 [{address}]。\n"
+            f"新证据 [{supplied}]，未知 [{unknown}]，范围 [{address}-L13]。\n"
+            f"## Sources\n[^r1]: {address}\n")
+    expected = text.replace(f"[{address}]", "[^r1]")
+    assert module.wl.normalize_raw_footnotes(text, reuse_inline=True) == expected
+    normalized = module.wl.normalize_raw_footnotes(text, reuse_inline=True, supplied_locators=(supplied,))
+    assert "新证据 [^r2]" in normalized and f"[^r2]: {supplied}" in normalized
+    assert f"未知 [{unknown}]，范围 [{address}-L13]" in normalized
+    assert module.wl.normalize_raw_footnotes(normalized, reuse_inline=True, supplied_locators=(supplied,)) == normalized
+    protected = (f"`[{address}]`\n``[{address}]``\n"
+                 f"[label]({address})\n[{address}](target)\n[{address}][label]\n"
+                 f"[{address}][]\n[other label][{address}]\n![{address}]\n\\[{address}]\n[[{address}]]\n"
+                 f"    [{address}]\n\t[{address}]\n"
+                 f"<!-- [{address}] -->\n<!--\n[{address}]\n-->\n"
+                 f"~~~~markdown\n[{address}]\n~~~~\n"
+                 f"[label]: {address}\n")
+    body = f"## Content\n{protected}\n## Sources\n[^r1]: {address}\n"
+    assert module.wl.normalize_raw_footnotes(body, reuse_inline=True) == body
+    # Case-insensitive shortcut link labels retain their reference definition.
+    reference = f"## Content\n[{address}]\n[{address.upper()}]: /reference\n## Sources\n[^r1]: {address}\n"
+    assert module.wl.normalize_raw_footnotes(reference, reuse_inline=True) == reference
+    duplicate = text + f"[^r1]: {unknown}\n"
+    assert module.wl.normalize_raw_footnotes(duplicate, reuse_inline=True) == duplicate
 
 
 def test_raw_footnote_wrappers_preserve_evidence_and_query_locators():
@@ -1062,6 +1107,9 @@ def test_main_unknown_command_errors():
 
 
 def main():
+    test_wiki_claim_sections_reject_citation_only_and_placeholders()
+    test_wiki_claim_sections_accept_substantive_cited_prose()
+    test_wiki_claim_sections_distinguish_uncertainty_from_empty_placeholders()
     test_envelope_has_all_fields()
     test_envelope_error_status_implies_ok_false()
     test_envelope_explicit_ok_overrides_status()
@@ -1083,6 +1131,7 @@ def main():
     test_wiki_locator_reads_one_section_and_raw_citations()
     test_wiki_locator_minimal_validation()
     test_inline_raw_citation_reuse_preserves_prose_and_protected_markup()
+    test_single_bracket_raw_citations_reuse_only_exact_unprotected_addresses()
     test_raw_footnote_wrappers_preserve_evidence_and_query_locators()
     test_wiki_locator_rejects_raw_handle_and_truncated_footnote()
     test_wiki_graph_source_points_to_cited_section()

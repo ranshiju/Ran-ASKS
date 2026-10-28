@@ -48,6 +48,9 @@ exclude:
   - .scripts/speech_entity_index.json
   - .scripts/speech_entity_index.tmp
   - operations/archive/**
+  # Local compiler experiments and handoff notes contain host paths and private evidence links.
+  - operations/engineering/semantic-compiler-v2-plan.md
+  - operations/engineering/semantic-compiler-v2-round-closure.md
   - "**/__pycache__/**"
   - "**/*.pyc"
   - "**/*.db"

@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.19.0
+> Current main version: v0.20.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -46,6 +46,27 @@ path remains traceable.
 *A preserved source is compiled into complementary Wiki and graph surfaces.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
+
+## Evidence preservation, oral-exam scope and ingestion evaluation
+
+Oral-exam preparation now connects knowledge points, observable competencies and
+objectives through source-bound scope design. New plans check these links before
+confirmation, while existing plans remain compatible. The graph guides bounded
+question candidates; coverage alone does not demonstrate student mastery.
+
+Ingestion preserves the conditions, attribution and uncertainty of propositions.
+Embedding similarity creates inferred navigation links instead of replacing a
+source-qualified statement with another. Bibliography, citation checks, local
+PDF text fallback and resumable intake also receive compatible fixes.
+
+The new [complete-ingestion acceptance tool](operations/engineering/ingest-acceptance-benchmark.md)
+checks saved evidence for quality reviews, final outputs, maintenance, continuous
+elapsed time and request usage. It does not establish scientific truth. The
+single-paper target of completing ingestion within 70% of a qualified baseline
+remains unverified. Semantic Compiler v2 is still an offline design direction;
+this release does not enable it or claim a measured speedup. Future evaluation
+will test which ingestion requirements improve retrieval, answers, reliable
+composition and maintenance using existing models without model training.
 
 ## For AI agents
 

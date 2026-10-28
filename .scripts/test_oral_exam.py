@@ -42,13 +42,45 @@ class OralExamTests(unittest.TestCase):
                 {"id": "boundary", "goal": "说明边界交换", "criteria": ["区分系统与外界"],
                  "misconceptions": [], "probes": ["如何选择边界？"],
                  "evidence": [{"locator": "academic/raw/test.md#L3", "excerpt": "边界交换会改变系统总量。"}]},
-            ]}
+            ],
+            "scope_design": {
+                "knowledge_points": [
+                    {"id": "conservation", "label": "守恒条件", "evidence": ["academic/raw/test.md#L2"]},
+                    {"id": "exchange", "label": "边界交换", "evidence": ["academic/raw/test.md#L3"]}],
+                "competency_points": [{"id": "conditions", "behavior": "说明适用条件，并用边界变化解释总量变化"}],
+                "links": [
+                    {"knowledge_id": "conservation", "competency_id": "conditions", "objective_id": "conservation"},
+                    {"knowledge_id": "exchange", "competency_id": "conditions", "objective_id": "boundary"}]}}
 
     def ready(self, *, client=None, plan_id="test-plan", draft=None):
         client = client or self.client
         self.kernel.execute(client, "prepare", plan_id=plan_id, topic=self.draft["topic"])
         self.kernel.execute(client, "save", draft=draft or self.draft)
         return self.kernel.execute(client, "confirm")
+
+    def course_draft(self):
+        draft = deepcopy(self.draft)
+        lines = [f"夹具知识点{index}：" + "此为测试用原文，核对适用条件与边界。" * 200 for index in range(19)]
+        (self.raw.parent / "course.md").write_text("# 工程夹具\n" + "\n".join(lines) + "\n", encoding="utf-8")
+        draft["objectives"] = []
+        design = {"knowledge_points": [], "competency_points": [
+            {"id": "explain", "behavior": "解释同一知识点的适用条件"},
+            {"id": "transfer", "behavior": "对新知识点给出可检验的迁移解释"}], "links": []}
+        for index in range(20):
+            source_index = 0 if index == 19 else index
+            objective_id = f"unit-{index}"
+            knowledge_id = f"knowledge-{source_index}"
+            locator = f"academic/raw/course.md#L{source_index + 2}"
+            card = deepcopy(self.draft["objectives"][0])
+            card.update(id=objective_id, goal=f"解释知识点{source_index}的条件与后果",
+                        evidence=[{"locator": locator, "excerpt": f"夹具知识点{source_index}："}])
+            draft["objectives"].append(card)
+            if index != 19:
+                design["knowledge_points"].append({"id": knowledge_id, "label": f"知识点{source_index}", "evidence": [locator]})
+            design["links"].append({"knowledge_id": knowledge_id, "competency_id": "explain" if source_index == 0 else "transfer",
+                                    "objective_id": objective_id})
+        draft["scope_design"] = design
+        return draft
 
     def start(self, *, client=None, draft=None):
         client = client or self.client
@@ -1073,6 +1105,8 @@ class OralExamTests(unittest.TestCase):
         draft = deepcopy(self.draft)
         for card in draft["objectives"]:
             card["evidence"][0]["locator"] = "academic/raw/test.md#L2-L3"
+        for point in draft["scope_design"]["knowledge_points"]:
+            point["evidence"] = ["academic/raw/test.md#L2-L3"]
         regions = {}
         with patch.object(oral_exam.source_locator, "read_locator_text",
                           wraps=oral_exam.source_locator.read_locator_text) as reader:
@@ -1099,6 +1133,9 @@ class OralExamTests(unittest.TestCase):
                 draft["style"] = style_id
                 draft["objectives"] += [dict(deepcopy(draft["objectives"][0]), id=f"extra-{index}")
                                          for index in range(3)]
+                draft["scope_design"]["links"] += [
+                    {"knowledge_id": "conservation", "competency_id": "conditions", "objective_id": f"extra-{index}"}
+                    for index in range(3)]
                 client = f"professor-{style_id}"
                 self.ready(client=client, plan_id=client, draft=draft)
                 result = self.kernel.receive(client, "/oral start", request_id="start")
@@ -1132,6 +1169,201 @@ class OralExamTests(unittest.TestCase):
                                      displayed_message_id=committed["message_id"])
         self.assertEqual(result["input"]["style"]["id"], "strict-examination")
         self.assertTrue(result["input"]["reference_regions"])
+
+    def test_scope_preparation_is_required_for_new_plans(self):
+        self.kernel.execute(self.client, "prepare", topic="守恒")
+        packet = self.kernel.packet(self.client)
+        self.assertTrue(packet["preparation_contract"]["scope_design_required"])
+        self.assertIn("考核范围图准备", packet["preparation_contract"]["steps"])
+        draft = deepcopy(self.draft)
+        draft["scope_design"] = deepcopy(oral_exam.oral_exam_scope.EMPTY_DESIGN)
+        self.kernel.execute(self.client, "save", draft=draft)
+        with self.assertRaisesRegex(ValueError, "考核范围图准备"):
+            self.kernel.execute(self.client, "confirm")
+        draft["scope_design"] = deepcopy(self.draft["scope_design"])
+        self.kernel.execute(self.client, "save", draft=draft)
+        self.assertTrue(self.kernel.execute(self.client, "confirm")["confirmed"])
+
+    def test_scope_design_cannot_be_removed_by_save_or_proposal(self):
+        self.kernel.execute(self.client, "prepare", topic="守恒")
+        draft = deepcopy(self.draft)
+        draft.pop("scope_design")
+        before = self.kernel.state_path.read_bytes()
+        with self.assertRaisesRegex(ValueError, "scope_design"):
+            self.kernel.execute(self.client, "save", draft=draft)
+        packet = self.kernel.packet(self.client)
+        with self.assertRaisesRegex(ValueError, "scope_design"):
+            self.kernel.check(self.client, {"task_id": packet["task_id"], "draft": draft})
+        self.assertEqual(before, self.kernel.state_path.read_bytes())
+
+    def test_scope_schema_rejects_invalid_references_duplicates_and_unbounded_data(self):
+        mutations = [
+            lambda design: design.update(extra=True),
+            lambda design: design.update(links={}),
+            lambda design: design.update(links=design["links"] * 41),
+            lambda design: design["knowledge_points"].append(deepcopy(design["knowledge_points"][0])),
+            lambda design: design["competency_points"].append(deepcopy(design["competency_points"][0])),
+            lambda design: design["competency_points"][0].update(behavior=""),
+            lambda design: design["links"].append(deepcopy(design["links"][0])),
+            lambda design: design["links"][0].update(knowledge_id="unknown"),
+            lambda design: design["links"][0].update(competency_id="unknown"),
+            lambda design: design["links"][0].update(objective_id="unknown"),
+            lambda design: design["links"][0].update(objective_id=[]),
+            lambda design: design["links"][0].update(objective_id="boundary"),
+            lambda design: design["links"].pop(),
+            lambda design: design["competency_points"].append({"id": "unused", "behavior": "比较两种边界选择"}),
+            lambda design: design["knowledge_points"][0].update(evidence=["temp/not-a-fact.md#L1"]),
+            lambda design: design["knowledge_points"][0].update(evidence=["academic/raw/test.md#L3"]),
+            lambda design: design["knowledge_points"][0].update(evidence=[[], "academic/raw/test.md#L2"]),
+        ]
+        for index, mutate in enumerate(mutations):
+            with self.subTest(case=index):
+                draft = deepcopy(self.draft)
+                mutate(draft["scope_design"])
+                with self.assertRaises(ValueError):
+                    self.kernel.validate_plan(draft, complete=True)
+
+    def test_partial_scope_can_be_saved_but_not_confirmed(self):
+        self.kernel.execute(self.client, "prepare", topic="守恒")
+        draft = deepcopy(self.draft)
+        draft["scope_design"]["links"].pop()
+        self.kernel.execute(self.client, "save", draft=draft)
+        self.assertEqual(self.kernel.status(self.client)["status"], "preparing")
+        with self.assertRaisesRegex(ValueError, "每个目标"):
+            self.kernel.execute(self.client, "confirm")
+
+    def test_scope_graph_is_rebuildable_private_and_has_raw_anchors(self):
+        self.ready()
+        teacher = self.kernel.show(self.client, examiner=True)
+        graph = teacher["scope_graph"]
+        self.assertEqual(graph, oral_exam.oral_exam_scope.build_graph(teacher["draft"]))
+        self.assertEqual(graph["mapping_authority"], "plan_design_not_knowledge_fact")
+        self.assertEqual({node["kind"] for node in graph["nodes"]}, {"knowledge", "competency", "objective", "raw"})
+        node_ids = {node["id"] for node in graph["nodes"]}
+        for edge in graph["edges"]:
+            self.assertIn(edge["source"], node_ids)
+            self.assertIn(edge["target"], node_ids)
+        self.assertNotIn("scope_graph", json.loads(self.kernel.state_path.read_text()))
+        self.assertFalse((self.repo / "cross-domain/graph.db").exists())
+        self.assertFalse((self.repo / "private/graph.db").exists())
+
+    def test_student_scope_view_omits_raw_anchors_and_examiner_notes(self):
+        self.ready()
+        student = self.kernel.show(self.client)
+        self.assertNotIn("scope_graph", student)
+        self.assertIn("behavior", student["draft"]["scope_design"]["competency_points"][0])
+        self.assertNotIn("evidence", student["draft"]["scope_design"]["knowledge_points"][0])
+        self.assertNotIn("criteria", student["draft"]["objectives"][0])
+        teacher = self.kernel.show(self.client, examiner=True)
+        self.assertIn("evidence", teacher["draft"]["scope_design"]["knowledge_points"][0])
+
+    def test_scope_design_is_frozen_with_the_session_version(self):
+        self.start()
+        frozen = deepcopy(self.session_record()["plan"]["scope_design"])
+        self.kernel.execute("teacher", "prepare", plan_id="test-plan")
+        changed = deepcopy(self.draft)
+        changed["scope_design"]["competency_points"][0]["behavior"] = "比较不同系统边界并给出反例"
+        self.kernel.execute("teacher", "save", draft=changed)
+        self.kernel.execute("teacher", "confirm")
+        self.assertEqual(self.session_record()["plan"]["scope_design"], frozen)
+        self.assertNotIn("比较不同系统边界并给出反例", json.dumps(self.kernel.packet(self.client), ensure_ascii=False))
+
+    def test_legacy_plan_without_scope_design_needs_no_migration(self):
+        self.kernel.execute(self.client, "prepare", plan_id="legacy", topic="守恒")
+        with self.kernel._locked() as state:
+            state["plans"]["legacy"]["draft"].pop("scope_design")
+            oral_exam.atomic_json(self.kernel.state_path, state)
+        draft = deepcopy(self.draft)
+        draft.pop("scope_design")
+        self.kernel.execute(self.client, "save", draft=draft)
+        self.kernel.execute(self.client, "confirm")
+        self.kernel.execute(self.client, "start")
+        packet = self.kernel.packet(self.client)
+        self.assertNotIn("scope_graph", packet)
+        self.assertEqual([card["id"] for card in packet["cards"]], ["conservation", "boundary"])
+        self.assertNotIn("scope_design", self.session_record()["plan"])
+
+    def test_scope_selection_keeps_pending_related_and_breadth_candidates(self):
+        draft = self.course_draft()
+        self.kernel.validate_plan(draft, complete=True)
+        selector = oral_exam.oral_exam_scope.select_cards
+        selected = selector(draft, "unit-0", {"unit-0"})
+        self.assertEqual([card["id"] for card in selected], ["unit-0", "unit-19", "unit-1"])
+        for card_id in ("unit-0", "unit-1", "unit-19"):
+            selected = selector(draft, card_id, {card["id"] for card in draft["objectives"]})
+            self.assertEqual(selected[0]["id"], card_id)
+            self.assertEqual(len({card["id"] for card in selected}), 3)
+        legacy = deepcopy(draft)
+        legacy.pop("scope_design")
+        self.assertEqual([card["id"] for card in selector(legacy, "unit-0", {"unit-0"})], ["unit-0", "unit-1", "unit-2"])
+
+    def test_turn_scope_is_bounded_and_does_not_read_unselected_sources(self):
+        draft = self.course_draft()
+        self.start(draft=draft)
+        self.deliver(self.question())
+        self.answer()
+        with patch.object(oral_exam.source_locator, "read_locator_text",
+                          wraps=oral_exam.source_locator.read_locator_text) as reader:
+            packet = self.kernel.packet(self.client)
+        self.assertEqual([card["id"] for card in packet["cards"]], ["unit-0", "unit-19", "unit-1"])
+        self.assertEqual(reader.call_count, 2)
+        graph = packet["scope_graph"]
+        self.assertEqual(len([node for node in graph["nodes"] if node["kind"] == "objective"]), 3)
+        self.assertEqual(graph["raw_anchors"], "cards.evidence")
+        self.assertFalse(any(node["kind"] == "raw" for node in graph["nodes"]))
+        self.assertTrue(all(edge["relation"] != "grounded_in" for edge in graph["edges"]))
+        self.assertTrue(all("label" not in node for node in graph["nodes"] if node["kind"] == "objective"))
+        self.assertNotIn("knowledge:knowledge-2", {node["id"] for node in graph["nodes"]})
+        self.assertEqual(len(packet["reference_regions"]), 2)
+        self.assertNotIn("scope_design", packet)
+        self.assertEqual(len(packet["objectives"]), 20)
+
+    def test_scope_fixture_reduces_source_reads_and_packet_size_against_legacy_selection(self):
+        self.start(draft=self.course_draft())
+        self.deliver(self.question())
+        self.answer()
+        with patch.object(oral_exam.source_locator, "read_locator_text",
+                          wraps=oral_exam.source_locator.read_locator_text) as reader:
+            packet = self.kernel.packet(self.client)
+        scope_reads = reader.call_count
+        with self.kernel._locked() as state:
+            legacy_state = deepcopy(state)
+        legacy_state["sessions"][packet["session_id"]]["plan"].pop("scope_design")
+        with patch.object(oral_exam.source_locator, "read_locator_text",
+                          wraps=oral_exam.source_locator.read_locator_text) as reader:
+            legacy_packet = self.kernel._packet(legacy_state, self.client)
+        self.assertEqual((scope_reads, reader.call_count), (2, 3))
+        self.assertLess(len(json.dumps(packet, ensure_ascii=False)), len(json.dumps(legacy_packet, ensure_ascii=False)))
+
+    def test_scope_api_uses_same_graph_without_extra_model_calls(self):
+        self.start(draft=self.course_draft())
+        captured = []
+
+        def caller(prompt, validate, **kwargs):
+            packet = json.loads(prompt)
+            captured.append(packet)
+            proposal = self.proposal(packet)
+            self.assertTrue(validate(proposal))
+            return {"status": "ok", "parsed": proposal}
+
+        with patch.dict("os.environ", {"ORAL_EXAM_BACKEND": "api"}):
+            oral_exam_api.advance(self.kernel, self.client, allow_api_sharing=True, caller=caller)
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0]["candidate_selection"]["limit"], 3)
+        self.assertTrue(captured[0]["scope_graph"]["nodes"])
+
+    def test_scope_assessment_still_requires_actual_dialogue_evidence(self):
+        self.start(draft=self.dialogue_draft())
+        self.kernel.execute(self.client, "end")
+        packet = self.kernel.packet(self.client)
+        self.assertEqual(packet["kind"], "assessment")
+        self.assertTrue(packet["scope_graph"]["nodes"])
+        proposal = self.assessment_proposal(packet)
+        self.assertTrue(all(item["independent_understanding"] == "not_assessed" for item in proposal["assessment"]["objectives"]))
+        self.assertTrue(self.kernel.check(self.client, proposal)["ok"])
+        proposal["assessment"]["objectives"][0]["independent_understanding"] = "demonstrated"
+        with self.assertRaises(ValueError):
+            self.kernel.check(self.client, proposal)
 
     def test_cli_and_wg_parser_have_oral_entry(self):
         path = oral_exam.REPO / ".scripts/wg.py"

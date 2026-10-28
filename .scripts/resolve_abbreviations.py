@@ -47,6 +47,12 @@ def _occurrence_target(entry: dict) -> str:
                entry.get("object") or entry.get("subject") or "")
 
 
+
+def _known_person_occurrence(conn, entry: dict) -> bool:
+    return str(entry.get("field") or "object") in {"subject", "object"} and bool(
+        gl.exact_person_identity(conn, _occurrence_target(entry)))
+
+
 def _is_page_identity_entry(entry: dict) -> bool:
     page = str(entry.get("page") or "")
     return (
@@ -282,6 +288,8 @@ def _collect_pending(conn, todo_entries: list[dict] | None = None) -> list[dict]
     # Slot/free-edge warnings may not have a proposition node. Preserve them as
     # review occurrences and still use their page-local Raw definition.
     for entry in todo_entries or []:
+        if _known_person_occurrence(conn, entry):
+            continue
         tok = entry["token"]
         resolved, _ambig = gl.resolve_bare_name(tok, title_idx, alias_idx, suffix_idx)
         if resolved:
@@ -526,6 +534,7 @@ def main():
             resolved_tokens = {item["token"] for item in applied["resolved"]}
             remaining_entries = [
                 entry for entry in todo_entries if entry["token"] not in resolved_tokens
+                and not _known_person_occurrence(conn, entry)
             ]
             _write_todo(todo_path, remaining_entries)
             pending = list_pending(conn, remaining_entries, emit=False)

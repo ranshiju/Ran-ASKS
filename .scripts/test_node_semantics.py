@@ -28,6 +28,54 @@ def add_node(conn, path, title=None, description="", node_type="entity", subtype
     )
 
 
+def test_lexical_top_k_matches_exhaustive_ranking_and_stable_ties():
+    import copy
+    import random
+    import re
+    from difflib import SequenceMatcher
+
+    # Exhaustive reference intentionally has no pruning or incremental top-k.
+    def exhaustive(query, rows, k):
+        query_n = ns._normalize(query)
+        terms = set(re.findall(r"[\u3400-\u9fff]{2,}|[A-Za-z0-9-]{2,}", query.casefold()))
+        ranked = []
+        for row in rows:
+            text = f"{row['title']} {row['description']}"
+            text_n = ns._normalize(text)
+            overlap = sum(term in text.casefold() for term in terms)
+            ratio = SequenceMatcher(None, query_n, text_n).ratio() if query_n and text_n else 0.0
+            score = overlap + ratio
+            if score > 0:
+                ranked.append({**row, "lexical_score": round(score, 4), "match_role": "lexical_candidate"})
+        return sorted(ranked, key=lambda row: row["lexical_score"], reverse=True)[:k]
+
+    rng = random.Random(20261027)
+    alphabet = "aaabccxyz 量子模型条件猜想MPS+-_()éß0123"
+    rows = [{"node_id": str(i),
+             "title": "".join(rng.choices(alphabet, k=rng.randint(0, 24))),
+             "description": "".join(rng.choices(alphabet, k=rng.randint(0, 280)))}
+            for i in range(180)]
+    rows += [{"node_id": f"tie-{i}", "title": "Same (MPS)", "description": "相同"} for i in range(25)]
+    queries = ["", "量子模型", "abc", "Same (MPS)", "a" * 240, "éß", "未知假设条件", "---"]
+    for order in (rows, list(reversed(rows))):
+        before = copy.deepcopy(order)
+        for query in queries:
+            for k in (-2, 0, 1, 5, 20, 999):
+                assert ns._lexical_rank(query, order, k) == exhaustive(query, order, k)
+        assert order == before
+
+
+def test_lexical_top_k_skips_impossible_scores_without_changing_tie_order():
+    from difflib import SequenceMatcher
+
+    rows = [{"node_id": str(i), "title": "MPS", "description": ""} for i in range(3)]
+    rows += [{"node_id": "long", "title": "unrelated", "description": "x" * 1000}] * 100
+    with patch.object(ns, "SequenceMatcher", wraps=SequenceMatcher) as matcher:
+        ranked = ns._lexical_rank("MPS", rows, 1)
+    assert ranked == [{**rows[0], "lexical_score": 2.0, "match_role": "lexical_candidate"}]
+    assert matcher.call_count == 1
+
+
 def test_alias_schema_migrates_to_many_to_many():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row

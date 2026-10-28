@@ -1626,15 +1626,12 @@ def assign_keyword_hubs(conn, keywords, direction_predicates, page_path):
 
 
 def _align_propositions(sem_triples, conn, page_path, *, route_page_file=None):
-    """proposition 对齐（统一对齐框架覆盖 proposition 颗粒度）。
+    """Link similar propositions without replacing their source-qualified text.
 
-    双阈值梯度（比 keyword 更保守，因误合并会污染事实层）：
-    - cosine > 0.98：合并——新 proposition 用已有 proposition 名替换（不建重复节点）
-    - 0.9 ≤ cosine ≤ 0.98：建关联边——new | 关联 | existing（各自保留独立，跨文档关系可见）
-    - < 0.9：不动
-
-    与 keyword 的 _dedup_semantic_keywords 平行，参数差异体现在阈值（0.98 vs 0.92）
-    和多一档关联边（keyword 只有合并档）。
+    Cosine >= 0.9 supports inferred navigation, never proposition identity:
+    even near-identical vectors may differ in modality, conditions or negation.
+    Exact text reuse remains GraphDelta's responsibility; do not add self-links.
+    Keep the legacy merged/mapping report fields for existing consumers.
     """
     # 收集本次 sem_triples 中的 proposition object
     prop_predicates = PROPOSITION_PREDICATES | {"决策"}
@@ -1645,7 +1642,7 @@ def _align_propositions(sem_triples, conn, page_path, *, route_page_file=None):
             new_props.append(t["object"])
     if not new_props:
         return {"merged": 0, "linked": 0, "mapping": {}}
-    # 查图中已有 proposition 节点（排除本次页面自己的，避免自匹配）
+    # 查图中已有 proposition；完全相同的文本不产生关联自环。
     rows = conn.execute(
         "SELECT title FROM nodes WHERE type='entity' AND entity_subtype='proposition' "
         "AND title != '' AND title IS NOT NULL"
@@ -1657,7 +1654,7 @@ def _align_propositions(sem_triples, conn, page_path, *, route_page_file=None):
         from embed_helper import match_by_embedding
     except Exception:
         return {"merged": 0, "linked": 0, "mapping": {}}
-    # 先用低阈值(0.9)找出所有候选，再按分数分档
+    # 相似度只用于导航；同时批处理后续方向路由已需的向量。
     extra_texts = []
     if route_page_file is not None:
         profile = hs.read_paper_profile(route_page_file)
@@ -1670,27 +1667,19 @@ def _align_propositions(sem_triples, conn, page_path, *, route_page_file=None):
     )
     if not matches:
         return {"merged": 0, "linked": 0, "mapping": {}}
-    merge_map = {}   # new -> existing (>0.98 合并)
-    link_pairs = []  # (new, existing) (0.9-0.98 关联边)
-    for new_prop, (existing_prop, score) in matches.items():
-        if score > 0.98:
-            merge_map[new_prop] = existing_prop
-        else:
-            link_pairs.append((new_prop, existing_prop))
-    # 应用合并：重写 sem_triples 的 object
-    if merge_map:
-        for t in sem_triples:
-            obj = t.get("object", "")
-            if obj in merge_map:
-                t["object"] = merge_map[obj]
+    link_pairs = [
+        (new_prop, existing_prop)
+        for new_prop, (existing_prop, _score) in matches.items()
+        if new_prop != existing_prop
+    ]
     # 应用关联边：新增 new | 关联 | existing 三元组
     for new_prop, existing_prop in link_pairs:
         sem_triples.append({
             "subject": new_prop, "predicate": "关联", "object": existing_prop,
-            "confidence": "可追溯", "source": page_path, "is_sr": 0,
+            "confidence": "推断", "source": page_path, "is_sr": 0,
         })
-    return {"merged": len(merge_map), "linked": len(link_pairs),
-            "mapping": merge_map, "links": link_pairs}
+    return {"merged": 0, "linked": len(link_pairs),
+            "mapping": {}, "links": link_pairs}
 
 
 def assign_keyword_hubs_meeting_admin(conn, keywords, page_path):
@@ -2041,11 +2030,13 @@ def _build_subgraph(triples, page_path):
 
 
 def bare_tokens_resolvable(text, conn, title_idx, alias_idx, suffix_idx) -> bool:
-    """文本中的裸缩写 token 是否全部能 resolve 到 keyword 节点。
+    """完整已登记人物字段，或全部 token 可 resolve 到 keyword 时免于缩写告警。
     slot 校验与图融合期复查的公共判定：缩写已注册 alias → 已建立关联，不 warn。
-    无 token 返回 False（交回 is_bare_abbreviation 原始判定，保留 warning）。
+    非人物字段无 token 返回 False（交回 is_bare_abbreviation 原始判定，保留 warning）。
     resolve 到 proposition 不算（非概念端点，防歧义）。
     """
+    if gl.exact_person_identity(conn, text):
+        return True
     if not text:
         return False
     no_paren = re.sub(r"[（(][^)）]*[)）]", "", text)
@@ -2200,13 +2191,26 @@ def add_knowledge_edges(
             if triple.get("subject", "").strip() not in abstained
             and triple.get("object", "").strip() not in abstained
         ]
+    # A proposition keeps its role when also used by another relation, regardless
+    # of edge order. Match GraphDelta's role-based identity boundary.
+    proposition_mentions = {
+        t.get(key, "").strip()
+        for t in normalized_triples
+        for key in ("subject", "object")
+        if (key == "object" and kir.relation_endpoint_kind(t.get("predicate", ""), key) == "proposition")
+        or (key == "subject" and t.get("predicate") == "包含")
+    }
+
+    def is_proposition_mention(name, triple, key):
+        return name in proposition_mentions or _is_proposition_slot(name, triple, key)
+
     # 第一遍扫描：建 concept_map（概念全名→keyword_id），供 proposition path 替换内嵌概念
     concept_map = {}
     for t in normalized_triples:
         for key in ("subject", "object"):
             name = t.get(key, "").strip()
             # 仅概念（非命题）进 concept_map：命题谓词 object / 包含边 subject 是命题，排除
-            if name and not _is_proposition_slot(name, t, key) and not _is_task_slot(t, key):
+            if name and not is_proposition_mention(name, t, key) and not _is_task_slot(t, key):
                 kid = gl.extract_keyword_id(name)
                 if kid:
                     concept_map[name] = kid
@@ -2260,14 +2264,14 @@ def add_knowledge_edges(
                         "COALESCE(entity_subtype,'') IN ('','keyword','concept')",
                         (target,),
                     )
-                elif _is_proposition_slot(name, t, key):
+                elif is_proposition_mention(name, t, key):
                     conn.execute(
                         "UPDATE nodes SET entity_subtype='proposition' "
                         "WHERE path=? AND type='entity' AND "
                         "(entity_subtype IS NULL OR entity_subtype='')",
                         (target,),
                     )
-                if not _is_proposition_slot(name, t, key) and not _is_task_slot(t, key):
+                if not is_proposition_mention(name, t, key) and not _is_task_slot(t, key):
                     resolved_mentions[name] = target
                 resolve_hits += 1
                 continue
@@ -2285,7 +2289,7 @@ def add_knowledge_edges(
                         "COALESCE(entity_subtype,'') IN ('','keyword','concept')",
                         (name,),
                     )
-                elif _is_proposition_slot(name, t, key):
+                elif is_proposition_mention(name, t, key):
                     # 历史节点已存在但无 subtype（改革前摄入）：补 proposition 标记
                     conn.execute(
                         "UPDATE nodes SET entity_subtype='proposition' "
@@ -2293,7 +2297,7 @@ def add_knowledge_edges(
                         "(entity_subtype IS NULL OR entity_subtype='')",
                         (name,),
                     )
-                if not _is_proposition_slot(name, t, key) and not _is_task_slot(t, key):
+                if not is_proposition_mention(name, t, key) and not _is_task_slot(t, key):
                     resolved_mentions[name] = name
                 continue
             if decision:
@@ -2328,7 +2332,7 @@ def add_knowledge_edges(
                     )
                     if not path_existed:
                         created_node_paths.add(t[key])
-                elif _is_proposition_slot(name, t, key):
+                elif is_proposition_mention(name, t, key):
                     # proposition 节点：用 extract_descriptive_id 算 path（替换内嵌概念为 ID）
                     if (decision or {}).get("action") == "create_scoped_proposition":
                         prop_path = _scoped_meeting_node_path(page_path, "decisions", name)
@@ -2366,7 +2370,7 @@ def add_knowledge_edges(
                     resolve_ambig += 1
                 else:
                     nodes_created += 1
-            if not _is_proposition_slot(name, t, key) and not _is_task_slot(t, key):
+            if not is_proposition_mention(name, t, key) and not _is_task_slot(t, key):
                 concept_map[name] = t[key]
                 resolved_mentions[name] = t[key]
         origin_source = str(t.get("source") or page_source_note or "")
@@ -2380,7 +2384,7 @@ def add_knowledge_edges(
                     managed=endpoint in created_node_paths,
                 )
         if t.get("predicate") in (PROPOSITION_PREDICATES | {"决策"}) \
-                and _is_proposition_slot(obj_raw, t, "object"):
+                and is_proposition_mention(obj_raw, t, "object"):
             propositions.append((t["object"], obj_raw))
         flat.append((page_path, t))
     for gloss in concept_glosses or []:
@@ -3026,7 +3030,7 @@ def _cmd_ingest_locked(args):
             sem_triples, dir_preds = normalize_semantic_directions(conn, sem_triples, keywords, page, _doc_text)
         sem_format_warns = detect_inline_section_headers(sem_text) if sem_text else []
         # proposition 对齐: 统一对齐框架覆盖 proposition 颗粒度
-        # >0.98 合并节点, 0.9-0.98 建关联边(比 keyword 更保守,防污染事实层)
+        # 相似度 >=0.9 仅建推断关联；不得覆盖原命题的条件或论断强度。
         route_page_file = (
             page_file if _is_paper and not getattr(args, "metadata_only", False) else None
         )

@@ -1089,6 +1089,44 @@ def test_api_semantic_backend_requests_ocr_authorization_in_same_transaction():
         )
 
 
+def test_visual_resume_persists_preprocess_before_pipeline():
+    """显式视觉输入恢复必须先落盘，后续 write_wiki 才能通过迁移校验。"""
+    import contextlib
+    import io
+    from unittest.mock import patch
+
+    cases = [
+        (".png", "image_ocr_authorization", ["--allow-remote-ocr"]),
+        (".png", "image_confirmation", ["--ocr-result", "temp/reviewed.json"]),
+        (".pptx", "pptx_api_action", ["--allow-remote-ppt"]),
+    ]
+    for suffix, kind, options in cases:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            txn = "20261027-120000-visual-resume"
+            state = {
+                "transaction_id": txn, "status": "prepared",
+                "semantic_backend": "api", "source": "inbox/source" + suffix,
+                "agent_task": {"schema": "agent-task-v1", "kind": kind},
+            }
+
+            def advance(current):
+                assert module.inbox_state.load(txn)["status"] == "preprocess"
+                module.inbox_state.advance(current, "write_wiki", reason="preprocess_completed")
+                module.inbox_state.save(txn, current)
+                return current
+
+            with patch.object(module.inbox_state, "REPO", root), \
+                    patch.object(module, "ingest_mode", return_value="api"), \
+                    patch.object(module, "run_pipeline", side_effect=advance), \
+                    patch.object(module.ic, "run_resume_post_maintenance", return_value=None), \
+                    patch("sys.argv", ["ingest_document.py", "--resume", txn, "--verbose", *options]), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                module.inbox_state.save(txn, state)
+                module.main()
+                assert module.inbox_state.load(txn)["status"] == "write_wiki", module.inbox_state.load(txn)
+
+
 def test_resume_rejects_semantic_backend_switch_with_nonzero_exit():
     """恢复事务时 backend 不一致须结构化失败并返回非零。"""
     import contextlib
@@ -1309,6 +1347,7 @@ def main():
     test_semantic_validation_refreshes_cache_before_responsibility_checks()
     test_api_semantic_backend_requests_ocr_authorization_in_same_transaction()
     test_resume_rejects_semantic_backend_switch_with_nonzero_exit()
+    test_visual_resume_persists_preprocess_before_pipeline()
     test_document_semantics_rejects_arrow_and_legacy_sections_before_finalize()
     test_normalize_slots_accepts_only_harmless_markdown_wrappers()
     test_document_navigation_principles_are_shared_by_agent_and_api()
@@ -1319,6 +1358,7 @@ def main():
     test_preprocess_native_text_uses_original()
     test_validate_native_text_uses_inbox_source_before_commit()
     test_preprocess_text_pdf_creates_line_locator_companion()
+    test_pdf_text_layer_recovers_failed_document_extraction()
     test_finalize_lands_original_and_companion_together()
     test_build_source_context_document_keeps_short_full()
     test_build_source_context_document_reduces_by_heading()
@@ -1447,6 +1487,22 @@ def test_preprocess_text_pdf_creates_line_locator_companion():
         module.extract_doc_text = original_extract
         shutil.rmtree(root, ignore_errors=True)
         shutil.rmtree(module.REPO / state["extract_dir"], ignore_errors=True)
+
+
+def test_pdf_text_layer_recovers_failed_document_extraction():
+    import fitz
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "course.pdf"
+        document = fitz.open()
+        document.new_page().insert_text((72, 72), "Course requirements and assessment rules for students." * 2)
+        document.save(str(source))
+        document.close()
+        with patch.object(module.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)):
+            text = module.extract_doc_text(source, root / "extract")
+        assert "Course requirements and assessment rules" in text
 
 
 def test_same_name_documents_finalize_without_overwriting_for_both_backends():

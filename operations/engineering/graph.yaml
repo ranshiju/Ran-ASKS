@@ -496,7 +496,7 @@ nodes:
   resolve_abbreviations:
     path: .scripts/resolve_abbreviations.py
     kind: implementation
-    role: field-aware-occurrence-abbreviation-resolution-and-agent-confirmed-typed-batch-apply
+    role: field-aware-occurrence-abbreviation-resolution-with-exact-registered-person-identity-and-agent-confirmed-typed-batch-apply
   query_graph:
     path: .scripts/query_graph.py
     kind: implementation
@@ -752,7 +752,7 @@ nodes:
   ingest_check:
     path: .scripts/ingest_check.py
     kind: validator
-    role: local-structural-source-raw-footnote-and-wiki-graph-consistency-validator
+    role: local-structural-visible-drafting-marker-source-raw-footnote-and-wiki-graph-consistency-validator
   ingest_build:
     path: .scripts/ingest_build.py
     kind: derived-builder
@@ -1089,7 +1089,11 @@ nodes:
   oral_exam:
     path: .scripts/oral_exam.py
     kind: implementation
-    role: shared-private-oral-kernel-with-prepared-evidence-bounded-backup-navigation-live-questioning-and-atomic-host-receive
+    role: shared-private-oral-kernel-with-confirmed-scope-design-prepared-evidence-live-questioning-and-atomic-host-receive
+  oral_exam_scope:
+    path: .scripts/oral_exam_scope.py
+    kind: implementation
+    role: shared-pure-private-scope-design-validation-rebuildable-knowledge-competency-objective-raw-view-and-bounded-candidate-selection
   oral_exam_playbook:
     path: operations/ORAL_EXAM_AGENT.md
     kind: documentation
@@ -1217,7 +1221,7 @@ nodes:
   wiki_locator:
     path: .scripts/wiki_locator.py
     kind: implementation
-    role: stable-heading-slug-cjk-bigram-ranked-semantic-address-reader-and-strict-raw-footnote-integrity-bridge-with-opt-in-exact-inline-citation-reuse
+    role: stable-heading-slug-cjk-bigram-ranked-semantic-address-reader-and-strict-raw-footnote-integrity-bridge-with-shared-explicit-placeholder-detection-and-opt-in-exact-inline-citation-reuse
   engineering_locator:
     path: .scripts/engineering_locator.py
     kind: implementation
@@ -1278,6 +1282,18 @@ nodes:
     path: .scripts/test_read_paper.py
     kind: test
     role: read-paper-directed-excerpt-regression
+  ingest_acceptance_benchmark:
+    path: .scripts/benchmark_ingest_acceptance.py
+    kind: implementation
+    role: shared-offline-hash-bound-ingest-completion-quality-latency-acceptance-and-failed-attempt-ledger-no-semantic-judgment-or-live-calls
+  ingest_acceptance_benchmark_test:
+    path: .scripts/test_benchmark_ingest_acceptance.py
+    kind: test
+    role: ingest-acceptance-fail-closed-quality-timing-cost-and-comparability-regression
+  ingest_acceptance_benchmark_ops:
+    path: operations/engineering/ingest-acceptance-benchmark.md
+    kind: spec
+    role: full-ingest-acceptance-measurement-and-evidence-binding-contract
   ingest_performance_benchmark:
     path: .scripts/benchmark_ingest_performance.py
     kind: implementation
@@ -1311,6 +1327,24 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - resolve_abbreviations
+  - uses
+  - graph_lib
+- - resolve_abbreviations
+  - tested_by
+  - ingest_pipeline_test
+- - ingest_acceptance_benchmark_ops
+  - governs
+  - ingest_acceptance_benchmark
+- - ingest_acceptance_benchmark
+  - tested_by
+  - ingest_acceptance_benchmark_test
+- - ingest_acceptance_benchmark
+  - uses
+  - ingest_inbox
+- - ingest_acceptance_benchmark
+  - uses
+  - llm_structured
 - - ingest_performance_benchmark
   - uses
   - node_semantics
@@ -1563,6 +1597,15 @@ edges:
 - - oral_exam
   - uses
   - oral_exam_styles
+- - oral_exam
+  - uses
+  - oral_exam_scope
+- - oral_exam_ops
+  - governs
+  - oral_exam_scope
+- - oral_exam_scope
+  - tested_by
+  - oral_exam_test
 - - oral_exam
   - uses
   - oral_exam_help
@@ -3251,6 +3294,7 @@ capabilities:
     - receive 合并显式送达确认、真实输入与内联任务包，commit 保留完整校验；准备阶段定位 Raw 子区域，回合不重复全库查询，不隐式调用模型。
     - 准备固定目标与证据，不固定题目或题序；备选导航仅按明确缺口读取，不自动成为评分依据，旧 probes 保留原记录但不进入正式任务。
     - 新方案准备时确认私有 scope_design 的知识点、可观察能力点和目标映射；范围图是可重建视图，不是事实源或独立数据库。旧方案不强制迁移，正式回合只携带有限候选子图，兼顾关联追问和未覆盖范围。
+    - 新方案准备时确认私有 scope_design 的知识点、可观察能力点和目标映射；范围图是可重建视图，不是事实源或独立数据库。旧方案不强制迁移，正式回合只携带有限候选子图，兼顾关联追问和未覆盖范围。
   graph-visualize:
     entry: route
     required:
@@ -3702,6 +3746,8 @@ verification:
   - python3 .scripts/engineering_graph.py validate
   oral_exam_api:
   - python3 .scripts/test_oral_exam.py
+  oral_exam_scope:
+  - python3 .scripts/test_oral_exam.py
   oral_exam_playbook:
   - python3 .scripts/test_oral_exam.py
   - python3 .scripts/test_playbook_dispatch.py
@@ -3996,6 +4042,9 @@ verification:
   - python3 .scripts/test_ingest_document.py
   - python3 .scripts/test_ingest_admin.py
   - python3 .scripts/test_ingest_pipeline.py
+  ingest_acceptance_benchmark:
+  - python3 .scripts/test_benchmark_ingest_acceptance.py
+  - python3 .scripts/engineering_graph.py validate
   ingest_performance_benchmark:
   - python3 .scripts/benchmark_ingest_performance.py --delay-sec 0 --repeats 1
   read_paper:
@@ -4911,6 +4960,8 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   graph_ingest:
     preconditions:
+    - shared writer 在同批关系中统一保留由命题角色确定的端点类型；同一命题再作为关联端点时不得降为 keyword 或进入 concept_map，关系输入顺序不改变其完整 title 与 proposition 身份
+    - shared 命题向量相似度只提供导航关联，不证明同一性；非逐字相同命题不得因任何相似度分数替换原文。cosine ≥ 0.9 的异文候选可建置信性质为推断的关联边，逐字相同不建自环并交原 GraphDelta 精确复用；保留作者归属、推测语气、条件、否定与数量差异
     - shared 单次 add_knowledge_edges 对同一既有/已确认 concept surface 复用 ASCII 词边界 pattern，CJK 保留原文包含；缓存仅在本页 writer 内存生效，不改变候选快照、单字过滤、大小写/词边界或歧义排除，不跨文档缓存图或语义裁决
     - shared 论文命题对齐可在同一 writer lock 内合并随后方向路由已需的 profile/Hub Scope 向量；路由仍运行原 canonical/floor/margin/子方向特异性与 Agent override 规则，身份解析仍在两者之后，不额外预热身份候选或改变候选可见性
     - shared --validate-page 在暂存页最终逻辑路径下复用 ingest_check 结构/来源检查，并在同一未提交连接上检查预期图的作者、venue、Raw 直连等跨层一致性；--plan-only 返回集中诊断后回滚，正式提交失败同样回滚。该入口用于旧 Wiki 局部更新预检，不触发全文重编译或替调用者覆盖 Wiki
@@ -5017,6 +5068,7 @@ script_contracts:
     - python3 .scripts/test_graph_delta.py
   node_semantics:
     preconditions:
+    - shared lexical top-k 可用 SequenceMatcher 比例的严格长度上界跳过不可能入选的候选；上界使用与最终分数相同的四位舍入，等分保留原输入顺序。候选 ID、分数、次序及零分规则须与穷举一致，不改身份门、向量可见范围或跨调用缓存
     - shared resolve_nodes 只在一次同步调用内复用名称规范化、组成部分与末尾缩写处理的纯文本结果；memo 使用 context-local 作用域并在异常/嵌套退出时恢复，不缓存节点、alias、distinct 裁决、候选或向量，不跨预检/提交保留结果
     - shared resolve_nodes 对同一只读图快照批量收集原身份门所需向量，再复用 resolve_node 逐项决策；按原顺序固定每项缓存可见范围与描述预热上限，后项预取不得扩大前项候选；不为无名称证据、唯一精确名称或已判 distinct 的项请求 embedding，向量不完整时沿原逐项路径处理
     - graph.db 已初始化；nodes.path 是稳定 node_id；description 可空；aliases 是确定性名称入口
@@ -5105,6 +5157,7 @@ script_contracts:
     - paper-summary 作者覆盖优先以 source.yaml 中 review.locked=true 的 bibliographic.authors 为 raw 锚点；仅在锁定作者不可用时回退 paper.md 机械提取，或在人数/顺序逐项一致且唯一差异是锁定姓名停在 De/van/von 等姓氏连接词时，采用 paper.md 中的完整向后扩展
     - paper-summary 标题覆盖优先以 source.yaml 中 review.locked=true 的 bibliographic.title 为 raw 锚点；锁定标题不可用时才回退 paper.md 首个 H1，避免出版社包装标题造成假 WARN
     - Wiki 正文不得含残留 RAW#Lx handle 或形如 [^r13]6> 的残缺 RAW 脚注；这些是确定性编译失败并作为 ERROR 阻断 finalize
+    - shared check_file 调用 wiki_locator 统一判定可见正文中的明确写作占位句与括号内填充指令并返回 draft-marker ERROR；保留正文行号，排除围栏/行内代码示例和 HTML 注释，不自动删除内容、不扩大为事实正确性判断
     writes: []
     forbidden:
     - 将 WARN 静默留给未来 Lint
@@ -5347,6 +5400,8 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_paper:
     preconditions:
+    - shared Wiki/semantic 提示及 Agent 结构化任务保留原文的作者归属、论断强度和适用条件；来源明确的猜想或预期可按原角色进入完整命题，不以副词扩增谓词，不把摄入模型的不确定或无依据关系包装成来源猜想。该语义指导不新增 schema、模型调用或程序科学判真门
+    - candidate-id 作者裁决先校验 ID 互斥与证据；不同 ID 的完全相同姓名若一条接受一条拒绝，只在编译后的 rejected 姓名列表排除已接受值并记录候选 ID 审计，完整 decision/catalog/双方 evidence 保留；不归一近似姓名、不处理 proposed 模式、不放宽直接 review 的矛盾校验
     - API 书目规则区分空 DOI/arXiv 可选标识与必要字段未决；可选缺失保留 ambiguous 不猜补，真实候选冲突仍由原 schema/证据门阻断，不根据全局状态自动放行
     - shared combined workspace 的 bibliographic_review_required 交接可在原事务重读已修正书目段，经原输入哈希、schema、证据和下游 validator 后恢复；prepared/agent_required 书目草稿仍受原门控，completed/failed 不得重新开启，不新增模型调用
     - agent-only 阅读契约一次批量读取已明确需要的章节并携带原始来源行号；shared reader 识别二至六级标题与短父节的层级/罗马数字字母子节，主文优先于同名显式附录；总阅读预算与证据缺口补读责任不变，展开子节和非连续片段不得重编号；短文全文也使用原始行号
@@ -5365,7 +5420,7 @@ script_contracts:
     - agent workspace 返回明确 write_to；书目协议同时携带由同一运行时代码生成且自身通过 schema 的完整严格模板，避免 prose shape 与 validator 漂移；程序按 bibliography → wiki → semantics 顺序物化为独立暂存产物并逐层校验，resume 不重跑 MinerU 或已通过阶段
     - Agent 只经 paper_workspace_read/refresh/check/commit 四个类型化动作接管事务；公开 workflow_status 仅允许 awaiting_agent、ready_to_commit、completed、failed，内部细粒度 status 只作为 internal_status 返回
     - 单篇与 batch item 均经 inbox_state 输出 ingest-result-v1；completed 必须同时报告 committed=true 与可定位的 Raw/Wiki 产物，awaiting_agent 的本次产物是 agent-task-v1，不以进程退出码冒充事务完成
-    - Wiki 物化可显式复用已定义脚注，把正文中完全相同的裸 Raw 行 locator 转成对应脚注；API 还可对本次已提供的精确 Raw handle 白名单确定性分配新脚注并在既有 Sources 节补定义；只改变引用表示，不推断地址、不改事实文本，不处理代码/链接/来源定义，重复 Sources 或脚注冲突不自动转换，随后仍通过原 locator 与结构 validator
+    - Wiki 物化可显式复用已定义脚注，把正文中完全相同的裸 Raw 行 locator 或非链接的单中括号 Raw 行 locator 转成对应脚注；单中括号形式保留引用式链接、图片、转义和注释，不猜地址或片段；API 还可对本次已提供的精确 Raw handle 白名单确定性分配新脚注并在既有 Sources 节补定义；只改变引用表示，不推断地址、不改事实文本，不处理代码/链接/来源定义，重复 Sources 或脚注冲突不自动转换，随后仍通过原 locator 与结构 validator
     - batch 顶层 workflow_status、terminal、committed 与 counts 只从 items 派生；prepared/partial 等旧顶层状态只保留为兼容 status，不得覆盖 item 四态或产生独立统计口径
     - 确定性 PDF metadata、首页规则与 MinerU 解析器仍在后台注册带 provenance 的 candidate provider；API 由 candidate-id-v2 锁定，Agent 不接收候选目录且以原始证据直接提取，程序仅把候选用于 fast path、去重和字段冲突诊断
     - bibliographic-candidate-provider-v8 保留 PDF 前两页 layout block 的 self DOI、完整 venue 和 candidate_only 作者，affiliation 单列排除，日期候选绑定 published/published_online/accepted/received/revised/preprint kind；ACM self-citation 作者补充须通过上述双来源一致性检查，冲突仍交同一 candidate-id-v2 workspace 裁决
@@ -5425,7 +5480,7 @@ script_contracts:
     - API 兼容 handoff 必须报告 `execution_backend=api`、明确的 `write_to` 和 API recovery plan；成功恢复后清除过期 `next_action/retryable`。Agent 后端仍使用 `prepared + agent-task-v1` 及原 workspace plan
     - paper-id 的拉丁文本保持 ASCII slug；作者或标题只有中文等非 ASCII 文本时使用稳定 Unicode slug，禁止退化为 paper-YYYY-paper
     - read_paper 只在可机械识别的摘要边界内从 preamble 收窄摘要；没有摘要边界时返回 missing，不得把标题、作者或机构地址冒充 abstract；全大写单字母间隔标题仅在折叠后命中已知 section 名时规范化匹配，locator 仍指向原始 paper.md
-    - Wiki validator 必须拒绝仅含脚注或“待巩固/待补充/TBD/unknown”等明确占位陈述；该机械门不判断引文是否语义蕴含陈述，证据一致性仍归 Agent/API semantic adapter
+    - Wiki validator 与 API 局部修复共用 wiki_locator 的占位判定：拒绝仅含脚注、整行“待巩固/待补充/TBD/unknown”或可见写作占位指令；有具体对象的“不确定/证据仍待补充”等实质陈述不因关键词出现而被认定为空占位，来源蕴含与科学条件仍由 Agent/API semantic adapter 核验
     writes:
     - temp/inbox-extract/<txn>/ paper.pdf、paper.md、paper.pdf.source.json（raw-companion-v1 双哈希绑定）、被 Markdown 引用的 images/、allowlist mineru/ sidecar、parse_meta.yaml、inbox-artifact-manifest-v2、语义槽与 wiki 草稿
     - temp/inbox-extract/<txn>/agent-workspace.txt（paper-agent-workspace-v1 共用语义输出；Agent 直接写入或 API adapter 单次生成）及独立物化的 bibliographic-review.json/wiki.md/semantic.txt；各自产物通过对应 validator 后才可进入提交

@@ -284,6 +284,21 @@ the earlier reviewed pages and frozen paper artifacts remain unchanged.
 尚未证实完整摄入时间减半，也未达到高质量 Markdown 提取后每知识页 20 秒。
 Markdown 与新增并标准化的 PDF 补充页同步；原已审阅页面及冻结论文产物不变。
 
+The 2026-10-28 `v0.20.0` update adds compatible oral-exam scope design and
+offline complete-ingestion acceptance tooling, and improves source-qualified
+propositions, uncertainty, citations and intake recovery. Semantic Compiler v2
+remains an offline design; the 70% complete-ingestion latency target is not
+validated. Future work will evaluate ingestion requirements against downstream
+use with existing models and no model training. The Markdown and appended,
+normalized PDF addendum carry the same update; earlier reviewed pages and
+frozen paper artifacts retain their historical scope.
+
+2026年10月28日的 `v0.20.0` 更新新增兼容的口试范围设计与完整摄入离线验收，
+并改进带条件命题、不确定性、引用及摄入接续。Semantic Compiler v2仍是离线设计，
+70%完整摄入耗时目标尚未验收。下一轮以现有模型、不训练模型，按实际使用效果
+评估摄入要求。Markdown与新增并标准化的PDF补充页同步，原已审阅页面及冻结
+论文产物保留其历史范围。本次按兼容新增能力作MINOR发布。
+
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
 | 核心方法与56篇论文的时间序列展示 | `v0.2.0` | `1.0.0` | arXiv:2608.29612 v1 的冻结边界 |

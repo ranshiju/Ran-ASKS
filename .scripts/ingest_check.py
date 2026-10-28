@@ -341,6 +341,7 @@ def check_file(path, rel_paths, basenames, *, page_path=None, raw_overrides=None
         warns.append(f"frontmatter: status='{status}' 非 deprecated 但填了 superseded_by(冗余字段)")
 
     # --- section 结构 ---
+    errors.extend(wl.check_drafting_markers(body))
     non_code, code_has = split_code_blocks(body)
     secs, seen = extract_h2_sections(non_code)
     sec_set = set(secs)

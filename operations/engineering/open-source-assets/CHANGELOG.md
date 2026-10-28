@@ -7,6 +7,25 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-28
+
+### Version decision / 版本判断
+
+- MINOR: Add compatible evidence-bound oral-exam scope design and offline complete-ingestion acceptance tooling while preserving legacy plans and managed ingestion contracts
+- MINOR（中文）：新增兼容的证据绑定口试范围设计与完整摄入离线验收工具，保持历史方案和受管摄入契约
+
+### Highlights
+
+- Added evidence-bound oral-exam scope design connecting knowledge points, observable competencies and objectives. New plans validate coverage before confirmation; existing plans remain supported, and graph coverage does not establish student mastery.
+- Added offline acceptance tooling for complete ingestion runs, binding saved outputs, source reviews, maintenance, continuous elapsed time and request usage. It checks evidence records, not scientific truth; the target of completing ingestion within 70% of a qualified baseline remains unverified.
+- Preserved source-qualified propositions instead of merging them by embedding similarity, retained uncertainty and attribution, and improved bibliography handling, citation checks, local PDF text fallback and resumable intake. Semantic Compiler v2 remains an offline design direction, with no production activation or validated speedup claim.
+
+### 主要更新
+
+- 新增证据绑定的口试范围设计，连接知识点、可观察能力与考查目标。新方案确认前检查覆盖，旧方案继续兼容；图覆盖不代表学生已经掌握。
+- 新增完整摄入的离线验收工具，绑定已保存产物、来源审阅、维护状态、连续耗时及请求用量。工具检查证据记录，不判断科学真伪；完整摄入耗时不超过合格基线70%的目标仍未验收。
+- 命题保留来源条件，不按向量相似度合并；保留不确定性与归属，并改进书目处理、引用检查、本地PDF文本回退和摄入接续。Semantic Compiler v2仍为离线设计方向，本版未生产启用，也未验证其提速收益。
+
 ## [0.19.0] - 2026-10-26
 
 ### Version decision / 版本判断
@@ -580,5 +599,7 @@ manifests and checksums.
 
 [0.18.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.18.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.19.0...HEAD
 [0.19.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.19.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.20.0

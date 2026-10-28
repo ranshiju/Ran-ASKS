@@ -1246,6 +1246,21 @@ def ensure_node(
     )
 
 
+
+def exact_person_identity(conn, text: str) -> str | None:
+    """Resolve a whole field to one registered person; never infer names from case."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    value = text.strip()
+    rows = conn.execute(
+        "SELECT path,type,entity_subtype FROM nodes WHERE path=? OR title=? LIMIT 2",
+        (value, value),
+    ).fetchall()
+    if len(rows) == 1 and rows[0]["type"] == "entity" and rows[0]["entity_subtype"] == "person":
+        return rows[0]["path"]
+    return None
+
+
 def get_metadata(conn, key, default=""):
     """读取 metadata 表的 key-value。"""
     row = conn.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()

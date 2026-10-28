@@ -495,7 +495,17 @@ def _lexical_rank(query: str, rows: list[dict], top_k: int) -> list[dict]:
     for row in rows:
         haystack = f"{row['title']} {row['description']}"
         haystack_n = _normalize(haystack)
-        overlap = sum(term in haystack.casefold() for term in terms)
+        folded = haystack.casefold()
+        overlap = sum(term in folded for term in terms)
+        # ratio = 2*M/(len(a)+len(b)), with M <= min(len(a), len(b)).
+        # A later row tied after rounding cannot displace an earlier top-k row.
+        upper = (
+            2 * min(len(query_n), len(haystack_n)) / (len(query_n) + len(haystack_n))
+            if query_n and haystack_n else 0.0
+        )
+        if (top_k > 0 and len(ranked) >= top_k
+                and round(overlap + upper, 4) <= ranked[-1]["lexical_score"]):
+            continue
         ratio = SequenceMatcher(None, query_n, haystack_n).ratio() if query_n and haystack_n else 0.0
         score = overlap + ratio
         if score <= 0:
@@ -503,6 +513,9 @@ def _lexical_rank(query: str, rows: list[dict], top_k: int) -> list[dict]:
         item = dict(row)
         item.update({"lexical_score": round(score, 4), "match_role": "lexical_candidate"})
         ranked.append(item)
+        if top_k > 0:
+            ranked.sort(key=lambda item: item["lexical_score"], reverse=True)
+            del ranked[top_k:]
     ranked.sort(key=lambda item: item["lexical_score"], reverse=True)
     return ranked[:top_k]
 

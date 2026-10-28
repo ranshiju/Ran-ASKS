@@ -8,6 +8,73 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ingest_check
 
 
+def test_drafting_markers_reject_unfinished_prose_without_claiming_fact_review():
+    examples = (
+        "本文研究……（此处为示例）随后给出结果。",
+        "项目结论为 [待填写]。",
+        "会议纪要：[待补充：发言要点]。",
+        "The result is [insert the measured value here].",
+        "> **核心贡献**：(此处是占位文本)",
+    )
+    for text in examples:
+        errors = ingest_check.wl.check_drafting_markers("## Navigation\n\n" + text)
+        assert len(errors) == 1, (text, errors)
+        assert "draft-marker:" in errors[0] and "正文第 3 行" in errors[0]
+    # Unsupported scientific claims require source review, not this syntax rule.
+    assert not ingest_check.wl.check_drafting_markers("未经条件限定的科学结论。")
+
+
+def test_drafting_markers_preserve_examples_uncertainty_and_literal_code():
+    prose = """## Navigation
+例如，考虑如下实验；作者认为结果或许成立，证据仍待核实。
+应该满足边界条件，数值大概为 0.24；区间为 [0, 1]。
+计划待补充实验，目前结论不确定。示例并不是结论。
+字面模板 `[待补充]` 和 ``（此处为示例）`` 用于说明写作协议。
+[待补充](pending.md) 与 [待填写][reference] 是链接。
+<!-- [insert a summary here] -->
+```markdown
+[待补充]
+```
+~~~~markdown
+（此处为示例）
+~~~
+[insert a value here]
+~~~~
+````markdown
+```
+（此处为示例）
+```
+````
+"""
+    assert ingest_check.wl.check_drafting_markers(prose) == []
+    errors = ingest_check.wl.check_drafting_markers(prose + "[待填写]\n")
+    assert len(errors) == 1 and f"正文第 {len(prose.splitlines()) + 1} 行" in errors[0]
+    # Code examples cannot mask a later malformed prose paragraph.
+    assert ingest_check.wl.check_drafting_markers("`[待补充]` 后仍有（此处为示例）(见正文)")
+
+
+def test_check_file_applies_drafting_guard_across_domains():
+    for domain, kind in (("academic", "paper-summary"), ("admin", "reference"),
+                         ("teaching", "lecture"), ("business", "research")):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / domain / "wiki/example.md"
+            path.parent.mkdir(parents=True)
+            text = (
+                f"---\ntitle: Example\ntype: {kind}\nsources: [https://example.test/source]\n"
+                "source_type: official-doc\ndate: 2026\nstatus: draft\nconfidence: low\n"
+                "created: 2026-10-27\nupdated: 2026-10-27\n---\n"
+                "## Navigation\n结论仍待核实。\n## Content\n[write the summary here]\n"
+            )
+            path.write_text(text, encoding="utf-8")
+            errors, _ = ingest_check.check_file(path, set(), {})
+            assert len(errors) == 1 and errors[0].startswith("draft-marker:"), errors
+            # Caller must complete the paragraph; the validator does not edit it.
+            assert path.read_text(encoding="utf-8") == text
+            path.write_text(text.replace("[write the summary here]", "作者预期这一结论成立。"), encoding="utf-8")
+            errors, _ = ingest_check.check_file(path, set(), {})
+            assert errors == [], errors
+
+
 def test_venue_key_preserves_non_ascii_venue_names():
     assert ingest_check._venue_key("新型炭材料") == "新型炭材料"
     assert ingest_check._venue_key("新型炭材料") != ingest_check._venue_key("炭材料学报")
@@ -525,6 +592,9 @@ def test_locator_aware_page_runs_only_minimal_closed_loop_checks():
 
 
 def main():
+    test_drafting_markers_reject_unfinished_prose_without_claiming_fact_review()
+    test_drafting_markers_preserve_examples_uncertainty_and_literal_code()
+    test_check_file_applies_drafting_guard_across_domains()
     test_venue_key_preserves_non_ascii_venue_names()
     test_academic_non_paper_types_validate_in_final_domain()
     test_graph_checks_with_isolated_database()

@@ -68,6 +68,8 @@ Python 调用：将 `.scripts` 加入模块搜索路径后，使用
 无授权返回 `image_ocr_authorization`；API 失败返回 `image_api_retry`；关键项未决返回 `image_confirmation`。这些任务只提供文字摘要，不把图片作为宿主输入，也不要求宿主自行复核。宿主协调授权或用户确认后恢复同一事务。
 成功转写先落暂存回执，复核失败不丢失转写。普通 resume 复用已验证产物，不重复付费复核；失败重试须显式 `--allow-remote-ocr`，关键未决项须提供可信的源绑定复核回执。失败不会隐式切换为宿主识图；单次调用内仍遵守配置的有界主/回退模型预算。
 
+显式授权或提供 OCR 回执恢复交接时，共享文档入口先持久化 `prepared → preprocess`，再执行提取及后续状态迁移；PPT 授权恢复遵循同一顺序，保持磁盘状态与迁移回执一致。
+
 ```bash
 # 公开入口：inbox 文件直接摄入；外部附件先受管暂存进入 inbox。
 python3 .scripts/wg.py ingest inbox/image.jpg --subproject admin

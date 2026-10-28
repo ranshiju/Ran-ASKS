@@ -302,6 +302,16 @@ def extract_doc_text(source_path: Path, extract_dir: Path | None = None) -> str:
             )
             if md_path.is_file():
                 return md_path.read_text(encoding="utf-8")
+        # The document extractor may be unavailable even when every page has
+        # a usable text layer. Keep the PDF as the source and extract locally.
+        try:
+            import fitz
+            with fitz.open(str(source_path)) as document:
+                pages = [page.get_text(sort=True).strip() for page in document]
+            if pages and all(len(page) >= 50 for page in pages):
+                return "\n\n".join(pages) + "\n"
+        except Exception:
+            pass
         return ""
     return ""
 
@@ -993,7 +1003,7 @@ def _companion_record(state: dict, source_path: Path, companion_path: Path,
         limitations = ["rendered-format-and-formula-recalculation-require-original"]
         review_status = None
     elif suffix == ".pdf":
-        generator = {"name": "extractor", "version": "1"}
+        generator = {"name": "ingest_document.extract_doc_text", "version": "1"}
         locator_scheme = "line"
         method = "document-text-extraction"
         limitations = ["layout-and-nontext-visuals-require-original"]
@@ -2322,6 +2332,7 @@ def main() -> None:
         state["retry_ppt_api"] = True
         if agent_task.is_prepared(state) and state["agent_task"]["kind"] in {"pptx_review", "pptx_api_action"}:
             inbox_state.transition(state, "preprocess", reason="explicit_ppt_api_input")
+            inbox_state.save(state["transaction_id"], state)
     if (args.ocr_result or args.allow_remote_ocr) \
             and Path(state.get("source", "")).suffix.lower() not in image_ocr.IMAGE_SUFFIXES:
         parser.error("OCR 参数只适用于图片来源")
@@ -2336,6 +2347,7 @@ def main() -> None:
             and state["agent_task"]["kind"] in {"image_ocr", "image_review", "image_ocr_authorization",
                                                "image_confirmation", "image_api_retry"}:
         inbox_state.transition(state, "preprocess", reason="explicit_ocr_input")
+        inbox_state.save(state["transaction_id"], state)
     if (state.get("subproject") == "academic" and
             state.get("document_type") not in ACADEMIC_DOCUMENT_TYPES):
         print(json.dumps({

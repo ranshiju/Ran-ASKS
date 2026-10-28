@@ -232,6 +232,8 @@ Hub 同时是 keyword、proposition、People page 等普通节点形成的可重
 - temporal = 页面 `status`
 - **edge confidence 不继承**(独立判断,默认 `[可追溯]`)
 
+**命题的确定程度**：上述 confidence 不是命题为真的概率。原文明确表达的猜想或预期可以作为 `[可追溯]` 的来源陈述，但完整命题与 Wiki 正文须保留“作者猜想/预期”、适用条件和否定，不得改成确定事实。谓词仍表达关系类型，不拼接“或许/应该/大概”作为确定性等级；这些词须按原文区分推测、规范要求和数值近似。原文无依据或模型自身未能核实，不等于作者提出了一个猜想。
+
 **显式标注时机**:edge confidence 在关系为推断/存疑时显式标(默认可追溯可省);花括号仅在关系与页面级不一致时标。
 
 **主数据化**(v4,2026-07-25):graph.db 是边唯一源(不再从 md Core Triples 段派生);edge confidence 存图 edges 表 `confidence` 字段;`[SR]` 从页面 source_type 派生。ingest 时 `graph_ingest.py` 增量加边,`graph_dump.py` 人读,`graph_build.py` 已废弃删除。

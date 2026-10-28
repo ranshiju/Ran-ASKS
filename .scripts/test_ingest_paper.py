@@ -1395,6 +1395,13 @@ def test_paper_wiki_claim_rules_are_shared_by_prompt_adapters():
     for prompt in prompts:
         for rule in module.PAPER_WIKI_CLAIM_RULES:
             assert rule in prompt
+    # Standalone semantic API and structured Agent handoffs must not lose the
+    # qualifications preserved by the Wiki-producing adapters above.
+    semantic = module.build_slots_prompt("# Example")
+    agent_rules = module.agent_paper_semantic_protocol()["rules"]
+    for rule in module.PAPER_CLAIM_QUALIFICATION_RULES:
+        assert rule in semantic
+        assert rule in agent_rules
 
 
 def test_bibliographic_review_merges_and_rejects_german_institutions():
@@ -1554,6 +1561,63 @@ def test_candidate_id_catalog_compiles_without_free_form_values():
         assert "未知 candidate_id" in str(exc)
     else:
         raise AssertionError("unknown candidate IDs must be rejected")
+
+
+def test_candidate_author_provider_rejection_does_not_reject_accepted_person():
+    import copy
+    text = "# Stable Paper\n\nAlice Example\n"
+    candidates = {
+        "title": ["Stable Paper"], "authors": ["Alice Example", "Example University"],
+        "year": ["2024"], "venue": [], "doi": [], "arxiv_id": [],
+        "candidate_records": {"authors": [
+            {"value": "Alice Example", "evidence": "pdf_layout_front_matter.page1.block1"},
+        ]},
+    }
+    catalog = module.build_bibliographic_candidate_catalog(candidates, {}, text)
+    records = catalog["fields"]["authors"]
+    alice = [item["id"] for item in records if item["value"] == "Alice Example"]
+    assert len(alice) == 2
+    excluded = next(item["id"] for item in records if item["value"] == "Example University")
+    decision = _candidate_id_decision(catalog)
+    decision["selections"]["authors"].update(accepted_ids=[alice[0]], rejected_ids=[alice[1], excluded])
+    before = copy.deepcopy((decision, catalog))
+    review = module.compile_bibliographic_decision(decision, catalog, text)
+    assert review["bibliographic"]["authors"]["value"] == ["Alice Example"]
+    assert review["bibliographic"]["authors"]["rejected"] == ["Example University"]
+    assert "pdf_layout_front_matter.page1.block1" in review["bibliographic"]["authors"]["evidence"]
+    assert alice[1] in review["review_notes"][-1]
+    assert (decision, catalog) == before
+    assert module.validate_bibliographic_review(review, candidates, text) == []
+
+    # A real same-ID conflict still fails before name-level compilation.
+    decision["selections"]["authors"]["rejected_ids"].append(alice[0])
+    try:
+        module.compile_bibliographic_decision(decision, catalog, text)
+    except ValueError as exc:
+        assert "同时接受和拒绝" in str(exc)
+    else:
+        raise AssertionError("same-ID contradiction must remain blocked")
+
+    # Free-form reviews do not get this candidate-record interpretation.
+    review["bibliographic"]["authors"]["rejected"].append("Alice Example")
+    assert "authors 不能同时出现在 value 和 rejected" in module.validate_bibliographic_review(review, candidates, text)
+
+
+def test_candidate_author_rejection_keeps_distinct_spellings_and_proposal_conflicts():
+    text = "# Stable Paper\n\nAlice Example, Alice Examples\n"
+    candidates = {"title": ["Stable Paper"], "authors": ["Alice Example", "Alice Examples"],
+                  "year": ["2024"], "venue": [], "doi": [], "arxiv_id": []}
+    catalog = module.build_bibliographic_candidate_catalog(candidates, {}, text)
+    decision = _candidate_id_decision(catalog)
+    decision["selections"]["authors"].update(accepted_ids=["author-01"], rejected_ids=["author-02"])
+    review = module.compile_bibliographic_decision(decision, catalog, text)
+    assert review["bibliographic"]["authors"]["rejected"] == ["Alice Examples"]
+    assert review["review_notes"] == []
+    decision["review_status"] = "corrected"
+    decision["selections"]["authors"].update(accepted_ids=[], rejected_ids=["author-01"],
+        proposed=[{"value": "Alice Example", "evidence": "paper.md#L3"}], status="corrected")
+    review = module.compile_bibliographic_decision(decision, catalog, text)
+    assert "authors 不能同时出现在 value 和 rejected" in module.validate_bibliographic_review(review, candidates, text)
 
 
 def test_candidate_id_v2_compiles_evidence_bound_author_proposals():
@@ -3049,17 +3113,18 @@ def test_api_wiki_handoff_message_does_not_claim_agent_backend():
 
 
 def test_paper_materialization_repairs_inline_citation_without_model_rewrite():
-    for backend in ("agent", "api"):
+    for backend, wrapped in ((backend, wrapped) for backend in ("agent", "api") for wrapped in (False, True)):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             extract_dir = root / "temp/paper-inline-citation"
             extract_dir.mkdir(parents=True)
             (extract_dir / "paper.md").write_text("Bell inequalities\n", encoding="utf-8")
             raw_path = "academic/raw/references/demo/paper.md"
+            inline = f"[{raw_path}#L1]" if wrapped else f"{raw_path}#L1"
             wiki = (
                 f"---\ntitle: Demo\nsources:\n  - {raw_path}\n---\n"
                 f"# Demo\n\n## Navigation\n\n贝尔不等式 [^r1]。\n"
-                f"\n## 研究方向定位\n\n贝尔不等式的经典界 {raw_path}#L1。\n"
+                f"\n## 研究方向定位\n\n贝尔不等式的经典界 {inline}。\n"
                 f"\n## Content\n\n保持原条件 [^r1]。\n"
                 f"\n## Sources\n\n[^r1]: {raw_path}#L1\n"
             )
@@ -3085,7 +3150,7 @@ def test_paper_materialization_repairs_inline_citation_without_model_rewrite():
                 assert module.step_write_slots(state)[0]
             finally:
                 module.REPO, module.ingest_mode, module.call_text = original_repo, original_mode, original_call
-            expected = wiki.replace(f"经典界 {raw_path}#L1。", "经典界 [^r1]。")
+            expected = wiki.replace(f"经典界 {inline}。", "经典界 [^r1]。")
             expected = expected.replace(f"  - {raw_path}", f'  - "{raw_path}"').strip()
             assert state["wiki_content"] == expected
             assert state["slots_content"].strip() == slots.strip()
@@ -6619,6 +6684,62 @@ def test_api_local_repair_uses_one_patch_call_preserves_slots_and_records_valida
             assert telemetry["repair_attempts"][0]["validation"] == "passed"
             assert telemetry["repair_attempts"][0]["slots_invalidated"] is False
             assert "agent_ingest" not in state["telemetry"]
+
+
+def test_api_placeholder_patch_preserves_substantive_uncertainty_and_code():
+    wiki = _local_patch_wiki().replace(
+        "Keep methods and conditions.",
+        "作者认为该机制可能成立，但独立重复实验的证据仍待补充。",
+    ).replace("### Method\n", "### Method\n```text\n待补充\n```\n待补充\n")
+    catalog = module._api_wiki_patch_catalog(wiki, ["Content 含明确占位陈述"])
+    assert len(catalog["targets"]) == 1
+    assert catalog["targets"][0]["current_text"] == "待补充\n"
+    target = catalog["targets"][0]
+    assert wiki[:target["start"]].endswith("```\n")
+    assert "证据仍待补充" not in target["current_text"]
+    numbered = wiki.replace("```\n待补充\n", "```\n5. （待补充其他不足）\n")
+    catalog = module._api_wiki_patch_catalog(numbered, ["Content 含明确占位陈述"])
+    assert len(catalog["targets"]) == 1
+    assert catalog["targets"][0]["current_text"] == "5. （待补充其他不足）\n"
+
+
+def test_api_drafting_marker_handoff_prevents_downstream_and_extra_calls():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract = root / "temp/marker"
+        extract.mkdir(parents=True)
+        wiki = _local_patch_wiki().replace("Stable study.", "研究对象……（此处为示例）")
+        (extract / "wiki.md").write_text(wiki, encoding="utf-8")
+        (extract / "paper.md").write_text("# Evidence\nSource fact.\n", encoding="utf-8")
+        (extract / "agent-workspace.txt").write_text(
+            f"<<<BIBLIOGRAPHIC>>>\n{{}}\n<<<WIKI>>>\n{wiki}<<<SLOTS>>>\nOriginal slots\n",
+            encoding="utf-8",
+        )
+        state = {
+            "transaction_id": "marker", "status": "write_wiki", "extract_dir": "temp/marker",
+            "raw_dir": "academic/raw/references/example", "wiki_content": wiki,
+            "slots_content": "Original slots", "agent_workspace": {
+                "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                "execution_backend": "api", "output_path": "temp/marker/agent-workspace.txt",
+            },
+        }
+        errors = module.wl.check_drafting_markers(wiki)
+        assert errors
+        with patch.object(module, "REPO", root), patch.object(module, "ingest_mode", return_value="api"), \
+                patch.object(module, "step_write_wiki", return_value=(True, "")), \
+                patch.object(module, "step_validate_wiki", return_value=errors), \
+                patch.object(module, "call_json", side_effect=AssertionError("no new API calls")), \
+                patch.object(module, "call_text", side_effect=AssertionError("no regeneration")), \
+                patch.object(module, "step_write_slots", side_effect=AssertionError("no downstream")), \
+                patch.object(module, "run_agent_graph_preflight", side_effect=AssertionError("no graph work")), \
+                patch.object(module.inbox_state, "save"):
+            result = module.run_prepare(state)
+        assert result["status"] == "agent_required"
+        assert result["agent_workspace"]["repair_scope"] == "wiki"
+        attempt = result["telemetry"]["api_ingest"]["repair_attempts"][0]
+        assert attempt["api_called"] is False
+        assert not (root / "academic").exists()
+        assert (extract / "wiki.md").read_text(encoding="utf-8") == wiki
 
 
 def test_api_local_body_repair_invalidates_slots_and_syncs_only_workspace_segments():

@@ -1894,7 +1894,7 @@ def lightweight_abbr_resolve(REPO: Path) -> dict:
     """Query 后轻量裸缩写消解（只查图 alias，不扫 raw，零 LLM）。
 
     与 ingest 后的全量消解（_auto_resolve_abbreviations）不同：
-    - 只做图层 alias 匹配（快，~10ms/条）
+    - 只做完整 person 身份与图层 alias 匹配（不推断人名或创建姓氏 alias）
     - 不做 raw 正则扫描（query 场景无需）
     - 不跑命题层 --apply（写图操作留给 ingest 事务）
 
@@ -1927,6 +1927,13 @@ def lightweight_abbr_resolve(REPO: Path) -> dict:
         if not abbr:
             remaining.append(entry)
             continue
+        target = _abbreviation_occurrence_target(entry)
+        if str(entry.get("field") or "object") in {"subject", "object"}:
+            person = gl.exact_person_identity(conn, target)
+            if person:
+                resolved_details.append({"abbr": abbr, "method": "exact_person_identity",
+                                         "resolved_to": person, "page": entry.get("page", "")})
+                continue
         try:
             resolved_path, _ = gl.resolve_bare_name(abbr, ti, ai, si)
             if resolved_path:

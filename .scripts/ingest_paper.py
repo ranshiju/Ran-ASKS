@@ -100,10 +100,15 @@ SEMANTIC_VALIDATOR_VERSION = "paper-semantic-validator-v3"
 GRAPH_PREFLIGHT_VALIDATOR_VERSION = "graph-plan-preflight-v2"
 BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v8"
 API_WORKSPACE_OPERATION = "ingest_paper_workspace"
+PAPER_CLAIM_QUALIFICATION_RULES = (
+    "保留原文的作者归属、推测/预期/已证语气、否定和适用条件；来源明确的猜想与不确定结论有价值，按其原有贡献、限制或展望角色保留完整命题，不升级为已证事实。",
+    "论断强度写在正文或 proposition 中，不把或许/应该/大概拼接为新谓词；应该可能表示规范要求，大概可能表示数值近似，须按原文语义表达。摄入模型没有把握或原文无依据的关系应留待核实或省略，不能靠添加可能来补救。",
+)
 PAPER_WIKI_CLAIM_RULES = (
     "定义、等式、定理和性能结论逐项回溯来源，保留对应对象、符号、条件与比较基准。",
     "同文出现的不同映射、算子或近似量分别核验；只陈述所引原文实际给出的性质，证据不足时缩减或删去。",
     "结构、脚注与 Graph 校验通过不替代来源事实核对。",
+    *PAPER_CLAIM_QUALIFICATION_RULES,
 )
 BIBLIOGRAPHIC_AUTHOR_MODE_GUIDANCE = """作者字段严格选择一种模式：
 - 候选模式：逐人核对原文作者及次序；候选可完整覆盖原文作者时，accepted_ids 按原文次序选择逐人候选 ID，proposed=[]；authors.status 使用 confirmed 或 corrected。其他错误、重复或多人合并候选不影响已核验完整候选组的使用。
@@ -229,6 +234,7 @@ def agent_paper_semantic_protocol() -> dict:
             "program_generated_predicates 由程序从 Wiki 与锁定书目生成，不写入语义槽",
             "concept 间关系两端必须是可独立指代的规范概念名",
             "每个 keyword concept 在概念说明中写一句有 Wiki 证据的局部说明",
+            *PAPER_CLAIM_QUALIFICATION_RULES,
         ],
     }
 
@@ -2577,10 +2583,26 @@ def compile_bibliographic_decision(
     author_evidence = ", ".join(dict.fromkeys(
         evidence for _value, evidence in accepted + rejected if evidence
     ))
+    # Candidate rejection can discard a redundant provider record, not the
+    # person accepted through another ID. Keep the original ID decisions and
+    # both evidence addresses; the value-only review must not invent a conflict.
+    accepted_values = {value for value, _evidence in accepted}
+    redundant_rejected_ids = [
+        candidate_id for candidate_id, (value, _evidence) in zip(rejected_ids, rejected)
+        if not proposed and value in accepted_values
+    ]
+    review_notes = list(decision["review_notes"])
+    if redundant_rejected_ids:
+        review_notes.append(
+            "程序编译：以下被拒绝的作者候选 ID 与另一已接受 ID 的姓名完全相同，"
+            "仅排除冗余候选，不将该姓名列为拒绝作者；原 ID 裁决与证据保留："
+            + ", ".join(redundant_rejected_ids)
+        )
     bibliographic["authors"] = {
         "value": [value for value, _evidence in accepted],
         "evidence": author_evidence,
-        "rejected": [value for value, _evidence in rejected],
+        "rejected": [value for candidate_id, (value, _evidence) in zip(rejected_ids, rejected)
+                     if candidate_id not in redundant_rejected_ids],
         "status": selections["authors"]["status"],
     }
     return {
@@ -2588,7 +2610,7 @@ def compile_bibliographic_decision(
         "review_status": decision["review_status"],
         "bibliographic": bibliographic,
         "conflicts": decision["conflicts"],
-        "review_notes": decision["review_notes"],
+        "review_notes": review_notes,
     }
 
 
@@ -4103,7 +4125,8 @@ def build_paper_semantic_contract() -> str:
 5. 期刊、作者、日期由程序从锁定书目生成，禁止在语义槽中重复填写或猜测；研究方向也不写入三元组，由程序使用 Wiki 定位句匹配 Hub Scope。
 6. 为三元组中的每个 keyword 概念写一句文档局部说明，只概括当前 Wiki 有 Raw 脚注支持的定义、角色或适用语境；不为 proposition 写 gloss，不输出 locator，locator 由程序机械绑定。概念说明行以第一个 `|` 分隔概念名和说明，说明内的数学竖线属于正文并原样保留。
 7. 主体用“本论文”代表当前论文。论文到概念只使用研究基础/核心方法/对比方法，论文到 proposition 只使用核心创新点/局限性/未来展望；主要研究/涉及/应用于/探索/属于等方向标签由程序根据 Wiki 定位句生成，不写成论文级三元组。概念间关系可使用基于/改进/结合/对比/推广/替代/扩展/应用于，且关系链至少有一个端点通过上述论文到概念谓词连接本论文。
-8. 优先使用以下已登记谓词：{semantic_predicate_guide()}。确有必要的新谓词只能是 1-12 个汉字或英文字母组成的简短关系词，不得是句子、短语或带标点描述。"""
+8. 优先使用以下已登记谓词：{semantic_predicate_guide()}。确有必要的新谓词只能是 1-12 个汉字或英文字母组成的简短关系词，不得是句子、短语或带标点描述。
+9. {" ".join(PAPER_CLAIM_QUALIFICATION_RULES)}"""
 
 
 def build_agent_wiki_slots_prompt(paper_md_path: Path, skeleton: str, errors: list[str] | None = None) -> str:
@@ -6292,10 +6315,8 @@ def _api_wiki_patch_catalog(wiki: str, errors: list[str]) -> dict:
                 raise ValueError(f"无法局部定位 Wiki 错误: {error}")
             start, end = sections[title] + 1, section_end(sections[title])
             if "含明确占位陈述" in error:
-                matching = [index for index in range(start, end) if (
-                    wl.PLACEHOLDER_CLAIM_RE.search(lines[index])
-                    or wl.PLACEHOLDER_TOKEN_RE.fullmatch(re.sub(
-                        r"[\s`*_>#\[\](){}:;,.!?，。；：！？、\-]+", "", wl.FOOTNOTE_REF_RE.sub("", lines[index]))))]
+                matching = [start + number - 1 for number in wl.placeholder_claim_line_numbers(
+                    "".join(lines[start:end]))]
                 spans = [(index, index + 1) for index in matching]
                 if not spans:
                     raise ValueError("占位陈述无法精确定位，需宿主修复")
