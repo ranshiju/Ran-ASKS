@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.20.0
+> Current main version: v0.20.1
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -46,6 +46,16 @@ path remains traceable.
 *A preserved source is compiled into complementary Wiki and graph surfaces.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
+
+## Gallery
+
+[![MPE science poster](gallery/works/mpe-science-poster/cover.webp)](gallery/works/mpe-science-poster/README.md)
+
+Explore [selected works made with ASKS](gallery/README.md). Each work presents the
+final artifact and explains which system capabilities contributed to it.
+The first exhibit is an A0 Chinese science poster about matrix-product
+entanglement, using science-exhibit authoring, illustration, mixed composition,
+simulated-reader review, and rendering/export.
 
 ## Evidence preservation, oral-exam scope and ingestion evaluation
 

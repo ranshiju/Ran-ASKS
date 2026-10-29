@@ -46,6 +46,16 @@ path remains traceable.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
+## Gallery
+
+[![MPE science poster](gallery/works/mpe-science-poster/cover.webp)](gallery/works/mpe-science-poster/README.md)
+
+Explore [selected works made with ASKS](gallery/README.md). Each work presents the
+final artifact and explains which system capabilities contributed to it.
+The first exhibit is an A0 Chinese science poster about matrix-product
+entanglement, using science-exhibit authoring, illustration, mixed composition,
+simulated-reader review, and rendering/export.
+
 ## Evidence preservation, oral-exam scope and ingestion evaluation
 
 Oral-exam preparation now connects knowledge points, observable competencies and

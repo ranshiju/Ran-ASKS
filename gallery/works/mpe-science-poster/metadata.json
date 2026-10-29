@@ -1,0 +1,32 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "mpe-science-poster",
+  "title": "量子纠缠怎样衡量？这样的状态有多难做？",
+  "kind": "science-poster",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-10-29",
+  "canvas_mm": [
+    841,
+    1189
+  ],
+  "capabilities": [
+    "science-exhibit",
+    "illustration",
+    "review",
+    "visual-qa"
+  ],
+  "references": [
+    {
+      "doi": "10.1103/6y5p-mp7q",
+      "url": "https://doi.org/10.1103/6y5p-mp7q"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "0add955ca2ba94e010720138e077bd7b1814088076d4570cec5131b24ac8a308",
+    "cover.webp": "271cd3791f51664afa11614cc54e15fac8f142cf7fa6b05df13fffd36c6acaa4",
+    "poster.png": "5f3596e2ffd3fb068af3d83e329c895fa8e29b9c7f09c45ecb21c7258193f558",
+    "poster.pdf": "29b58ae566892fc6bd299e537ce2b125acaade6e28a2249f160d8f3a839ef4c2"
+  }
+}

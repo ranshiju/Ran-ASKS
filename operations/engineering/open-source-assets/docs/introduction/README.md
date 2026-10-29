@@ -299,6 +299,18 @@ frozen paper artifacts retain their historical scope.
 评估摄入要求。Markdown与新增并标准化的PDF补充页同步，原已审阅页面及冻结
 论文产物保留其历史范围。本次按兼容新增能力作MINOR发布。
 
+The 2026-10-29 `v0.20.1` documentation update introduces the curated Gallery,
+its MPE science-poster exhibit, and concise explanations of the capabilities
+used. Only exact-approved exhibition files are published; working projects and
+local provenance remain local. The Markdown and appended normalized PDF page
+carry the same update. Existing scientific capabilities and frozen paper
+artifacts retain their scope; this is a PATCH release.
+
+2026年10月29日的 `v0.20.1` 更新增加 Gallery 精选作品、MPE 科普展板及其功能介绍。
+作品成品按逐文件白名单公开，项目过程和本地来源记录保持隔离。Markdown 与新增并
+标准化的 PDF 补充页同步。本次为展示与使用文档更新，按 PATCH 发布，既有科学功能
+及冻结论文产物边界保持不变。[浏览 Gallery](../../gallery/README.md)。
+
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
 | 核心方法与56篇论文的时间序列展示 | `v0.2.0` | `1.0.0` | arXiv:2608.29612 v1 的冻结边界 |

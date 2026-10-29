@@ -1,6 +1,14 @@
 version: 1
 purpose: "公开发布白名单：只允许此清单声明的工程文件进入开源副本。"
 include:
+  # Exact curated Gallery assets; project sources and local provenance stay private.
+  - gallery/README.md
+  - gallery/RIGHTS.md
+  - gallery/works/mpe-science-poster/README.md
+  - gallery/works/mpe-science-poster/metadata.json
+  - gallery/works/mpe-science-poster/cover.webp
+  - gallery/works/mpe-science-poster/poster.png
+  - gallery/works/mpe-science-poster/poster.pdf
   - VERSION
   - pyproject.toml
   - uv.lock
@@ -35,6 +43,7 @@ include:
   - operations/engineering/engineering-handbook.md
   - operations/engineering/code-guidance.md
 exclude:
+  - gallery/local/**
   - private/**
   - "**/.DS_Store"
   - .scripts/e1_experiment.py

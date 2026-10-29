@@ -829,6 +829,14 @@ nodes:
     path: operations/engineering/open-source-manifest.yaml
     kind: policy
     role: public-release-allowlist-and-reader-documentation-omissions
+  gallery:
+    path: gallery/
+    kind: documentation-family
+    role: shared-curated-final-artifacts-and-evidence-backed-capability-guides
+  gallery_ops:
+    path: operations/GALLERY.md
+    kind: spec
+    role: shared-gallery-selection-provenance-and-explicit-public-file-boundary
   open_source_assets:
     path: operations/engineering/open-source-assets/
     kind: documentation-family
@@ -2914,6 +2922,15 @@ edges:
 - - engineering_graph
   - tested_by
   - engineering_graph_test
+- - gallery_ops
+  - governs
+  - gallery
+- - open_source_manifest
+  - governs
+  - gallery
+- - open_source_release
+  - publishes
+  - gallery
 - - open_source_release
   - publishes
   - open_source_assets
@@ -4007,6 +4024,9 @@ verification:
   engineering_manifest:
   - python3 .scripts/test_engineering_graph.py
   - python3 .scripts/engineering_graph.py validate
+  gallery:
+  - python3 .scripts/test_open_source_release.py
+  - python3 .scripts/engineering_graph.py validate
   open_source_assets:
   - python3 .scripts/test_open_source_release.py
   - python3 .scripts/engineering_graph.py validate
@@ -4766,6 +4786,7 @@ script_contracts:
     - python3 .scripts/graph_validate.py
   open_source_release:
     preconditions:
+    - Gallery is a shared presentation surface: only exact manifest-approved final assets and public capability descriptions are exported; gallery/local, source projects, Raw, review packets and runtime records remain local. Gallery selection does not rewrite historical creative acceptance.
     - private paths are an unconditional publication deny rule across includes, asset sources/targets and template directories; preflight completes before clearing or copying the destination
     - 口试 route 依赖的通用操作卡归属 operations/ORAL_EXAM_AGENT.md，经既有 operations 白名单发布；本地 memory/playbooks 索引、经验与个人材料保持禁止导出
     - 科研代码公开示例只发布 manifest 精确批准的通用源码与测试，以及独立公开资产中的合成工作目录；不得复制本地工作目录中的 Raw 引用、项目运行记录或数值结果；公开 code-library/code-run 依赖与 evidence 哈希须在生成树验证

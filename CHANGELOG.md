@@ -7,6 +7,21 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-29
+
+### Version decision / 版本判断
+
+- PATCH: Add curated Gallery artwork and capability usage documentation without changing scientific functionality or public APIs
+- PATCH（中文）：新增精选作品展示和功能使用说明，不改变科学功能与公开接口
+
+### Highlights
+
+- Added a curated Gallery with the final MPE science poster, full preview and A0 PDF, plus concise guides to the ASKS capabilities used. Exact-file publication keeps project sources and local provenance separate; artwork rights remain distinct from the code license.
+
+### 主要更新
+
+- 新增 Gallery 精选作品区，收录 MPE 科普展板的最终展示版、完整预览与 A0 PDF，以简短说明介绍实际使用的系统功能。按逐文件白名单发布，项目源文件与本地来源记录保持隔离，作品权利与代码许可证分开。
+
 ## [0.20.0] - 2026-10-28
 
 ### Version decision / 版本判断
@@ -601,5 +616,7 @@ manifests and checksums.
 
 [0.19.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.19.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.20.0...HEAD
 [0.20.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.20.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.20.1

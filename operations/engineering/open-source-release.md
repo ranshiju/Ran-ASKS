@@ -8,12 +8,26 @@
 
 The public release is an engineering template, never a copy of the personal knowledge base. The authoritative allowlist is `open-source-manifest.yaml`; a file not named there is private by default.
 
-- **Public**: generic specifications, scripts, tests, schemas, agents, DSH loops and guards, templates, architecture documentation, and explicitly approved frozen paper artifacts.
+- **Public**: generic specifications, scripts, tests, schemas, agents, DSH loops and guards, templates, architecture documentation, explicitly approved frozen paper artifacts, and exact-file-approved Gallery exhibition assets.
 - **Selectively published skills**: publish only the exact functional files approved by the manifest. Local manuscripts, reports, style profiles, and samples remain private; published tests must run without them or host-specific paths.
 - **Reader-facing scope**: `documentation_omissions` in the manifest keeps selected implementation details out of public Markdown descriptions, including README, introductions, changelog, and their source assets. Explicitly exempted runtime skill instructions remain available. Documentation synchronization and version checks still apply; describe other affected public contracts without advertising omitted features.
 - **Template only**: content directories represented by `.gitkeep` files.
 - **Private**: all raw sources, personal or production compiled Wiki pages, graph databases, caches, outputs, inbox items, local memory, active project materials, personal state, and personal Codex skills declared private by the manifest. A sanitized paper-specific Wiki/Graph export is public only when it is versioned under `paper-artifacts/`, explicitly allowlisted, independently licensed, and verified.
 - **Review required**: a document that mixes public engineering rules with personal data must be split before publication. Put stable rules in public engineering documents and private context in `*.private.md` or a private project/status file.
+
+### Curated Gallery
+
+`gallery/` is a shared static presentation surface for selected final works and
+short, evidence-backed explanations of the ASKS capabilities used. The canonical
+reader pages and assets are maintained in the source tree and copied unchanged
+by the existing publisher. Follow `operations/GALLERY.md`.
+
+Only the exact files listed in the manifest may be exported. No recursive
+Gallery include is permitted: `gallery/local/**`, source projects, Raw content,
+review packets and runtime records remain local. Final artwork is an explicit
+exception to the general exclusion of working outputs, not permission to export
+an active project. Work-specific rights are separate from the code license.
+Selection for exhibition does not rewrite historical creative acceptance states.
 
 ### Unconditional private exclusion
 
