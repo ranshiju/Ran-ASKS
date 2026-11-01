@@ -352,6 +352,44 @@ python3 .scripts/read_paper.py academic/raw/works/papers/<paper-id>/paper.md Abs
 
 ## 2. 摄入工作流：原料 → wiki → 图
 
+### 2.0 Source-first 独立来源事务
+
+显式 `wg.py ingest <file> --profile source-first` 在 `ingest_inbox.py` 的旧 backend 分流前，
+调用共享 `.scripts/source_ingest.py`；N1 仅 academic PDF/MD/TXT，原件 → 解析版本 → 全文索引。
+返回 `source_ready`，默认知识待办 pending，不要求 Wiki/图或执行全库收尾。
+纯事务可显式 `--knowledge none`，持久记录 source_only/not_required，零分类/知识模型调用；
+skip 保留现有意图，仅暂不执行。none 不清除已执行任务或 KU，后续可显式开启整理。
+恢复用相同 profile 和 `--resume S-ID`，批处理用 `source_ingest.py ingest <files...>`。
+详见 [Source-first 契约](source-first-ingestion.md)，不复用旧完整摄入状态冒充成功。
+
+### 2.0a 有界知识编译与 KU（N2）
+
+产物按[用途契约](artifact-use-contracts.md)区分导航、来源、可复用知识和任务结果，
+共享`artifact_usage.py`的用途说明与字段映射不要求LLM生成标签。N2默认示例只列核心操作字段，
+可选分类/论断标签沿原缺省，篇幅按关键含义确定；允许少量背景，不补无关书目。
+必要条件、不确定性、证据绑定及修订事务保持，legacy编译流程本轮不迁移。
+
+`wg.py ingest --profile source-first --knowledge agent|api` 显式消费来源后的知识任务，
+也可独立 `wg.py knowledge prepare|run S-ID`；默认 skip，无后台循环。
+`.scripts/knowledge_compile.py` 负责 shared 材料包、检查、逐对象 apply，Agent 直接接
+`agent-task-v1`；`.scripts/knowledge_compile_api.py` 才经 llm_structured 调用 API。
+`.scripts/knowledge_store.py` 保存 Statement Markdown 主记录/历史和可重建 FTS，
+Question 只适配原生 Frontier。CAS、证据版本/片段哈希与幂等回执防止旧版覆盖及重复提交，
+不认证科学正确。KU 当前为草稿，KU partial/failed 不回滚 source_ready。
+可选 content_role 按研究问题、概念定义、方法模型、科学结论整理内容；旧 Statement 为 unspecified。
+attach 可补齐未知角色，保留已指定角色和旧论断；锁内通过版本/来源校验后，完全重复的内容与依据
+复用当前 KU，返回 reused/unchanged，不重写主记录或历史。依据关系/解析版本、未决项和角色的有效变化仍升版。
+重复操作沿用 job 回执与摘要冻结；回执中断且没有主记录写入时重新校验快照，拒绝并发变化后的旧包。
+create/revise 与实际写入后的恢复机制保持，无新增模型调用。Question 来源处境与原生本库/科学状态分开；
+包内 Question 候选只读复用，更新仍走 Frontier，无逐篇四类配额或额外审核调用。
+候选查询从来源标题/章节主题构造；focus 指导语义任务并优先选择来源内命中片段及邻近上下文，
+沿用预算、保留开头及正式条件。完整章节标题匹配保留词序和重复词，分号/换行分隔的请求分别匹配，
+避免共享词语被检索词去重后漏掉后一个标题；仍最多两个优先命中，实际覆盖以packet为准。
+focus 不作为旧 KU 的召回词。先用同源/主题匹配筛选，
+再加载 Statement 旧依据。Question 保留完整问题和状态，不加载本次不能更新的旧依据。
+这只是词汇导航优化，不裁决身份，跨语言或改名漏召仍可能存在。
+详细协议、缓存、局部修复与边界见 [N2 契约](knowledge-units.md)。
+
 > 先路由 `ingest`，读本域 `SCHEMA.md`。本节仅给脚本调用次序，不决定页面语义和关系内容。
 
 ### 2.1 论文 PDF：`.scripts/extractor.py`
@@ -844,15 +882,41 @@ python3 .scripts/graph_metrics.py tight_clusters
 
 ### 4.1 `.scripts/query_orchestrate.py`
 
+- **计算后收束（API-only）**：已有成功calculate结果时，正常及仅作答提示均指导复用返回值作答，允许合理舍入/等值百分比及引用原文数字；非必要数值扩写省略，必要的新数值通过既有calculate计算，工具结束时保留符号式并说明未算。无成功计算的会话不增加此指导，不新增状态、输出字段、模板替换、审核或重试。该规则不判定公式/归属/最终语义正确，效果按实际答案与完整成本验证。
+- **阅读索引与归属（API-only）**：提示中的read_options仅投影ref→action/input，不反复展示未读候选title；新检索结果全文、已读Raw/KU/计算正文和session原始映射保持。旧入口仍可执行，需重新比较已离开上下文的候选时按缺口重查。普通及仅作答分支共享简短归属指导：原文陈述以已读Raw为准，KU是解释、导航是线索，公式推导和算例标明为本次推导，保留典型/可能与适用范围。不新增语义校验、模型调用或必填字段；减少重复文本不保证归属正确或净提速。
+- **按缺口发现（API-only）**：明确来源/知识主题/跨类型关系分别优先source_search/knowledge_search/hybrid_recall，先看结果再补查；独立子问题可批量发现。候选evidence_preview可直接read_raw，完整条件或冲突按需knowledge_read。只调整现有规划指导，不硬删通道或自动读依据。
+- **模型失败边界（API-only）**：模型adapter恢复后仍失败、parsed决策不合法或answer为空白时，循环立即返回`model_error`，报告实际轮次、原始模型status和错误；session保存`model_error`停止原因及先前已读正文。失败响应不执行plan、不默认转为answer，也不标记sufficient；编排器不再追加模型恢复。此项只保证完成状态真实，不保证下一次生成成功或降低单次请求成本。
+- **按用途消费**：成功动作旁展示程序派生的navigation/source_material/knowledge/result短说明；错误或未知动作不冒充来源，正文自报usage不影响角色。已明确相关Raw地址可直接核对当前问题，避免为净化导航或补齐非关键字段继续检索；引用白名单、预算和停止机制保持。
+- **跨轮复用（API-only）**：`retained_results`随会话保存成功的具体Raw/KU/Wiki阅读和计算结果，后续提示补入未在上轮结果中出现的正文，每份只展示一次。搜索候选不累计，最新错误与拒绝仍显示；用途角色按实际动作派生，KU/Wiki/算术不升级为Raw依据。旧会话缺该字段时按空列表恢复，不从地址或日志摘要补造正文。复用原读取预算和轮次限制；再次传入正文的模型输入成本单独计量，不重复记作工具读取，也不宣称一定降低总token。
+- **发现后可见阅读契约（API-only）**：首次start阶段发现成功后，循环即切入evidence，使下一轮模型看到read_raw/knowledge_read/read_ref等合法动作及其参数契约。发现失败或参数拒绝不推进；不要求模型猜测“先提交当前不可见的read动作，再由程序切阶段”。受管读取及public边界保持。
 - **何时调用**：仅 `QUERY_BACKEND=api` 时使用受预算约束的内部模型循环。当前宿主 Agent 不调用本编排器，直接按 query task card 组合 `query_actions.py`、`query_graph.py` 和 Raw/Wiki locator。
 - **写入**：会话状态和查询日志；不修改 raw。
 - **子命令**：`init`、`make-plan`、`exec`、`finalize`、`run-api`；session 的 mode 固定为 `api`，旧 `mode=agent` 明确拒绝。
 - **安全原则**：程序限制预算、重复和回环，但不替 LLM 判断证据充分性；最终答案仍需 read raw。
+- **停止与交付**：工具计划达到原上限后，如配置的模型请求次数还有余量且读取预算未超限，允许一次仅作答的收束轮，保留此前正文与最后一次计算结果，隐藏不可再用的阅读入口和工具契约。收束轮仍请求工具则直接停止，绝不继续执行计划；不超出模型次数上限，预算耗尽不请求收束。实际请求与token均计入成本。未交付时，执行/模型轮数上限记`loop_limit`、读取预算超限优先记`budget_exhausted`，不把资源上限写成没有候选。未上报槽位覆盖只表示记录缺失，不冒称LLM已判断无答案。
+- **类型化工具输入（API-only）**：`query_tool_contracts.py` 从既有签名生成输入契约，并补充实际 intent/domain/scope 枚举、必需参数、数值范围和 locator 语法；执行前拒绝未知字段及非法类型，不替模型猜测修正值。契约随当前 stage 可用动作进入提示，参数拒绝、执行错误和硬约束拒绝均可见；无新增模型评审或重试。
+- **阅读编号（API-only）**：`read_options` 只从结构化工具返回的 Source/KU/Wiki 主入口及 KU evidence 建立至多 80 个会话内编号；`read_ref(ref)` 解析成原动作后，继续执行原 stage、去重、公共域范围和 Raw 绑定检查。编号及候选不是已读事实；存在编号不保证模型会选择正确入口。会话恢复保留映射，Agent/shared 查询工具不依赖该映射。
+- **有界计算（API-only）**：`calculate(operation,operands)` 仅在 evidence/continue 支持 sum、product、difference、quotient 和等长向量 sum_products；使用 34 位十进制精度，拒绝非有限值、超限及形状不符，不执行表达式或代码。结果返回输入、实际长度、分项及结果，但不登记 Raw citation，不认证公式选择、科学适用性或最终文字复述。模型仍须读原文确认公式；计算结果只验证所给输入的算术。
+- **效果边界**：完整契约和阅读编号会增加上下文，计算可能增加决策轮次；按最终用途质量和实际总成本验收。机械回归通过不代表模型使用稳定，也不证明 token 预算最优。
 - **引用映射**：API session 的 `read_sources` 同时保留已读 locator 与 `source_locator` 确定性确认的原件路径；读取受管 Markdown companion 后，citation contract 允许引用该原件路径，不把 companion 伪装成另一份事实来源。
-- **注册派生**（v2）：`_ACTION_SIGS` 从 `query_actions` 函数签名自动派生 action→参数清单，驱动 `_build_step`（输入组装）、`ALLOWED`（合法性白名单）、`allowed_next_actions`（下一步候选）、去重 set、`--action choices`。新增工具只需在 `query_actions.py` 加函数 + `DISPATCH` 注册，`_ACTION_SIGS` 自动适配，不再需要同步改 5 处硬编码。
+- **注册派生**（v2）：`_ACTION_SIGS` 从已接入的 `query_actions` 函数签名派生 action→参数清单；API 局部工具 read_ref/calculate 显式补入。清单驱动 `_build_step`（输入组装）、`ALLOWED`（合法性白名单）、按 stage 过滤的 `allowed_next_actions`、去重 set 和 `--action choices`。新增动作需确认签名、stage 和输入契约；已有动作参数变更由签名同步。
 - **不要**：直接自由编造长动作列表绕过 `intent_to_plan` 的白名单。
 
 ### 4.2 `.scripts/query_actions.py`
+
+- **用途回执**：`execute`在成功结果外层附`usage`，原工具text保留；wg envelope同样标记，DSH文本适配器在JSON外层或原文本前交付短说明。存储正文不写分类标记；完整KU的knowledge与检索摘录的navigation不同，分类不代表真实性认证。规则集中在`artifact_usage.py`，共享提示面纳入工程契约。
+- **发现摘录**：Source及KU/Question通道复用`lexical_relevance.excerpt`，在原700字符上限内展示查询命中附近的连续原文；完整片段排名、身份与读取入口保持。`excerpt_span`为相对完整候选正文的零起点、右端不包含字符偏移，`excerpt_truncated`标明省略；无正文命中则用前缀。纯字面展示不保证条件完整，也不登记Raw证据，仍需沿原入口读取核验。
+- **KU 入口**：`knowledge_search/knowledge_read` 统一查询 Statement 与原生 Question，
+  宿主用 `wg.py ku-search/ku-read`；API/DSH 同步注册。KU 正文/状态/来源用于导航及理解，
+  透传 content_role/source_question_status；用途和来源处境不认证科学状态。
+  不登记 Raw citation；必须另行 read_raw。仅 academic/public，词汇召回，已合入 hybrid 的类型化结果。
+  搜索候选增加至多3条`evidence_preview`（原locator/relation/assessed_revision），原顺序、总数与截断可见；
+  不读Raw、不认证支持关系、不改变排名。可直接沿相关地址read_raw，完整条件/其他依据仍knowledge_read。
+- **来源全文入口**：`source_search(query,domain,topk)` 检索 N1 来源投影，无 Wiki/Graph 依赖。
+  `wg.py source-search` 和 API/DSH discovery 已注册，候选含版本化 Raw locator，直接 read_raw 核验。
+  仅 academic/public，private 明确拒绝；字面召回，不隐式联网。新来源的原件映射和哈希校验由 source_locator 接入共享来源内核。
+- **API 证据传递**：query_orchestrate 和 DSH query loop 将工具实际有界输出传给模型；
+  `text_preview` 只作摘要，不可截去长地址或 Raw 正文后仍宣称已交付证据。
 
 - **独立图版本边界**：`graph_search(term,include_deprecated=False)` 和 `semantic_search(query,scope,topk,include_deprecated=False)` 在排名/top-k前默认排除图中 deprecated 的页面；Agent execute、API schema/意图计划及图CLI/`wg lookup`/`wg abbr --include-deprecated` 支持显式历史发现。图层只用已有生命周期，不增加Wiki全库扫描；每次数据变更仍须保证图与Wiki状态同步。`node/neighbors/relations/hub_of` 保留旧节点和导航边，以 `material_role/default_page_candidate/version_context` 区分历史导航与默认下钻候选，不删除中间路径；neighbors复用原批量属性和预算，relations按端点批量读取生命周期。Agent/API node_resolve 只判身份并附版本上下文，不因 resolved 认定材料现行。temporal按显式日期有效性、path_exists只判连通，均不冒充默认材料发现。
 
@@ -867,7 +931,7 @@ python3 .scripts/graph_metrics.py tight_clusters
 - **Hub 路由工具**：`hub_route` 返回论文定位句→Scope 候选及 floor 决策（margin 已移除）；`hub_inspect` 返回 Scope、keyword/proposition/People 类型化成员和 split candidate。两者只读，不向弱 LLM 暴露 membership 写入、merge 或生命周期能力。`wiki_recall` 搜 title + Navigation + 论文方向定位，不读旧 Hub 关键词段。
 - **Wiki 召回**：每次每个范围内 Wiki 文件只读取一次，`hub_semantics.read_paper_profile(page,text=loaded_text)` 复用已校验文本并沿用 section/citation 解析器；不建缓存或索引。图中的规范 title、alias、status 保留，完整标签→标签短语→导航短语→词项召回依次排序，同档按不同词项覆盖、标签命中数、path 稳定排序；重复提及不加分，`%/_/反斜杠` 不作为 SQL 通配符。返回 `match_kind/matched_terms/term_coverage` 只解释词汇导航，不确认身份或事实；文件全文被机械读取，但 Content 不参与该评分，事实仍下钻 Raw。`hybrid_recall` 仍只消费排名做 RRF，不混加这些词汇分数。
 - **版本准入**：`wiki_recall/admin_recall/hybrid_recall` 在排名/top-k 前默认排除图或 frontmatter 为 deprecated 的页；direct、graph_fallback、hybrid 的直接图命中和邻接页使用同一准入。联合召回复用 `_wiki_recall_data` 的同次页面元数据，不重扫全库；邻接页在原有行预算前排除废弃页，其他遍历预算不放宽。图 status 保留，磁盘状态另报 page_status，superseded_by 仅作版本导航。仅显式历史请求传 `include_deprecated=True`（布尔值或 true/false 字符串），lineage 不自动开启；Agent execute、API 工具/意图计划和 `wg.py hybrid-recall --include-deprecated` 贯通此开关。
-- **联合召回**：`hybrid_recall(query,intent,domain,topk,include_deprecated=False)` 按 intent 对 Wiki 与 Graph 两路排名做 weighted RRF，返回 section capsule/semantic address；不把异构原始分数直接相加。`wiki_context(page,section,profile,topk)` 读取一个语义地址并动态附加受限 Graph envelope，overlay 不回写 Wiki。
+- **联合召回（N3）**：`hybrid_recall(query,intent,domain,topk,include_deprecated=False)` 复用 Wiki/Graph 的 weighted RRF 导航排名，以共享 lexical_relevance 的完整短语/整词、不同词项和标题覆盖优先排序，再融合 Source、KU/Question 的通道名次。Source/KU 信号用完整候选文字计算后才截短预览；lexical_match 不是事实置信度。返回 `unified-recall-v1`，每项有 kind 与 read_action/read_input，原 Wiki capsule/semantic_address 保留；缺图时 Wiki 文件、来源和 KU 可独立发现，按 channels 披露问题。Source 片段按来源解析版本分组，不重复计票；所有结果只用于发现。仅 academic/公共跨域启用来源/KU 路，其他域/private 不读该数据。旧 Wiki source_links 是 frontmatter 文档来源，不冒充章节 raw_citations。查询不触发摄入或重建。详见 [N3 契约](unified-retrieval.md)。`wiki_context` 仍为独立 Wiki/Graph 下钻工具。
 
 ### 4.2a `.scripts/code_library.py` — 科研代码能力工作元图
 

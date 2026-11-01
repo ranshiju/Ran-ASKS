@@ -311,6 +311,21 @@ artifacts retain their scope; this is a PATCH release.
 标准化的 PDF 补充页同步。本次为展示与使用文档更新，按 PATCH 发布，既有科学功能
 及冻结论文产物边界保持不变。[浏览 Gallery](../../gallery/README.md)。
 
+The 2026-11-01 `v0.21.0` update adds opt-in Source-first ingestion, bounded
+Agent/API compilation and versioned maintenance of draft KUs, source-only intake,
+purpose-aware artifacts and unified discovery. Default legacy ingestion remains.
+Source/KU search is lexical; completion means the bounded task was saved, not
+whole-document coverage or scientific certification. Large-corpus quality and
+end-to-end speedup remain unverified. This is a compatible MINOR release. The
+Markdown and appended normalized PDF page contain the same addendum; earlier
+reviewed pages and frozen paper artifacts retain their historical scope.
+
+2026年11月1日的 `v0.21.0` 更新新增显式 Source-first 摄入、Agent/API 有界 KU 编译与
+版本维护、纯事务材料的仅来源模式、产物用途标记及联合检索。默认仍为 legacy；
+Source/KU 使用词汇检索，任务完成不表示全文覆盖或科学认证。大语料质量与端到端
+提速尚未验收。本次为兼容新增能力，按 MINOR 发布。Markdown 与新增并标准化的
+PDF 补充页同步，原已审阅页面与冻结论文产物保留其历史范围。
+
 | 中文说明涉及的内容 | Ran-ASKS 边界 | 论文数据产物 | 状态 |
 | --- | --- | --- | --- |
 | 核心方法与56篇论文的时间序列展示 | `v0.2.0` | `1.0.0` | arXiv:2608.29612 v1 的冻结边界 |

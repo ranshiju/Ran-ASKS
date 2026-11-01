@@ -104,7 +104,7 @@ class AgentLoop:
         if last_results:
             parts.append("\n上轮结果:")
             for r in last_results:
-                parts.append(f"  - {r.get('name', '?')}({r.get('arguments', {})}): {r.get('content', '')[:200]}")
+                parts.append(f"  - {r.get('name', '?')}({r.get('arguments', {})}): {r.get('content', '')}")
         parts.append("")
         parts.append("输出 JSON:")
         parts.append('  {"decision": "discover|read|answer",')
@@ -112,6 +112,8 @@ class AgentLoop:
         parts.append('   "answer": "回答文本",')
         parts.append('   "citations": ["raw路径或locator"]}')
         parts.append("discover=发现候选, read=核验(read_raw的locator会记入已读来源), answer=回答")
+        parts.append("复杂发现可用 hybrid_recall；按候选 kind 与 read_action/read_input 读取当前知识或来源。KU/Question/Wiki 保留条件、草稿及未决项，仍须 read_raw 取证；多路命中不提高科学确定性。")
+        parts.append("KU content_role 说明内容用途；Question 的 source_question_status 只说明本来源处理了或留下了该问题，不代替本库回答状态或科学界解决状态。")
         parts.append("answer的citations必须全部来自已读来源")
         return "\n".join(parts)
 

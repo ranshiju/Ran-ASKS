@@ -34,6 +34,22 @@
 
 ## 检索策略
 
+**Source-first 来源发现（N1）**：查询新收录、尚无 Wiki/Graph 的 academic 材料时，
+使用 `wg.py source-search '<词项>'` 或 `source_search(query,domain,topk)`，按返回的精确
+locator 直接 `read_raw`。它与已有 Wiki/Graph 入口并列，不强制先有 Wiki；片段摘录只是候选。
+当前是英文词/中文二元词组的字面召回，中文问英文材料可显式用对应英文术语；
+不承诺跨语言语义召回。来源 `pending` 仅指知识整理待处理，不阻止阅读真实 Raw。
+private 不使用这一 academic 索引。详见 [Source-first 契约](engineering/source-first-ingestion.md)。
+
+**KU 入口（N2）**：`wg.py ku-search '<主题>'` / `knowledge_search` 召回 Statement 草稿和
+原生 Frontier Question，`ku-read <ID>` / `knowledge_read` 返回当前完整表述、论断类型、
+未决项和依据地址，并透传 content_role（研究问题/概念定义/方法模型/科学结论，旧 Statement 可为 unspecified）。
+Question 保留本库/科学状态及当前回答；source_question_status 仅描述捕获来源已处理/留下该问题，
+不等于本库有答案或科学界已解决/仍开放。KU 命中或读取不算 Raw 核验，
+事实答案仍须 `read_raw`。查询仅只读，不触发编译或后台维护。当前仅 academic/public 的
+词汇检索，已接入 `hybrid_recall` 的 academic/公共混合召回；private 明确拒绝直接使用这些 academic 动作。
+详见 [N2 契约](engineering/knowledge-units.md) 与 [N3 联合检索](engineering/unified-retrieval.md)。
+
 **语义执行主体**：Agent 后端由当前宿主 Agent 完成候选判断、证据综合与回答；API 后端由程序控制状态机并调用 API LLM，复杂步骤可在其 harness 内组织 worker 或 sub-agent。下文的“语义执行主体”均依当前后端取值，检索、预算、Evidence Profile 与停止门由两端共享的确定性内核提供。
 
 **结构优先（v9）**：先由 `.scripts/query_graph.py`、索引和 `query_orchestrate.py` 完成意图允许的候选定位、去重和预算控制，再由语义执行主体阅读最小候选上下文、做语义综合和证据充分性判断；事实答案仍须下钻 raw。ingest 的“先结构、后语义”是生成顺序，query 的对应形式是“先结构化检索、后语义阅读”。
@@ -42,7 +58,13 @@
 
 **跨域统一召回（v7）**：新动作 `wiki_recall(query, domain, topk)` 复用上述流程；`domain` 可为 `academic/admin/teaching/business`，为空表示跨域。`admin_recall` 保留为兼容入口。business 结果标记 `sensitive_review=true`，回答前必须按权限/敏感性复核，不能因召回命中直接扩散合同、财务或个人信息。
 
-**自适应联合召回（v10）**：关系、解释、探索和研究脉络问题优先调用 `hybrid_recall(query,intent,domain,topk)`，并行取得 Wiki narrative recall 与 Graph structural recall，再用按 intent 加权的 reciprocal-rank fusion 合并；不得直接相加 embedding、词频和图分数。简单事实已有唯一强命中时仍可走低成本 cascade。联合召回返回候选 `semantic_address` 和 section capsule，只用于定位，事实仍须下钻 Raw。
+**按用途联合召回（N3）**：关系、解释、探索和研究脉络问题优先调用 `hybrid_recall(query,intent,domain,topk)`。
+共享入口复用 Wiki/Graph 导航排名，并纳入 academic 来源、Statement 和 Question，按各路名次融合；
+不混加 embedding、词频和图原始分数，不把多路命中当作证据增强。简单事实已有唯一强命中时仍可直达。
+按返回的 `kind` 与 `read_action/read_input` 下钻：Source 直接 Raw，KU/Question 读取当前对象再回 Raw，
+Wiki 读取章节再回 Raw。Wiki 无章节脚注时 `source_links` 仅表示文档来源，不能当作章节证据。
+`channels` 披露缺失索引和其他路的问题；某一路不可用不等于本库没有材料。查询只读，具体维护经现有受管入口。
+private 及其他指定域保持原 Wiki/Graph 范围，不读取 academic Source/KU。预算与状态见 [N3 契约](engineering/unified-retrieval.md)。
 
 `graph_exact` 的实体词抽取保留有辨识力的数学写法（如 `z*`、`|z|`、`Arg z`），并过滤“是什么/怎么算”等疑问词；裸单字母变量不单独扩散。别名命中仍只是导航候选，不替代 Wiki→Raw 证据链。
 
@@ -516,7 +538,7 @@ LLM 据此判:来源是否足够、权威是否适合、时间是否匹配、标
 6. **回答后反哺判断**：按「反哺（缺口记录 → ingest update）」将使用困难记入既有日志，仅将经 Raw 核实、可复用的事实或导航缺口记入 `knowledge_gap`，不以关键词出现触发写入。候选注明来源 locator、目标页面和预期发现路径；摄入解析或归属缺陷先修责任组件。query 不直接写 wiki 或 graph.db；已有授权时另起 `ingest update` 修复确认数据，校验后回放原查询，检查正确召回及 Wiki→Raw 可达性；普通查询只记录候选。
 
 7. **查询日志**(v4,2026-07-23 动态检索流程落地):查询完成后追加一行 JSONL 到 `academic/wiki/outputs/query-log.jsonl`(或对应子项目 `*/outputs/`),字段对齐 testbed `trace-format.md`:
-   - 必填:`ts`(时间戳)、`query`(查询)、`pages_read`、`evidence_profile`(程序供给的原始证据事实)、`stop_reason`(sufficient/no_actionable_candidate/budget_exhausted/loop_limit/tool_failure)、`decision`(回答/停止)、`tokens_est`/`tokens_actual`、`loop_count`
+   - 必填:`ts`(时间戳)、`query`(查询)、`pages_read`、`evidence_profile`(程序供给的原始证据事实)、`stop_reason`(sufficient/no_actionable_candidate/budget_exhausted/loop_limit/tool_failure/model_error；model_error用于API模型调用或决策输出失败，不表示证据不足或已完成回答)、`decision`(回答/停止)、`tokens_est`/`tokens_actual`、`loop_count`
    - **v4 新增(动态流程审计)**:`probe`(步骤 2 探测结果,hit/miss 事实)、`route`(步骤 3a 排序信号+分派路径,审计路由是否信号驱动防答案泄漏)、`routing_cost`(步骤 2+3a 开销,近零 token,与 retrieval_cost 分列)、`answer_completeness_audit`(步骤 4 ②回答完全性审计结果,LLM 判)
    - **保留程序侧**:`evidence_profile`(source_presence/source_types/version_status/conflict_markers,客观事实)、`required_disclosures`(证据不足提示)、`loop_count`(程序计,非 LLM 自报)、`slot_checklist`/`covered_slots`/`slot_gaps`(v5:含种子模板开局+增量修正轨迹)、`slot_updates`(v5 新增,每轮 SLOT_UPDATE/NO_CHANGE 记录)、`answer_audit_flags`(v5 新增,程序锚定的答案审计 flag:槽位关键词缺失/姿态不一致)、`knowledge_gap`(反哺候选记录；实际落盘由后续 ingest update 另行审计)
    - **用途**:供 LINT 审计证据状态是否属实(程序读 frontmatter 客观,非判语义)、回环计数是否超限、stop_reason 与回答是否一致、`route` 是否信号驱动(防答案泄漏)、`probe` 是否真实

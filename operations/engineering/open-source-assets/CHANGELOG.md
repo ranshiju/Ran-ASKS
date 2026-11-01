@@ -7,6 +7,25 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-01
+
+### Version decision / 版本判断
+
+- MINOR: Add opt-in Source-first ingestion, versioned draft Knowledge Units and purpose-aware unified retrieval while preserving default legacy ingestion and existing public contracts
+- MINOR（中文）：新增显式 Source-first 摄入、版本化知识草稿和按用途联合检索，保持默认 legacy 摄入及既有公开契约
+
+### Highlights
+
+- Added opt-in Source-first ingestion for academic PDF/Markdown/text: preserve immutable originals and parse versions, index sources independently, resume interrupted work and explicitly choose source-only intake for transactional material. The default remains `legacy`.
+- Added bounded Agent/API compilation of draft Knowledge Units, with source-bound statements, optional concept/method/finding roles, native Frontier questions, evidence attachment, versioned revision and deferred work. No fixed semantic-review loop or model training is required; task completion is not exhaustive coverage or scientific certification.
+- Added purpose-aware artifacts and unified Source/KU/Question/Wiki/Graph discovery with bounded API evidence reading. Improved local relevance, excerpts and duplicate-update handling; preserved Raw verification and private isolation. Source/KU retrieval remains lexical, and end-to-end quality or latency gains are not claimed.
+
+### 主要更新
+
+- 新增 academic PDF/Markdown/TXT 的 Source-first 显式试用流程：保存不可变原件和解析版本，独立建立来源索引，支持恢复及纯事务材料的仅来源摄入。默认仍为 `legacy`。
+- 新增 Agent/API 有界知识单元编译，支持来源绑定的知识草稿、可选概念/方法/发现角色、原生 Frontier 问题、补充依据、版本修订与暂缓处理。无需固定语义审核循环或模型训练；任务完成不等于全文覆盖或科学认证。
+- 新增按用途区分产物要求及 Source/KU/Question/Wiki/Graph 联合发现，支持有界 API 取证读取。改进本地相关性、摘录与重复更新处理，保留 Raw 核验和 private 隔离。Source/KU 仍为词汇检索，不宣称端到端质量或耗时收益已验收。
+
 ## [0.20.1] - 2026-10-29
 
 ### Version decision / 版本判断
@@ -618,5 +637,7 @@ manifests and checksums.
 
 [0.20.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.20.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.20.1...HEAD
 [0.20.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.20.1
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.21.0

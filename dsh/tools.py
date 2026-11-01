@@ -32,9 +32,9 @@ def _wg_call(action: str, args: list[str]) -> str:
     if not env.get("ok"):
         return env.get("error", "[ERROR unknown]") or "[ERROR empty]"
     result = env.get("result", "")
-    if isinstance(result, (dict, list)):
-        return json.dumps(result, ensure_ascii=False)
-    return str(result)
+    import artifact_usage
+    text = json.dumps(result, ensure_ascii=False) if isinstance(result, (dict, list)) else str(result)
+    return artifact_usage.render(action, text)
 
 
 def _qa_call(action: str, input_: dict) -> str:
@@ -48,7 +48,8 @@ def _qa_call(action: str, input_: dict) -> str:
         result = qa.execute(action, input_)
     if not result.get("ok"):
         return result.get("error", "[ERROR unknown]") or "[ERROR empty]"
-    return result.get("text", "")
+    import artifact_usage
+    return artifact_usage.render(action, result.get("text", ""))
 
 
 # ============ 工具定义 ============
@@ -171,6 +172,27 @@ def build_tools() -> list[ToolDefinition]:
             execute_fn=lambda args: _qa_call("read_raw", {"locator": args.get("locator", "")}),
         ),
         ToolDefinition(
+            name="source_search",
+            description="检索 source-first academic 来源的全文片段；无 Wiki 也可返回精确 Raw locator，随后必须 read_raw 核验；仅词汇召回",
+            input_schema={"type": "object", "properties": {
+                "query": {"type": "string"},
+                "domain": {"type": "string", "enum": ["", "academic", "public"], "default": ""},
+                "topk": {"type": "string", "default": "5"}}, "required": ["query"]},
+            execute_fn=lambda args: _qa_call("source_search", {
+                "query": args.get("query", ""), "domain": args.get("domain", ""), "topk": args.get("topk", "5")}),
+        ),
+        ToolDefinition(
+            name="knowledge_search", description="检索 academic KU Statement 与原生 Frontier Question，候选仍须读取并回溯 Raw",
+            input_schema={"type": "object", "properties": {"query": {"type": "string"},
+                "domain": {"type": "string", "default": "academic"}, "topk": {"type": "string", "default": "5"}}, "required": ["query"]},
+            execute_fn=lambda args: _qa_call("knowledge_search", args),
+        ),
+        ToolDefinition(
+            name="knowledge_read", description="读取 KU 当前表述、条件、状态及依据地址；不等于读取原文或事实核验",
+            input_schema={"type": "object", "properties": {"unit_id": {"type": "string"}}, "required": ["unit_id"]},
+            execute_fn=lambda args: _qa_call("knowledge_read", {"unit_id": args.get("unit_id", "")}),
+        ),
+        ToolDefinition(
             name="admin_recall",
             description="行政文档直接召回（标题/别名/Navigation 三路匹配 + 图回退），只返回候选 Navigation",
             input_schema={"type": "object", "properties": {
@@ -196,6 +218,17 @@ def build_tools() -> list[ToolDefinition]:
             execute_fn=lambda args: _qa_call("wiki_recall",
                 {"query": args.get("query", ""), "domain": args.get("domain", ""), "topk": args.get("topk", "8"),
                  "include_deprecated": args.get("include_deprecated", False)}),
+        ),
+        ToolDefinition(
+            name="hybrid_recall",
+            description="联合发现 Source、Statement、Question 与 Wiki/Graph；按候选 read_action/read_input 读取，事实仍须 read_raw；查询只读",
+            input_schema={"type": "object", "properties": {
+                "query": {"type": "string"},
+                "intent": {"type": "string", "enum": ["fact", "relation", "explanation", "exploration", "lineage"], "default": "exploration"},
+                "domain": {"type": "string", "default": ""},
+                "topk": {"type": "string", "default": "8"},
+                "include_deprecated": {"type": "boolean", "default": False}}, "required": ["query"]},
+            execute_fn=lambda args: _qa_call("hybrid_recall", args),
         ),
         ToolDefinition(
             name="recall",

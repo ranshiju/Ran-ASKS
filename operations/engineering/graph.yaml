@@ -528,7 +528,15 @@ nodes:
   query_orchestrate:
     path: .scripts/query_orchestrate.py
     kind: implementation
-    role: api-only-constrained-query-session-loop
+    role: api-only-constrained-query-session-loop-with-retained-read-and-calculation-results
+  query_tool_contracts:
+    path: .scripts/query_tool_contracts.py
+    kind: implementation
+    role: api-query-pure-typed-input-validation-and-bounded-numerical-operations-without-io
+  query_tool_contracts_test:
+    path: .scripts/test_query_tool_contracts.py
+    kind: test
+    role: typed-query-enum-shape-bounds-and-arithmetic-regression
   answer_judge:
     path: .scripts/answer_judge.py
     kind: implementation
@@ -540,11 +548,35 @@ nodes:
   query_actions:
     path: .scripts/query_actions.py
     kind: implementation
-    role: shared-single-read-label-preserving-wiki-recall-hybrid-semantic-context-and-precise-evidence-reader
+    role: shared-typed-source-ku-question-wiki-graph-recall-and-precise-evidence-reader
+  artifact_usage:
+    path: .scripts/artifact_usage.py
+    kind: implementation
+    role: shared-pure-action-derived-artifact-use-roles-without-confidence-or-source-promotion
+  artifact_usage_ops:
+    path: operations/engineering/artifact-use-contracts.md
+    kind: specification
+    role: purpose-specific-minimum-accuracy-and-use-boundaries
+  artifact_usage_test:
+    path: .scripts/test_artifact_usage.py
+    kind: test
+    role: usage-role-derivation-error-boundaries-and-content-preservation
+  lexical_relevance:
+    path: .scripts/lexical_relevance.py
+    kind: implementation
+    role: shared-pure-literal-query-ranking-and-contiguous-match-centered-excerpts-without-identity-or-fact-claims
   wiki_recall_test:
     path: .scripts/test_wiki_recall.py
     kind: test
     role: single-read-literal-label-and-coverage-ranked-wiki-recall-scope-and-freshness-regression
+  unified_retrieval_ops:
+    path: operations/engineering/unified-retrieval.md
+    kind: spec
+    role: typed-source-ku-question-wiki-discovery-and-current-evidence-read-contract
+  unified_retrieval_test:
+    path: .scripts/test_unified_retrieval.py
+    kind: test
+    role: shared-isolated-mixed-recall-read-actions-source-grouping-current-revisions-and-scope-regression
   experience_recall:
     path: .scripts/experience_recall.py
     kind: implementation
@@ -1218,6 +1250,38 @@ nodes:
     path: .scripts/source_locator.py
     kind: implementation
     role: raw-locator-parse-validate-excerpt-explicit-fact-anchor-and-hash-bound-binary-companion-first-source-read-citation-contract
+  source_ingest:
+    path: .scripts/source_ingest.py
+    kind: implementation
+    role: shared-source-first-receipt-backed-immutable-ingestion-versioned-parser-reuse-and-incremental-fulltext-search
+  source_ingest_test:
+    path: .scripts/test_source_ingest.py
+    kind: test
+    role: source-first-independent-commit-recovery-duplicate-binding-and-query-regression
+  source_ingest_ops:
+    path: operations/engineering/source-first-ingestion.md
+    kind: spec
+    role: source-ready-contract-and-versioned-receipt-index-recovery
+  knowledge_store:
+    path: .scripts/knowledge_store.py
+    kind: implementation
+    role: shared-markdown-primary-versioned-statement-store-and-native-frontier-question-read-adapter
+  knowledge_compile:
+    path: .scripts/knowledge_compile.py
+    kind: implementation
+    role: shared-bounded-source-packets-agent-tasks-delta-validation-and-idempotent-ku-publication
+  knowledge_compile_api:
+    path: .scripts/knowledge_compile_api.py
+    kind: implementation
+    role: api-only-bounded-knowledge-delta-execution-with-persistent-response-reuse
+  knowledge_units_test:
+    path: .scripts/test_knowledge_units.py
+    kind: test
+    role: isolated-ku-version-evidence-recovery-agent-api-and-query-regression
+  knowledge_units_ops:
+    path: operations/engineering/knowledge-units.md
+    kind: spec
+    role: n2-source-to-ku-implementation-contract-and-small-existing-source-validation
   ingest_user_assertions:
     path: .scripts/ingest_user_assertions.py
     kind: implementation
@@ -1335,6 +1399,126 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - artifact_usage_ops
+  - governs
+  - artifact_usage
+- - artifact_usage
+  - tested_by
+  - artifact_usage_test
+- - query_actions
+  - uses
+  - artifact_usage
+- - query_orchestrate
+  - uses
+  - artifact_usage
+- - dsh_tools
+  - uses
+  - artifact_usage
+- - wg
+  - uses
+  - artifact_usage
+- - knowledge_compile
+  - uses
+  - artifact_usage
+- - query_orchestrate
+  - uses
+  - query_tool_contracts
+- - query_tool_contracts
+  - tested_by
+  - query_tool_contracts_test
+- - source_locator
+  - uses
+  - source_ingest
+- - source_ingest
+  - uses
+  - extractor
+- - source_ingest
+  - uses
+  - inbox_finalize
+- - source_ingest
+  - tested_by
+  - source_ingest_test
+- - source_ingest_ops
+  - governs
+  - source_ingest
+- - query_actions
+  - uses
+  - source_ingest
+- - wg
+  - uses
+  - source_ingest
+- - ingest_inbox
+  - uses
+  - source_ingest
+- - knowledge_store
+  - uses
+  - source_ingest
+- - knowledge_store
+  - uses
+  - lexical_relevance
+- - source_ingest
+  - uses
+  - lexical_relevance
+- - query_actions
+  - uses
+  - lexical_relevance
+- - lexical_relevance
+  - tested_by
+  - unified_retrieval_test
+- - knowledge_store
+  - uses
+  - source_locator
+- - knowledge_store
+  - uses
+  - frontier
+- - knowledge_compile
+  - uses
+  - knowledge_store
+- - knowledge_compile
+  - uses
+  - agent_task
+- - knowledge_compile_api
+  - uses
+  - knowledge_compile
+- - knowledge_compile_api
+  - uses
+  - llm_structured
+- - knowledge_compile
+  - tested_by
+  - knowledge_units_test
+- - knowledge_store
+  - tested_by
+  - knowledge_units_test
+- - knowledge_compile_api
+  - tested_by
+  - knowledge_units_test
+- - knowledge_units_ops
+  - governs
+  - knowledge_compile
+- - knowledge_units_ops
+  - governs
+  - knowledge_store
+- - knowledge_units_ops
+  - governs
+  - knowledge_compile_api
+- - query_actions
+  - uses
+  - knowledge_store
+- - unified_retrieval_ops
+  - governs
+  - query_actions
+- - query_actions
+  - tested_by
+  - unified_retrieval_test
+- - knowledge_store
+  - tested_by
+  - unified_retrieval_test
+- - ingest_inbox
+  - uses
+  - knowledge_compile
+- - wg
+  - uses
+  - knowledge_compile
 - - resolve_abbreviations
   - uses
   - graph_lib
@@ -4107,6 +4291,112 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  artifact_usage:
+    preconditions:
+    - shared deterministic use instructions describe navigation/source/knowledge/result boundaries, never confidence or certification; roles come from successful actions or packet structure, not source assertions
+    - compiler optional metadata and soft formatting requirements do not override provenance, necessary conditions or uncertainty in the statement
+    writes: []
+    forbidden:
+    - source-driven role promotion
+    - classifying failed reads as material
+    - automatic semantic validation
+    - model calls
+    verify:
+    - python3 .scripts/test_artifact_usage.py
+    - python3 .scripts/engineering_graph.py validate
+  knowledge_store:
+    preconditions:
+    - shared search adds up to three stored evidence locator/relation/assessed_revision previews in original order plus total and truncation; ranking and existing candidate fields are unchanged, no Raw read or binding certification occurs at discovery, and full knowledge_read remains available
+    - shared academic-only Markdown primary Statement store; native Frontier Question identity and states remain authoritative
+    - optional content_role describes research_question/concept_definition/method_model/scientific_finding; legacy Statements stay unspecified without forced rewriting; roles do not certify truth
+    - attach may fill an unspecified Statement role but preserves any assigned role, statement, origin and claim strength; omitted/null optional role fields do not erase existing metadata
+    - attach-only unchanged detection runs under the KU lock after CAS and evidence validation; compare complete content and evidence bindings/relations without order or execution stamps, require old assessments at the current revision, and preserve primary/history bytes on a duplicate
+    - unchanged attach uses saved/index_pending with reused and unchanged flags in the existing job receipt; receipt hashes freeze acknowledged operations, while interrupted no-write attempts revalidate the current snapshot; real commits retain primary-operation recovery
+    - Question source_question_status distinguishes addressed/left_open/unspecified in a source from independent Frontier knowledge and scientific states
+    - revision compare-and-swap, prior revision snapshot and idempotent operation receipt precede rebuildable index publication
+    - Source-first evidence binds source hash, immutable parse, exact Raw span and KU revision; source reachability is not scientific truth
+    writes:
+    - academic/knowledge/units/
+    - academic/knowledge/history/
+    - academic/knowledge/index.sqlite
+    - academic/frontier/questions/
+    forbidden:
+    - private import or symlinks
+    - modifying Raw or public graph
+    - automatic identity merge or split
+    - inheriting support checks after statement revision
+    verify:
+    - python3 .scripts/test_knowledge_units.py
+    - python3 .scripts/test_frontier.py
+    - python3 .scripts/engineering_graph.py validate
+  knowledge_compile:
+    preconditions:
+    - purpose roles distinguish navigation fields, bound source blocks and revisable candidate/output knowledge; roles are program-supplied, optional classification metadata may be omitted, and evidence/version validators remain unchanged
+    - shared bounded packet and delta validator; host Agent receives agent-task-v1 and never silently calls an API
+    - bounded explicit focus hits and their adjacent source context precede the default formal-result survey after the opening; absent or unmatched focus preserves default ordering and budgets; formal-result recognition accepts Markdown headings and emphasis and prioritizes main results before their background; actual coverage does not guarantee complete conditions or missing knowledge
+    - focus ranks explicitly named normalized multi-term source headings before ordinary lexical overlap; heading matching preserves token order and repetitions within semicolon/newline-delimited requests, while lexical scoring keeps deduplicated topic terms; at least two distinct heading terms are required; source-local rarity, the two-hit cap and primary-before-neighbor order remain; heading matches do not establish scientific roles or semantic support
+    - retrieval uses source topic plus at most twelve literal names from actually selected source passages, never execution instructions or old evidence; at most two local searches return twenty hits each, merged to a twenty-item pool and at most five admitted candidates before loading old evidence
+    - candidate titles matching focus names corroborated in actually selected source passages take priority before other same-source context; uncorroborated focus names do not affect priority or retrieval
+    - within each focus-title tier of the bounded merged pool, existing units citing the current source take candidate slots first, then exact passage-name title/body matches; lexical admission does not decide semantic identity or support and Question candidates remain read-only
+    - cross-source admission requires an exact selected-passage name in the candidate title or a multiword source-topic phrase; a lone generic English title word never admits a candidate; same-source admission is preserved
+    - focus guides selective semantic output and prior candidates are maintenance context rather than an output checklist; this guidance is not a semantic hard validator or a coverage guarantee
+    - incomplete old-evidence bundles disable revision and release only blocks newly added for that candidate, preserving source coverage and shared evidence already in the packet
+    - after candidate loading, unused packet budget may fill omitted formal-result spans and their immediate neighbors with metadata headroom; original source and old evidence stay intact, candidate retrieval is not repeated, and actual coverage never certifies complete prerequisites
+    - semantic statements distinguish mathematical or observed results from source authors' practical, causal, or generalization interpretations with explicit attribution; no hard semantic adjudicator is added
+    - each selected semantic unit states its own object, necessary assumptions and variable scope; optional proof, numerical or interpretation detail stays in Raw unless it is itself the requested reusable knowledge, with no per-paper output quota
+    - four content roles guide selective compilation without per-paper quotas; prior Question candidates are read-only reuse context and native Frontier retains update authority
+    - only packet block IDs and candidate KU identities may be submitted; revisions and source bindings rechecked at publication
+    - source-ready survives KU failure; independent operations preserve partial successes and unresolved work
+    writes:
+    - temp/knowledge-compile/
+    - academic/sources/
+    forbidden:
+    - semantic model calls from Agent adapter
+    - full-source coverage claims from sampled input
+    - arbitrary output paths
+    - mandatory fixed reviewer
+    verify:
+    - python3 .scripts/test_knowledge_units.py
+    - python3 .scripts/test_source_ingest.py
+    - python3 .scripts/test_wg.py
+    - python3 .scripts/engineering_graph.py validate
+  knowledge_compile_api:
+    preconditions:
+    - API backend only; reuse llm_structured with bounded input/output, typed retry budget and transaction execution events
+    - persist model output before applying; replay completed jobs without model calls; failed calls require explicit retry
+    writes:
+    - temp/knowledge-compile/
+    forbidden:
+    - new OCR during knowledge compilation
+    - implicit API fallback from Agent
+    - external source instructions controlling tools
+    verify:
+    - python3 .scripts/test_knowledge_units.py
+    - python3 .scripts/test_query_api_loop.py
+    - python3 .scripts/engineering_graph.py validate
+  source_ingest:
+    preconditions:
+    - shared deterministic Source-first profile; first release accepts academic PDF/Markdown/plain text, with no semantic LLM or Graph dependency
+    - Source and KU discovery use shared contiguous match-centered excerpts within the existing 700-character cap, with zero-based end-exclusive body offsets; ranking and full reading locators remain unchanged, excerpts are not evidence and never rewrite or concatenate source text
+    - source search recognizes explicit bibliography sections after source binding checks and prefers other matched passages within each source for ordinary queries; bibliography queries keep literal ranking, no passages are removed, and no model or index migration is introduced
+    - trusted explicit knowledge none records source_only/not_required without semantic classification; skip defers; reindex preserves intent and prior executed knowledge, while explicit prepare/run can opt in
+    - source IDs identify immutable byte editions independently of bibliography; changed bytes are separate editions, never automatically merged
+    - source receipt and original commit precede parsing/indexing; receipt preserves origin and pending knowledge work; index is rebuildable
+    - PDF parsing reuses the managed MinerU adapter; PaddleOCR requires existing enabled configuration and explicit authorization; no new local PDF fallback
+    - parser bundles bind original and all published artifacts; explicit refresh uses current parser configuration and publishes a new immutable parse path if the request changed; normal replay pins the selected parse
+    writes:
+    - academic/raw/sources/S-*/ via managed atomic source transactions only
+    - academic/sources/*.json and academic/sources/index.sqlite; no public graph relations
+    - temp/source-ingest/ for parser staging and resumable checkpoints
+    forbidden:
+    - direct publication of unbound parse text, source_ready before successful index readback, implicit legacy completed receipt
+    - private source import or cross-domain traversal/symlinks; model or network calls during search/read
+    - deleting received originals after parse/index failure; rewriting old parse carriers or silently reinterpreting old locators
+    verify:
+    - python3 .scripts/test_source_ingest.py
+    - python3 .scripts/test_wg.py
+    - python3 .scripts/test_private_query.py
+    - python3 .scripts/engineering_graph.py validate
   review:
     preconditions:
     - 显式声明材料敏感性、当前宿主处理授权及真实能力；仅使用声明的 UTF-8 文本或静态 PNG 和受信任 reviewer。
@@ -5226,6 +5516,9 @@ script_contracts:
     - shared query scope selects public or private across discovery, Wiki, Raw and companion reads; nested actions cannot change storage domain
     - private uses the same actions with private/graph.db, physical path checks and local-only embedding fallback; no public scans or provider calls
     - hybrid_recall 的 intent 必须是 fact/relation/explanation/exploration/lineage；结果只是候选，不形成 identity 或事实断言
+    - hybrid_recall 在 academic/公共范围融合 Source/Statement/Question 与已有 Wiki/Graph 导航排名；其他域和 private 不读取 academic 来源或 KU。候选携带 kind 和受限 read_action/read_input，读取 KU 不计入 Raw citation。
+    - Source/KU use full validated candidate text for literal phrase and distinct-term coverage before preview truncation; unified discovery ranks these shared signals before channel rank without treating them as semantic identity or confidence; weak candidates remain available within the same bounded pool
+    - 联合发现只读；缺失图/派生索引按通道披露并保留可用结果；同来源解析版本的重复片段只占一个 Source 候选，多路命中不提高科学确定性。读取当前 KU 保留 revision、claim_mode、unresolved 和依据绑定问题。
     - wiki_context 必须指定可解析的 page#section，Graph envelope 有 top-k 与 traversal profile 边界
     - read_raw 通过 source_locator 读取原件的精确 locator 或受管 Markdown companion；返回中显式区分可引用原件与实际读取路径
     - graph_exact 候选保留有辨识力的数学写法（如 z*、|z|、Arg z），同时不把裸单字母变量扩散为通用噪声
@@ -5243,6 +5536,7 @@ script_contracts:
     - python3 .scripts/test_query_orchestrate.py
     - python3 .scripts/test_wg.py
     - python3 .scripts/test_private_query.py
+    - python3 .scripts/test_unified_retrieval.py
   query_graph:
     preconditions:
     - 已确定查询目标；事实性结论另行从相邻 Wiki section 的 Raw 脚注回到 Raw，边 locator 仅作可选捷径
@@ -5664,6 +5958,20 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   query_orchestrate:
     preconditions:
+    - API prompts with successful calculation results guide task-bounded numerical answers using returned values, source numbers and equivalent formatting; necessary new arithmetic uses existing tools or remains explicitly uncomputed when tools end, without new schemas, states, retries or semantic certification
+    - API prompt read-handle indexes project only action/input without repeating stored candidate titles; fresh discovery bodies, retained reads/calculations, saved handle metadata and guarded execution remain unchanged
+    - normal and answer-only guidance distinguishes read Raw statements from KU interpretation, navigation and current derivations; it preserves source qualifiers without new semantic validators, output fields or model calls
+    - API discovery guidance selects an initial source, knowledge or hybrid route by task and supplements observed gaps; independent subquestions remain batchable and candidate evidence previews allow direct guarded Raw reads without automatic evidence promotion
+    - failed model responses, invalid parsed decisions and empty answers terminate as model_error with actual round and backend status; they never imply sufficient evidence, execute a failed plan or add adapter retries, and prior reads remain in the saved session
+    - artifact use roles are derived from successful executed actions, never source assertions; navigation and KU do not become Raw evidence, and arithmetic does not verify scientific applicability
+    - API validates declared input types/enums and reports tool errors/denials; session-local read_ref resolves only issued read actions through existing stage, deduplication and public Raw boundaries
+    - calculate performs bounded scalar or equal-length vector arithmetic without code execution or IO; numerical results are not Raw evidence or semantic validation
+    - API prompts consume bounded actual tool text including source_search locators and read_raw evidence; short log previews do not replace evidence
+    - successful concrete reads and calculations persist in the API session and remain visible across later rounds, once per prompt with action-derived use roles; discovery candidates and failed actions are not retained as evidence
+    - retained results reuse existing cumulative tool-read budgets and execution limits without new model calls or citation promotion; repeated prompt input costs must be measured separately from tool-read accounting
+    - after the tool-plan limit, at most one answer-only model round may use remaining configured model-round capacity; no further tool plan executes, budget exhaustion blocks this round, and its actual request cost is counted
+    - after a successful start-stage discovery, the API loop advances to evidence before the next model prompt so legal read actions and input contracts are visible; failed discovery alone cannot advance the stage
+    - API exhaustion reports actual model decision rounds and the binding loop/budget limit; configured maximum is not an executed count, and an unreported slot is not an LLM finding that no candidate exists
     - existing API sessions are public-only; private scope cannot be selected by a model action or read into shared session storage
     - 本脚本只为 API backend 保存受预算约束的 query session 与运行模型循环；当前宿主 Agent 直接按 query task card 调用 query_actions/query_graph/source locator
     - read_sources 同时登记已验证 locator 与 source_locator 确定性映射出的原件引用路径；citation contract 只接受该白名单
@@ -5674,6 +5982,7 @@ script_contracts:
     verify:
     - python3 .scripts/test_query_orchestrate.py
     - python3 .scripts/test_query_api_loop.py
+    - python3 .scripts/test_query_tool_contracts.py
   answer_judge:
     preconditions:
     - 输入结果包含 retrieved 页面列表；优先消费结果随附的结构化 evidence_profile 与 required_disclosures
@@ -5768,6 +6077,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   dsh_agent_loop:
     preconditions:
+    - query prompts retain actual bounded tool results rather than a 200-character preview; source-only discovery and Raw evidence must reach the model
     - 每个已获准的 ingest tool action 在 DSH 层只派发一次；底层 llm_structured 依 typed RecoveryPolicy 处理基础设施与输出传输恢复
     - api_timeout 等类别只用于结构化交接与运维判断，不授权 DSH 重跑整个摄入子进程
     writes:
@@ -5777,6 +6087,8 @@ script_contracts:
     - 用 DSH ingest/retry 事件或 stage counter 代替 ExecutionEvent 统计真实 API 请求
     verify:
     - python3 dsh/test_dsh_ingest_tools.py
+    - python3 dsh/test_dsh_harness.py
+    - python3 .scripts/test_source_ingest.py
     - python3 .scripts/test_ingest_pipeline.py
     - python3 .scripts/engineering_graph.py validate
   dsh_semantic_recovery_agent:

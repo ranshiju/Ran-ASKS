@@ -97,6 +97,10 @@ def test_hybrid_recall_fuses_wiki_and_graph_candidates():
         original_semantic = actions.ns.semantic_search
         original_wiki = actions._wiki_recall_data
         original_capsule = actions._section_capsule
+        original_repo = actions._REPO
+        # Keep Source/KU discovery in the same synthetic repository as the graph.
+        # Otherwise a populated local corpus can displace these test candidates.
+        actions._REPO = Path(directory)
         actions.gl.connect = lambda *args, **kwargs: conn
         actions.ns.semantic_search = lambda *args, **kwargs: {
             "candidates": [{"node_id": "concept-a"}]
@@ -114,6 +118,7 @@ def test_hybrid_recall_fuses_wiki_and_graph_candidates():
             actions.ns.semantic_search = original_semantic
             actions._wiki_recall_data = original_wiki
             actions._section_capsule = original_capsule
+            actions._REPO = original_repo
             conn.close()
     result = json.loads(text)
     by_path = {item["path"]: item for item in result["candidates"]}

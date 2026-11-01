@@ -1,5 +1,22 @@
 # Ingest（摄入）操作规范
 
+## Source-first 显式入口（N1/N2）
+
+公共 academic PDF/MD/TXT 可以显式用 `wg.py ingest <file> --profile source-first`。
+该 profile 以受管保存原件、哈希绑定解析和来源全文索引为独立完成条件，返回
+`source_ready` 和独立的知识状态，不使用下文旧 Wiki/Graph 多阶段完成标准。
+来源可直接经 `wg.py source-search` → `read-raw` 使用。默认 `--knowledge skip`，
+新来源登记 pending，但本次暂不执行；纯事务材料可显式 `--knowledge none`，
+持久选择 `source_only/not_required`，零分类/知识模型调用，恢复时保留意图。
+不按“非论文”一律跳过知识；混合材料只整理可复用部分，允许零 KU。
+显式 `--knowledge agent|api` 可在来源发布后准备宿主任务或同步运行有界 KU 整理。
+none 不抹除已执行知识结果；以后可显式 prepare/run 开启整理。
+来源与知识状态分开，KU 的失败/未决项不回滚来源。Statement 保存为带依据的草稿，
+Question 写原生 Frontier；不要求 Wiki/Graph 或执行全库维护。
+默认入口仍为 legacy；首次上下文预热和 Raw/private 边界不变。
+完整命令、恢复和局限见 [Source-first 契约](engineering/source-first-ingestion.md)。
+KU 新建/局部更新、查询与 Agent/API 边界见 [N2 契约](engineering/knowledge-units.md)。
+
 
 ---
 

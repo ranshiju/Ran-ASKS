@@ -80,6 +80,10 @@ def envelope(action, result, sources=None, status="ok", error="", ok=None):
         "status": status,
         "error": error,
     }
+    import artifact_usage
+    usage = artifact_usage.for_action(action, ok=ok is True and not error)
+    if usage:
+        out["usage"] = usage
     print(json.dumps(out, ensure_ascii=False))
     return 0
 
@@ -273,6 +277,13 @@ def cmd_recall(args):
                     sources=[], status="ok")
 
 
+def cmd_source_search(args):
+    result = qa.execute("source_search", {"query": args.query, "domain": args.domain, "topk": str(args.topk)})
+    if not result["ok"]:
+        return envelope("source-search", None, status="error", error=result["error"])
+    return envelope("source-search", json.loads(result["text"]), status="ok")
+
+
 def cmd_ingest(args):
     pasted = getattr(args, "stdin", False)
     keep_source = getattr(args, "keep_source", False)
@@ -282,6 +293,21 @@ def cmd_ingest(args):
     if keep_source and not args.file:
         return envelope("ingest", None, status="error", error="--keep-source 只能用于文件附件")
     command = [sys.executable, str(SCRIPTS / "ingest_inbox.py"), "--run"]
+    profile = getattr(args, "profile", "legacy")
+    if profile == "source-first":
+        if (pasted or args.subproject != "academic" or args.name or args.document_type
+                or args.ocr_result or args.allow_remote_ocr or getattr(args, "allow_remote_ppt", False)):
+            return envelope("ingest", None, status="error",
+                            error="source-first 只支持 academic PDF/MD/TXT 文件或 S-ID 恢复；不支持旧分类、改名或 OCR 参数")
+        command.extend(["--profile", profile])
+        command.extend(["--knowledge", getattr(args, "knowledge", "skip")])
+    elif any(getattr(args, k, False) for k in ("reuse_parse", "refresh_parse", "allow_paddleocr")) or getattr(args, "knowledge", "skip") != "skip":
+        return envelope("ingest", None, status="error", error="解析复用/刷新参数需要 --profile source-first")
+    if getattr(args, "reuse_parse", None):
+        command.extend(["--reuse-parse", args.reuse_parse])
+    for flag in ("refresh_parse", "allow_paddleocr"):
+        if getattr(args, flag, False):
+            command.append("--" + flag.replace("_", "-"))
     input_options = {}
     if args.resume:
         command.extend(["--resume", args.resume])
@@ -294,7 +320,7 @@ def cmd_ingest(args):
         input_options["input"] = sys.stdin.buffer.read()
     else:
         supplied = Path(args.file).expanduser()
-        source = supplied.absolute() if keep_source else supplied.resolve()
+        source = supplied.absolute() if keep_source or profile == "source-first" else supplied.resolve()
         try:
             rel = source.relative_to(REPO)
         except ValueError:
@@ -323,17 +349,50 @@ def cmd_ingest(args):
                         error=(err or out or "摄入入口未返回 JSON").strip()[:500])
     sources = []
     for item in result.get("files", []) if isinstance(result.get("files"), list) else []:
-        for key in ("raw_dir", "wiki_path"):
+        for key in ("raw_dir", "wiki_path", "source_path"):
             if item.get(key) and item[key] not in sources:
                 sources.append(item[key])
-    for key in ("raw_dir", "wiki_path"):
+    for key in ("raw_dir", "wiki_path", "source_path"):
         if result.get(key) and result[key] not in sources:
             sources.append(result[key])
     failed = result.get("status") in {"failed", "validation_error", "backend_mismatch"}
+    if profile == "source-first" and (rc != 0 or result.get("error")):
+        failed = True
     if rc != 0 and failed:
         return envelope("ingest", result, sources=sources, status="error",
                         error=str(result.get("errors") or result.get("error") or "摄入失败")[:500])
     return envelope("ingest", result, sources=sources, status="ok")
+
+
+def cmd_knowledge_query(args):
+    action = "knowledge_search" if args.cmd == "ku-search" else "knowledge_read"
+    inputs = {"query": args.query, "domain": args.domain, "topk": str(args.topk)} if action == "knowledge_search" else {"unit_id": args.unit_id}
+    result = qa.execute(action, inputs, subproject=getattr(args, "domain", "academic"))
+    return envelope(args.cmd, json.loads(result["text"]) if result["ok"] else None,
+                    status="ok" if result["ok"] else "error", error=result["error"])
+
+
+def cmd_knowledge(args):
+    import knowledge_compile as kc
+    try:
+        if args.knowledge_action == "prepare":
+            result = kc.prepare(args.identifier, repo=REPO, focus=args.focus, refresh=args.refresh)
+        elif args.knowledge_action == "run":
+            from knowledge_compile_api import run
+            result = run(args.identifier, repo=REPO, focus=args.focus, refresh=args.refresh, retry=args.retry)
+        elif args.knowledge_action == "show":
+            state, packet = kc.load_job(REPO, args.identifier)
+            result = {"state": state, "packet": packet}
+        elif args.knowledge_action == "rebuild-index":
+            import knowledge_store as ks
+            result = ks.rebuild_index(repo=REPO)
+        else:
+            result = getattr(kc, args.knowledge_action)(args.identifier, repo=REPO)
+        failed = result.get("status") == "failed" or result.get("ready") is False
+        return envelope("knowledge", result, status="error" if failed else "ok",
+                        error=str(result.get("error") or "") if failed else "")
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        return envelope("knowledge", None, status="error", error=str(exc))
 
 
 def _task_execution_payload(execution: dict) -> dict:
@@ -721,7 +780,7 @@ def build_parser():
     p.add_argument("--topk", type=int, default=12)
     p.set_defaults(func=cmd_read_section)
 
-    p = sub.add_parser("hybrid-recall", help="按意图融合 Wiki 语义与 Graph 结构召回")
+    p = sub.add_parser("hybrid-recall", help="联合发现 Source、KU、Question 与 Wiki/Graph，返回分类型读取入口")
     p.add_argument("query")
     p.add_argument("--intent", default="exploration",
                    choices=("fact", "relation", "explanation", "exploration", "lineage"))
@@ -733,11 +792,34 @@ def build_parser():
     p = sub.add_parser("read-raw", help="按 locator 读 raw 片段溯源核验")
     p.add_argument("locator"); p.set_defaults(func=cmd_read_raw)
 
+    p = sub.add_parser("source-search", help="检索 source-first 来源全文并返回可直接读取的 Raw locator")
+    p.add_argument("query")
+    p.add_argument("--domain", default="academic")
+    p.add_argument("--topk", type=int, default=5)
+    p.set_defaults(func=cmd_source_search)
+
+    p = sub.add_parser("ku-search", help="检索 Statement KU 和原生 Frontier Question")
+    p.add_argument("query"); p.add_argument("--domain", default="academic")
+    p.add_argument("--topk", type=int, default=5); p.set_defaults(func=cmd_knowledge_query)
+    p = sub.add_parser("ku-read", help="读取 KU 当前表述与来源依据")
+    p.add_argument("unit_id"); p.add_argument("--domain", default="academic"); p.set_defaults(func=cmd_knowledge_query)
+    p = sub.add_parser("knowledge", help="Source-first 知识任务：prepare 为宿主 Agent，run 为显式 API")
+    p.add_argument("knowledge_action", choices=("prepare", "run", "show", "check", "apply", "rebuild-index"))
+    p.add_argument("identifier", nargs="?", default="")
+    p.add_argument("--focus", default=""); p.add_argument("--refresh", action="store_true")
+    p.add_argument("--retry", action="store_true"); p.set_defaults(func=cmd_knowledge)
+
     p = sub.add_parser("recall", help="研究记忆恢复")
     p.add_argument("project"); p.set_defaults(func=cmd_recall)
 
     p = sub.add_parser("ingest", help="统一 inbox 摄入入口；外部附件受管暂存后进入同一管线")
     p.add_argument("file", nargs="?", help="inbox 文件或仓库外附件路径")
+    p.add_argument("--profile", choices=("legacy", "source-first"), default="legacy")
+    p.add_argument("--knowledge", choices=("skip", "none", "agent", "api"), default="skip",
+                   help="skip 暂缓整理；none 仅保存来源；agent/api 提取可复用知识")
+    p.add_argument("--reuse-parse", default="", help="source-first: 复用含同字节 paper.pdf/paper.md 的受管解析目录")
+    p.add_argument("--refresh-parse", action="store_true", help="source-first: 按当前配置选择解析版本；默认固定复用已选版本")
+    p.add_argument("--allow-paddleocr", action="store_true", help="source-first: 允许已启用的 PaddleOCR 在 MinerU 失败时接续")
     p.add_argument("--stdin", action="store_true", help="从 stdin 原样摄入粘贴正文")
     p.add_argument("--keep-source", action="store_true", help="对话附件复制摄入，原件不移动、不修改、不删除")
     p.add_argument("--resume", default="", help="恢复既有摄入事务")

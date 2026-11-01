@@ -49,6 +49,36 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 首件作品是 MPE 科普展板：结合科普展板创作、插图生成、图文混排、理解试读和版式导出，
 将论文中的量子纠缠与态制备问题呈现为面向跨专业大学生的 A0 海报。
 
+## Source-first 摄入与知识单元（预览）
+
+新增显式试用流程：先保存原件、建立来源索引，再按需编译可复用的知识单元（KU）。
+来源可用与知识整理完成分开记录，知识任务失败或暂缓不影响已发布来源的检索。
+默认摄入仍为 `legacy`。
+
+```bash
+python3 .scripts/wg.py ingest /absolute/paper.pdf --profile source-first
+python3 .scripts/wg.py ingest /absolute/notice.md --profile source-first --knowledge none
+python3 .scripts/wg.py ingest /absolute/paper.pdf --profile source-first --knowledge api
+```
+
+首批支持 academic 的 PDF、Markdown 和 UTF-8 TXT。默认 `--knowledge skip` 保留待整理项；
+`none` 显式选择仅来源，适合纯事务材料。`agent` 返回宿主 Agent 任务；`api` 在
+`INGEST_BACKEND=api` 下执行有界 API 整理。PDF 解析仍可能使用已配置的远端服务。
+
+KU 保存完整表述、必要条件、不确定性和绑定具体版本的来源地址，可选内容角色涵盖
+核心概念、方法模型、科学发现与研究问题。一次任务可新建、补充依据、修订或暂缓；
+修订保留历史，问题复用已有 Frontier 记录。无需训练模型或固定追加语义审核模型，
+这些产物仍是知识草稿，不是经过认证的科学结论。
+
+产物要求由用途决定：导航帮助找到材料，知识表示保留含义与关键条件，事实回答回到 Raw。
+联合检索汇集 Source、KU/Question 与 Wiki/Graph，并提供后续读取动作。Source/KU 当前
+使用词汇检索，未实现自动跨语言语义召回。实际使用发现缺口后，可定向维护知识对象。
+
+详见 [Source-first](operations/engineering/source-first-ingestion.md)、
+[KU](operations/engineering/knowledge-units.md)、[产物用途](operations/engineering/artifact-use-contracts.md)
+及[联合检索](operations/engineering/unified-retrieval.md)。任务 `completed` 不代表全文穷尽
+或科学核验通过；大语料质量与完整摄入提速尚未验收，private 和其他域沿用既有摄入路径。
+
 ## 来源保真、口试范围与摄入验收
 
 口试准备新增证据绑定的范围设计，将知识点、可观察能力与考查目标连接起来。
@@ -61,9 +91,9 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 
 新增[完整摄入验收工具](operations/engineering/ingest-acceptance-benchmark.md)，
 核对已保存的质量审阅、最终产物、维护状态、连续耗时和请求用量，不判断科学真伪。
-单篇完整摄入耗时不超过合格基线70%的目标仍未验收。Semantic Compiler v2仍处于
-离线设计阶段，本版未启用，也不宣称已经提速。后续将使用现有模型、不训练模型，
-检验哪些摄入要求真正改善检索、回答、可靠组合与增量维护。
+单篇完整摄入耗时不超过合格基线70%的目标仍未验收。上述 Source-first/KU 预览是
+独立的显式试用实现，其完成状态有明确范围。评价效率须合计后续检索、答案核对与
+维护成本，不能把摄入工作减少直接当作端到端提速。
 
 ## 给 AI Agent 的说明
 

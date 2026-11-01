@@ -231,6 +231,10 @@ def companion_binding_status(source, companion):
 def companion_binding_for_target(target):
     """Return binding status when the requested Raw path has a companion."""
     target = Path(target)
+    from source_ingest import binding_for_target
+    source_binding = binding_for_target(REPO, target)
+    if source_binding is not None:
+        return source_binding
     original = original_for_companion(target)
     if original is not None:
         return companion_binding_status(original, target)
@@ -471,6 +475,10 @@ def evidence_targets(target, locator):
     only a compatibility fallback when no matching companion is available.
     """
     target = Path(target)
+    from source_ingest import binding_for_target
+    source_binding = binding_for_target(REPO, target)
+    if source_binding and source_binding["status"] == "valid":
+        return REPO / source_binding["source_path"], target
     original = original_for_companion(target)
     if original is not None:
         binding = companion_binding_status(original, target)

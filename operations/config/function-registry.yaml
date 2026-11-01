@@ -69,7 +69,7 @@ functions:
     maturity: stable
     bindings:
       route_tasks: [ingest, inbox]
-      wg: [ingest, task]
+      wg: [ingest, task, knowledge]
       dsh:
         - ingest_inbox_dry_run
         - ingest_inbox_run
@@ -92,6 +92,7 @@ functions:
         - .scripts/ingest_paper.py
         - .scripts/ingest_meeting.py
         - .scripts/ingest_document.py
+        - .scripts/knowledge_compile.py
       pipelines: [.scripts/ingest_pipeline.py]
     protocols: [agent-task-v1, agent-task-control-v1, ingest-result-v1, knowledge-ir-v1, graph-plan-v1]
 
@@ -107,7 +108,7 @@ functions:
     maturity: stable
     bindings:
       route_tasks: [query]
-      wg: [lookup, neighbors, relations, hub-of, abbr, read-section, hybrid-recall, read-raw]
+      wg: [lookup, neighbors, relations, hub-of, abbr, read-section, hybrid-recall, source-search, ku-search, ku-read, read-raw]
       dsh:
         - graph_search
         - graph_neighbors
@@ -117,6 +118,10 @@ functions:
         - semantic_search
         - read_section
         - read_raw
+        - source_search
+        - knowledge_search
+        - knowledge_read
+        - hybrid_recall
         - admin_recall
         - wiki_recall
       cli: [.scripts/query_graph.py, .scripts/query_actions.py]

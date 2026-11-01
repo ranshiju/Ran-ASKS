@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.20.1
+> Current main version: v0.21.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -57,6 +57,47 @@ The first exhibit is an A0 Chinese science poster about matrix-product
 entanglement, using science-exhibit authoring, illustration, mixed composition,
 simulated-reader review, and rendering/export.
 
+## Source-first ingestion and Knowledge Units (preview)
+
+An opt-in path now saves and indexes a source before compiling reusable
+Knowledge Units (KUs). Source availability and knowledge completion have separate
+states: a failed or deferred knowledge task does not hide an already published
+source. The default ingestion profile remains `legacy`.
+
+```bash
+python3 .scripts/wg.py ingest /absolute/paper.pdf --profile source-first
+python3 .scripts/wg.py ingest /absolute/notice.md --profile source-first --knowledge none
+python3 .scripts/wg.py ingest /absolute/paper.pdf --profile source-first --knowledge api
+```
+
+The preview supports academic PDF, Markdown and UTF-8 text. The default
+`--knowledge skip` leaves compilation pending; `none` explicitly keeps only a
+searchable source, useful for transactional material. Choose `agent` for a host
+Agent task or `api` for bounded API compilation with `INGEST_BACKEND=api`.
+PDF parsing may still use a configured remote provider.
+
+KUs preserve full statements, necessary conditions, uncertainty and version-bound
+source addresses. Optional roles cover concepts, methods, findings and research
+questions. Bounded compilation can create, attach evidence, revise or defer;
+revisions retain history, while questions reuse the existing Frontier records.
+No model training or fixed semantic-review model is required. These are draft
+knowledge objects, not certified scientific conclusions.
+
+Artifact requirements follow their use: navigation should help find material;
+knowledge should preserve meaning and essential conditions; factual answers must
+return to Raw. Unified discovery combines Source, KU/Question and Wiki/Graph
+candidates and supplies the next reading action. Source/KU search is lexical,
+not automatic cross-language semantic retrieval. Use-triggered maintenance can
+repair a bounded knowledge object without recompiling the whole document.
+
+See [Source-first](operations/engineering/source-first-ingestion.md),
+[Knowledge Units](operations/engineering/knowledge-units.md),
+[artifact uses](operations/engineering/artifact-use-contracts.md) and
+[unified retrieval](operations/engineering/unified-retrieval.md).
+`completed` describes the submitted task, not exhaustive document coverage or
+scientific validation. Large-corpus quality and complete-ingestion speedups
+remain unverified; private and other domain ingestion retain their existing paths.
+
 ## Evidence preservation, oral-exam scope and ingestion evaluation
 
 Oral-exam preparation now connects knowledge points, observable competencies and
@@ -73,10 +114,10 @@ The new [complete-ingestion acceptance tool](operations/engineering/ingest-accep
 checks saved evidence for quality reviews, final outputs, maintenance, continuous
 elapsed time and request usage. It does not establish scientific truth. The
 single-paper target of completing ingestion within 70% of a qualified baseline
-remains unverified. Semantic Compiler v2 is still an offline design direction;
-this release does not enable it or claim a measured speedup. Future evaluation
-will test which ingestion requirements improve retrieval, answers, reliable
-composition and maintenance using existing models without model training.
+remains unverified. The Source-first/KU preview above is a separate, opt-in
+implementation with bounded completion semantics. Evaluation must account for
+later retrieval, answer checking and maintenance costs as well as ingestion;
+reduced intake work alone does not establish an end-to-end speedup.
 
 ## For AI agents
 

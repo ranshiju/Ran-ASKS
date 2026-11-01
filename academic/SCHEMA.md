@@ -17,8 +17,35 @@
 | `raw/references/` | 他人参考论文包 | 与自己成果隔离；每篇一个 `<paper-id>/` 目录 |
 | `raw/reference-documents/` | 学术参考文档（非论文） | 报告、说明、资料汇编等；类型为 `academic-reference`，不得与他人论文混放 |
 | `raw/conferences/` | 学术会议事务记录与会议纪要 | 类型为 `conference-summary`；人工整理稿保持 `official-doc/high`，语音转写另按来源降级 |
+| `raw/sources/S-<24hex>/` | 显式 source-first 原件与版本化解析 | 与书目脱钩，受管 source 事务写入，不要求 Wiki/Graph 前置产物 |
+
+Source-first 的 `academic/sources/S-*.json` 保存来源/解析/接收日志及待办回执，
+`academic/sources/index.sqlite` 是可重建的全文检索投影，不是事实关系图。
+S-ID 表示不可变文件字节版本；同字节复用，不同版本不自动合并。
+`source_ready` 与旧 `completed` 分开，当前 title 来自未核验文件名；
+`knowledge_policy=optional|source_only` 记录整理意图，显式 `--knowledge none` 的新来源
+为 `knowledge_status=not_required`，仍可检索；默认 skip 暂缓执行，不等于没有知识。
+纯事务文档不要求 KU，混合材料按复用价值选择；既有知识不会被 none 撤销。
+详见 [Source-first 契约](../operations/engineering/source-first-ingestion.md)。下述论文包命名和 Wiki schema 继续适用于旧路径。
 
 **论文包命名**：每篇论文使用 `<paper-id>/` 目录，包含规范化的 `paper.pdf`、MinerU 文本层 `paper.md`、锁定书目的 `source.yaml` 与提取元数据。`paper-id` 采用稳定的 `author-year-slug`；Wiki `sources` 指向包内 `paper.md`。
+
+## KU 与原生 Question（N2）
+
+`knowledge/units/KU-<24hex>.md` 保存 `knowledge-unit-v1` Statement：frontmatter 包含稳定 ID、
+title、revision、`status=draft`、`origin_kind`、`claim_mode`、可选 `content_role`、evidence、unresolved 及变更回执，
+正文保存一个完整可复用定义、方法或结论及必要条件。Statement 的 content_role 可为
+`concept_definition/method_model/scientific_finding/unspecified`，旧记录读取为 unspecified，不强制回填。
+`knowledge/history/<KU-ID>/<revision>.md` 保留旧版；
+`knowledge/index.sqlite` 仅为可重建词汇索引。完整来源哈希、解析版本、精确 Raw 行和片段哈希由程序生成。
+修订保留 ID，重新评估支持片段；哈希校验不证明科学结论正确。
+
+Question 继续使用 `frontier/questions/Q-*.md`，当前回答/认识状态/历史以原生记录为准。
+读取角色固定为 `research_question`；可选 `source_question_status=addressed/left_open/unspecified`
+仅描述捕获来源中的问题处境，不改变 `kb_state/scientific_state`。四类用途按价值选择，无逐篇配额。
+KU 接口统一读取，不在 knowledge 目录另建 Question 副本。KU 是来源约束下的解释性产物，
+不替代 Raw，不向 `graph.db` 写未经对应图流程处理的关系。命令与协议见
+[N2 契约](../operations/engineering/knowledge-units.md)。
 
 
 ## 页面类型

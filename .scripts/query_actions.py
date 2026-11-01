@@ -10,6 +10,7 @@ import json
 import re
 import sys
 import inspect
+import sqlite3
 import yaml
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
@@ -362,11 +363,12 @@ def _wiki_recall_data(conn, query: str, domain: str, limit: int,
     pages = {}
     prefixes = [f"{root}/wiki/%" for root in roots]
     condition = " OR ".join("nodes.path LIKE ?" for _ in prefixes)
-    for row in conn.execute(
+    rows = conn.execute(
         "SELECT nodes.path,nodes.title,nodes.status,aliases.alias FROM nodes "
         "LEFT JOIN aliases ON aliases.node_path=nodes.path "
         f"WHERE {condition} ORDER BY nodes.path,aliases.alias", prefixes,
-    ):
+    ) if conn is not None else ()
+    for row in rows:
         item = pages.setdefault(row["path"], {
             "path": row["path"], "title": row["title"] or Path(row["path"]).name,
             "status": row["status"], "filename": Path(row["path"]).name,
@@ -398,6 +400,12 @@ def _wiki_recall_data(conn, query: str, domain: str, limit: int,
                     pass
             item["page_status"] = metadata.get("status") if isinstance(metadata.get("status"), str) else "unknown"
             item["superseded_by"] = metadata.get("superseded_by") if isinstance(metadata.get("superseded_by"), str) else ""
+            sources = metadata.get("sources", [])
+            item["source_links"] = []
+            for source in sources if isinstance(sources, list) else []:
+                if isinstance(source, str) and re.match(r"^(?:academic|admin|teaching|business|private)/raw/", source):
+                    check_path_scope(source)
+                    item["source_links"].append(source)
             if not graph_registered:
                 item["status"] = item["page_status"]
             item["navigation"] = match.group(1).strip() if match else ""
@@ -413,7 +421,7 @@ def _wiki_recall_data(conn, query: str, domain: str, limit: int,
     ranked.sort(key=lambda matched: matched[0])
     mode = "direct"
     out = [matched[1] for matched in ranked[:limit]]
-    if not out:
+    if not out and conn is not None:
         mode = "graph_fallback"
         graph_paths = set()
         for term in terms:
@@ -535,22 +543,8 @@ def _query_entity_terms(query: str) -> list[str]:
     return list(dict.fromkeys(terms))[:8]
 
 
-@scoped_query
-def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = "",
-                  topk: str = "8", include_deprecated: bool = False) -> tuple[str, int]:
-    """Fuse Wiki narrative recall and Graph structural recall with weighted RRF."""
-    if not query.strip():
-        return "[ERROR 缺 query]", 0
-    intent = intent.strip().lower() or "exploration"
-    if intent not in _INTENT_WEIGHTS:
-        return f"[ERROR 不支持 intent: {intent}]", 0
-    domain = domain.strip().lower()
-    if _QUERY_SCOPE.get() == "private":
-        domain = "private"
-    if domain and domain not in DOMAIN_DIRS | {"private"}:
-        return f"[ERROR 不支持 domain: {domain}]", 0
-    limit = max(1, min(int(topk), 20))
-    include_deprecated = _history_enabled(include_deprecated)
+def _navigation_recall_data(query, intent, domain, limit, include_deprecated):
+    """Existing Wiki/Graph ranking; usable Wiki files survive a missing graph projection."""
     wiki_weight, graph_weight = _INTENT_WEIGHTS[intent]
     scores: dict[str, float] = {}
     signals: dict[str, list[dict]] = {}
@@ -570,15 +564,27 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
         scores[path] = scores.get(path, 0.0) + weight / (60.0 + rank)
         signals.setdefault(path, []).append({"channel": channel, "rank": rank, "via": via})
 
-    conn = _connect()
+    issues = []
     try:
-        wiki_result, wiki_pages = _wiki_recall_data(
-            conn, query, domain, min(max(limit * 2, 8), 20), include_deprecated)
+        conn = _connect()
+    except (FileNotFoundError, sqlite3.Error) as exc:
+        conn = None
+        issues.append({"channel": "graph", "error": str(exc), "next": "restore graph via managed maintenance"})
+    try:
+        try:
+            wiki_result, wiki_pages = _wiki_recall_data(
+                conn, query, domain, min(max(limit * 2, 8), 20), include_deprecated)
+        except sqlite3.Error as exc:
+            if conn is not None:
+                conn.close()
+            conn = None
+            issues.append({"channel": "graph", "error": str(exc), "next": "restore graph via managed maintenance"})
+            wiki_result, wiki_pages = _wiki_recall_data(None, query, domain, limit, include_deprecated)
         wiki_items = wiki_result["candidates"]
         for rank, item in enumerate(wiki_items, start=1):
             add(item.get("path", ""), "wiki", rank, wiki_weight)
         exact_rank = 0
-        for term in _query_entity_terms(query):
+        for term in _query_entity_terms(query) if conn is not None else []:
             for item in qg.search_nodes(conn, term, include_deprecated=True).get("nodes", [])[:8]:
                 exact_rank += 1
                 node = item.get("path", "")
@@ -586,9 +592,9 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
                     add(node, "graph_exact", exact_rank, graph_weight * 1.2, term)
                 for page_path in _adjacent_wiki_pages(conn, node, domain, limit, wiki_pages, include_deprecated):
                     add(page_path, "graph_exact", exact_rank, graph_weight * 1.2, term)
-        semantic = ns.semantic_search(conn, query, scope="node", top_k=max(limit * 2, 8), include_deprecated=True)
+        semantic = ns.semantic_search(conn, query, scope="node", top_k=max(limit * 2, 8), include_deprecated=True) if conn is not None else {}
         graph_nodes = semantic.get("candidates", [])
-        if not graph_nodes:
+        if not graph_nodes and conn is not None:
             graph_nodes = qg.search_nodes(conn, query, include_deprecated=True).get("nodes", [])
         for rank, item in enumerate(graph_nodes, start=1):
             node = item.get("node_id") or item.get("path") or ""
@@ -597,7 +603,8 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
             for page_path in _adjacent_wiki_pages(conn, node, domain, limit, wiki_pages, include_deprecated):
                 add(page_path, "graph", rank, graph_weight, node)
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     wiki_by_path = {item.get("path"): item for item in wiki_items}
     capsules = {
@@ -619,6 +626,7 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
             "score": round(scores[path], 6),
             "signals": signals[path],
             "navigation": item.get("navigation", ""),
+            "source_links": wiki_pages.get(path, {}).get("source_links", []),
             **capsule,
         })
     candidates.sort(key=lambda item: (-item["score"], item["path"]))
@@ -632,8 +640,99 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
         "include_deprecated": include_deprecated,
         "candidates": candidates,
         "identity_claim": False,
+        "issues": issues,
         "next": "read semantic_address, then raw_citations",
     }
+    return result
+
+
+@scoped_query
+def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = "",
+                  topk: str = "8", include_deprecated: bool = False) -> tuple[str, int]:
+    """Discover typed Source/KU/Question/Wiki candidates without promoting them to evidence."""
+    if not query.strip():
+        return "[ERROR 缺 query]", 0
+    intent = intent.strip().lower() or "exploration"
+    if intent not in _INTENT_WEIGHTS:
+        return f"[ERROR 不支持 intent: {intent}]", 0
+    domain = domain.strip().lower()
+    if _QUERY_SCOPE.get() == "private":
+        domain = "private"
+    if domain and domain not in DOMAIN_DIRS | {"private"}:
+        return f"[ERROR 不支持 domain: {domain}]", 0
+    limit = max(1, min(int(topk), 20))
+    pool_limit = min(max(limit * 2, 8), 20)
+    include_deprecated = _history_enabled(include_deprecated)
+    try:
+        navigation = _navigation_recall_data(query, intent, domain, pool_limit, include_deprecated)
+    except (OSError, sqlite3.Error) as exc:
+        navigation = {"candidates": [], "issues": [{"channel": "navigation", "error": str(exc)}],
+                      "fusion": "weighted_rrf", "weights": dict(zip(("wiki", "graph"), _INTENT_WEIGHTS[intent]))}
+    channels = {"navigation": {"status": "partial" if navigation["issues"] else "ok",
+                               "count": len(navigation["candidates"]), "issues": navigation["issues"]}}
+    groups = {"navigation": [], "knowledge": [], "source": []}
+    for candidate in navigation["candidates"]:
+        item = {**candidate, "kind": "wiki", "id": candidate["path"], "navigation_score": candidate["score"]}
+        address = item.get("semantic_address", "")
+        page, _, section = address.partition("#")
+        item.update(read_action="read_section", read_input={"page": page or item["path"], "section": section or "navigation"})
+        groups["navigation"].append(item)
+
+    if domain in {"", "academic"}:
+        import knowledge_store as ks
+        import source_ingest as si
+        for name, search in (("knowledge", ks.search), ("source", si.search)):
+            try:
+                found = search(query, repo=_REPO, topk=20)
+            except (OSError, sqlite3.Error, ValueError, KeyError, yaml.YAMLError) as exc:
+                channels[name] = {"status": "unavailable", "count": 0, "issues": [str(exc)]}
+                continue
+            issues = found.get("issues", [])
+            channels[name] = {"status": "partial" if issues else "ok",
+                              "count": len(found["candidates"]), "issues": issues,
+                              "candidate_window": 20, "window_full": len(found["candidates"]) >= 20}
+            if name == "knowledge":
+                for candidate in found["candidates"]:
+                    groups[name].append({**candidate, "read_action": "knowledge_read",
+                                         "read_input": {"unit_id": candidate["id"]}})
+            else:
+                if not found.get("index_available", True):
+                    channels[name].update(status="unavailable", issues=["source index absent; use source resume to rebuild registered sources"])
+                # Several passages of one immutable source are alternative reading locations, not votes.
+                sources = {}
+                for candidate in found["candidates"]:
+                    identity = (candidate["source_id"], candidate["parse_id"])
+                    if identity not in sources:
+                        sources[identity] = {**candidate, "id": ":".join(identity), "path": candidate["source_path"],
+                            "read_action": "read_raw", "read_input": {"locator": candidate["locator"]},
+                            "matched_locators": []}
+                    locators = sources[identity]["matched_locators"]
+                    if candidate["locator"] not in locators and len(locators) < 3:
+                        locators.append(candidate["locator"])
+                groups[name] = list(sources.values())
+                channels[name]["source_count"] = len(sources)
+    else:
+        for name in ("knowledge", "source"):
+            channels[name] = {"status": "not_applicable", "count": 0, "issues": []}
+
+    # Compare shared literal signals before channel rank; keep weak matches as
+    # navigation fallbacks and never promote relevance into scientific confidence.
+    import lexical_relevance as lr
+    candidates = []
+    for name, items in groups.items():
+        for rank, item in enumerate(items, 1):
+            features = item.get("lexical_match") or lr.match(query, item.get("title", ""),
+                item.get("excerpt", "") + "\n" + item.get("navigation", "") + "\n" + item.get("capsule", ""))
+            candidates.append({**item, "score": round(1.0/(60+rank), 8), "lexical_match": features,
+                "retrieval_channel": name, "channel_rank": rank, "evidence_read": False})
+    candidates.sort(key=lambda item: (*lr.rank_key(item["lexical_match"]), -item["score"], item["retrieval_channel"], item["id"]))
+    result = {"schema": "unified-recall-v1", "query": query, "intent": intent, "domain": domain or "all",
+        "fusion": "literal_coverage_then_rank", "navigation_fusion": navigation["fusion"],
+        "navigation_weights": navigation["weights"], "channels": channels,
+        "include_deprecated": include_deprecated, "count": min(limit, len(candidates)),
+        "candidates": candidates[:limit], "truncated": len(candidates)>limit,
+        "identity_claim": False, "fact_claim": False,
+        "next": "follow each candidate's read_action/read_input; Wiki source_links are document navigation, not section evidence; verify facts with read_raw"}
     text = json.dumps(result, ensure_ascii=False, indent=2)
     return text, _tok(text)
 
@@ -727,7 +826,44 @@ def raw_citation_sources(locator: str) -> list[str]:
     return list(dict.fromkeys([locator, source_rel]))
 
 
+@scoped_query
+def source_search(query: str, domain: str = "", topk: str = "5") -> tuple[str, int]:
+    """Find source-only Raw evidence without requiring Wiki or Graph entries."""
+    if scope_for() == "private":
+        raise ValueError("Source-first search is academic-only; private sources remain isolated")
+    from source_ingest import search
+    payload = search(query, repo=_REPO, domain=domain, topk=int(topk))
+    text = json.dumps(payload, ensure_ascii=False)
+    return text, _tok(text)
+
+
+@scoped_query
+def knowledge_search(query: str, domain: str = "", topk: str = "5") -> tuple[str, int]:
+    if scope_for() == "private" or domain not in {"", "academic", "public"}:
+        raise ValueError("KU search currently supports academic public sources only")
+    import knowledge_store as ks
+    text = json.dumps(ks.search(query, repo=_REPO, topk=int(topk)), ensure_ascii=False)
+    return text, _tok(text)
+
+
+@scoped_query
+def knowledge_read(unit_id: str) -> tuple[str, int]:
+    if scope_for() == "private":
+        raise ValueError("KU read currently supports academic public sources only")
+    import knowledge_store as ks
+    record = ks.read(unit_id, repo=_REPO)
+    result = {k:record.get(k) for k in ("id", "kind", "title", "statement", "revision", "status", "origin_kind",
+              "claim_mode", "content_role", "source_question_status", "evidence", "unresolved", "kb_state", "scientific_state", "answer_status", "current_answer", "anchors", "source_locator")}
+    result["evidence_issues"] = ks.evidence_status(record, repo=_REPO)
+    result["next"] = "read_raw on relevant evidence locator; KU is a revisable interpretation, not a fact source"
+    text = json.dumps(result, ensure_ascii=False)
+    return text, _tok(text)
+
+
 DISPATCH = {
+    "knowledge_search": lambda inp: knowledge_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5")),
+    "knowledge_read": lambda inp: knowledge_read(inp.get("unit_id", "")),
+    "source_search": lambda inp: source_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5")),
     "read_section": lambda inp: read_section(inp.get("page", ""), inp.get("section", "")),
     "read_raw": lambda inp: read_raw(inp.get("locator", "")),
     "graph_search": lambda inp: graph_search(inp.get("term", ""), inp.get("include_deprecated", False)),
@@ -775,6 +911,11 @@ def execute(action: str, input_: dict, *, subproject: str = "") -> dict:
                 raise ValueError("query subproject conflicts with caller scope")
             text, tokens = fn(inputs)
         ok = not text.startswith("[ERROR")
-        return {"ok": ok, "text": text, "tokens": tokens, "error": "" if ok else text[:300]}
+        import artifact_usage
+        result = {"ok": ok, "text": text, "tokens": tokens, "error": "" if ok else text[:300]}
+        usage = artifact_usage.for_action(action, ok=ok)
+        if usage:
+            result["usage"] = usage
+        return result
     except Exception as e:
         return {"ok": False, "text": "", "tokens": 0, "error": f"{type(e).__name__}: {str(e)[:200]}"}

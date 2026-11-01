@@ -30,16 +30,17 @@ def test_registry_and_runtime_have_exact_coverage():
     assert data["functions"]["artifact.review"]["allowed_callers"] == ["main_agent"]
     assert data["functions"]["artifact.science_exhibit"]["backends"] == ["agent"]
     assert set(data["states"]) == {"workspace", "research", "frontier", "oral_exam"}
-    assert len(registry.observed_dsh_tools()) == 38
+    assert len(registry.observed_dsh_tools()) == 42
     assert registry.observed_dsh_tool_names() == registry.observed_dsh_tools()
 
 
 def test_dsh_tools_receive_canonical_policy_metadata():
     tools = registry.load_dsh_tools()
-    assert len(tools) == 38
+    assert len(tools) == 42
     assert all(tool.function_id for tool in tools)
     assert all("api_controller" in tool.allowed_callers for tool in tools)
     assert next(tool for tool in tools if tool.name == "read_raw").function_id == "knowledge.query"
+    assert next(tool for tool in tools if tool.name == "source_search").function_id == "knowledge.query"
     assert next(tool for tool in tools if tool.name == "hub_route").function_id == "knowledge.hub"
     assert next(tool for tool in tools if tool.name == "comic_generate").function_id == "artifact.comic"
 

@@ -12,6 +12,17 @@ academic/frontier/                     研究前沿 overlay
 
 Frontier 主数据目录为 `questions/`（一问题一页）和 `trajectories/`；旧 `intake/threads/` 仅作迁移读取兼容。
 
+N2 的 KU 接口可直接检索/读取原生 Question，沿用 Q-ID、当前回答、`answer_history`、
+`kb_state/scientific_state`，不复制第二份主记录或添加虚构修订号。
+Source-first 的显式有界知识编译可捕获作者明示的核心研究问题（含本文已处理的问题）及开放问题，保存来源片段、猜想强度和未决范围，
+状态仍为 `captured/unassessed/unverified`；不自动运行下文的回答、准入或科学状态升级。
+KU 适配读取时 content_role 固定为 research_question；新增来源字段
+`source_question_status=addressed/left_open/unspecified` 仅描述捕获来源是否处理/留下该问题，
+与本库是否有答案、科学界是否已解决分开。旧记录默认 unspecified，不强制迁移。
+编译包召回已有 Question 作只读复用候选，同一问题应 defer 交本规范维护；
+不自动保证跨任务语义去重、不因复用候选而修改科学状态。
+详见 [KU 契约](engineering/knowledge-units.md)。
+
 - `Raw/Wiki/graph.db` 回答“知识库已经知道什么”；事实答案仍回 Raw。
 - Frontier 回答“问题如何演进、目前缺什么、有哪些候选思路与尝试”。
 - Frontier 只保存指向 Raw locator、Wiki path、Graph node path 的 `fact_links`；不得向事实 `graph.db` 写 Frontier 节点或反向边。
@@ -21,7 +32,7 @@ Frontier 主数据目录为 `questions/`（一问题一页）和 `trajectories/`
 
 ### 2.1 Question Page
 
-每个被捕获的开放问题立即拥有一个独立 Question Page；页面存在只表示本库记录了该问题，不表示其已被认定为活跃或科学上未解决。页面贯穿 `captured → triaged → active → resolved/parked/rejected`，至少包含：规范问题、来源表述、`kb_state`、`scientific_state`、本库当前回答、回答依据、残余缺口、价值理由、事实锚点和审查状态。
+每个被捕获的研究问题立即拥有一个独立 Question Page；页面存在只表示本库记录了该问题，不表示其已被认定为活跃或科学上未解决。页面贯穿 `captured → triaged → active → resolved/parked/rejected`，至少包含：规范问题、来源表述、`kb_state`、`scientific_state`、本库当前回答、回答依据、残余缺口、价值理由、事实锚点和审查状态。
 
 ### 2.2 Trajectory
 
