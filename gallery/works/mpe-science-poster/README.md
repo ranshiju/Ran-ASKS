@@ -39,3 +39,7 @@ Shuo Qi, Wen-Jun Li, Gang Su and Shi-Ju Ran, *Matrix-Product Entanglement Charac
 ## English overview
 
 This Chinese-language A0 science poster introduces matrix-product entanglement and quantum-state preparation through a deep-diving analogy. It was made with ASKS's science-exhibit authoring, illustration, mixed text/image composition, simulated-reader review, and local rendering/export capabilities, with author input on scientific wording and layout. The poster retains the scope of the cited paper's exact and numerical results.
+
+## 同主题作品
+
+[阅读 MPE 学术报告](../mpe-academic-talk/README.md)：面向专业读者的 12 页报告，提供完整 PDF 与 PowerPoint。

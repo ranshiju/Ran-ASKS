@@ -9,14 +9,15 @@ import knowledge_store as ks
 import source_ingest as si
 
 
-def run(source_id, *, repo=si.REPO, focus="", refresh=False, retry=False):
+def run(source_id, *, repo=si.REPO, focus="", refresh=False, retry=False, target=None, source_locators=None):
     if agent_task.ingest_backend() != "api":
         raise ValueError("API compilation requires INGEST_BACKEND=api; host Agent uses prepare/check/apply")
     import llm_structured as llm
     config = llm.load_env()
     executor = "api:" + llm.configured_model(config)
     profile_hash = si.fingerprint({k:config.get(k, "") for k in ("LLM_MODEL", "LLM_API_BASE", "LLM_API_PATH")})[:16]
-    prepared = kc.prepare(source_id, repo=repo, focus=focus, executor=executor+":"+profile_hash, refresh=refresh)
+    prepared = kc.prepare(source_id, repo=repo, focus=focus, executor=executor+":"+profile_hash, refresh=refresh,
+                          target=target, source_locators=source_locators)
     job_id = prepared["job_id"]
     folder = kc.job_dir(repo, job_id)
     new_model_calls = 0
@@ -36,7 +37,7 @@ def run(source_id, *, repo=si.REPO, focus="", refresh=False, retry=False):
             kc.save_state(repo, state)
             started = time.perf_counter()
             try:
-                response = llm.call_json(kc.RULES+"\n材料包：\n"+json.dumps(packet, ensure_ascii=False), kc.delta_schema,
+                response = llm.call_json(kc.instructions(packet)+"\n材料包：\n"+json.dumps(packet, ensure_ascii=False), kc.delta_schema,
                     operation="ingest_knowledge_delta", transaction_id=job_id, reasoning="standard", max_tokens=4096,
                     recovery_limits={"infrastructure": 1, "output_transport": 0}, timeout_sec=90)
                 new_model_calls = len(response.get("history", [])) or int(response.get("event_kind") == "llm_api_call")

@@ -335,3 +335,14 @@ PDF 补充页同步，原已审阅页面与冻结论文产物保留其历史范�
 这份中文说明是帮助理解项目的介绍材料，不替代论文，也不是复现实验所需的冻结
 数据产物。需要核对论文、代码和数据的精确边界时，请使用仓库 README 中列出的
 不可变 Release 与论文数据产物目录。
+
+
+The 2026-11-02 `v0.22.0` update adds explicit-target KU maintenance and a
+standalone Gallery with three selected works, filters, search, previews and
+full downloads. Source-confirmed complete names guide bounded candidate
+admission; unresolved lexical recall and semantic-quality limits remain explicit.
+Only exact-approved Gallery works and presentation files are public, while project
+sources, Raw, local provenance and runtime records remain excluded. The manual
+Pages workflow deploys the generated site. This is a compatible MINOR update;
+frozen paper artifacts stay unchanged. The PDF retains its 29 reviewed pages
+and appends the same dated update for printing.

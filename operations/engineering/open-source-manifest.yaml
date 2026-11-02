@@ -3,12 +3,31 @@ purpose: "公开发布白名单：只允许此清单声明的工程文件进入�
 include:
   # Exact curated Gallery assets; project sources and local provenance stay private.
   - gallery/README.md
+  - gallery/catalog.json
+  - gallery/site/style.css
+  - gallery/site/app.js
   - gallery/RIGHTS.md
   - gallery/works/mpe-science-poster/README.md
   - gallery/works/mpe-science-poster/metadata.json
   - gallery/works/mpe-science-poster/cover.webp
   - gallery/works/mpe-science-poster/poster.png
   - gallery/works/mpe-science-poster/poster.pdf
+  - gallery/works/mpe-academic-talk/README.md
+  - gallery/works/mpe-academic-talk/cover.webp
+  - gallery/works/mpe-academic-talk/metadata.json
+  - gallery/works/mpe-academic-talk/preview-01.webp
+  - gallery/works/mpe-academic-talk/preview-05.webp
+  - gallery/works/mpe-academic-talk/preview-06.webp
+  - gallery/works/mpe-academic-talk/preview-10.webp
+  - gallery/works/mpe-academic-talk/talk.pdf
+  - gallery/works/mpe-academic-talk/talk.pptx
+  - gallery/works/bilingual-academic-cv/README.md
+  - gallery/works/bilingual-academic-cv/cover.webp
+  - gallery/works/bilingual-academic-cv/cv-en.pdf
+  - gallery/works/bilingual-academic-cv/cv-zh.pdf
+  - gallery/works/bilingual-academic-cv/metadata.json
+  - gallery/works/bilingual-academic-cv/preview-en.webp
+  - gallery/works/bilingual-academic-cv/preview-zh.webp
   - VERSION
   - pyproject.toml
   - uv.lock
@@ -19,6 +38,7 @@ include:
   - .env.example
   - .gitignore
   - .github/workflows/public-release.yml
+  - .github/workflows/gallery-pages.yml
   - preprocess.py
   # Includes local-only presentation runtime/state/renderer/delivery and isolated regression fixtures.
   - .scripts/**

@@ -375,11 +375,15 @@ def cmd_knowledge_query(args):
 def cmd_knowledge(args):
     import knowledge_compile as kc
     try:
+        if (args.target or args.source_locators) and args.knowledge_action not in {"prepare", "run"}:
+            raise ValueError("--target/--source-locator are only valid for prepare or run")
         if args.knowledge_action == "prepare":
-            result = kc.prepare(args.identifier, repo=REPO, focus=args.focus, refresh=args.refresh)
+            result = kc.prepare(args.identifier, repo=REPO, focus=args.focus, refresh=args.refresh,
+                                target=args.target, source_locators=args.source_locators)
         elif args.knowledge_action == "run":
             from knowledge_compile_api import run
-            result = run(args.identifier, repo=REPO, focus=args.focus, refresh=args.refresh, retry=args.retry)
+            result = run(args.identifier, repo=REPO, focus=args.focus, refresh=args.refresh, retry=args.retry,
+                         target=args.target, source_locators=args.source_locators)
         elif args.knowledge_action == "show":
             state, packet = kc.load_job(REPO, args.identifier)
             result = {"state": state, "packet": packet}
@@ -807,6 +811,7 @@ def build_parser():
     p.add_argument("knowledge_action", choices=("prepare", "run", "show", "check", "apply", "rebuild-index"))
     p.add_argument("identifier", nargs="?", default="")
     p.add_argument("--focus", default=""); p.add_argument("--refresh", action="store_true")
+    p.add_argument("--target"); p.add_argument("--source-locator", action="append", dest="source_locators")
     p.add_argument("--retry", action="store_true"); p.set_defaults(func=cmd_knowledge)
 
     p = sub.add_parser("recall", help="研究记忆恢复")

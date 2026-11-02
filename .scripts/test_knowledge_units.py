@@ -144,6 +144,167 @@ class KnowledgeTests(unittest.TestCase):
         again=kc.apply(task["job_id"],repo=self.root)
         self.assertEqual(ks.read(uid,repo=self.root)["revision"],2)
 
+    def directed_fixture(self):
+        uid, _ = self.create()
+        source = self.receive("distinct.md", "# Separate topic\nA separately named observation.\nIts limiting condition.\n")
+        locator = si.selected_parse(si.load_receipt(self.root, source["source_id"]))["text_path"] + "#L2-L3"
+        return uid, source, locator
+
+    def test_directed_cross_source_revision_bypasses_search_and_keeps_history(self):
+        uid, source, locator = self.directed_fixture()
+        old = ks.read(uid, repo=self.root)
+        with patch.object(kc, "retrieve_candidates", side_effect=AssertionError("no discovery")), \
+             patch.object(kc, "focused_chunks", side_effect=AssertionError("no source survey")), \
+             patch.object(ka, "run", side_effect=AssertionError("no API from Agent")):
+            task, packet = self.prepare(source, target=uid, source_locators=[locator])
+        candidate = packet["candidates"][0]
+        self.assertEqual([c["id"] for c in packet["candidates"]], [uid])
+        self.assertEqual(candidate["statement"], old["statement"])
+        self.assertEqual(candidate["snapshot_sha256"], old["snapshot_sha256"])
+        self.assertEqual(len(candidate["old_evidence_blocks"]), len(old["evidence"]))
+        self.assertEqual({b["ref"]["locator"] for b in packet["blocks"]},
+                         {locator, *[r["locator"] for r in old["evidence"]]})
+        self.assertEqual(packet["coverage"]["provided_ranges"], [[2, 3]])
+        self.assertEqual(packet["coverage"]["unread_ranges"], [[1, 1]])
+        self.assertIn(kc.DIRECTED_RULES, task["agent_task"]["protocol"]["instructions"])
+        self.stage(task, [self.op(packet, action="revise", target=uid, origin_kind="synthesis",
+            statement="A conditional comparison, with each source's limiting conditions retained.",
+            evidence=[{"block_id": b["id"], "relation": "supports"} for b in packet["blocks"]])])
+        self.assertTrue(kc.check(task["job_id"], repo=self.root)["ready"])
+        result = kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(result["status"], "completed", result)
+        current = ks.read(uid, repo=self.root)
+        self.assertEqual((current["revision"], current["origin_kind"]), (2, "synthesis"))
+        self.assertEqual(len({r["source_id"] for r in current["evidence"]}), 2)
+        self.assertEqual(ks.read(uid, repo=self.root, revision=1)["snapshot_sha256"], old["snapshot_sha256"])
+        kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 2)
+
+    def test_directed_requires_paired_bounded_current_parse_locators(self):
+        uid, source, locator = self.directed_fixture()
+        wrong_source = ks.read(uid, repo=self.root)["evidence"][0]["locator"]
+        for options in (
+            {"target": uid}, {"source_locators": [locator]},
+            {"target": "Q-native", "source_locators": [locator]},
+            {"target": uid, "source_locators": locator},
+            {"target": uid, "source_locators": [locator] * 6},
+            *[{"target": uid, "source_locators": [value]} for value in (
+                wrong_source, "private/raw/a.md#L1", "../outside.md#L1", "/tmp/a.md#L1",
+                locator.split("#")[0], locator.replace("L2-L3", "L2-L99"),
+                locator.replace("L2-L3", "L0-L1"))]):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                self.prepare(source, **options)
+        with self.assertRaises(FileNotFoundError):
+            self.prepare(source, target="KU-" + "0" * 24, source_locators=[locator])
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 1)
+
+    def test_directed_old_evidence_and_budget_fail_before_api(self):
+        uid, source, locator = self.directed_fixture()
+        call = self.mock_api()
+        before = si.digest(self.root / "academic/sources" / (source["source_id"] + ".json"))
+        with patch.object(kc, "token_count", return_value=20000), self.assertRaisesRegex(ValueError, "budget"):
+            ka.run(source["source_id"], repo=self.root, target=uid, source_locators=[locator])
+        with patch.object(ks, "resolve_evidence", side_effect=ValueError("evidence binding changed")), \
+             self.assertRaisesRegex(ValueError, "binding changed"):
+            ka.run(source["source_id"], repo=self.root, target=uid, source_locators=[locator])
+        self.assertEqual(call.call_count, 0)
+        self.assertEqual(si.digest(self.root / "academic/sources" / (source["source_id"] + ".json")), before)
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 1)
+
+    def test_directed_multiple_old_spans_and_requested_spans_are_all_retained(self):
+        uid, source, locator = self.directed_fixture()
+        task, packet = self.prepare(source, target=uid, source_locators=[locator])
+        self.stage(task, [self.op(packet, action="attach", target=uid,
+            evidence=[{"block_id": b["id"], "relation": "related"} for b in packet["blocks"]])])
+        kc.apply(task["job_id"], repo=self.root)
+        old = ks.read(uid, repo=self.root)
+        task, packet = self.prepare(source, target=uid,
+            source_locators=[locator.replace("L2-L3", "L1"), locator], refresh=True)
+        self.assertEqual(len(packet["candidates"][0]["old_evidence_blocks"]), 2)
+        self.assertEqual(len(packet["blocks"]), 3)
+        self.assertTrue(all(r["locator"] in {b["ref"]["locator"] for b in packet["blocks"]} for r in old["evidence"]))
+        self.assertEqual(packet["coverage"]["provided_ranges"], [[1, 3]])
+        # Packet metadata, full target and both instruction sets count toward the bound.
+        budget = kc.token_count(packet) + kc.token_count(kc.instructions(packet)) - 2001
+        with self.assertRaisesRegex(ValueError, "budget"):
+            self.prepare(source, target=uid, source_locators=[locator], max_tokens=budget)
+
+    def test_directed_blocks_create_other_targets_and_multiple_writes(self):
+        uid, source, locator = self.directed_fixture()
+        task, packet = self.prepare(source, target=uid, source_locators=[locator])
+        for change in ({}, {"action": "revise", "target": "KU-" + "0" * 24},
+                       {"action": "revise", "target": uid, "kind": "question"}):
+            self.stage(task, [self.op(packet, **change)])
+            self.assertFalse(kc.check(task["job_id"], repo=self.root)["ready"])
+        self.stage(task, [self.op(packet, action="defer"), self.op(packet, id="item-2", action="defer")])
+        with self.assertRaisesRegex(ValueError, "at most one"):
+            kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 1)
+        self.stage(task, [self.op(packet, action="defer")])
+        self.assertEqual(kc.apply(task["job_id"], repo=self.root)["status"], "partial")
+
+    def test_directed_cas_and_source_binding_remain_required(self):
+        uid, source, locator = self.directed_fixture()
+        task, packet = self.prepare(source, target=uid, source_locators=[locator])
+        operation = self.op(packet, action="attach", target=uid,
+            evidence=[{"block_id": b["id"], "relation": "supports"} for b in packet["blocks"]])
+        self.stage(task, [operation])
+        concurrent, _ = self.prepare(source, target=uid, source_locators=[locator], refresh=True)
+        self.stage(concurrent, [operation])
+        kc.apply(concurrent["job_id"], repo=self.root)
+        self.assertFalse(kc.check(task["job_id"], repo=self.root)["ready"])
+        fresh, packet = self.prepare(source, target=uid, source_locators=[locator], refresh=True)
+        self.stage(fresh, [operation])
+        path = self.root / locator.split("#")[0]
+        path.write_text(path.read_text() + "Changed source.\n")
+        self.assertFalse(kc.check(fresh["job_id"], repo=self.root)["ready"])
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 2)
+
+    def test_directed_request_identity_and_automatic_cache_compatibility(self):
+        uid, source, locator = self.directed_fixture()
+        auto, packet = self.prepare(source)
+        expected = "KJ-" + si.fingerprint([source["source_id"], source["parse_id"], kc.PROTOCOL,
+            kc.PACKET_POLICY, si.fingerprint(kc.RULES), "", "agent", 14000])[:24]
+        self.assertEqual(auto["job_id"], expected)
+        self.assertNotIn("maintenance", packet)
+        task, _ = self.prepare(source, target=uid, source_locators=[locator])
+        replay, _ = self.prepare(source, target=uid, source_locators=[locator])
+        changed, _ = self.prepare(source, target=uid, source_locators=[locator.replace("L2-L3", "L2")])
+        self.assertEqual(task["job_id"], replay["job_id"])
+        self.assertEqual(len({auto["job_id"], task["job_id"], changed["job_id"]}), 3)
+
+    def test_directed_api_uses_shared_instructions_and_replays_without_call(self):
+        uid, source, locator = self.directed_fixture()
+        def response(packet):
+            return {"ok": True, "parsed": {"schema": kc.PROTOCOL, "job_id": packet["job_id"],
+                "operations": [self.op(packet, action="attach", target=uid,
+                    evidence=[{"block_id": b["id"], "relation": "supports"} for b in packet["blocks"]])]},
+                "model": "mock", "history": [{"status": "ok"}]}
+        call = self.mock_api(response)
+        result = ka.run(source["source_id"], repo=self.root, target=uid, source_locators=[locator])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn(kc.DIRECTED_RULES, call.call_args.args[0])
+        replay = ka.run(source["source_id"], repo=self.root, target=uid, source_locators=[locator])
+        self.assertEqual((call.call_count, replay["new_model_calls"]), (1, 0))
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 2)
+
+    def test_directed_cli_forwards_options_and_rejects_them_on_apply(self):
+        uid, source, locator = self.directed_fixture()
+        for action, module, name in (("prepare", kc, "prepare"), ("run", ka, "run")):
+            with patch.object(module, name, return_value={"status": "prepared"}) as call, redirect_stdout(io.StringIO()):
+                args = wg.build_parser().parse_args(["knowledge", action, source["source_id"],
+                    "--target", uid, "--source-locator", locator])
+                args.func(args)
+                self.assertEqual(call.call_args.kwargs["target"], uid)
+                self.assertEqual(call.call_args.kwargs["source_locators"], [locator])
+        with redirect_stdout(io.StringIO()) as output:
+            args = wg.build_parser().parse_args(["knowledge", "apply", "KJ-unused", "--target", uid])
+            args.func(args)
+        self.assertFalse(json.loads(output.getvalue())["ok"])
+        with patch.object(kc, "prepare", return_value={"status": "prepared"}) as call, redirect_stdout(io.StringIO()):
+            kc.main(["prepare", source["source_id"], "--target", uid, "--source-locator", locator])
+            self.assertEqual(call.call_args.kwargs["source_locators"], [locator])
+
     def test_source_only_can_opt_in_and_never_erases_existing_knowledge(self):
         source=si.resume(self.source["source_id"],repo=self.root,knowledge_required=False)
         self.assertEqual(source["knowledge_status"],"not_required")
@@ -252,6 +413,61 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(kc.name_matches(['ComplEx'],'complex systems and Complex networks'),[])
         self.assertEqual(kc.name_matches(['TransE'],'TransE2 and PreTransE'),[])
 
+    def test_compound_name_components_do_not_admit_unrelated_old_evidence(self):
+        task, packet = self.prepare()
+        self.stage(task, [self.op(packet, title="EM-LLM 情景记忆", statement="A separate memory mechanism.")])
+        noise = kc.apply(task['job_id'], repo=self.root)['results']['item-1']['id']
+        definition = self.receive('definition.md', '# LLM 概念\nLanguage models generate tokens.\n')
+        task, packet = self.prepare(definition)
+        self.stage(task, [self.op(packet, title="LLM 的一般概念", statement="A language model predicts tokens.")])
+        useful = kc.apply(task['job_id'], repo=self.root)['results']['item-1']['id']
+        source = self.receive('controller.md', '# Retrieval controller\nAn LLM controls the next query.\n')
+        with patch.object(ks, 'search', return_value={'candidates': [{'id': noise}, {'id': useful}]}):
+            _, packet = self.prepare(source)
+        self.assertIn('LLM', packet['candidate_retrieval']['passage_names'])
+        self.assertEqual([c['id'] for c in packet['candidates']], [useful])
+        self.assertTrue(packet['candidates'][0]['can_update'])
+        self.assertNotIn(self.source['source_id'], {b['ref']['source_id'] for b in packet['blocks']})
+        self.assertIn(definition['source_id'], {b['ref']['source_id'] for b in packet['blocks']})
+        # A full method name still brings in the same old unit and its evidence.
+        named = self.receive('named.md', '# Retrieval controller\nWe discuss EM-LLM in this setting.\n')
+        with patch.object(ks, 'search', return_value={'candidates': [{'id': noise}, {'id': useful}]}):
+            _, packet = self.prepare(named)
+        self.assertEqual([c['id'] for c in packet['candidates']], [noise])
+        self.assertTrue(packet['candidates'][0]['can_update'])
+
+    def test_compound_name_collision_cannot_crowd_out_complete_name_in_pool(self):
+        records = {f'KU-{i:024x}': {'id': f'KU-{i:024x}', 'title': f'Variant{i}-LLM',
+                   'statement': 'Unrelated topic.', 'evidence': []} for i in range(20)}
+        useful = 'KU-' + 'f' * 24
+        records[useful] = {'id': useful, 'title': 'LLM 的一般概念', 'statement': 'Token prediction.', 'evidence': []}
+        responses = [{'candidates': [{'id': uid} for uid in list(records)[:20]]},
+                     {'candidates': [{'id': useful}]}]
+        with patch.object(ks, 'search', side_effect=responses), \
+             patch.object(ks, 'read', side_effect=lambda uid, **_: records[uid]):
+            pool, info = kc.retrieve_candidates(self.root, 'S-new', 'controller reasoning', ['LLM'])
+        self.assertEqual(pool[0]['id'], useful)
+        self.assertEqual(len(pool), 20)
+        self.assertEqual(len(info['searches']), 2)
+
+    def test_name_boundaries_preserve_whole_names_and_punctuation(self):
+        for text in ['EM-LLM', 'LLM-based', 'pre-LLM-post', 'LLM-2', '1-LLM', 'preLLM', 'LLM_v2']:
+            with self.subTest(text=text):
+                self.assertEqual(kc.name_matches(['LLM'], text), [])
+        for text in ['LLM概念', '中文LLM', '(LLM)', 'LLM - methods', 'LLM- 方法', '-LLM', 'a--LLM']:
+            with self.subTest(text=text):
+                self.assertEqual(kc.name_matches(['LLM'], text), ['LLM'])
+        self.assertEqual(kc.name_matches(['EM-LLM', 'LLM'], '中文EM-LLM机制'), ['EM-LLM'])
+        self.assertEqual(kc.name_matches(['RAG', 'S2G-RAG'], 'S2G-RAG框架'), ['S2G-RAG'])
+        self.assertEqual(kc.name_matches(['TransE', 'ComplEx'], 'TransE和ComplEx；complex'), ['TransE', 'ComplEx'])
+
+    def test_compound_boundary_does_not_override_source_or_topic_admission(self):
+        old = {'title': 'EM-LLM 概述', 'statement': 'Memory retrieval under explicit conditions.', 'evidence': []}
+        self.assertFalse(kc.candidate_matches_topic(old, 'S-new', set(), ['LLM']))
+        self.assertTrue(kc.candidate_matches_topic(old, 'S-new', {'memory retrieval'}, ['LLM']))
+        old['evidence'] = [{'source_id': 'S-new'}]
+        self.assertTrue(kc.candidate_matches_topic(old, 'S-new', set(), ['LLM']))
+
     def test_passage_names_do_not_use_unread_text_or_instruction_names(self):
         lines=['General background without any named method. '*8 for _ in range(220)]
         lines[128]='## VisibleFlow method'
@@ -266,6 +482,82 @@ class KnowledgeTests(unittest.TestCase):
         for absent in ['InstructionOnly','HiddenFlow','HiddenMath','HiddenImage']:
             self.assertNotIn(absent,names)
         self.assertLessEqual(len(names),12)
+
+    def test_literal_names_include_uppercase_prefixes_and_hyphen_acronyms(self):
+        names = kc.passage_names([
+            'RAGTruth Stop-RAG Self-RAG S2G-RAG LLMs ComplEx RAG. Ordinary Title words. '
+            '$HiddenMath$ ![](images/HiddenImage.png) https://example.org/HiddenURL <HiddenTag>'
+        ])
+        self.assertEqual(names, ['RAGTruth', 'Stop-RAG', 'Self-RAG', 'S2G-RAG', 'LLMs', 'ComplEx', 'RAG'])
+
+    def test_complete_focus_name_limits_cross_source_context_and_preserves_evidence(self):
+        task, packet = self.prepare()
+        self.stage(task, [self.op(packet, title='RAG 的其他机制', statement='An unrelated retrieval procedure.')])
+        noise = kc.apply(task['job_id'], repo=self.root)['results']['item-1']['id']
+        definitions = self.receive('definitions.md', '# Method descriptions\nDefinitions under explicit conditions.\n')
+        _, definition_packet = self.prepare(definitions)
+        ref = definition_packet['blocks'][0]['ref']
+        targets = {}
+        for name in ['RAGTruth', 'Stop-RAG', 'S2G-RAG']:
+            targets[name] = ks.commit(repo=self.root, operation_id='define-'+name, title=name+' 机制',
+                statement='A named procedure under condition A.', evidence=[ref], reason='Reusable definition')['id']
+        source = self.receive('focused.md', '# Evaluation pipeline\nRAG and LLM appear with RAGTruth, Stop-RAG and S2G-RAG.\n')
+        hits = {'candidates': [{'id': uid} for uid in [noise, *targets.values()]]}
+        for name, uid in targets.items():
+            with self.subTest(name=name), patch.object(ks, 'search', return_value=hits) as search:
+                _, context = self.prepare(source, focus='只整理'+name.lower()+'；保留条件')
+                self.assertEqual([c['id'] for c in context['candidates']], [uid])
+                self.assertEqual(context['candidate_retrieval']['priority_names'], [name])
+                self.assertEqual(context['candidate_retrieval']['admission_names'], [name])
+                self.assertTrue(context['candidates'][0]['can_update'])
+                self.assertEqual(len(context['candidates'][0]['old_evidence_blocks']), 1)
+                self.assertNotIn(self.source['source_id'], {b['ref']['source_id'] for b in context['blocks']})
+                self.assertIn(definitions['source_id'], {b['ref']['source_id'] for b in context['blocks']})
+                for block in context['blocks']:
+                    self.assertEqual(ks.resolve_evidence(self.root, block['ref']), block['text'])
+                self.assertLessEqual(search.call_count, 2)
+
+    def test_focus_name_admission_preserves_source_topic_and_unconfirmed_fallback(self):
+        _, old_packet = self.prepare()
+        source = self.receive('taxonomy.md', '# Corpus taxonomy\nRAG and LLM appear alongside RAGTruth.\n')
+        _, source_packet = self.prepare(source)
+        ids = {}
+        for key, title, ref in [
+            ('generic', 'RAG 其他用途', old_packet['blocks'][0]['ref']),
+            ('named', 'RAGTruth 类别', old_packet['blocks'][0]['ref']),
+            ('topic', 'Corpus taxonomy 条件', old_packet['blocks'][0]['ref']),
+            ('source', 'Different object', source_packet['blocks'][0]['ref']),
+        ]:
+            ids[key] = ks.commit(repo=self.root, operation_id=key, title=title,
+                statement='A conditional statement.', evidence=[ref], reason='Admission fixture')['id']
+        for focus in ['RAGTruth', '', 'UnknownMethod']:
+            with self.subTest(focus=focus), patch.object(ks, 'search', return_value={
+                'candidates': [{'id': uid} for uid in ids.values()]
+            }) as search:
+                _, context = self.prepare(source, focus=focus, refresh=True)
+                expected = set(ids.values()) - ({ids['generic']} if focus == 'RAGTruth' else set())
+                self.assertEqual({c['id'] for c in context['candidates']}, expected)
+                self.assertTrue(all(c['can_update'] for c in context['candidates']))
+                info = context['candidate_retrieval']
+                self.assertEqual(info['admission_names'], ['RAGTruth'] if focus == 'RAGTruth' else info['passage_names'])
+                self.assertNotIn('UnknownMethod', ' '.join(call.args[0] for call in search.call_args_list))
+
+    def test_focused_compound_target_survives_bounded_generic_name_competition(self):
+        uid, _ = self.create()
+        template = ks.read(uid, repo=self.root)
+        records = {f'KU-{i:024x}': {**template, 'id': f'KU-{i:024x}',
+                   'title': f'RAG 独立场景 {i}', 'statement': 'Unrelated retrieval usage.'} for i in range(20)}
+        records[uid] = {**template, 'title': 'Stop-RAG 停止机制'}
+        source = self.receive('competition.md', '# Retrieval controller\nRAG and LLM support Stop-RAG.\n')
+        responses = [{'candidates': [{'id': key} for key in list(records)[:20]]},
+                     {'candidates': [{'id': uid}]}]
+        with patch.object(ks, 'search', side_effect=responses), \
+             patch.object(ks, 'read', side_effect=lambda key, **_: records[key]):
+            _, context = self.prepare(source, focus='只整理stop-rag')
+        self.assertEqual([c['id'] for c in context['candidates']], [uid])
+        self.assertTrue(context['candidates'][0]['can_update'])
+        self.assertEqual(context['candidate_retrieval']['pool_size'], 20)
+        self.assertEqual(len(context['candidate_retrieval']['searches']), 2)
 
     def test_incidental_body_acronym_does_not_admit_unrelated_knowledge(self):
         task,packet=self.prepare()

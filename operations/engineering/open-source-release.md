@@ -29,6 +29,19 @@ exception to the general exclusion of working outputs, not permission to export
 an active project. Work-specific rights are separate from the code license.
 Selection for exhibition does not rewrite historical creative acceptance states.
 
+### Standalone Gallery Pages
+
+The shared `gallery_site.py` builder renders `gallery/catalog.json` and each
+work's public presentation metadata into a standalone static site. It copies
+only verified, exact-approved previews and downloads, never the source tree or
+`gallery/local/`. Relative URLs support a project subpath. The manual-only
+`gallery-pages.yml` workflow uploads just the generated site; regular source
+publishing does not trigger a Pages deployment. See `operations/GALLERY.md`.
+
+A local website build does not allocate a public version or authorize deployment.
+Before a future public release, synchronize reader documentation and its PDF,
+classify the version, and use the existing committed-source publication flow.
+
 ### Unconditional private exclusion
 
 `private/` is denied independently of the manifest: include rules, renamed asset sources,

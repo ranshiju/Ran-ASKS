@@ -1,0 +1,47 @@
+{
+  "schema": "gallery-catalog-v1",
+  "featured": "mpe-science-poster",
+  "works": [
+    "mpe-science-poster",
+    "mpe-academic-talk",
+    "bilingual-academic-cv"
+  ],
+  "capabilities": [
+    {
+      "id": "science-exhibit",
+      "label": "科普展板",
+      "description": "把论文与研究结论组织成面向读者的图文展板。",
+      "doc": "operations/SCIENCE_EXHIBIT.md"
+    },
+    {
+      "id": "illustration",
+      "label": "插图与图示",
+      "description": "用插画、类比和示意图表达抽象概念。",
+      "doc": "operations/ILLUSTRATION.md"
+    },
+    {
+      "id": "review",
+      "label": "理解试读",
+      "description": "借助模拟读者的反馈，发现表达中的理解断点。",
+      "doc": "operations/REVIEW.md"
+    },
+    {
+      "id": "visual-qa",
+      "label": "版式与导出",
+      "description": "检查实际呈现，输出适合阅读和展示的文件。",
+      "doc": "operations/VISUAL_QA.md"
+    },
+    {
+      "id": "cv",
+      "label": "简历制作与维护",
+      "description": "集中维护双语履历、栏目模板与不同用途的简历版本。",
+      "doc": "operations/CV.md"
+    },
+    {
+      "id": "presentation",
+      "label": "演示文稿制作",
+      "description": "围绕论文或材料组织报告，逐页编排并保留可编辑内容。",
+      "doc": "operations/PRESENTATION.md"
+    }
+  ]
+}

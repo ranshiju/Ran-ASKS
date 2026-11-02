@@ -1,7 +1,7 @@
 # Ran-ASKS
-> 当前 main 版本: v0.21.0
+> 当前 main 版本: v0.22.0
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md) | **[Gallery · 精选作品](https://ranshiju.github.io/Ran-ASKS/)**
 
 **联系邮箱：** [sjran@cnu.edu.cn](mailto:sjran@cnu.edu.cn)
 
@@ -42,14 +42,6 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
 
-## Gallery · 精选作品
-
-[![MPE 科普展板](gallery/works/mpe-science-poster/cover.webp)](gallery/works/mpe-science-poster/README.md)
-
-[浏览使用 ASKS 制作的精选作品](gallery/README.md)，直接查看成品及其使用的系统功能。
-首件作品是 MPE 科普展板：结合科普展板创作、插图生成、图文混排、理解试读和版式导出，
-将论文中的量子纠缠与态制备问题呈现为面向跨专业大学生的 A0 海报。
-
 ## Source-first 摄入与知识单元（预览）
 
 新增显式试用流程：先保存原件、建立来源索引，再按需编译可复用的知识单元（KU）。
@@ -74,6 +66,15 @@ KU 保存完整表述、必要条件、不确定性和绑定具体版本的来�
 产物要求由用途决定：导航帮助找到材料，知识表示保留含义与关键条件，事实回答回到 Raw。
 联合检索汇集 Source、KU/Question 与 Wiki/Graph，并提供后续读取动作。Source/KU 当前
 使用词汇检索，未实现自动跨语言语义召回。实际使用发现缺口后，可定向维护知识对象。
+
+已定位 KU 时，可在 `knowledge prepare` 或 `knowledge run` 中成对传入
+`--target KU-ID` 与 `--source-locator '<当前解析的Raw路径>#L起-L止'`，最多指定五段。
+材料包完整提供目标、全部旧依据及指定新片段；绑定失效或预算不足时在模型调用前停止，
+已知维护目标无需再参加自动候选竞争。
+
+自动材料包补齐完整方法名识别，并用来源确认的 focus 名称约束无关跨来源上下文，
+保留同源与主题短语匹配。它仍是有界词汇导航，背景或跨语言目标可能漏召；
+离线材料包缩小不代表 API 已提速或最终语义质量已得到同等保证。
 
 详见 [Source-first](operations/engineering/source-first-ingestion.md)、
 [KU](operations/engineering/knowledge-units.md)、[产物用途](operations/engineering/artifact-use-contracts.md)

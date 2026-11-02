@@ -865,6 +865,26 @@ nodes:
     path: gallery/
     kind: documentation-family
     role: shared-curated-final-artifacts-and-evidence-backed-capability-guides
+  gallery_site:
+    path: .scripts/gallery_site.py
+    kind: implementation
+    role: shared-allowlisted-static-gallery-builder-with-multiple-previews-and-related-work-navigation-without-model-or-network-calls
+  gallery_site_test:
+    path: .scripts/test_gallery_site.py
+    kind: test
+    role: static-gallery-multiwork-filter-data-and-publication-boundary-regression
+  gallery_site_assets:
+    path: gallery/site/
+    kind: data
+    role: shared-responsive-gallery-styles-and-progressive-enhancement
+  gallery_catalog:
+    path: gallery/catalog.json
+    kind: data
+    role: curated-multiwork-capability-navigation-and-featured-selection
+  gallery_pages_ci:
+    path: .github/workflows/gallery-pages.yml
+    kind: automation
+    role: manually-triggered-gallery-only-github-pages-build-and-deployment
   gallery_ops:
     path: operations/GALLERY.md
     kind: spec
@@ -3108,6 +3128,24 @@ edges:
   - engineering_graph_test
 - - gallery_ops
   - governs
+  - gallery_site
+- - gallery_site
+  - reads
+  - gallery_catalog
+- - gallery_site
+  - uses
+  - gallery_site_assets
+- - gallery_site
+  - uses
+  - open_source_manifest
+- - gallery_site
+  - tested_by
+  - gallery_site_test
+- - gallery_pages_ci
+  - uses
+  - gallery_site
+- - gallery_ops
+  - governs
   - gallery
 - - open_source_manifest
   - governs
@@ -4208,7 +4246,11 @@ verification:
   engineering_manifest:
   - python3 .scripts/test_engineering_graph.py
   - python3 .scripts/engineering_graph.py validate
+  gallery_site:
+  - python3 .scripts/test_gallery_site.py
+  - python3 .scripts/engineering_graph.py validate
   gallery:
+  - python3 .scripts/test_gallery_site.py
   - python3 .scripts/test_open_source_release.py
   - python3 .scripts/engineering_graph.py validate
   open_source_assets:
@@ -4333,12 +4375,16 @@ script_contracts:
     preconditions:
     - purpose roles distinguish navigation fields, bound source blocks and revisable candidate/output knowledge; roles are program-supplied, optional classification metadata may be omitted, and evidence/version validators remain unchanged
     - shared bounded packet and delta validator; host Agent receives agent-task-v1 and never silently calls an API
+    - optional directed maintenance pairs one existing Statement target with at most five exact current-selected-parse source locators; bypass automatic candidate retrieval and survey, load the complete target and all old evidence plus requested spans within the existing budget or fail before model execution; explicit selection establishes neither semantic identity nor support
+    - directed inputs and instruction policy participate in task identity; only one attach/revise/defer for the specified target or zero operations is allowed; normal automatic mode keeps its own selection and cache inputs, packet-policy changes create new task identities while saved jobs remain recoverable by ID, and existing binding, version, commit and recovery checks remain authoritative
     - bounded explicit focus hits and their adjacent source context precede the default formal-result survey after the opening; absent or unmatched focus preserves default ordering and budgets; formal-result recognition accepts Markdown headings and emphasis and prioritizes main results before their background; actual coverage does not guarantee complete conditions or missing knowledge
     - focus ranks explicitly named normalized multi-term source headings before ordinary lexical overlap; heading matching preserves token order and repetitions within semicolon/newline-delimited requests, while lexical scoring keeps deduplicated topic terms; at least two distinct heading terms are required; source-local rarity, the two-hit cap and primary-before-neighbor order remain; heading matches do not establish scientific roles or semantic support
     - retrieval uses source topic plus at most twelve literal names from actually selected source passages, never execution instructions or old evidence; at most two local searches return twenty hits each, merged to a twenty-item pool and at most five admitted candidates before loading old evidence
-    - candidate titles matching focus names corroborated in actually selected source passages take priority before other same-source context; uncorroborated focus names do not affect priority or retrieval
+    - literal source-name signals include mixed case, uppercase-prefix and hyphen-linked acronym forms; focus corroboration matches complete names case-insensitively rather than token components, while candidate title matching remains case-sensitive; uncorroborated focus names never become retrieval terms
+    - candidate titles matching focus names corroborated in actually selected source passages take priority before other same-source context; these names also constrain name-only cross-source admission, falling back to all selected-passage names when none are corroborated; this is lexical focus matching, not intent or negation interpretation
     - within each focus-title tier of the bounded merged pool, existing units citing the current source take candidate slots first, then exact passage-name title/body matches; lexical admission does not decide semantic identity or support and Question candidates remain read-only
-    - cross-source admission requires an exact selected-passage name in the candidate title or a multiword source-topic phrase; a lone generic English title word never admits a candidate; same-source admission is preserved
+    - cross-source admission requires an exact admitted source name in the candidate title or a multiword source-topic phrase; candidate_retrieval exposes admission_names, a lone generic English title word never admits a candidate, and same-source and topic-phrase admission remain independent of focus-name narrowing
+    - literal name matches respect complete ASCII hyphen-linked names, so a component such as LLM does not match EM-LLM; standalone acronyms, complete names, Chinese adjacency and punctuation separators remain eligible, with no acronym blacklist; same-source, topic-phrase and explicit-target paths remain independent
     - focus guides selective semantic output and prior candidates are maintenance context rather than an output checklist; this guidance is not a semantic hard validator or a coverage guarantee
     - incomplete old-evidence bundles disable revision and release only blocks newly added for that candidate, preserving source coverage and shared evidence already in the packet
     - after candidate loading, unused packet budget may fill omitted formal-result spans and their immediate neighbors with metadata headroom; original source and old evidence stay intact, candidate retrieval is not repeated, and actual coverage never certifies complete prerequisites

@@ -1,0 +1,64 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "bilingual-academic-cv",
+  "title": "冉仕举 · 中英文学术长简历",
+  "kind": "academic-cv",
+  "language": "中文 / English",
+  "edition": 1,
+  "selected_on": "2026-10-30",
+  "content_as_of": "2026-09-22",
+  "capabilities": [
+    "cv"
+  ],
+  "references": [],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "133e5dae9059145fa4ecb0f4b04266a8bdf447796fe9199e09e564605ff27346",
+    "cover.webp": "52e651a8e2d838e968b80ac3454a85e3314d654bbb746671acae6347dd88e996",
+    "cv-en.pdf": "4752affe88182655c2f4e819734f6685fa20826a44fc44d0a1e9f2b54c683b79",
+    "cv-zh.pdf": "f77befc19b278e43da90dc15b3780857f3cdef6c5ea6e3fea31b5acc46cc1098",
+    "preview-en.webp": "ac06762acdfb3ed8ac7b1e12b6ed7acadb09645b65cbce95483c620d8494b093",
+    "preview-zh.webp": "deffd0b8053063b34ff382534f913ebae16bf99e391ae6560d5ce4509199e882"
+  },
+  "presentation": {
+    "name": "中英文学术长简历",
+    "summary": "从教育任职到论文、专著、专利与学术报告，以中英文呈现完整的学术履历。两种语言、完整清单，展示长期履历维护与文档组织。",
+    "type_label": "学术简历",
+    "format_label": "长简历 · 中文 10 页 / English 9 页",
+    "audience": "学术交流与科研合作",
+    "cover": "cover.webp",
+    "preview": "preview-zh.webp",
+    "previews": [
+      {
+        "file": "preview-zh.webp",
+        "label": "中文 · 首页 / 共 10 页",
+        "document": "cv-zh.pdf"
+      },
+      {
+        "file": "preview-en.webp",
+        "label": "English · First page / 9 pages",
+        "document": "cv-en.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "cv-zh.pdf",
+        "label": "中文长简历 PDF · 10 页"
+      },
+      {
+        "file": "cv-en.pdf",
+        "label": "English CV PDF · 9 pages"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "cv",
+        "text": "在同一工作区集中维护中英文履历条目，组织教育任职、著作、论文、专利、学术服务与报告等栏目；通过双语工作主记录和栏目模板持续维护长简历。"
+      }
+    ],
+    "prompt": "请根据我的履历材料，维护一份中英文学术长简历。保留完整论文、著作、专利和学术报告清单，统一栏目与双语表述，关联事实来源；另准备适合公开展示的版本，检查个人信息与文档元数据，并导出完整 PDF。",
+    "source_note": "履历内容版本：2026 年 9 月 22 日。公开展示版整理：2026 年 10 月 30 日。",
+    "credit": "冉仕举 / Shi-Ju Ran，与 ASKS 协作维护。",
+    "boundary": "两张图片分别展示中文与英文首页，完整长简历请阅读或下载 PDF。公开版按展示用途调整个人及第三方信息，保留完整学术栏目与成果署名。"
+  }
+}

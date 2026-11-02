@@ -1,6 +1,6 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md) | **[Gallery · Selected works](https://ranshiju.github.io/Ran-ASKS/)**
 
 **Contact:** [sjran@cnu.edu.cn](mailto:sjran@cnu.edu.cn)
 
@@ -46,16 +46,6 @@ path remains traceable.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## Gallery
-
-[![MPE science poster](gallery/works/mpe-science-poster/cover.webp)](gallery/works/mpe-science-poster/README.md)
-
-Explore [selected works made with ASKS](gallery/README.md). Each work presents the
-final artifact and explains which system capabilities contributed to it.
-The first exhibit is an A0 Chinese science poster about matrix-product
-entanglement, using science-exhibit authoring, illustration, mixed composition,
-simulated-reader review, and rendering/export.
-
 ## Source-first ingestion and Knowledge Units (preview)
 
 An opt-in path now saves and indexes a source before compiling reusable
@@ -88,6 +78,19 @@ return to Raw. Unified discovery combines Source, KU/Question and Wiki/Graph
 candidates and supplies the next reading action. Source/KU search is lexical,
 not automatic cross-language semantic retrieval. Use-triggered maintenance can
 repair a bounded knowledge object without recompiling the whole document.
+
+For an already located KU, pair `--target KU-ID` with one or more
+`--source-locator '<current parsed Raw path>#Lstart-Lend'` options on
+`knowledge prepare` or `knowledge run`. The packet includes the complete target,
+all existing evidence and up to five selected source spans; invalid bindings or
+insufficient space stop preparation before a model call. This avoids automatic
+candidate competition for a known maintenance target.
+
+Automatic packets recognize complete method names and use source-confirmed focus
+names to limit unrelated cross-source context. Same-source and topic-phrase
+matches remain available. This is bounded lexical navigation: background or
+cross-language targets can still be missed, and smaller offline packets do not
+establish faster API completion or unchanged final semantic quality.
 
 See [Source-first](operations/engineering/source-first-ingestion.md),
 [Knowledge Units](operations/engineering/knowledge-units.md),

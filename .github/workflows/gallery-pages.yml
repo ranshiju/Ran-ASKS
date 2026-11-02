@@ -1,0 +1,48 @@
+name: Gallery Pages
+
+# Prepared locally; publishing requires an explicit manual run on the public repo.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gallery-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'ranshiju/Ran-ASKS'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.11.28'
+          enable-cache: true
+      - name: Install locked environment
+        run: uv sync --frozen
+      - name: Validate Gallery boundaries
+        run: uv run python .scripts/test_gallery_site.py
+      - name: Build standalone Gallery
+        run: uv run python .scripts/gallery_site.py --output "$RUNNER_TEMP/gallery-site"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/gallery-site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Gallery
+        id: deployment
+        uses: actions/deploy-pages@v4

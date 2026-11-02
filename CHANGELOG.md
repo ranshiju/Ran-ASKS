@@ -7,6 +7,29 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-02
+
+### Version decision / 版本判断
+
+- MINOR: Adds backward-compatible explicit-target KU maintenance and a standalone curated Gallery with manual Pages deployment; existing ingestion and evidence contracts remain compatible.
+- MINOR（中文）：新增兼容的KU定向维护与独立精选作品Gallery及手动Pages部署，既有摄入和来源证据契约保持兼容。
+
+### Highlights
+
+- Added directed KU maintenance: an explicit existing target and selected current-source spans form a bounded packet with complete old evidence. Source/version checks and history remain authoritative.
+- Improved complete method-name recognition and focus-guided candidate admission to reduce unrelated compilation context. Automatic retrieval remains bounded and lexical; offline input reductions do not establish end-to-end speed or final semantic quality.
+- Added the 12-slide MPE academic report with full PDF and PPTX downloads, selected slide previews and validated related-work links to the MPE science poster.
+- Added a bilingual full academic CV exhibit with Chinese and English PDFs, labeled first-page previews and privacy-reviewed public copies. Multi-document previews remain accessible without JavaScript; source Word files and provenance stay local.
+- Added an independent responsive Gallery with capability/type filters, search, individual artifact pages and a manual-only Pages workflow. Only selected works and their presentation assets are published; project sources and runtime records stay local. Repository READMEs keep a top Gallery entry.
+
+### 主要更新
+
+- 新增KU定向维护：显式指定已有目标与当前来源片段，在原预算内提供完整旧依据，继续核验来源、版本并保留历史。
+- 改进完整方法名识别和focus引导的候选准入，减少无关编译上下文。自动召回仍是有界词汇检索，离线输入减少不等于端到端提速或最终语义质量验收。
+- 收录 12 页 MPE 学术报告，提供完整 PDF、PPTX、代表页预览，以及经目录校验的科普展板关联入口。
+- 收录中英文学术长简历，提供完整 PDF、标明页码的双语首页预览及经过信息清理的公开展示版；多文档预览无需 JavaScript 也可阅读，原始 Word 和来源记录保留在本地。
+- 新增独立 Gallery 网站，支持功能与作品类型筛选、搜索和独立作品详情页，并提供仅手动触发的 Pages 工作流。仅公开选定作品及展示资产，项目原件与运行记录保留本地；仓库 README 保留顶部入口。
+
 ## [0.21.0] - 2026-11-01
 
 ### Version decision / 版本判断
@@ -639,5 +662,7 @@ manifests and checksums.
 
 [0.20.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.20.1
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.21.0...HEAD
 [0.21.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.21.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.0

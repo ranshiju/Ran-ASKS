@@ -1,0 +1,94 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "mpe-academic-talk",
+  "title": "矩阵乘积纠缠与量子态制备",
+  "kind": "academic-talk",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-10-30",
+  "content_as_of": "2026-09-28",
+  "slide_count": 12,
+  "canvas_mm": [
+    338.67,
+    190.5
+  ],
+  "capabilities": [
+    "presentation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "mpe-science-poster"
+  ],
+  "references": [
+    {
+      "doi": "10.1103/6y5p-mp7q",
+      "url": "https://doi.org/10.1103/6y5p-mp7q"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "8da40b6bd5aeaa3a1eb69823035672fd029b9796ec4c28fdac126654411fa2b0",
+    "cover.webp": "865297be5e954adb80f286b5622dc6a29a21a26137ab5a7a19ba9826b8cba14e",
+    "preview-01.webp": "64c223d2000270745387f9630cc94e5ad170c3c764aa7cb9259d86e56fba0302",
+    "preview-05.webp": "804de8a3d230883ef27f392249d10c6d15b32e6696d37ee8313656707c39025f",
+    "preview-06.webp": "d73a5ff9055bbe61246f9e89111107aba5b73b704dc7a06a107733cc0cee82de",
+    "preview-10.webp": "304786f1c08dfc6ca73392d37cc2a23f724f9b86883afa75dc2471f651a23c49",
+    "talk.pdf": "e8be35490fa87a8205b2a644e85324c3859ddab646d9166d9717a6d6073fe49b",
+    "talk.pptx": "33fadeebe6f3de6500d127acab7b4b8a4260c99c2275cb749ee3e3a82d803492"
+  },
+  "presentation": {
+    "name": "MPE 学术报告",
+    "summary": "用 12 页报告讲清矩阵乘积纠缠的定义、理论关系与数值结果，连接量子态的纠缠结构和制备线路的资源需求。",
+    "type_label": "学术报告",
+    "format_label": "12 页 · 16:9 · PPTX / PDF",
+    "audience": "量子信息与张量网络研究者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 报告封面",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-05.webp",
+        "label": "第 5 页 · MPE 定义",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-06.webp",
+        "label": "第 6 页 · 单层理论关系",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-10.webp",
+        "label": "第 10 页 · 资源匹配",
+        "document": "talk.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "talk.pdf",
+        "label": "完整报告 PDF · 12 页"
+      },
+      {
+        "file": "talk.pptx",
+        "label": "下载 PowerPoint"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "presentation",
+        "text": "根据论文组织学术叙事，逐页编排与局部修订；保留可编辑文字和部分原生图形，将论文图表放入对应的论证页面。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "检查实际页面中的公式、图文位置与完整性，输出 PPTX、PDF 和同源预览。"
+      }
+    ],
+    "prompt": "请根据这篇论文制作一份中文学术报告 PPT，面向相关专业研究者。先组织研究背景、关键问题、核心定义与主要结果，再逐页制作；保留文字和适合原生表达的图形的可编辑性，正确引用论文图表，清楚区分严格理论结论与数值证据，最后导出 PPTX 和 PDF。",
+    "source_note": "Qi 等，Physical Review Letters 136, 020602 (2026)。报告内容版本：2026 年 9 月 28 日。论文图表保留原有引用，下载报告不构成图表的独立再许可。",
+    "credit": "冉仕举报告，与 ASKS 协作制作。",
+    "boundary": "页面展示第 1、5、6、10 页，完整报告共 12 页。文字和部分图形可编辑；论文插图及部分示意图为嵌入图片。"
+  }
+}
