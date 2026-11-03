@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.22.2
+> Current main version: v0.23.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -56,6 +56,29 @@ path remains traceable.
 *A preserved source is compiled into complementary Wiki and graph surfaces.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
+
+## What changes in v0.23.0
+
+Meeting intake can collect independent validation errors and repair only the
+failed records within its existing revision budget. The shared merge keeps
+unaffected content and rechecks the complete result; interrupted repairs retain
+a complete draft for recovery. A managed name-confirmation entry records the
+user's evidence before updating related meeting navigation. Student-file
+eligibility is separate from person identity: an unavailable downstream file does
+not erase the meeting facts or authorize a new student record.
+
+Search now supplies readable Wiki section entries and keeps titles across query
+rounds. Failed reads do not count as read pages, and citations can identify a
+subspan of one already read source range. Explicitly requested KU sections
+compete within the existing packet budget. New host-Agent writing profiles cover
+[academic abstracts](operations/research/academic-abstract.md) and
+[whole-manuscript improvement](operations/research/manuscript-improvement.md).
+
+The Gallery links completed works to usage notes and current system documentation;
+historical articles retain their original version context. Targeted regressions
+support these mechanisms, but whole-ingestion speedup and unchanged semantic
+quality across a large corpus are not established. See the
+[Changelog](CHANGELOG.md) for the release scope.
 
 ## Source-first ingestion and Knowledge Units (preview)
 

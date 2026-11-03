@@ -306,7 +306,16 @@ def test_runtime_prompt_surface_boundaries():
         if item["path"] == "dsh/tools.py"
         and item.get("symbol", "").startswith("ToolDefinition:")
     ]
-    assert len(tool_definitions) == 14
+    registered_tools = json.loads(run(
+        "python3", "-c",
+        "from dsh.tools import build_tools; import json; "
+        "print(json.dumps([tool.name for tool in build_tools()]))",
+    ).stdout)
+    # Compare independently registered names, so added tools remain covered
+    # without an obsolete count hiding missing or extra audit locations.
+    assert registered_tools
+    assert sorted(item["symbol"].removeprefix("ToolDefinition:")
+                  for item in tool_definitions) == sorted(registered_tools)
     assert all(item["mode"] == "api" for item in tool_definitions)
     assert all(item["governed_by"] == ["graph:contract:dsh_tools"]
                for item in tool_definitions)
@@ -762,7 +771,7 @@ def test_state_capability_tool_dispatch_is_explicit():
     assert "research: 研究工作 route=research" in listing
     assert "可路由任务:" in listing
     assert "按需能力:" in listing
-    assert "write: artifact.write profiles=academic,general" in listing
+    assert "write: artifact.write profiles=academic,academic-abstract,academic-manuscript,general" in listing
     assert "兼容 task 别名:" in listing
     assert "write: artifact.write -> write/general" in listing
     assert "task/state" not in listing
@@ -781,11 +790,46 @@ def test_state_capability_tool_dispatch_is_explicit():
     assert "# 物理论文写作讨论注意力清单" in academic_write
     assert "发言稿、公文" not in academic_write
 
+    abstract_write = run(
+        "python3", ".scripts/route.py", "--capability", "write",
+        "--capability-profile", "academic-abstract",
+    ).stdout
+    assert "共享落笔约定（可组合能力）" in abstract_write
+    abstract_header = "--- operations/research/academic-abstract.md (全文) ---"
+    assert abstract_write.count(abstract_header) == 1
+    # The focused profile resolves its complete contract, without forcing a
+    # physics overlay or loading unrelated office-writing workflows.
+    abstract_spec = (REPO / "operations/research/academic-abstract.md").read_text().strip()
+    assert abstract_spec in abstract_write
+    assert "--- operations/research/physics-manuscript-editing.md (全文) ---" not in abstract_write
+    assert "发言稿、公文" not in abstract_write
+    assert abstract_header not in academic_write
+
+    manuscript_write = run(
+        "python3", ".scripts/route.py", "--capability", "write",
+        "--capability-profile", "academic-manuscript",
+    ).stdout
+    manuscript_header = "--- operations/research/manuscript-improvement.md (全文) ---"
+    manuscript_spec = (REPO / "operations/research/manuscript-improvement.md").read_text().strip()
+    assert manuscript_write.count(manuscript_header) == 1
+    assert manuscript_spec in manuscript_write
+    assert "共享落笔约定（可组合能力）" in manuscript_write
+    # Abstract guidance is resolved at its stage, not duplicated by the router.
+    assert abstract_header not in manuscript_write
+    assert "--- operations/research/physics-manuscript-editing.md (全文) ---" not in manuscript_write
+    assert "发言稿、公文" not in manuscript_write
+    for other_profile in (academic_write, abstract_write):
+        assert manuscript_header not in other_profile
+
     general_write = run("python3", ".scripts/route.py", "--capability", "write").stdout
     legacy_write = run("python3", ".scripts/route.py", "--task", "write").stdout
     for requirement in ("共享落笔约定（可组合能力）", "起草工作流", "能力边界"):
         assert requirement in general_write
         assert requirement in legacy_write
+    assert abstract_header not in general_write
+    assert abstract_header not in legacy_write
+    assert manuscript_header not in general_write
+    assert manuscript_header not in legacy_write
 
     mixed = subprocess.run(
         ["python3", ".scripts/route.py", "--task", "research", "--capability", "write"],

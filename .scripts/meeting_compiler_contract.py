@@ -29,6 +29,19 @@ MEETING_IR_RECORD_FIELDS = {
     "person_updates": ("person", "person_label", "kind", "text", "evidence_ids"),
 }
 UNRESOLVED_PERSON_FIELDS = {"attendees": "person", "reports": "person", "tasks": "assignee"}
+ROLE_EVIDENCE = {
+    "attendees": "依据明确出席名单、实际发言或互动记录。人物身份匹配、被提及、被布置会后任务均不单独证明参会；点名无回应也不证明缺席。",
+    "reports": "依据该人的实际汇报，区分汇报者与被谈论的人；自动会议助手是记录载体，助手的解释或推测保持来源归属。",
+    "tasks": "区分指派者、执行者与协作对象，结合上下文保留行动及各方关系。每条记录只对应一位执行者，assignee 与 assignee_label 指同一人，已匹配姓名复用候选目录的对应标签。原文明示多人共同执行时逐人记录，复用共同动作与证据，在 text 中保留协作关系；仅被提及的协作对象不自动成为执行者。动作明确但执行者未明确时 assignee、assignee_label 同为空；执行者称呼明确但全局身份未匹配时仅 assignee 为空并保留原称呼。",
+    "relations": "扩展关系只连接证据明确的概念或已关联的人物，两端均为非空的确定端点。涉及身份未关联的人物时，重要关系保留在 Wiki 正文中，使用原称呼、来源归属及 Raw 引用；该关系不进入 relations，不填空端点或猜测人物身份。",
+}
+WIKI_CONTENT_CONTRACT = (
+    "Navigation 概述检索主题，Content 保留研究问题、关键观察、解释、方法限制和未决矛盾，来源限制简明表述。"
+    "参会者、议题、汇报、决策、待办和学生指导的完整清单、人物链接及记录条数由程序从 MEETING_IR 生成。"
+    "正文只在解释上下文需要时提及人物或事件，省略重复清单和汇总数量。"
+    "同一议题出现后续澄清、更正或撤回时，正文连接前述质疑/方案与后续说明，按讨论结束时的状态表述，分歧仍未解决则保留未决。"
+    "后续说明只支持其明确陈述的内容；当事人自述和助手评论分别归属，均不自动升级为已证实结论。"
+)
 
 
 def meeting_ir_record_contract() -> dict:
@@ -38,8 +51,11 @@ def meeting_ir_record_contract() -> dict:
             "fields": list(fields),
             "text_fields": [field for field in fields if field != "evidence_ids"],
             "evidence_ids": "nonempty unique sNNNN IDs from evidence_catalog, at most 16",
-            "unresolved_identity_field": UNRESOLVED_PERSON_FIELDS.get(section),
-            "unresolved_identity": "empty string; retain the source label and fact in Wiki, not a global identity",
+            **({
+                "unresolved_identity_field": UNRESOLVED_PERSON_FIELDS[section],
+                "unresolved_identity": "empty string; retain the source label and fact in Wiki, not a global identity",
+            } if section in UNRESOLVED_PERSON_FIELDS else {}),
+            **({"role_evidence": ROLE_EVIDENCE[section]} if section in ROLE_EVIDENCE else {}),
         }
         for section, fields in MEETING_IR_RECORD_FIELDS.items()
     }
@@ -110,45 +126,69 @@ def _parse_meta(text: str) -> dict[str, str]:
     return values
 
 
-def _validate_preprocess_version(value, versions: set[str]) -> bool:
-    if not isinstance(value, dict) or value.get("protocol_version") not in versions:
-        return False
-    replacements = value.get("transcript_replacements")
-    decisions = value.get("entity_resolutions")
-    if not isinstance(replacements, list) or len(replacements) > MAX_REPLACEMENTS:
-        return False
-    if not isinstance(decisions, list) or len(decisions) > MAX_ENTITY_DECISIONS:
-        return False
+def _preprocess_errors(value, versions: set[str]) -> list[str]:
+    """Explain the existing acceptance rules without echoing transcript values."""
+    if not isinstance(value, dict):
+        return ["PREPROCESS must be an object"]
+    errors = []
+    version = value.get("protocol_version")
+    if not isinstance(version, str) or version not in versions:
+        errors.append("PREPROCESS.protocol_version must be " + " or ".join(sorted(versions)))
+    rows = {}
+    for name, limit in (("transcript_replacements", MAX_REPLACEMENTS),
+                        ("entity_resolutions", MAX_ENTITY_DECISIONS)):
+        items = value.get(name)
+        if not isinstance(items, list):
+            errors.append(f"PREPROCESS.{name} must be a list")
+        elif len(items) > limit:
+            errors.append(f"PREPROCESS.{name} exceeds {limit} items")
+        else:
+            rows[name] = items
     seen = set()
-    for item in replacements:
+    for index, item in enumerate(rows.get("transcript_replacements", [])):
+        prefix = f"PREPROCESS.transcript_replacements[{index}]"
         if not isinstance(item, dict):
-            return False
-        original = item.get("original")
-        replacement = item.get("replacement")
-        reason = item.get("reason")
-        if not all(isinstance(part, str) for part in (original, replacement, reason)):
-            return False
-        if not original.strip() or not replacement.strip() or original == replacement:
-            return False
-        if "\n" in original or "\n" in replacement or len(original) > 80 or len(replacement) > 160:
-            return False
+            errors.append(f"{prefix} must be an object")
+            continue
+        invalid = [key for key in ("original", "replacement", "reason")
+                   if not isinstance(item.get(key), str)]
+        if invalid:
+            errors.extend(f"{prefix}.{key} must be a string" for key in invalid)
+            continue
+        original, replacement = item["original"], item["replacement"]
+        for key, limit in (("original", 80), ("replacement", 160)):
+            if not item[key].strip():
+                errors.append(f"{prefix}.{key} must be nonempty")
+            if "\n" in item[key] or len(item[key]) > limit:
+                errors.append(f"{prefix}.{key} must be single-line and at most {limit} characters")
         if original in seen:
-            return False
+            errors.append(f"{prefix}.original duplicates an earlier replacement")
         seen.add(original)
-    for item in decisions:
+    for index, item in enumerate(rows.get("entity_resolutions", [])):
+        prefix = f"PREPROCESS.entity_resolutions[{index}]"
         if not isinstance(item, dict):
-            return False
+            errors.append(f"{prefix} must be an object")
+            continue
         if set(item) != {"mention", "canonical", "status", "reason"}:
-            return False
-        if item.get("status") not in {"resolved", "unchanged", "unresolved"}:
-            return False
-        if not all(isinstance(item.get(key), str) for key in item):
-            return False
-        if not item["mention"].strip() or not item["reason"].strip():
-            return False
+            errors.append(f"{prefix} fields must be exactly: mention, canonical, status, reason")
+            continue
+        invalid = [key for key in ("mention", "canonical", "status", "reason")
+                   if not isinstance(item[key], str)]
+        if invalid:
+            errors.extend(f"{prefix}.{key} must be a string" for key in invalid)
+            continue
+        if item["status"] not in {"resolved", "unchanged", "unresolved"}:
+            errors.append(f"{prefix}.status must be resolved, unchanged or unresolved")
+        for key in ("mention", "reason"):
+            if not item[key].strip():
+                errors.append(f"{prefix}.{key} must be nonempty")
         if item["status"] == "resolved" and not item["canonical"].strip():
-            return False
-    return True
+            errors.append(f"{prefix}.canonical must be nonempty for resolved identity")
+    return errors
+
+
+def _validate_preprocess_version(value, versions: set[str]) -> bool:
+    return not _preprocess_errors(value, versions)
 
 
 def validate_preprocess(value) -> bool:
@@ -217,7 +257,10 @@ def _validate_meeting_ir(value, evidence_ids: set[str] | None = None, *,
                 UNRESOLVED_PERSON_FIELDS.get(section)
                 if value.get("protocol_version") == PROTOCOL_VERSION else None
             )
-            if any(not row[field].strip() for field in text_fields if field != optional_identity):
+            optional_fields = {optional_identity}
+            if section == "tasks" and optional_identity and not row["assignee"].strip():
+                optional_fields.add("assignee_label")
+            if any(not row[field].strip() for field in text_fields if field not in optional_fields):
                 errors.append(f"{prefix} has an empty required value")
             if any(item in DEICTIC_ENDPOINTS for item in values):
                 errors.append(f"{prefix} contains an unresolved deictic endpoint")
@@ -250,13 +293,20 @@ def _validate_meeting_ir(value, evidence_ids: set[str] | None = None, *,
 def validate_meeting_ir(value, evidence_ids: set[str] | None = None, *,
                         evidence_catalog: list[dict] | None = None) -> list[str]:
     errors = _validate_meeting_ir(value, evidence_ids=evidence_ids)
-    if errors or evidence_catalog is None:
+    if evidence_catalog is None or not isinstance(value, dict):
         return errors
     evidence = {row["evidence_id"]: str(row["text"]) for row in evidence_catalog}
     for section, fields in {
         "topics": ("label",), "reports": ("topic",), "relations": ("subject", "object"),
     }.items():
-        for index, row in enumerate(value[section]):
+        rows = value.get(section)
+        if not isinstance(rows, list):
+            continue
+        for index, row in enumerate(rows):
+            if (not isinstance(row, dict) or set(row) != set(MEETING_IR_RECORD_FIELDS[section])
+                    or not all(isinstance(row.get(field), str) for field in fields)
+                    or not _valid_evidence_ids(row.get("evidence_ids"), evidence_ids)):
+                continue
             source = unicodedata.normalize(
                 "NFKC", "\n".join(evidence.get(key, "") for key in row["evidence_ids"]),
             )
@@ -301,12 +351,15 @@ def parse_proposal_detailed(text: str) -> tuple[dict | None, str, dict]:
             "excerpt": json_text[excerpt_start:exc.pos + 100],
         }
     version = str(preprocess.get("protocol_version") or "") if isinstance(preprocess, dict) else ""
-    if not _validate_preprocess_version(
-            preprocess,
-            {PROTOCOL_VERSION, LEGACY_MEETING_IR_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION}):
+    preprocess_errors = _preprocess_errors(
+        preprocess,
+        {PROTOCOL_VERSION, LEGACY_MEETING_IR_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION},
+    )
+    if preprocess_errors:
         error = "invalid meeting compiler preprocess proposal"
         return None, error, {"kind": "schema", "stage": "validate_preprocess",
-                             "segment": "PREPROCESS", "message": error}
+                             "segment": "PREPROCESS", "message": error,
+                             "issues": preprocess_errors}
     semantic_delimiter = (
         SLOTS_DELIMITER if version == LEGACY_PROTOCOL_VERSION else MEETING_IR_DELIMITER
     )
@@ -377,6 +430,11 @@ def apply_transcript_replacements(source_text: str, replacements: list[dict]) ->
     missing = [original for original in mapping if original not in source_text]
     if missing:
         raise ValueError("replacement source text not found: " + ", ".join(missing))
+    # Source-bound no-ops carry no edit and must not shadow a real replacement.
+    mapping = {original: replacement for original, replacement in mapping.items()
+               if original != replacement}
+    if not mapping:
+        return source_text
     pattern = re.compile("|".join(re.escape(value) for value in sorted(mapping, key=len, reverse=True)))
     matched = set(pattern.findall(source_text))
     if matched != set(mapping):

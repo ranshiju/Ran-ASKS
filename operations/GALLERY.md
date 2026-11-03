@@ -58,7 +58,7 @@ Gallery 是成果展示与功能发现入口。首页展示精选成品；详情
 1. 按上面的收录步骤准备真实成品，放入 `gallery/works/<slug>/`。`slug` 使用小写字母、数字和连字符；不添加占位作品。
 2. 在 `metadata.json` 的 `presentation` 中填写 `name`、`summary`、`type_label`、`format_label`、`audience`、`cover`、`preview`、`downloads`、`capability_uses`、`prompt`、`source_note`、`credit`、`boundary`。`capability_uses` 的 ID 必须与作品 `capabilities` 一致；仅描述实际贡献。
 3. 多语言或多文档作品可增加 `presentation.previews` 数组，每项包含 `file`、`label`、`document`：分别是预览图片、明确的语言/页码标签、已列入 `downloads` 的完整文档。页面逐项展示，关闭 JavaScript 也能阅读。长文档的首页预览必须标注“首页”，并链接完整 PDF。
-4. `cover`、`preview`、额外预览和下载文件必须出现在已有 `files` 哈希表中。预览使用 PNG/JPEG/WebP；下载可以指向已核验成品，站点不复制整个作品文件夹。
+4. `cover`、`preview`、额外预览和下载文件必须出现在已有 `files` 哈希表中。预览使用 PNG/JPEG/WebP；下载可以指向已核验成品，站点不复制整个作品文件夹。网站页脚链接当前系统说明和更新日志，历史作品内容沿用创作时的版本背景。
 5. 可在作品元数据顶层设置 `related_works`（作品 ID 数组），生成关联作品入口。引用必须指向同一目录中的其他作品，禁止重复、自引用或不存在的 ID；需要互相链接时分别登记。
 6. 把作品 ID 加入 `catalog.json` 的 `works`；顺序即目录顺序。`featured` 指定首页推荐作品。新功能可在 `capabilities` 添加稳定 ID、显示名称、用途和真实 `operations/` 文档路径；只展示已有作品使用的功能。作品类型选项从实际作品自动生成。
 7. 逐文件更新发布白名单，再构建并检查页面。元数据哈希变化时同步本地 provenance，保留先前记录；成品不变时无需重新导出或增加作品版本。

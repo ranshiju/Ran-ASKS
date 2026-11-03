@@ -41,6 +41,8 @@ locator 直接 `read_raw`。它与已有 Wiki/Graph 入口并列，不强制先�
 不承诺跨语言语义召回。来源 `pending` 仅指知识整理待处理，不阻止阅读真实 Raw。
 private 不使用这一 academic 索引。详见 [Source-first 契约](engineering/source-first-ingestion.md)。
 
+**入口范围与发现单位（API）**：当前Source索引位于academic，但已登记材料可为论文或非论文，纯事务资料可只有Source而没有KU。`admin_recall`只覆盖admin Wiki；内容涉及教学管理不意味着存储于admin。按已知存储域选择`domain`，未知时`wiki_recall/hybrid_recall`可留空；hybrid指定teaching/admin/business时仅覆盖该域导航，留空才联合公共导航与academic Source/KU。同一文档的多个问题共用初始发现，读相关入口后按实际缺口补查；独立来源可以批量。此项是API规划指导，不限制现有工具或回退，不保证模型每次只查一路，也不把命中视为事实。
+
 **KU 入口（N2）**：`wg.py ku-search '<主题>'` / `knowledge_search` 召回 Statement 草稿和
 原生 Frontier Question，`ku-read <ID>` / `knowledge_read` 返回当前完整表述、论断类型、
 未决项和依据地址，并透传 content_role（研究问题/概念定义/方法模型/科学结论，旧 Statement 可为 unspecified）。
@@ -142,9 +144,13 @@ private 是标准 query 的存储范围，不是另一套问答方法。共用 `
 
 **Raw Locator（2026-08-25）**：统一使用 `python3 .scripts/wg.py read-raw '<path>#<locator>'` 做局部读取。Markdown/TXT 支持标题、`#L12`、`#L12-L18`；非论文 PDF 支持 `#page-3`、`#page-3-5`。工具可以机械扫描文件，但只把 locator 命中的片段送入 LLM；裸路径与 `#全篇` 均拒绝执行，Graph 中的 `#全篇` 仅是文件级 provenance，读取前必须细化 locator。命中片段超过单次上限时也拒绝返回半截内容，调用方须缩小章节、行范围或页码。检索回溯到 Raw 指的是确认事实来源身份，不要求把二进制原件本身送入模型：对于 PDF、Office、表格、图片等 Agent 不便直接读取的二进制格式，受管摄入必须保存同 stem Markdown companion；查询优先读取 companion，并在返回中区分 `source_path`（可引用原件）、`read_path`/`evidence_locator`（实际读取片段），读取投影不取代原件的事实来源身份。读取前机械校验同包 sidecar 的 `raw-companion-v1` 名称和双 SHA-256；明确损坏、缺字段或哈希失配时拒绝把 companion 送入模型，要求受管重建。缺少该字段的旧包标记为 legacy 兼容。分页 companion 的 `## Page N` 与 PDF `#page-N` locator 对应；历史 PDF 尚未补齐 companion 时才允许原生文本层页码读取作为兼容回退。若无可精确读取的原生 locator 且无 companion，则不得标记为已核验。学术论文始终读取 MinerU `paper.md`，不得因 PDF 有文本层而绕过它；回答可以引用程序返回的原始 PDF 路径。
 
+**API引用范围核验**：已成功读取的文本行／PDF页范围，可引用同一路径、同一定位单位且被单个已读范围完整包含的子范围。例如已读`#L24-L43`可引用`#L26`；不合并跨段，不猜别名或版本。原件裸路径只保留既有精确白名单，不能据此引用未读片段；标题及文本companion页码只作精确匹配。`verified`仅表示引用落在已读范围或受管原件映射内，不保证答案语义正确。
+
 **图片 Raw 停止规则**：文字型图片、表单、截图和可忠实转写的表格在摄入后以“原图 + 源绑定 Markdown companion + sidecar”构成同一个 Raw 来源。普通事实检索命中图片时，默认只用 `read-raw` 读取 companion 的精确 locator；一旦该片段覆盖当前答案槽位即停止，不重新 OCR、不把原图送入视觉模型。只有当前问题依赖版式、空间关系、颜色、图形、印章、签名或手写等视觉语义，相关 OCR 未决项直接影响答案，证据发生冲突，或用户明确要求核对原图时，宿主才可另行进入视觉流程，并须在调用前说明具体缺口。纯照片、示意图或复杂图表没有可充分表达其视觉语义的 companion 时，不得用 OCR 文本假装已经核验。
 
 **Wiki Locator（2026-08-25）**：Wiki 是可重建的阅读导航层，使用稳定 heading slug，不使用 Wiki 行号。调用 `python3 .scripts/wg.py read-section '<wiki-page>.md#<heading-slug>'` 时，程序只返回目标 heading 到下一个同级/更高标题之间的正文，并解析该节实际使用的 `[^rN]` 脚注，返回 `raw_citations`。回答事实时再把这些 Raw locators 交给 `read-raw`；不得因读取 Wiki section 而自动读取整页或整份 Raw。
+
+**可执行章节入口**：`wiki_recall/admin_recall`候选中的`read_action/read_input`指向当前页面实际存在的章节；优先使用返回入口，API可通过对应`read_ref`执行。候选和入口仍是导航，事实答案继续下钻Raw。裸Wiki地址的错误会列出可用章节；修正section或使用page#section后再读。API记录失败尝试用于去重，但失败不进入已读页面，也不登记Raw证据；不重复提交同一缺参数请求。
 
 **Semantic Address 与 Context Envelope（v10）**：`<wiki-page>#<heading-slug>` 是跨 Wiki/Graph 的正式语义地址。边填写该地址时必须可解析到真实 section；新摄入 section 必须带精确 Raw 脚注，历史缺失由 validator 聚合为迁移 WARN。`wg.py read-section ... --with-context --profile <intent>` 可动态附加受限 Graph neighbors、Hub 和来源局部 gloss；overlay 不回写 Wiki，也不是事实证据。
 

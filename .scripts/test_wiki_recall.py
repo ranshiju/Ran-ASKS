@@ -27,6 +27,7 @@ class WikiRecallTests(unittest.TestCase):
             (qa, "_REPO", self.root), (gl, "REPO", self.root), (gl, "GRAPH_DB", self.public_db),
             (gl, "PRIVATE_GRAPH_DB", self.private_db), (gl, "PRIVATE_DIR", self.private_db.parent),
             (hs, "REPO", self.root), (hs, "PAGE_ROOT", None), (wl, "REPO", self.root),
+            (qa.sl, "REPO", self.root),
         ):
             self.stack.enter_context(patch.object(module, name, value))
         self.stack.enter_context(patch.object(qa, "_tok", return_value=0))
@@ -75,6 +76,61 @@ class WikiRecallTests(unittest.TestCase):
         with patch.object(qa.ns, "semantic_search", return_value={"candidates": []}):
             text, _ = qa.hybrid_recall(query, domain=kwargs.pop("domain", "academic"), **kwargs)
         return json.loads(text)
+
+    def test_recall_entry_reads_actual_section_then_raw_without_full_page(self):
+        page = self.add_page("entry", "Module guidance", "Module guidance", domain="teaching")
+        target = self.root / f"{page}.md"
+        target.write_text("# Module guidance\n\n## Navigation\nModule guidance\n\n"
+                          "## Unrelated\nDO-NOT-DISCLOSE-FULL-PAGE\n\n"
+                          "## Actual rules\nModule guidance rule.[^r1]\n\n"
+                          "[^r1]: teaching/raw/example.md#L2\n")
+        raw = self.root / "teaching/raw/example.md"
+        raw.parent.mkdir(parents=True, exist_ok=True)
+        raw.write_text("heading\nThe chosen path is sufficient.\n")
+        result = self.recall("Module guidance", domain="teaching")
+        candidate = result["candidates"][0]
+        self.assertEqual(candidate["read_action"], "read_section")
+        self.assertEqual(candidate["read_input"], {"page": page, "section": "actual-rules"})
+        self.assertNotIn("DO-NOT-DISCLOSE-FULL-PAGE", json.dumps(result))
+        read = qa.execute(candidate["read_action"], candidate["read_input"])
+        self.assertTrue(read["ok"], read)
+        data = json.loads(read["text"])
+        self.assertEqual(data["raw_citations"], ["teaching/raw/example.md#L2"])
+        self.assertNotIn("DO-NOT-DISCLOSE-FULL-PAGE", data["text"])
+        evidence = qa.execute("read_raw", {"locator": data["raw_citations"][0]})
+        self.assertTrue(evidence["ok"], evidence)
+        self.assertIn("The chosen path is sufficient.", evidence["text"])
+
+    def test_entry_fallback_uses_existing_section_and_missing_file_has_no_entry(self):
+        page = self.add_page("no-cites", "Only navigation", "Navigation clue")
+        candidate = self.recall("Only navigation")["candidates"][0]
+        self.assertEqual(candidate["read_input"], {"page": page, "section": "navigation"})
+        (self.root / f"{page}.md").write_text("# Only navigation\nNo subsection exists.\n")
+        self.assertNotIn("read_action", self.recall("Only navigation")["candidates"][0])
+        (self.root / f"{page}.md").write_text("# Only navigation\nA whole-page citation.[^r1]\n\n[^r1]: academic/raw/example.md#L2\n")
+        self.assertNotIn("read_action", self.recall("Only navigation")["candidates"][0])
+        (self.root / f"{page}.md").unlink()
+        self.assertNotIn("read_action", self.recall("Only navigation")["candidates"][0])
+
+    def test_missing_heading_lists_real_entries_and_context_accepts_fragment(self):
+        page = self.add_page("context", "Context guide", "Context navigation", content="Body evidence.[^r1]")
+        failed = qa.execute("read_section", {"page": page})
+        self.assertFalse(failed["ok"])
+        self.assertIn("可用", failed["error"])
+        self.assertIn("content", failed["error"])
+        result = qa.execute("wiki_context", {"page": page + "#content", "profile": "fact"})
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(json.loads(result["text"])["wiki"]["section"], "content")
+
+    def test_private_read_entry_stays_scoped(self):
+        page = self.add_page("private-entry", "Private guide", "Private navigation",
+                             domain="private", content="Private guide evidence.[^r1]")
+        candidate = self.recall("Private guide", domain="private")["candidates"][0]
+        self.assertEqual(candidate["read_input"]["page"], page)
+        denied = qa.execute(candidate["read_action"], candidate["read_input"], subproject="academic")
+        self.assertFalse(denied["ok"])
+        allowed = qa.execute(candidate["read_action"], candidate["read_input"], subproject="private")
+        self.assertTrue(allowed["ok"], allowed)
 
     def test_deprecated_exact_match_does_not_displace_current(self):
         old = self.add_page("a-old", "Shared label", profile="Shared label", status="deprecated")

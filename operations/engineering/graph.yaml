@@ -37,6 +37,14 @@ nodes:
     path: operations/research/physics-manuscript-editing.md
     kind: spec
     role: academic-writing-overlay
+  academic_abstract_ops:
+    path: operations/research/academic-abstract.md
+    kind: spec
+    role: agent-only-evidence-bound-academic-abstract-discussion-drafting-and-revision-contract
+  manuscript_improvement_ops:
+    path: operations/research/manuscript-improvement.md
+    kind: spec
+    role: agent-only-full-reading-and-ordered-manuscript-improvement-contract
   experiences:
     path: operations/EXPERIENCES.md
     kind: spec
@@ -157,6 +165,14 @@ nodes:
     path: .scripts/meeting_compiler_contract.py
     kind: contract
     role: backend-neutral-meeting-compiler-record-contract-and-deterministic-preprocess-meeting-ir-and-guidance-update-validator
+  meeting_compiler_repair:
+    path: .scripts/meeting_compiler_repair.py
+    kind: contract
+    role: shared-source-bound-meeting-diagnostic-aggregation-and-hash-bound-row-patch-kernel-without-model-or-file-writes
+  meeting_compiler_repair_test:
+    path: .scripts/test_meeting_compiler_repair.py
+    kind: test
+    role: meeting-row-repair-scope-integrity-aggregation-and-api-merge-regression
   recovery_policy:
     path: .scripts/recovery_policy.py
     kind: contract
@@ -416,7 +432,15 @@ nodes:
   repair_meeting_identity:
     path: .scripts/repair_meeting_identity.py
     kind: implementation
-    role: validated-transactional-raw-evidence-bound-meeting-identity-projection-and-user-assertion-remediation
+    role: validated-transactional-raw-evidence-bound-meeting-identity-projection-and-user-assertion-remediation-with-exact-grouped-mentions
+  meeting_identity_confirmation:
+    path: .scripts/meeting_identity_confirmation.py
+    kind: implementation
+    role: shared-prepared-user-confirmation-to-existing-assertion-and-meeting-repair-transactions-with-resume-and-compact-report
+  meeting_identity_confirmation_test:
+    path: .scripts/test_meeting_identity_confirmation.py
+    kind: test
+    role: isolated-confirmation-preflight-identity-separation-resume-and-publication-regression
   wiki_skeleton:
     path: .scripts/wiki_skeleton.py
     kind: implementation
@@ -1419,6 +1443,33 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - manuscript_improvement_ops
+  - uses
+  - academic_abstract_ops
+- - write
+  - uses
+  - manuscript_improvement_ops
+- - research
+  - uses
+  - manuscript_improvement_ops
+- - route
+  - reads
+  - manuscript_improvement_ops
+- - manuscript_improvement_ops
+  - tested_by
+  - prompt_test
+- - write
+  - uses
+  - academic_abstract_ops
+- - research
+  - uses
+  - academic_abstract_ops
+- - route
+  - reads
+  - academic_abstract_ops
+- - academic_abstract_ops
+  - tested_by
+  - prompt_test
 - - artifact_usage_ops
   - governs
   - artifact_usage
@@ -2610,6 +2661,27 @@ edges:
 - - repair_meeting_identity
   - tested_by
   - ingest_meeting_test
+- - repair_meeting_identity
+  - uses
+  - meeting_identity_confirmation
+- - meeting_identity_confirmation
+  - uses
+  - ingest_user_assertions
+- - meeting_identity_confirmation
+  - uses
+  - ingest_inbox
+- - meeting_identity_confirmation
+  - uses
+  - repair_meeting_identity
+- - meeting_identity_confirmation
+  - uses
+  - ingest_check
+- - meeting_identity_confirmation
+  - tested_by
+  - meeting_identity_confirmation_test
+- - ingest_user_assertions
+  - uses
+  - ingest_check
 - - dsh_ingest_tools
   - uses
   - ingest_paper
@@ -2717,6 +2789,24 @@ edges:
   - meeting_compiler_contract
 - - ingest_meeting
   - uses
+  - meeting_compiler_repair
+- - meeting_compiler_repair
+  - uses
+  - meeting_compiler_contract
+- - meeting_compiler_repair
+  - uses
+  - student_guidance_projection
+- - meeting_compiler_repair
+  - tested_by
+  - ingest_meeting_test
+- - meeting_compiler_repair
+  - tested_by
+  - meeting_compiler_repair_test
+- - meeting_compiler_repair
+  - tested_by
+  - dsh_meeting_compiler_test
+- - ingest_meeting
+  - uses
   - student_guidance_projection
 - - student_guidance_projection
   - tested_by
@@ -2727,6 +2817,9 @@ edges:
 - - dsh_meeting_compiler_agent
   - uses
   - meeting_compiler_contract
+- - dsh_meeting_compiler_agent
+  - uses
+  - meeting_compiler_repair
 - - dsh_meeting_compiler_agent
   - uses
   - llm_structured
@@ -3204,6 +3297,9 @@ edges:
 - - query_orchestrate
   - uses
   - wiki_locator
+- - query_orchestrate
+  - uses
+  - source_locator
 - - wg
   - uses
   - wiki_locator
@@ -3726,6 +3822,8 @@ capabilities:
     - write
     optional:
     - physics_manuscript_editing
+    - academic_abstract_ops
+    - manuscript_improvement_ops
     - experiences
     - experience_recall
     - illustration_ops
@@ -3735,7 +3833,7 @@ capabilities:
     forbidden: []
     guardrails:
     - 对外主张先取可追溯证据；不把未核验知识库内容写成事实。
-    - write 是按需落笔能力；academic profile 在 research 工作上下文内组合共享约定与学科 overlay，不切换研究上下文。
+    - write 是按需落笔能力；academic、academic-abstract 与 academic-manuscript profile 在 research 工作上下文内组合写作规范，不切换研究上下文；论文通读、语义判断与修改由宿主 Agent 完成。
   cv:
     entry: route
     required:
@@ -4177,6 +4275,11 @@ verification:
   - python3 .scripts/engineering_graph.py validate
   repair_meeting_identity:
   - python3 .scripts/test_ingest_meeting.py
+  - python3 .scripts/test_meeting_identity_confirmation.py
+  - python3 .scripts/engineering_graph.py validate
+  meeting_identity_confirmation:
+  - python3 .scripts/test_meeting_identity_confirmation.py
+  - python3 .scripts/test_ingest_user_assertions.py
   - python3 .scripts/engineering_graph.py validate
   api_ingest:
   - python3 .scripts/test_api_ingest.py
@@ -4217,6 +4320,14 @@ verification:
   - python3 .scripts/test_long_document_plan.py
   prompt_test:
   - python3 .scripts/test_prompt_audit.py
+  academic_abstract_ops:
+  - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/function_registry.py validate --runtime
+  - python3 .scripts/engineering_graph.py validate
+  manuscript_improvement_ops:
+  - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/function_registry.py validate --runtime
+  - python3 .scripts/engineering_graph.py validate
   lint_specs:
   - python3 .scripts/test_prompt_audit.py
   - python3 .scripts/engineering_graph.py validate
@@ -4378,7 +4489,7 @@ script_contracts:
     - optional directed maintenance pairs one existing Statement target with at most five exact current-selected-parse source locators; bypass automatic candidate retrieval and survey, load the complete target and all old evidence plus requested spans within the existing budget or fail before model execution; explicit selection establishes neither semantic identity nor support
     - directed inputs and instruction policy participate in task identity; only one attach/revise/defer for the specified target or zero operations is allowed; normal automatic mode keeps its own selection and cache inputs, packet-policy changes create new task identities while saved jobs remain recoverable by ID, and existing binding, version, commit and recovery checks remain authoritative
     - bounded explicit focus hits and their adjacent source context precede the default formal-result survey after the opening; absent or unmatched focus preserves default ordering and budgets; formal-result recognition accepts Markdown headings and emphasis and prioritizes main results before their background; actual coverage does not guarantee complete conditions or missing knowledge
-    - focus ranks explicitly named normalized multi-term source headings before ordinary lexical overlap; heading matching preserves token order and repetitions within semicolon/newline-delimited requests, while lexical scoring keeps deduplicated topic terms; at least two distinct heading terms are required; source-local rarity, the two-hit cap and primary-before-neighbor order remain; heading matches do not establish scientific roles or semantic support
+    - focus ranks explicitly named normalized multi-term source headings before ordinary lexical overlap; heading matching preserves token order and repetitions within semicolon/newline-delimited requests, while lexical scoring keeps deduplicated topic terms; at least two distinct heading terms are required; all named-heading hits get priority opportunities within the existing packet budget, lexical hits only fill to two when fewer named hits exist, and source-local rarity and primary-before-neighbor order remain; priority does not guarantee coverage of every requested section or adjacent condition and heading matches do not establish scientific roles or semantic support
     - retrieval uses source topic plus at most twelve literal names from actually selected source passages, never execution instructions or old evidence; at most two local searches return twenty hits each, merged to a twenty-item pool and at most five admitted candidates before loading old evidence
     - literal source-name signals include mixed case, uppercase-prefix and hyphen-linked acronym forms; focus corroboration matches complete names case-insensitively rather than token components, while candidate title matching remains case-sensitive; uncorroborated focus names never become retrieval terms
     - candidate titles matching focus names corroborated in actually selected source passages take priority before other same-source context; these names also constrain name-only cross-source admission, falling back to all selected-passage names when none are corroborated; this is lexical focus matching, not intent or negation interpretation
@@ -5273,9 +5384,28 @@ script_contracts:
     verify:
     - python3 .scripts/test_wg.py
     - python3 .scripts/test_ingest_user_assertions.py
+  meeting_identity_confirmation:
+    preconditions:
+    - shared 确定性编排；用户原话与显式 mention/label/canonical 由宿主提供，不猜身份、不调用模型、不回落 API
+    - 仅处理公共域已完成且有 MEETING_IR 的会议；prepare 只生成完整暂存草稿和 agent-task-v1，宿主复核 Wiki 后 apply
+    - 原始输入及机械产物绑定哈希；确认事实锚点含会议事务身份，原文写法逐字绑定，人物页显式对应确认姓名
+    - apply 复用既有用户事实、会议修复和报告发布；阶段失败保留已完成归档，续跑使用原回执且重新验证内容，仅补做未完成阶段
+    writes:
+    - temp/meeting-repair/<bundle>（草稿、冻结输入和紧凑结果）
+    - 最终 Raw/Wiki/Graph/状态/报告仅经既有受管事务更新
+    forbidden:
+    - 直接改写原始转写或历史 corrected 派生物
+    - 消费普通 inbox 事实、猜全局别名、将临时提案当事实源
+    - 只检查文件存在就把已变化产物报为完成
+    verify:
+    - python3 .scripts/test_meeting_identity_confirmation.py
+    - python3 .scripts/test_ingest_user_assertions.py
+    - python3 .scripts/test_ingest_meeting.py
+    - python3 .scripts/engineering_graph.py validate
   ingest_user_assertions:
     preconditions:
-    - 输入只能是 inbox/facts-pending.md，且每条待处理事实有稳定 fact ID、日期、陈述与可确定的目标 Wiki 页面
+    - 输入为 inbox/facts-pending.md 或统一姓名纠错入口生成的 temp/meeting-repair/<bundle>/facts-pending.md；每条事实有稳定 fact ID、日期、陈述与目标 Wiki 页面，暂存不是最终事实源
+    - 写入 Raw 或建立图副本前复用 ingest_check 的纯 frontmatter 校验；缺字段、非法枚举和日期在昂贵工作前拒绝
     - 用户申明为增量来源；只新增本批关系，保留目标页的既有语义边，不以本批提案清空重建全页关系
     - 事务先在同一文件系统暂存新的 Raw/Wiki/pending 内容和 graph plan；所有结构、locator 与图校验通过后才提交
     - Raw 追加、Wiki 更新、graph.db 写入、pending 清理和 receipt 作为一个受管事务；任一步失败必须恢复事务前字节与图快照
@@ -5283,7 +5413,7 @@ script_contracts:
     - cross-domain/raw/facts/user-assertions.md
     - 目标 <domain>/wiki/**/*.md
     - cross-domain/graph.db（仅经 graph_ingest）
-    - inbox/facts-pending.md（仅在完整提交后移除已提交条目）
+    - inbox/facts-pending.md 或受管会议修复 facts-pending.md（仅在完整提交后移除本输入的已提交条目）
     - temp/user-assertions/<transaction-id>/receipt.json
     forbidden:
     - Agent 手工依次修改 Raw、Wiki、Graph 或提前清空 pending
@@ -5569,6 +5699,8 @@ script_contracts:
     - read_raw 通过 source_locator 读取原件的精确 locator 或受管 Markdown companion；返回中显式区分可引用原件与实际读取路径
     - graph_exact 候选保留有辨识力的数学写法（如 z*、|z|、Arg z），同时不把裸单字母变量扩散为通用噪声
     - shared wiki_recall 每次只读每个已校验范围内 Wiki 文件一次；研究方向 profile 复用本次文本并沿用 Hub section/citation 解析器，无持久缓存、索引、模型或 embedding 调用。
+    - shared wiki_recall/admin_recall 在排名后复用同次扫描文本和 best_cited_section，为实际存在的章节提供 read_action/read_input；优先有引用的相关节，无引用时用实际 Navigation 或子章节，缺文件/子章节不捏造入口。完整扫描文本不进入候选输出，候选仍非事实证据，排序/数量/private范围保持
+    - shared Wiki locator 裸地址与失效章节错误返回实际可用章节而不返回全文；wiki_context 与 read_section 共用 page#section 或显式 section 语法，读取前仍校验路径和范围
     - Wiki 排序保留图中的规范标题、完整 alias 和 status；标签完整匹配优先于标签短语匹配、导航短语匹配与词项召回，再按不同词项覆盖率、标签命中数和 path 稳定排序。重复提及不放大分数；匹配按字面而非 SQL 通配符解释，候选不代表身份或事实确认。
     - shared wiki_recall/admin_recall/hybrid_recall 默认在排名与 top-k 前排除图或 Wiki frontmatter 标为 deprecated 的页面；联合召回的所有图通道复用同次扫描的准入信息，图回退与相邻页筛选不得绕过过滤。废弃页仍可作为只读定位中间节点到达现行邻页，但不进入默认候选。图规范 status 保留，page_status 单独报告磁盘状态，superseded_by 仅作版本导航。
     - include_deprecated 默认 false；仅用户明确询问历史版本时由宿主显式开启。接受布尔值及 true/false 字符串，拒绝其他值；lineage intent 不隐式开启。Agent execute、API 工具与 wg hybrid-recall --include-deprecated 共享此开关，不新增模型、索引、缓存或写入。
@@ -5744,8 +5876,26 @@ script_contracts:
     - python3 .scripts/test_agent_task.py
     - python3 .scripts/test_ingest_pipeline.py
     - python3 .scripts/engineering_graph.py validate
+  meeting_compiler_repair:
+    preconditions:
+    - shared 复用 parser、IR/术语、原文替换与学生目录校验，汇总可解析当前协议中的独立错误；不宣称覆盖正文语义
+    - shared 记录补丁绑定完整旧输出与逐条原记录 hash，只能覆盖请求列出的全部记录；最多16条，删除须带理由且由程序逐条 allow_remove 授权，仅可选 relations 和已有学生目录中无目标的 person_updates 投影可删除；目录缺失/不合法、身份缺失或 key/人物页/姓名任一匹配已有学生时不准删除投影，核心 typed 记录只能替换；未点名内容保持，合并后重新执行全部原校验
+    - api-only adapter 在既有修订预算中请求补丁；语法、旧协议、非局部问题保留完整协议恢复，Agent 只消费共享诊断且不调用 API
+    writes: []
+    forbidden:
+    - 导入模型客户端、调用模型、写文件、猜测证据或身份、自动丢弃失败记录，或接受跨范围/错 hash/遗漏/重复目标的补丁
+    verify:
+    - python3 .scripts/test_meeting_compiler_repair.py
+    - python3 .scripts/test_ingest_meeting.py
+    - python3 dsh/test_meeting_compiler_agent.py
+    - python3 .scripts/engineering_graph.py validate
   meeting_compiler_contract:
     preconditions:
+    - shared 允许格式合法的 original 等于 replacement；应用时先验证全部原串在来源中精确存在，再跳过无变化项，原提议保留追踪；实际替换仍校验重复/重叠并非级联应用
+    - shared record contract 的身份留空说明只给 attendees/reports/tasks；relations 端点必填，重要但未关联身份的关系保留在 Wiki 原称呼和 Raw 引用中，不生成空端点或猜人物
+    - shared Wiki 叙事连接前述质疑/方案与后续澄清、更正或撤回，保留未决分歧及来源归属；较晚的自述和助手解释不自动视为已证实结论
+    - shared 记录含义区分身份匹配与角色证据；attendees/reports 需要明确出席/发言/汇报依据，任务中的协作对象不自动成为责任人，会议助手推测保留归属与不确定性
+    - v3 tasks 在动作有依据但责任人未明确时允许 assignee 和 assignee_label 同为空；明确称呼但身份未关联仍保留 label。既有字段与协议版本保持，不增加语义判断型 validator
     - shared 有证据目录时检查 topics/reports/relations 中的新增大写缩写须在该项引用的原文中出现；无依据的全称扩写保留原称呼，不因双语格式偏好补造名称，常规摄入与受管修复共用此门
     - API adapter 与当前 Agent 产物共同使用 meeting-compiler-v3 delimiter、context hash、parser、preprocess schema、evidence-bound typed MEETING_IR/person_updates 与非级联 replacement 规则；v2 会议 IR 和 v1 slots 只解析在途兼容产物
     - MEETING_IR 空模板、Agent 顶层字段清单与 validator 共用 MEETING_IR_RECORD_FIELDS；模板包含固定 protocol_version，不自动补齐非法实际产物
@@ -5753,7 +5903,7 @@ script_contracts:
     writes: []
     forbidden:
     - 导入 dsh 或 llm_structured、调用模型、写暂存/最终文件，或因 backend 改变协议解析与机械校验
-    - 接受空 Wiki/MEETING_IR、未绑定 evidence ID、指代端点、typed predicate 重复、重叠/重复 replacement 或原文中不存在的 replacement source
+    - 接受空 Wiki/MEETING_IR、未绑定 evidence ID、指代端点、typed predicate 重复、重复原串/重叠实际 replacement 或原文中不存在的 replacement source
     verify:
     - python3 .scripts/test_agent_task.py
     - python3 dsh/test_meeting_compiler_agent.py
@@ -5903,6 +6053,10 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_meeting:
     preconditions:
+    - API attempt state 留存有界解析诊断（种类、阶段、字段 issues 与语法坐标），不复制响应全文或原文附近片段；完整输出仍在权限受限的临时文件供 hash 绑定重试使用，完成后的清理沿用 cleanup_pending/cleanup_error
+    - shared PREPROCESS 校验保留 bool 入口，详细 parser 返回失败的记录/字段 issues；Agent 和 API 获取相同原因，仅来源精确命中的无变化纠错不执行文本替换，不自动删除其他无效纠错或跳过后续校验
+    - shared API prompt 与 Agent manifest 明确每条任务对应一位执行者及其姓名标签；共同执行逐人记录并保留动作和证据，名单、链接及已提取记录条数由同一 IR 派生，自由正文聚焦解释和条件
+    - API prompt 与 Agent manifest 复用记录契约中的角色含义；未知责任人任务投影为责任人未明确，保留动作和证据，不生成虚构人物或责任边
     - shared completed 输出保留 canonical state 的 quality_status、当前告警与历史告警；统一 maintenance 发布从同一状态同步质量，不把缺失输出误报为零告警
     - inbox 会议纪要仅接受 .txt 与显式 subproject=academic|admin|business；去重后先生成 entity-candidates.json，不提前 apply 最终纠错
     - 直接入口与统一 inbox 入口均先查询公共 Raw 指纹索引；只有二进制 SHA-256 精确命中可直接返回 duplicate_found，同日、同标题或既有 Raw/Wiki 目录不足以确认重复，不得丢弃不同字节的会议分段来源
@@ -6004,10 +6158,12 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   query_orchestrate:
     preconditions:
+    - API records attempted action keys to block unchanged repeats but only successful read_section results enter visited_pages; duplicate-attempt messages never imply failed or old-session actions were read, while retained successful results remain reusable. Corrected input is eligible under existing budgets, with no new state or automatic retry
     - API prompts with successful calculation results guide task-bounded numerical answers using returned values, source numbers and equivalent formatting; necessary new arithmetic uses existing tools or remains explicitly uncomputed when tools end, without new schemas, states, retries or semantic certification
-    - API prompt read-handle indexes project only action/input without repeating stored candidate titles; fresh discovery bodies, retained reads/calculations, saved handle metadata and guarded execution remain unchanged
+    - API prompt read-handle indexes preserve stored candidate titles alongside action/input so navigation labels remain available after discovery leaves context; titles remain untrusted navigation, not evidence, source equivalence or relevance certification; old title-less handles remain usable, existing 80-handle and 200-character issuance bounds and answer-only hiding remain, and discovery fields, retained reads/calculations, saved handle metadata and guarded execution are unchanged
+    - API-only navigation display removes JSON formatting whitespace from valid successful candidate payloads without dropping fields or merging candidates; order, excerpts, limits, versions, retrieval signals and read actions remain complete. Concrete reads/calculations, errors and unsupported shapes remain verbatim; shared outputs/session schemas/budgets do not change, and display is not evidence or semantic certification
     - normal and answer-only guidance distinguishes read Raw statements from KU interpretation, navigation and current derivations; it preserves source qualifiers without new semantic validators, output fields or model calls
-    - API discovery guidance selects an initial source, knowledge or hybrid route by task and supplements observed gaps; independent subquestions remain batchable and candidate evidence previews allow direct guarded Raw reads without automatic evidence promotion
+    - API discovery guidance groups slots by source and explains actual Source/admin/domain coverage; one initial route per source precedes gap-driven supplements, independent sources remain batchable and candidate evidence previews allow direct guarded Raw reads without automatic evidence promotion. Guidance never infers storage domain from topic or removes tools and fallbacks
     - failed model responses, invalid parsed decisions and empty answers terminate as model_error with actual round and backend status; they never imply sufficient evidence, execute a failed plan or add adapter retries, and prior reads remain in the saved session
     - artifact use roles are derived from successful executed actions, never source assertions; navigation and KU do not become Raw evidence, and arithmetic does not verify scientific applicability
     - API validates declared input types/enums and reports tool errors/denials; session-local read_ref resolves only issued read actions through existing stage, deduplication and public Raw boundaries
@@ -6020,7 +6176,7 @@ script_contracts:
     - API exhaustion reports actual model decision rounds and the binding loop/budget limit; configured maximum is not an executed count, and an unreported slot is not an LLM finding that no candidate exists
     - existing API sessions are public-only; private scope cannot be selected by a model action or read into shared session storage
     - 本脚本只为 API backend 保存受预算约束的 query session 与运行模型循环；当前宿主 Agent 直接按 query task card 调用 query_actions/query_graph/source locator
-    - read_sources 同时登记已验证 locator 与 source_locator 确定性映射出的原件引用路径；citation contract 只接受该白名单
+    - read_sources 同时登记已验证 locator 与 source_locator 确定性映射出的原件引用路径；API citation contract 接受精确白名单及被单个已读范围完整包含的同路径同单位子范围（文本行/PDF页），不合并跨段、不猜别名或版本，裸文件和标题授权不扩展为未读片段；只核验阅读范围，不认证语义
     writes:
     - .scripts/query_sessions/<sid>.json（会话持久化,含 stage/mode/read_sources）
     forbidden:
@@ -6157,8 +6313,8 @@ script_contracts:
   dsh_meeting_compiler_agent:
     preconditions:
     - 仅处理已通过会议去重的 .txt；输入为只读原始纪要、确定性人物候选、程序生成的 meeting ID/目标来源路径与本轮 validator 错误
-    - api-only 修订携带最近一次同源 compiler 完整输出与诊断；纯 JSON 语法错误最小修复，schema/内容错误按当前 validator 修复，仍返回完整协议并消费原有预算
-    - API result 保留 response_text 与 diagnostic；ingest_meeting 按事务和轮次保存 temp/inbox-extract 下的 compiler-attempt-N.json，状态只引用最近一次输出，普通 trace 不包含响应正文或诊断片段
+    - api-only 修订复用最近一次同源完整输出与汇总诊断；仅有可定位 IR 记录错误时返回 meeting-ir-row-repair-v1 补丁，由共享内核按 hash 和范围合并；其余情况仍返回完整协议，均消费原有修订预算
+    - API result 保留原始 response_text、diagnostic 及局部修复时的 assembled_output/repair_request；失败/超时/预算耗尽保留完整基线；ingest_meeting 在现有私有 attempt 文件中分开留存实际补丁与合并协议，续跑以绑定 hash 的合并协议为基线，普通 trace 不包含响应正文
     - API 模式运行 operation=ingest_meeting_compile，优先复用 INGEST_GENERATION profile；模型目录只作审计，运行时选择仍服从 llm_structured/.env
     - 初次编译只允许一个 Meeting Compiler execution，同时返回 meeting-compiler-v3 的转写纠错决策、实体决策、精简 Wiki 草稿和 evidence-bound typed MEETING_IR/person_updates；不得拆给多个语义 Worker，provider transport/fallback 仍由 llm_structured 受控处理
     - transcript replacements 必须逐条精确命中原文且不可级联；调用方确定性应用后生成 staged corrected.txt，并从同一 MEETING_IR 投影 Wiki 导航和语义槽后校验一致性与 Raw locator 覆盖

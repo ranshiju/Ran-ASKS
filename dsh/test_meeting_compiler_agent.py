@@ -20,7 +20,7 @@ from dsh.meeting_compiler_agent import (
     parse_proposal_detailed,
     task_context_hash,
 )
-from meeting_compiler_contract import validate_meeting_ir
+from meeting_compiler_contract import validate_meeting_ir, validate_preprocess
 
 
 def _output(replacements=None) -> str:
@@ -80,6 +80,45 @@ def test_single_call_returns_typed_proposal():
     assert result.trace()["models"] == ["test-model"]
 
 
+def test_preprocess_diagnostics_identify_fields_without_changing_acceptance():
+    base = {"protocol_version": PROTOCOL_VERSION, "transcript_replacements": [], "entity_resolutions": []}
+    cases = [
+        ({"transcript_replacements": [{"original": "原文", "replacement": "", "reason": "未修改"}]},
+         "PREPROCESS.transcript_replacements[0].replacement must be nonempty"),
+        ({"transcript_replacements": [{"original": "原串", "replacement": "新串", "reason": None}]},
+         "PREPROCESS.transcript_replacements[0].reason must be a string"),
+        ({"transcript_replacements": [{"original": "原串", "replacement": "新串", "reason": ""}] * 2},
+         "PREPROCESS.transcript_replacements[1].original duplicates an earlier replacement"),
+        ({"transcript_replacements": [{"original": "原串", "replacement": "新\n串", "reason": ""}]},
+         "PREPROCESS.transcript_replacements[0].replacement must be single-line and at most 160 characters"),
+        ({"entity_resolutions": [{"mention": "某人", "canonical": "", "status": "resolved", "reason": "已知"}]},
+         "PREPROCESS.entity_resolutions[0].canonical must be nonempty for resolved identity"),
+        ({"entity_resolutions": [{"mention": "某人", "canonical": "", "status": "guess", "reason": "推测"}]},
+         "PREPROCESS.entity_resolutions[0].status must be resolved, unchanged or unresolved"),
+        ({"entity_resolutions": [{}]},
+         "PREPROCESS.entity_resolutions[0] fields must be exactly: mention, canonical, status, reason"),
+        ({"transcript_replacements": [None] * 65},
+         "PREPROCESS.transcript_replacements exceeds 64 items"),
+        ({"entity_resolutions": None}, "PREPROCESS.entity_resolutions must be a list"),
+    ]
+    tail = _output().split("<<<WIKI>>>", 1)[1]
+    for changes, issue in cases:
+        value = base | changes
+        assert not validate_preprocess(value)
+        text = "<<<PREPROCESS>>>\n" + json.dumps(value, ensure_ascii=False) + "\n<<<WIKI>>>" + tail
+        proposal, error, diagnostic = parse_proposal_detailed(text)
+        assert proposal is None and error == "invalid meeting compiler preprocess proposal"
+        assert diagnostic["stage"] == "validate_preprocess" and issue in diagnostic["issues"]
+        assert "保留原文" not in json.dumps(diagnostic, ensure_ascii=False)
+    # Preserve existing permissive fields; diagnostics must not tighten the contract.
+    compatible = base | {
+        "legacy_extension": True,
+        "transcript_replacements": [{"original": "原串", "replacement": "新串", "reason": "", "extra": True}],
+        "entity_resolutions": [{"mention": "某人", "canonical": "", "status": "unresolved", "reason": "未匹配"}],
+    }
+    assert validate_preprocess(base) and validate_preprocess(compatible)
+
+
 def test_agent_backend_returns_same_task_handoff():
     def fake_call(prompt, **kwargs):
         return {"ok": False, "status": "agent_required", "prompt": "HOST PROMPT"}
@@ -129,6 +168,45 @@ def test_replacements_are_exact_and_non_cascading():
         assert "overlapping" in str(exc)
     else:
         raise AssertionError("overlapping replacements must fail")
+
+
+def test_noop_replacements_require_original_source_and_preserve_real_edits():
+    noop = {"original": "甲乙", "replacement": "甲乙", "reason": "保留原文"}
+    proposal, error = parse_proposal(_output([noop]))
+    assert proposal, error
+    assert proposal["preprocess"]["transcript_replacements"] == [noop]
+    assert apply_transcript_replacements("甲乙讨论。", [noop]) == "甲乙讨论。"
+    mixed = [noop, {"original": "甲", "replacement": "丙", "reason": "原文依据"}]
+    assert apply_transcript_replacements("甲乙讨论。", mixed) == "丙乙讨论。"
+    # Replacement output never becomes a new match, including for skipped records.
+    mixed.append({"original": "丙", "replacement": "丁", "reason": "原文依据"})
+    assert apply_transcript_replacements("甲乙和丙。", mixed) == "丙乙和丁。"
+    cases = [
+        ("甲", [noop]),  # The unchanged phrase still has to occur in Raw.
+        ("甲乙", [noop, noop]),
+        ("甲乙", [noop | {"reason": None}]),
+        ("甲乙", [{"original": "", "replacement": "", "reason": "空串"}]),
+        ("甲\n乙", [{"original": "甲\n乙", "replacement": "甲\n乙", "reason": "跨行"}]),
+        ("甲" * 81, [{"original": "甲" * 81, "replacement": "甲" * 81, "reason": "超长"}]),
+        ("甲", [{"original": "甲", "replacement": "乙", "reason": "变化"},
+                 {"original": "乙", "replacement": "乙", "reason": "原文缺失"}]),
+    ]
+    for source, replacements in cases:
+        try:
+            apply_transcript_replacements(source, replacements)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("source binding and schema checks must still reject unsafe records")
+
+
+def test_noop_acceptance_does_not_hide_empty_relation_endpoints():
+    output = _output([{"original": "甲", "replacement": "甲", "reason": "保留"}])
+    output = output.replace('"relations": []', '"relations": [{"subject": "known-person", "predicate": "指导", "object": "", "evidence_ids": ["s0001"]}]')
+    proposal, error, diagnostic = parse_proposal_detailed(output)
+    assert proposal is None and "meeting IR" in error
+    assert diagnostic["segment"] == "MEETING_IR"
+    assert diagnostic["issues"] == ["MEETING_IR.relations[0] has an empty required value"]
 
 
 def test_meeting_ir_requires_evidence_and_keeps_typed_predicates_out_of_relations():
@@ -220,6 +298,9 @@ def test_retry_messages_inject_output_and_use_error_specific_scope():
 
 
 def main():
+    test_noop_replacements_require_original_source_and_preserve_real_edits()
+    test_noop_acceptance_does_not_hide_empty_relation_endpoints()
+    test_preprocess_diagnostics_identify_fields_without_changing_acceptance()
     test_single_call_returns_typed_proposal()
     test_agent_backend_returns_same_task_handoff()
     test_parser_rejects_missing_or_invalid_sections()

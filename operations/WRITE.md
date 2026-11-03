@@ -6,6 +6,8 @@
 
 ## 触发与任务判定
 
+整篇学术论文改进使用 `write/academic-manuscript`，流程见 [论文改进规范](research/manuscript-improvement.md)。宿主 Agent 先通读主文、图表与补充材料，再依次改进摘要、标题、引言和全文，最后回查一致性；保持 `research` 上下文，摘要阶段复用现有摘要规范。
+
 用户要求撰写、准备、起草、生成、改写、压缩或排版以下材料时，路由为 `write`：
 
 - 行政发言稿、讲稿、汇报、通知、请示、报告等公文；
@@ -15,6 +17,8 @@
 明确要求逐页协作制作原生可编辑 PPT 时，在当前工作上下文内另加载 `python3 .scripts/route.py --capability presentation --capability-profile create`，其成熟度与当前可执行动作以 `operations/PRESENTATION.md` 为准；当前阶段1B已提供单页状态、整套导出与三个独立按需辅助入口，真实用户验收尚待完成。仅写 PPT 文字提纲或讲稿仍用本规范，图片/PDF 重建沿用独立重建能力。
 
 研究论文仍以 `research` 作为持续工作。Agent 真正开始起草、改写或润色论文正文时，在该工作上下文内调用 `write` 的 academic profile；讨论研究问题、核对数据和运行实验时继续保持 `research`，无需加载写作能力。
+
+学术论文摘要使用 `write/academic-abstract` profile（`python3 .scripts/route.py --capability write --capability-profile academic-abstract`）；讨论摘要说服力时按需读取 `operations/research/academic-abstract.md`，实际起草或修改时加载该 profile。它在原研究上下文内组合共享约定与摘要规范，由宿主 Agent 执行，不另建 API 流程。
 
 用户要求进入“论文到科普展板”创作或先讨论主题/受众/需求时，加载 `python3 .scripts/route.py --capability science-exhibit --capability-profile discuss`；这是可持续的协作创作流程，底层复用 writing 工作区或已有 research 工作上下文。接续展板先读取目标项目 notes/status.md，再加载该能力的 resume profile 并调用 `wg.py science-exhibit resume --store <store>`；以当前受管记录恢复，不重新假设需求、批准方案或直接生成成品。精确边界见 `operations/SCIENCE_EXHIBIT.md`。
 
@@ -178,4 +182,6 @@
 | `*/wiki/`、对应 `raw/` | 可回溯事实来源 |
 | `.scripts/check_wikilinks.py` | Markdown 内链确定性校验 |
 | `operations/research/physics-manuscript-editing.md` | 物理论文 academic write overlay |
+| `operations/research/academic-abstract.md` | 学术摘要科学主线、证据比较、实验贡献及多轮修改规范 |
+| `operations/research/manuscript-improvement.md` | Agent 通读全文后按摘要、标题、引言、全文顺序改进并回查一致性 |
 | 工作区文档运行时 | `.docx`/PDF 生成、解析与渲染验证 |

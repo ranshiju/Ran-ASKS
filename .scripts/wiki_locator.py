@@ -345,12 +345,13 @@ def read_wiki_locator(value: str, section: str = "") -> dict:
     target = resolve_wiki_path(path_part or value)
     if target is None:
         raise FileNotFoundError(f"Wiki 页面未找到: {path_part or value}")
+    sections, _definitions = parse_wiki_page(target)
+    available = [entry.slug for entry in sections if entry.level >= 2]
     wanted = section or fragment
     if not wanted:
-        raise ValueError("Wiki locator 需要 heading slug，例如 page.md#retrieval-control")
-    item = get_wiki_section(target, wanted)
+        raise ValueError(f"Wiki locator 需要 heading slug；使用 page#section 或 section 参数；可用: {', '.join(available)}")
+    item = next((entry for entry in sections if entry.slug == heading_slug(wanted)), None)
     if item is None:
-        available = [entry.slug for entry in parse_wiki_page(target)[0]]
         raise KeyError(f"section '{wanted}' 不存在；可用: {', '.join(available)}")
     rel = target.resolve().relative_to(REPO.resolve()).as_posix()
     return {
@@ -468,9 +469,9 @@ def validate_claim_sections(path: Path | str, section_names: tuple[str, ...]) ->
     return errors
 
 
-def best_cited_section(path: Path | str, *terms: str) -> WikiSection | None:
-    """Choose a cited section for Graph navigation using deterministic text overlap."""
-    sections, _definitions = parse_wiki_page(path)
+def best_cited_section(path: Path | str, *terms: str, text: str | None = None) -> WikiSection | None:
+    """Choose a cited section, optionally reusing already scope-checked scan text."""
+    sections, _definitions = parse_wiki_page(path) if text is None else parse_wiki_text(text)
     candidates = [item for item in sections
                   if item.raw_citations and item.slug not in {"sources", "来源"}]
     if not candidates:

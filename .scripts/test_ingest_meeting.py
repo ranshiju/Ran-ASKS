@@ -315,6 +315,18 @@ def test_agent_path_prepares_task_without_entering_api_adapter():
         for section, rows in _proposal()["meeting_ir"].items():
             if isinstance(rows, list) and rows:
                 assert set(protocol["meeting_ir"]["records"][section]["fields"]) == set(rows[0])
+        from meeting_compiler_contract import ROLE_EVIDENCE, WIKI_CONTENT_CONTRACT
+        for section, meaning in ROLE_EVIDENCE.items():
+            assert protocol["meeting_ir"]["records"][section]["role_evidence"] == meaning
+        records = protocol["meeting_ir"]["records"]
+        assert {section for section, record in records.items() if "unresolved_identity" in record} == {
+            "attendees", "reports", "tasks",
+        }
+        assert protocol["wiki"]["content"] == WIKI_CONTENT_CONTRACT
+        prompt = meeting._compiler_request(state, "任老师讨论知事库。", {}, host_agent=False)[0]
+        assert WIKI_CONTENT_CONTRACT in prompt
+        assert ROLE_EVIDENCE["tasks"] in prompt
+        assert ROLE_EVIDENCE["relations"] in prompt
         assert "agent_prompt" not in state
     finally:
         meeting.run_api_meeting_compiler = original_runner
@@ -564,7 +576,7 @@ def test_prompt_requires_one_coherent_protocol():
     assert "只读事实源" in prompt
     assert "person_updates" in prompt
     assert "已有学生研究记录目录" in prompt
-    assert "避免重复叙述" in prompt
+    assert "省略重复清单和汇总数量" in prompt
     assert "不为双语格式猜测或补造全称" in prompt
     assert "不把待确认身份写成同一人" in prompt
 
@@ -753,6 +765,211 @@ def test_api_retry_injects_latest_persisted_response_and_diagnostic():
         shutil.rmtree(work)
 
 
+def test_compiler_diagnostics_survive_success_and_extract_cleanup():
+    from dsh.meeting_compiler_agent import MeetingCompilerResult
+
+    invalid_schema = _output().replace('"assignee_label": "任胜泉", ', '')
+    invalid_syntax = _output().replace("<<<WIKI>>>", "<<</PREPROCESS>>>\n<<<WIKI>>>")
+    invalid_preprocess = _output().replace('"replacement": "任胜泉"', '"replacement": ""')
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        extract = repo / "temp/extract"
+        extract.mkdir(parents=True)
+        source = repo / "inbox/meeting.txt"
+        source.parent.mkdir()
+        source.write_text("original transcript", encoding="utf-8")
+        archive = repo / "trash"
+        archive.mkdir()
+        state = {"transaction_id": "diagnostic-cleanup", "source": "inbox/meeting.txt",
+                 "extract_dir": "temp/extract", "cleanup_pending": True, "status": "completed"}
+        with patch.object(meeting, "REPO", repo):
+            for output in (invalid_schema, invalid_syntax, invalid_preprocess, _output()):
+                proposal, error, diagnostic = meeting.parse_proposal_detailed(output)
+                result = MeetingCompilerResult(
+                    "compiled" if proposal else "rejected", error or "proposal_ready",
+                    response_text=output, diagnostic=diagnostic,
+                )
+                trace = result.trace() | {"context_hash": "context"}
+                meeting._record_compiler_output(state, result, trace, "input")
+            attempts = state["meeting_compiler_attempts"]
+            assert attempts[0]["diagnostic_summary"]["kind"] == "schema"
+            assert attempts[0]["diagnostic_summary"]["issues"] == ["MEETING_IR.tasks[0] has invalid fields"]
+            assert attempts[0]["diagnostic_summary"]["issue_count"] == 1
+            assert attempts[1]["diagnostic_summary"]["kind"] == "json_syntax"
+            payload = json.loads((repo / attempts[1]["output_artifact"]).read_text())
+            assert payload["response_text"] == invalid_syntax and payload["diagnostic"]["excerpt"]
+            for key in ("line", "column", "position"):
+                assert attempts[1]["diagnostic_summary"][key] == payload["diagnostic"][key]
+            assert attempts[2]["diagnostic_summary"]["issues"] == [
+                "PREPROCESS.transcript_replacements[0].replacement must be nonempty"
+            ]
+            assert "diagnostic_summary" not in attempts[3]
+            assert "excerpt" not in json.dumps(attempts)
+            assert "response_text" not in json.dumps(attempts)
+            with patch.object(meeting.ingest_pipeline, "REPO", repo), \
+                    patch.object(meeting.ingest_pipeline.trash_util, "trash_path",
+                                 side_effect=lambda path: shutil.move(str(path), str(archive / path.name))), \
+                    patch.object(meeting.ingest_pipeline, "_save",
+                                 side_effect=lambda current: (repo / "state.json").write_text(json.dumps(current))):
+                meeting.ingest_pipeline._finish_cleanup(state, {}, lambda *args, **kwargs: None)
+        saved = json.loads((repo / "state.json").read_text())
+        assert saved["status"] == "completed" and not saved["cleanup_pending"]
+        assert not extract.exists() and not source.exists()
+        assert saved["meeting_compiler_attempts"] == attempts
+        assert (archive / "extract/compiler-attempt-1.json").is_file()
+
+
+def test_source_bound_noop_is_consumed_in_both_backends_without_semantic_retry():
+    from dsh.meeting_compiler_agent import MeetingCompilerAgent, MeetingCompilerTask
+
+    output = _output().replace('"replacement": "任胜泉"', '"replacement": "任老师"')
+    for backend in ("agent", "api"):
+        work = _workspace()
+        try:
+            state = _state(work)
+            source_path = REPO / state["source"]
+            source_bytes = source_path.read_bytes()
+            calls = []
+
+            def fake_call(prompt, **kwargs):
+                calls.append(prompt)
+                return {"ok": True, "text": output}
+
+            def runner(fields):
+                assert backend == "api", "Agent must not enter API adapter"
+                return MeetingCompilerAgent(MeetingCompilerTask(**fields), fake_call).run()
+
+            with patch.object(meeting, "ingest_mode", return_value=backend), \
+                    patch.object(meeting, "run_api_meeting_compiler", runner):
+                if backend == "agent":
+                    ok, error = meeting.step_write_wiki(state)
+                    assert not ok and error == "Agent task prepared"
+                    (work / "agent-meeting-compiler.txt").write_text(output, encoding="utf-8")
+                ok, error = meeting.step_write_wiki(state)
+            assert ok, error
+            assert len(calls) == (1 if backend == "api" else 0)
+            assert (REPO / state["corrected_path"]).read_text() == "任老师讨论知识库。"
+            assert source_path.read_bytes() == source_bytes
+            resolution = json.loads((REPO / state["entity_resolution"]).read_text())
+            assert resolution["compiler_transcript_replacements"][0]["replacement"] == "任老师"
+            assert state["meeting_ir_content"] == _proposal()["meeting_ir"]
+            assert meeting.step_validate_wiki(state) == []
+        finally:
+            shutil.rmtree(work)
+
+
+def test_record_repair_persists_patch_and_assembled_protocol_and_agent_gets_all_issues():
+    from dsh.meeting_compiler_agent import MeetingCompilerAgent, MeetingCompilerTask
+
+    ir = _proposal()["meeting_ir"]
+    ir["decisions"][0]["evidence_ids"] = ["s0099"]
+    ir["relations"] = [{"subject": "cnu-ren-shengquan", "predicate": "指导", "object": "", "evidence_ids": []}]
+    ir["person_updates"] = [{"person": "academic/wiki/authors/student", "person_label": "学生甲",
+                             "kind": "next_step", "text": "验证知识库", "evidence_ids": ["s0001"]}]
+    failed = _output().split("<<<MEETING_IR>>>", 1)[0] + "<<<MEETING_IR>>>\n" + json.dumps(ir, ensure_ascii=False)
+    for backend in ("api", "agent"):
+        work = _workspace()
+        try:
+            state = _state(work)
+            student_file = work / "student-guidance-candidates.json"
+            student_file.write_text(json.dumps({"protocol_version": meeting.sgp.CANDIDATE_VERSION,
+                "students": [{"student_key": "student", "label": "学生甲", "people_page": "academic/wiki/authors/student"}]}))
+            state["student_guidance_candidates"] = str(student_file.relative_to(REPO))
+            calls = []
+
+            def fake_call(prompt, **kwargs):
+                calls.append(prompt)
+                if len(calls) == 1:
+                    return {"ok": True, "text": failed}
+                request = json.loads(prompt.rsplit("[修复请求]\n", 1)[1])
+                edits = []
+                for row in request["records"]:
+                    value = dict(row["record"])
+                    if row["section"] == "relations": value = None
+                    elif row["section"] == "decisions": value["evidence_ids"] = ["s0001"]
+                    elif row["section"] == "person_updates": value["person"] = "student"
+                    edits.append({key: row[key] for key in ("section", "index", "record_sha256")} | {
+                        "replacement": value, "reason": "来源和候选目录支持；未知关系保留原始提议"})
+                return {"ok": True, "text": json.dumps({"schema": request["schema"],
+                    "base_sha256": request["base_sha256"], "edits": edits}, ensure_ascii=False)}
+
+            def runner(fields):
+                assert backend == "api"
+                return MeetingCompilerAgent(MeetingCompilerTask(**fields), fake_call).run()
+
+            with patch.object(meeting, "ingest_mode", return_value=backend), patch.object(meeting, "run_api_meeting_compiler", runner):
+                if backend == "agent":
+                    assert not meeting.step_write_wiki(state)[0]
+                    (work / "agent-meeting-compiler.txt").write_text(failed)
+                ok, error = meeting.step_write_wiki(state)
+                assert not ok
+                diagnostic = (json.loads(state["agent_task"]["issues"][-1]) if backend == "agent"
+                              else json.loads((work / "compiler-attempt-1.json").read_text())["diagnostic"])
+                assert all(any(target in issue for issue in diagnostic["issues"])
+                           for target in ("decisions[0]", "relations[0]", "person_updates[0]"))
+                if backend == "agent":
+                    assert not calls and state["agent_task"]["status"] == "prepared"
+                    continue
+                state = json.loads(json.dumps(state))
+                ok, error = meeting.step_write_wiki(state)
+                assert ok, error
+            assert len(calls) == 2
+            assert meeting.step_validate_wiki(state) == []
+            payload = json.loads((work / "compiler-attempt-2.json").read_text())
+            assert json.loads(payload["response_text"])["schema"] == "meeting-ir-row-repair-v1"
+            assert payload["assembled_output"].split("<<<MEETING_IR>>>", 1)[0] == failed.split("<<<MEETING_IR>>>", 1)[0]
+            assert payload["repair_request"]["records"]
+            retry = meeting._compiler_retry_context(state, state["meeting_compiler_attempts"][-1]["input_hash"])
+            assert retry["previous_output"] == payload["assembled_output"]
+            assert (work / "compiler-attempt-1.json").stat().st_mode & 0o777 == 0o600
+        finally:
+            shutil.rmtree(work)
+
+
+def test_compiler_diagnostic_summary_is_bounded_and_excludes_source_payloads():
+    diagnostic = {"kind": "schema", "message": "m" * 1000,
+                  "issues": ["MEETING_IR.tasks[0] " + "x" * 1000] * 100,
+                  "response_text": "private response", "excerpt": "private source",
+                  "extra": {"source": "private source"}}
+    summary = meeting._compiler_diagnostic_summary(diagnostic)
+    assert summary["kind"] == "schema" and len(summary["message"]) == 300
+    assert summary["issue_count"] == 100 and len(summary["issues"]) == 12
+    assert all(len(issue) == 300 for issue in summary["issues"])
+    assert summary["truncated"] is True
+    assert "private" not in json.dumps(summary)
+
+
+def test_joint_task_projection_preserves_each_owner_and_derives_record_counts():
+    ir = _proposal()["meeting_ir"]
+    action = "共同验证知识库方案，保留协作分工"
+    ir["tasks"] = [
+        {"text": action, "assignee": "cnu-ren-shengquan", "assignee_label": "任胜泉", "evidence_ids": ["s0001"]},
+        {"text": action, "assignee": "academic/wiki/authors/yang", "assignee_label": "杨老师", "evidence_ids": ["s0001"]},
+        {"text": "补充反馈", "assignee": "", "assignee_label": "小蔡", "evidence_ids": ["s0001"]},
+        {"text": "安排下一次讨论", "assignee": "", "assignee_label": "", "evidence_ids": ["s0001"]},
+    ]
+    assert meeting.validate_meeting_ir(ir, {"s0001"}) == []
+    kwargs = {"raw_source": "academic/raw/meeting.txt", "date": "2026-09-03",
+              "catalog": [{"evidence_id": "s0001", "line": 1}]}
+    wiki = meeting.compile_meeting_navigation(_proposal()["wiki_markdown"], ir, **kwargs)
+    assert "已提取记录：参会 1 条 · 汇报 1 条 · 待办 4 条。" in wiki
+    assert f"[[cnu-ren-shengquan|任胜泉]]：{action}[^meeting-s0001]" in wiki
+    assert f"[[authors/yang|杨老师]]：{action}[^meeting-s0001]" in wiki
+    assert "小蔡（身份待确认）：补充反馈[^meeting-s0001]" in wiki
+    assert "责任人未明确：安排下一次讨论[^meeting-s0001]" in wiki
+    slots = meeting.compile_meeting_slots(ir)
+    assert f"{action} | cnu-ren-shengquan" in slots
+    assert f"{action} | academic/wiki/authors/yang" in slots
+    assert "补充反馈" not in slots and "安排下一次讨论" not in slots
+    assert meeting.compile_meeting_navigation(wiki, ir, **kwargs) == wiki
+    ir["tasks"].pop()
+    refreshed = meeting.compile_meeting_navigation(wiki, ir, **kwargs)
+    assert "待办 3 条。" in refreshed and "待办 4 条。" not in refreshed
+    assert refreshed.count("已提取记录：") == 1
+    assert refreshed.count("[^meeting-s0001]:") == 1
+    assert "- 任胜泉讨论知识库。" in refreshed
+
+
 def test_real_worker_protocol_retry_stops_before_commit():
     from dsh.meeting_compiler_agent import MeetingCompilerAgent, MeetingCompilerTask
 
@@ -817,6 +1034,45 @@ def test_content_retry_injects_previously_compiled_output():
         repair = calls[1]["messages"][-1]["content"]
         assert "缺少 ## Content 段" in repair and "本轮只修复" not in repair
         assert json.loads(repair.split("[当前校验错误与上轮解析诊断]\n")[1])["diagnostic"] == {}
+    finally:
+        shutil.rmtree(work)
+
+
+def test_invalid_record_patch_exhausts_existing_revision_budget_without_commit():
+    from dsh.meeting_compiler_agent import MeetingCompilerAgent, MeetingCompilerTask
+
+    work = _workspace()
+    calls = []
+    failed = _output().replace('"evidence_ids": ["s0001"]', '"evidence_ids": ["s0099"]', 1)
+
+    def fake_call(prompt, **kwargs):
+        calls.append(prompt)
+        return {"ok": True, "text": failed if len(calls) == 1 else "{}"}
+
+    def runner(fields):
+        return MeetingCompilerAgent(MeetingCompilerTask(**fields), fake_call).run()
+
+    def forbidden_step(*args, **kwargs):
+        raise AssertionError("failed scoped repair must not reach commit")
+
+    try:
+        state = _state(work)
+        spec = {"script_name": "ingest_meeting.py", "unified_semantic_worker": True,
+                "recovery_limits": meeting.RECOVERY_LIMITS,
+                "steps": {"write_wiki": meeting.step_write_wiki,
+                          "prepare_unified_handoff": meeting.step_prepare_unified_handoff,
+                          "validate_wiki": forbidden_step, "finalize": forbidden_step,
+                          "update_graph": forbidden_step}}
+        with patch.object(meeting, "run_api_meeting_compiler", runner), \
+                patch.object(meeting, "ingest_mode", return_value="api"), \
+                patch.object(meeting.ingest_pipeline, "_save"):
+            result = meeting.ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
+        assert len(calls) == 2 and "[修复请求]" in calls[1]
+        assert result["status"] == "agent_required"
+        assert len(result["meeting_compiler_attempts"]) == 2
+        saved = json.loads((work / "compiler-attempt-2.json").read_text())
+        assert saved["response_text"] == "{}" and saved["assembled_output"] == failed
+        assert not (work / "wiki.md").exists() and not (work / "corrected.txt").exists()
     finally:
         shutil.rmtree(work)
 
@@ -934,10 +1190,32 @@ def test_unresolved_roles_preserve_wiki_without_global_identity():
     assert "验证知识库方案" in wiki
     assert "[^meeting-s0001]: academic/raw/test.txt#L1" in wiki
     meeting_ir["tasks"][0]["assignee_label"] = ""
-    assert any("empty required" in error for error in meeting.validate_meeting_ir(meeting_ir, {"s0001"}))
+    assert meeting.validate_meeting_ir(meeting_ir, {"s0001"}) == []
     meeting_ir["tasks"][0]["assignee_label"] = "任胜泉"
     meeting_ir["tasks"][0]["assignee"] = None
     assert any("must be strings" in error for error in meeting.validate_meeting_ir(meeting_ir, {"s0001"}))
+
+
+def test_unknown_task_owner_keeps_action_without_inventing_role():
+    ir = _proposal()["meeting_ir"]
+    ir["tasks"] = [{"text": "会后讨论光学课题，责任人待明确", "assignee": "", "assignee_label": "", "evidence_ids": ["s0001"]}]
+    assert meeting.validate_meeting_ir(ir, {"s0001"}) == []
+    catalog = [{"evidence_id": "s0001", "line": 1, "text": "会后讨论光学课题，责任人待明确"}]
+    wiki = meeting.compile_meeting_navigation(_proposal()["wiki_markdown"], ir,
+        raw_source="academic/raw/test.txt", date="2026-09-03", catalog=catalog)
+    assert "责任人未明确：会后讨论光学课题" in wiki
+    assert "（身份待确认）：会后讨论光学课题" not in wiki
+    assert "会后讨论光学课题" not in meeting.compile_meeting_slots(ir)
+    assert "cnu-ren-shengquan | 知识库knowledge base" in meeting.compile_meeting_slots(ir)
+    for section, label in (("attendees", "label"), ("reports", "person_label")):
+        changed = json.loads(json.dumps(ir))
+        changed[section][0][label] = ""
+        assert any("empty required" in e for e in meeting.validate_meeting_ir(changed, {"s0001"}))
+    ir["tasks"][0]["assignee"] = "cnu-ren-shengquan"
+    assert any("empty required" in e for e in meeting.validate_meeting_ir(ir, {"s0001"}))
+    ir["tasks"][0]["assignee"] = ""
+    ir["tasks"][0]["text"] = ""
+    assert any("empty required" in e for e in meeting.validate_meeting_ir(ir, {"s0001"}))
 
 
 def test_source_binding_rebases_only_transaction_footnotes():
@@ -987,6 +1265,57 @@ def test_identity_correction_requires_archived_exact_assertion():
             assert evidence[0]["source_sha256"]
             assert resolution["compiler_entity_resolutions"][0]["status"] == "resolved"
             assert resolution["resolved"][0]["entity"] == correction["canonical"]
+
+
+def test_grouped_identity_correction_requires_every_source_spelling_and_full_assertion():
+    with tempfile.TemporaryDirectory() as temporary:
+        repo = Path(temporary)
+        raw = repo / "cross-domain/raw/facts/user-assertions.md"
+        raw.parent.mkdir(parents=True)
+        raw.write_text(
+            "- [2026-10-10] **小宁/晓宁指真实姓名。** {: #fact-identity-group}\n"
+            "- [2026-10-10] **小宁指真实姓名。** {: #fact-identity-single}\n",
+            encoding="utf-8",
+        )
+        person = repo / "academic/wiki/authors/person.md"
+        person.parent.mkdir(parents=True)
+        person.write_text("---\ntitle: 真实姓名\ntype: people\nsources: [cross-domain/raw/facts/user-assertions.md]\n---\n", encoding="utf-8")
+        correction = {"mention": "小宁/晓宁", "canonical": "academic/wiki/authors/person",
+                      "label": "真实姓名", "source": "cross-domain/raw/facts/user-assertions.md#fact-identity-group",
+                      "quote": "小宁/晓宁指真实姓名。"}
+        original = {"resolved": [], "compiler_entity_resolutions": [
+            {"mention": "小宁/晓宁", "canonical": "", "status": "unresolved"},
+            {"mention": "小宁", "canonical": "", "status": "unresolved"},
+        ]}
+        source = "小宁发言。\n晓宁提出建议。"
+        single = {**correction, "mention": "小宁",
+                  "source": "cross-domain/raw/facts/user-assertions.md#fact-identity-single",
+                  "quote": "小宁指真实姓名。"}
+        with patch.object(meeting_repair, "REPO", repo):
+            invalid_cases = [
+                ("小宁发言。", [correction]),
+                (source, [{**correction, "quote": "小宁指真实姓名。", "source": single["source"]}]),
+                (source, [{**correction, "mention": "小宁/小宁"}]),
+                (source, [{**correction, "mention": "小宁/"}]),
+                (source, [correction, single]),
+                (source, [{**correction, "mention": "小宁/晓宁/不存在"}]),
+            ]
+            for input_text, corrections in invalid_cases:
+                resolution = json.loads(json.dumps(original))
+                try:
+                    meeting_repair._apply_identity_corrections(resolution, input_text, corrections)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError("unbound or overlapping identity group accepted")
+                assert resolution == original
+            resolution = json.loads(json.dumps(original))
+            evidence = meeting_repair._apply_identity_corrections(resolution, source, [correction])
+            assert evidence[0]["source_mentions"] == ["小宁", "晓宁"]
+            assert resolution["compiler_entity_resolutions"][0]["status"] == "resolved"
+            assert resolution["compiler_entity_resolutions"][1]["status"] == "unresolved"
+            assert {row["original"] for row in resolution["resolved"]} == {"小宁", "晓宁"}
+            assert all(row["entity"] == correction["canonical"] for row in resolution["resolved"])
 
 
 def test_body_source_rebinding_survives_title_change_in_both_backends():
@@ -1079,6 +1408,13 @@ def test_unsupported_acronym_is_rejected_before_meeting_staging():
 
 
 def main():
+    test_invalid_record_patch_exhausts_existing_revision_budget_without_commit()
+    test_record_repair_persists_patch_and_assembled_protocol_and_agent_gets_all_issues()
+    test_source_bound_noop_is_consumed_in_both_backends_without_semantic_retry()
+    test_compiler_diagnostics_survive_success_and_extract_cleanup()
+    test_compiler_diagnostic_summary_is_bounded_and_excludes_source_payloads()
+    test_joint_task_projection_preserves_each_owner_and_derives_record_counts()
+    test_unknown_task_owner_keeps_action_without_inventing_role()
     test_completed_meeting_output_preserves_current_and_historical_quality()
     test_meeting_term_acronyms_require_their_own_cited_source()
     test_unsupported_acronym_is_rejected_before_meeting_staging()
@@ -1086,6 +1422,7 @@ def main():
     test_unresolved_roles_preserve_wiki_without_global_identity()
     test_source_binding_rebases_only_transaction_footnotes()
     test_identity_correction_requires_archived_exact_assertion()
+    test_grouped_identity_correction_requires_every_source_spelling_and_full_assertion()
     test_source_binding_rebases_all_yaml_styles_in_both_backends()
     test_wiki_validation_rejects_noncanonical_or_missing_sources()
     test_api_retry_injects_latest_persisted_response_and_diagnostic()

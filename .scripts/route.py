@@ -19,6 +19,8 @@ LLM 判断指令类型后,调本脚本截取对应规范 section,拼成 prompt�
   route.py --task research # 研究:输出 RESEARCH 规范
   route.py --task frontier # 研究前沿:输出 FRONTIER 规范
   route.py --capability write --capability-profile academic # research 工作上下文内按需加载论文落笔能力
+  route.py --capability write --capability-profile academic-abstract # 学术论文摘要撰写与修改
+  route.py --capability write --capability-profile academic-manuscript # 通读全文后的论文系统改进
   route.py --capability cv --capability-profile general # workspace 工作上下文内加载简历制作与维护契约
   route.py --capability presentation --capability-profile create # PPT 创作契约与当前可执行入口
   route.py --list           # 分类列出持续工作、路由任务与按需能力
@@ -276,6 +278,14 @@ CAPABILITY_ROUTES = {
         "academic": [
             ("operations/WRITE.md", ["总体原则", "共享落笔约定", "事实与主张控制"]),
             ("operations/research/physics-manuscript-editing.md", None),
+        ],
+        "academic-abstract": [
+            ("operations/WRITE.md", ["总体原则", "共享落笔约定", "事实与主张控制"]),
+            ("operations/research/academic-abstract.md", None),
+        ],
+        "academic-manuscript": [
+            ("operations/WRITE.md", ["总体原则", "共享落笔约定", "事实与主张控制"]),
+            ("operations/research/manuscript-improvement.md", None),
         ],
     },
 }
@@ -608,7 +618,7 @@ def main():
     ap.add_argument("--capability", choices=sorted(CAPABILITY_ROUTES),
                     help="在当前工作上下文内按需加载的能力")
     ap.add_argument("--capability-profile", default="general",
-                    help="能力 profile（write: general/academic；science-exhibit: create/discuss/resume；presentation: create/form-check/evidence-check/citation-redact）")
+                    help="能力 profile（write: general/academic/academic-abstract/academic-manuscript；science-exhibit: create/discuss/resume；presentation: create/form-check/evidence-check/citation-redact）")
     ap.add_argument("--subproject", help="ingest 目标域或 query 范围；private 使用隔离图及本地 Agent，不继承公共 API backend")
     ap.add_argument("--mode", help="ingest 模式: create(默认)/update/batch")
     ap.add_argument("--content", help="ingest 内容类型: paper(默认)/other")

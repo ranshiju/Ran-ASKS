@@ -256,21 +256,11 @@ def extract_wikilinks(text):
     return out
 
 
-def check_file(path, rel_paths, basenames, *, page_path=None, raw_overrides=None):
-    errors = []
-    warns = []
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except Exception as e:
-        return [f"读取失败: {e}"], []
-    logical_path = page_path or path
-
-    fm, raw_fm, body = parse_frontmatter(text)
-    if fm is None:
-        errors.append("frontmatter: 缺失或 YAML 解析失败(--- 块)")
-        # 没有可用 frontmatter,后续检查无意义
-        return errors, warns
-
+def check_frontmatter(fm, logical_path):
+    """Pure shared preflight; identical field rules to final ingestion checks."""
+    errors, warns = [], []
+    if not isinstance(fm, dict):
+        return ["frontmatter: 缺失或 YAML 解析失败(--- 块)"], []
     # --- frontmatter 必填字段 ---
     fm_type = fm.get('type', '')
     required = REQUIRED_HUB if fm_type in HUB_TYPES else REQUIRED
@@ -339,6 +329,29 @@ def check_file(path, rel_paths, basenames, *, page_path=None, raw_overrides=None
             errors.append("frontmatter: status=deprecated 但无 superseded_by(版本链断裂)")
     elif sup and (isinstance(sup, str) and sup.strip()):
         warns.append(f"frontmatter: status='{status}' 非 deprecated 但填了 superseded_by(冗余字段)")
+
+    return errors, warns
+
+
+def check_file(path, rel_paths, basenames, *, page_path=None, raw_overrides=None):
+    errors = []
+    warns = []
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except Exception as e:
+        return [f"读取失败: {e}"], []
+    logical_path = page_path or path
+
+    fm, raw_fm, body = parse_frontmatter(text)
+    if not isinstance(fm, dict):
+        errors.append("frontmatter: 缺失或 YAML 解析失败(--- 块)")
+        # 没有可用 frontmatter,后续检查无意义
+        return errors, warns
+
+    field_errors, field_warnings = check_frontmatter(fm, logical_path)
+    errors.extend(field_errors)
+    warns.extend(field_warnings)
+    fm_type = fm.get("type", "")
 
     # --- section 结构 ---
     errors.extend(wl.check_drafting_markers(body))

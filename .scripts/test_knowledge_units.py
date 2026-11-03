@@ -1047,6 +1047,57 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(normal['coverage']['provided_ranges'],focused['coverage']['provided_ranges'])
         self.assertFalse(focused['focus_selection']['matched_terms'])
 
+    def test_all_named_sections_precede_incidental_lexical_hits(self):
+        titles = ['Event Formation', 'Memory Retrieval', 'Cache Accounting', 'Error Conditions']
+        chunks = [(1, 2, 'Overview of event formation memory retrieval cache accounting error conditions.')]
+        chunks += [(3+i*2, 4+i*2, f'## {title}\nA selected definition.')
+                   for i, title in enumerate(titles)]
+        for count in (3, 4):
+            with self.subTest(count=count):
+                selected, _ = kc.focused_chunks(chunks, '; '.join(titles[:count]))
+                self.assertEqual(set(selected), set(range(1, count+1)))
+                # Repeating a request or a heading within one chunk adds no slots.
+                repeated = [*chunks]
+                repeated[1] = (3, 4, '## Event Formation\n## Event Formation')
+                selected, _ = kc.focused_chunks(repeated, '; '.join(titles[:count]+titles[:1]))
+                self.assertEqual(set(selected), set(range(1, count+1)))
+
+    def test_lexical_focus_still_fills_only_two_priority_slots(self):
+        chunks = [(1, 2, '## Event Formation\nSelected events.'),
+                  (3, 4, 'Memory retrieval strategy cache accounting details.'),
+                  (5, 6, 'Another memory retrieval strategy.'),
+                  (7, 8, 'Cache accounting elsewhere.')]
+        for focus in ('Event Formation; memory retrieval strategy cache accounting',
+                      'memory retrieval strategy cache accounting'):
+            with self.subTest(focus=focus):
+                selected, _ = kc.focused_chunks(chunks, focus)
+                self.assertEqual(len(selected), 2)
+                self.assertEqual(selected[0], 0 if focus.startswith('Event') else 1)
+
+    def test_three_named_sections_reach_packet_before_neighbors(self):
+        lines = ['Background observations with no requested definition. '*4 for _ in range(288)]
+        lines[:32] = ['A short introduction.']*32
+        titles = ['Event Formation', 'Memory Retrieval', 'Cache Accounting']
+        for pos, title in zip((64, 160, 224), titles):
+            lines[pos] = f'## {title}'
+            lines[pos+1] = f'REQUIRED_{pos} is defined only under LOCAL_CONDITION_{pos}.'
+        source = self.receive('three-requested-sections.md', '\n'.join(lines))
+        _, packet = self.prepare(source, max_tokens=9000, focus='; '.join(titles))
+        shown = '\n'.join(b['text'] for b in packet['blocks'])
+        for pos in (64, 160, 224):
+            self.assertIn(f'REQUIRED_{pos}', shown)
+            self.assertIn(f'LOCAL_CONDITION_{pos}', shown)
+        self.assertLessEqual(kc.token_count(packet)+kc.token_count(kc.instructions(packet)), 11000)
+        # A tighter budget reports priority separately from actual coverage.
+        _, small = self.prepare(source, max_tokens=2700, focus='; '.join(titles))
+        self.assertEqual(len(small['focus_selection']['priority_ranges']), 3)
+        ranges = small['coverage']['provided_ranges']
+        self.assertTrue(any(not any(a <= lo and hi <= b for a,b in ranges)
+                            for lo,hi in small['focus_selection']['priority_ranges']))
+        self.assertTrue(small['coverage']['unread_ranges'])
+        self.assertFalse(small['coverage']['exhaustive_knowledge'])
+        self.assertLessEqual(kc.token_count(small)+kc.token_count(kc.instructions(small)), 4700)
+
     def test_shared_heading_words_do_not_hide_later_requested_section(self):
         cases = [
             ("MEMORY FORMATION VIA SURPRISE", "MEMORY RETRIEVAL",

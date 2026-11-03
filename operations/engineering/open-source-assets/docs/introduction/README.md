@@ -363,3 +363,19 @@ works and an explicit browse link. Readers open the standalone Gallery for full
 artifacts, downloads and concise capability descriptions. The entry avoids a
 fixed work count. The PDF retains its 31 reviewed pages and appends the same
 navigation guidance; public APIs and frozen paper artifacts are unchanged.
+
+
+The 2026-11-03 `v0.23.0` MINOR adds managed meeting-name confirmation and
+bounded record repair, with complete-draft recovery and separate student-file
+eligibility. It also improves reading entries, citation subspans, explicit KU
+section selection and host-Agent academic-writing profiles. The Gallery keeps
+its 14 approved works and links current documentation; original work claims
+retain their historical context. The Markdown and appended normalized PDF pages
+carry the same update. Whole-ingestion speedup and broad semantic-quality gains
+remain unverified; frozen paper artifacts are unchanged.
+
+2026年11月3日的 `v0.23.0` 按兼容新增能力发布，增加会议姓名确认、失败记录局部修复
+及完整草稿续跑，区分人物身份与学生档案适用性；同时改进阅读入口、引用子片段、
+KU显式章节选择和宿主Agent学术写作规范。Gallery保留14件已批准作品，并提供当前
+系统说明入口，历史作品主张不改写。Markdown与追加并标准化的PDF页面同步；
+完整摄入提速和大语料语义收益尚未证实，冻结论文产物不变。

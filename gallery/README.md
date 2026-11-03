@@ -28,6 +28,14 @@
 | [ASKS 科普 09 · 持续工作](works/asks-09-persistent-work/README.md) | 10 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
 | [ASKS 科普 10 · Graph 与知识关系](works/asks-10-graph-model/README.md) | 9 页图文 PDF | 科普写作 · 漫画配图 · 插图与图示 · 版式与导出 |
 
+## 从作品开始使用
+
+1. 打开作品详情，阅读完整成品、适用读者与所用功能说明。
+2. 按页面示例指令准备自己的论文或素材，提出具体制作目标。
+3. 使用[当前系统说明](https://github.com/ranshiju/Ran-ASKS/blob/main/README.zh-CN.md)和[更新日志](../CHANGELOG.md)核对现有能力；科普文章保留创作时的版本背景，不作为最新接口说明。
+
+本次同步保留现有14件作品的成品与下载。作品原稿、制作过程和本地来源记录不进入公开包。
+
 ## 本地预览
 
 在仓库根目录运行：

@@ -8,6 +8,10 @@ Writer Agent 面向独立的办公与专业材料交付：把用户材料和知�
 
 `write` 能力的范围更广。研究论文保持 `research` 工作上下文，并在实际起草、改写或润色时加载 academic write profile；这一组合调用不等同于启动 Writer Agent 实例。
 
+论文摘要的专项能力为 `write/academic-abstract`，规范见 `operations/research/academic-abstract.md`，仍由当前研究宿主 Agent 执行。
+
+整篇论文改进使用 `write/academic-manuscript`，规范见 `operations/research/manuscript-improvement.md`。当前研究宿主 Agent 负责全文通读与顺序改稿，不因此启动独立 Writer 实例。
+
 ## 实例范围
 
 | 类型 | 常见交付 |

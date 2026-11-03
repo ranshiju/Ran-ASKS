@@ -15,12 +15,10 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
-
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / ".scripts"))
 import agent_task
+import ingest_check
 
 PROTOCOL = "user-assertions-transaction-v1"
 PROPOSAL_SCHEMA = "user-assertions-proposal-v1"
@@ -81,12 +79,24 @@ def _workspace(repo: Path, transaction_id: str) -> Path:
     return repo / "temp" / "user-assertions" / transaction_id
 
 
+def _pending_path(repo: Path, value: Path) -> Path:
+    pending = value.resolve()
+    ordinary = (repo / "inbox/facts-pending.md").resolve()
+    repair_root = (repo / "temp/meeting-repair").resolve()
+    if pending != ordinary and not (
+        pending.is_relative_to(repair_root)
+        and pending.name == "facts-pending.md"
+        and pending.parent != repair_root
+    ):
+        raise ValueError("user assertions input must be inbox/facts-pending.md or a managed meeting-repair facts-pending.md")
+    pending.relative_to(repo)
+    return pending
+
+
 def prepare_transaction(path: Path | None = None, repo: Path | None = None) -> dict:
     repo = (repo or REPO).resolve()
-    pending = (path or repo / "inbox" / "facts-pending.md").resolve()
-    expected = (repo / "inbox" / "facts-pending.md").resolve()
-    if pending != expected:
-        raise ValueError("user assertions input must be inbox/facts-pending.md")
+    pending = _pending_path(repo, path or repo / "inbox/facts-pending.md")
+    pending_relative = str(pending.relative_to(repo))
     pending_bytes = pending.read_bytes()
     pending_text = pending_bytes.decode("utf-8")
     facts = parse_fact_entries(pending_text)
@@ -100,7 +110,10 @@ def prepare_transaction(path: Path | None = None, repo: Path | None = None) -> d
         )
     if not facts:
         return {"ok": True, "status": "no_action", "fact_entries": 0}
-    digest = _sha256(pending_bytes)[:16]
+    identity = pending_bytes
+    if pending_relative != "inbox/facts-pending.md":
+        identity += b"\0" + pending_relative.encode("utf-8")
+    digest = _sha256(identity)[:16]
     transaction_id = f"user-assertions-{digest}"
     workspace = _workspace(repo, transaction_id)
     manifest_path = workspace / "manifest.json"
@@ -110,11 +123,18 @@ def prepare_transaction(path: Path | None = None, repo: Path | None = None) -> d
         "schema": PROTOCOL,
         "transaction_id": transaction_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "pending_path": "inbox/facts-pending.md",
+        "pending_path": pending_relative,
         "pending_sha256": _sha256(pending_bytes),
         "raw_path": "cross-domain/raw/facts/user-assertions.md",
         "raw_sha256": _file_sha256(raw_path),
         "facts": facts,
+        "wiki_contract": {
+            "required_frontmatter": ingest_check.REQUIRED,
+            "recommended_frontmatter": ingest_check.SOFT_REQUIRED,
+            "sections": ingest_check.STANDARD_SECTIONS,
+            "relations": "nonempty; every fact_id must have an explicit, source-bound relation",
+            "preflight": "all existing frontmatter field, enum and date rules run before Raw/Graph writes",
+        },
         "proposal_schema": {
             "schema": PROPOSAL_SCHEMA,
             "transaction_id": transaction_id,
@@ -231,12 +251,10 @@ def _validate_proposal(repo: Path, manifest: dict, proposal: dict) -> tuple[list
             raise ValueError(f"empty wiki content: {relative}")
         if _file_sha256(target) != str(update.get("before_sha256") or ""):
             raise ValueError(f"wiki changed after proposal: {relative}")
-        try:
-            frontmatter = yaml.safe_load(content.split("---", 2)[1]) or {}
-        except (IndexError, yaml.YAMLError) as exc:
-            raise ValueError(f"invalid Wiki frontmatter: {relative}: {exc}") from exc
-        if not isinstance(frontmatter, dict) or not frontmatter.get("title"):
-            raise ValueError(f"Wiki frontmatter lacks title: {relative}")
+        frontmatter, _, _ = ingest_check.parse_frontmatter(content)
+        errors, _warnings = ingest_check.check_frontmatter(frontmatter, relative)
+        if errors:
+            raise ValueError(f"Wiki preflight failed for {relative}: " + "; ".join(errors))
         normalized_updates.append({**update, "page": relative, "target": target})
     facts_with_relations = set()
     normalized_relations = []
@@ -294,7 +312,7 @@ def _restore(path: Path, existed: bool, data: bytes) -> None:
 def apply_transaction(transaction_id: str, repo: Path | None = None) -> dict:
     repo = (repo or REPO).resolve()
     workspace, manifest, proposal = _load_apply_inputs(repo, transaction_id)
-    pending = repo / manifest["pending_path"]
+    pending = _pending_path(repo, repo / manifest["pending_path"])
     raw = repo / manifest["raw_path"]
     if _file_sha256(pending) != manifest["pending_sha256"]:
         raise ValueError("facts-pending.md changed after transaction preparation")

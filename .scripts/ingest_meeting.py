@@ -34,11 +34,13 @@ import ingest_pipeline
 import recovery_policy as rp
 import source_fingerprints as sf
 import student_guidance_projection as sgp
+from meeting_compiler_repair import inspect_output as inspect_meeting_output
 import wiki_locator as wl
 from meeting_compiler_contract import (
     MEETING_IR_DELIMITER,
     PREPROCESS_DELIMITER,
     PROTOCOL_VERSION as MEETING_COMPILER_PROTOCOL,
+    WIKI_CONTENT_CONTRACT,
     apply_transcript_replacements,
     meeting_ir_record_contract,
     meeting_ir_template,
@@ -261,7 +263,7 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
                                         sources_path: str, full_date: str, today: str,
                                         errors: list[str] | None = None,
                                         student_candidates: str = "{}") -> str:
-    """Build the single Meeting Compiler task used by both API and agent backends."""
+    """Build the API prompt; record meanings also feed the separate Agent task."""
     error_section = ""
     if errors:
         error_section = "\n\n[上次输出的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
@@ -286,12 +288,12 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
 
 [要求]
 1. PREPROCESS 只列必要、证据明确的 exact replacements；original 必须是原文中的连续原串，replacement 不得含换行。没有可靠纠错就返回空数组。不要输出整份改写后的原文。
-2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved。未解析人物仍保留明确的参会、汇报与责任任务，person/assignee 为空串、label/person_label/assignee_label 保留原称呼，不创建或猜测全局人物身份。叙事正文同样区分不同原称呼及其来源，不把待确认身份写成同一人。
+2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved。身份与角色分别取证：人物身份匹配不证明参会或负责。未解析人物仍保留明确的参会、汇报与责任任务，person/assignee 为空串、label/person_label/assignee_label 保留原称呼，不创建或猜测全局人物身份。任务执行者未明确时 assignee、assignee_label 同为空。叙事正文同样区分不同原称呼及其来源，不把待确认身份写成同一人。
 3. Wiki 和 MEETING_IR 必须基于同一组纠错与实体判断，禁止使用相互矛盾的人名或术语。
 4. 撰写 conference-summary 类型 wiki 页面，含 frontmatter 和正文。
 5. frontmatter 必须包含: title, type: conference-summary, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: current, created（今日日期）, updated（今日日期）。
-6. 正文结构: # 标题 → ## Navigation（2-4 句导航概述）→ ## Content（保留研究问题、关键观察、方法限制和未决矛盾，避免重复叙述结构化清单；来源限制简明表述）。参会者、议题、汇报、决策、待办和学生指导更新由程序从 MEETING_IR 统一生成。
-7. Wiki 简写、纠错、去口语化，但忠实于原文，不编造。
+6. 正文结构: # 标题 → ## Navigation（2-4 句）→ ## Content。{WIKI_CONTENT_CONTRACT}
+7. Wiki 简写、纠错、去口语化，但忠实于原文，不编造。区分纪要记载的行为与自动会议助手的解释或推测；后者注明来源和不确定性，Wiki 与 IR 使用相同证据强度。
 8. 原文每个非空行前有程序分配的 [sNNNN] evidence_id。MEETING_IR 每个事实必须引用至少一个真实 evidence_id；不得编造路径、行号或 evidence_id。
 9. 议题保留有来源依据的学术概念名。英文全称和缩写仅在原文明确给出时使用；原文只有缩写且含义未确认时保留原称呼，不为双语格式猜测或补造全称、替换缩写。决策只保留会议结束时仍有效的最终判断。先提出后被纠正、否决或替换的方案只能作为 Wiki 背景，不得与最终结论压成同一 decision；尚未确定的选择进入待办并明确“待确认”。待办保留可执行动作，不把决策和待办压缩成关键词。
 10. attendees/reports/decisions/tasks/topics 各自独占对应事实。relations 只容纳议题间的涉及/紧密相关于或人物间的指导/师从/受指导于，不得重复参会、汇报、决策、待办或会议议题，不得使用“本会议”等指代词。
@@ -381,6 +383,12 @@ def _evidence_refs(row: dict) -> str:
     return "".join(f"[^meeting-{item}]" for item in row["evidence_ids"])
 
 
+def _wiki_task(row: dict) -> str:
+    owner = (_wiki_person_link(row["assignee"], row["assignee_label"])
+             if row["assignee"].strip() or row["assignee_label"].strip() else "责任人未明确")
+    return f"{owner}：{row['text']}"
+
+
 def compile_meeting_navigation(markdown: str, meeting_ir: dict, *,
                                raw_source: str, date: str,
                                catalog: list[dict]) -> str:
@@ -405,6 +413,11 @@ def compile_meeting_navigation(markdown: str, meeting_ir: dict, *,
         body = body[:h1.end()] + "\n\n" + participant_line + tail
 
     sections: list[str] = ["<!-- meeting-navigation:start -->", "### 会议导航"]
+    counts = [f"{label} {len(meeting_ir[key])} 条" for key, label in (
+        ("attendees", "参会"), ("reports", "汇报"), ("tasks", "待办"),
+    ) if meeting_ir[key]]
+    if counts:
+        sections.extend(["", "已提取记录：" + " · ".join(counts) + "。"])
     structured = [
         ("参会者", meeting_ir["attendees"],
          lambda row: _wiki_person_link(row["person"], row["label"])),
@@ -413,8 +426,7 @@ def compile_meeting_navigation(markdown: str, meeting_ir: dict, *,
         ("汇报", meeting_ir["reports"],
          lambda row: f"{_wiki_person_link(row['person'], row['person_label'])}：{row['topic']}"),
         ("决策", meeting_ir["decisions"], lambda row: row["text"]),
-        ("待办事项", meeting_ir["tasks"],
-         lambda row: f"{_wiki_person_link(row['assignee'], row['assignee_label'])}：{row['text']}"),
+        ("待办事项", meeting_ir["tasks"], _wiki_task),
         ("相关关系", meeting_ir["relations"],
          lambda row: f"{row['subject']} · {row['predicate']} · {row['object']}"),
         ("学生指导更新", meeting_ir["person_updates"],
@@ -587,7 +599,7 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
                 "required_sections": ["Navigation", "Content"],
                 "frontmatter": frontmatter,
                 "title_binding": "same as META.title; template title is the current inferred title",
-                "content": "research question, key reported observations, limitations and unresolved issues; program projects structured lists",
+                "content": WIKI_CONTENT_CONTRACT,
                 "source_binding": "program binds final Raw path after META; cite only this transaction source or existing verified sources",
             },
             "meeting_ir": {
@@ -600,7 +612,7 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
                 "records": meeting_ir_record_contract(),
                 "topic_predicates": ["讨论", "涉及", "规划"],
                 "relation_predicates": ["涉及", "紧密相关于", "指导", "师从", "受指导于"],
-                "identity": "unresolved person/assignee is empty; preserve source labels and role facts in Wiki; only resolved roles enter Graph",
+                "identity": "identity and role require separate evidence; unresolved identity retains source label; tasks with no stated owner have both assignee fields empty; only resolved roles enter Graph",
                 "person_updates": {
                     "student_identity": "person must equal student_guidance_candidates.student_key",
                     "kinds": sorted(sgp.GUIDANCE_KINDS),
@@ -659,12 +671,43 @@ def _compiler_retry_context(state: dict, input_hash: str) -> dict:
             or payload.get("attempt") != len(attempts)
             or payload.get("input_hash") != input_hash):
         raise ValueError("compiler retry artifact identity mismatch")
-    return {"previous_output": payload["response_text"],
+    return {"previous_output": payload.get("assembled_output") or payload["response_text"],
             "previous_diagnostic": payload["diagnostic"]}
+
+
+def _compiler_diagnostic_summary(diagnostic: dict) -> dict:
+    """Keep bounded parser diagnostics after extract cleanup, without source excerpts."""
+    summary = {}
+    truncated = False
+    for key, limit in (
+        ("kind", 64), ("stage", 64), ("segment", 64), ("error_type", 64),
+        ("message", 300), ("coordinate_space", 200),
+    ):
+        value = diagnostic.get(key)
+        if isinstance(value, str):
+            summary[key] = value[:limit]
+            truncated |= len(value) > limit
+    for key in ("line", "column", "position"):
+        value = diagnostic.get(key)
+        if type(value) is int and value >= 0:
+            summary[key] = value
+    issues = diagnostic.get("issues")
+    if isinstance(issues, list):
+        summary["issue_count"] = len(issues)
+        summary["issues"] = [item[:300] for item in issues[:12] if isinstance(item, str)]
+        truncated |= len(issues) > 12 or any(
+            not isinstance(item, str) or len(item) > 300 for item in issues[:12]
+        )
+    if truncated:
+        summary["truncated"] = True
+    return summary
 
 
 def _record_compiler_output(state: dict, result, trace: dict, input_hash: str) -> None:
     attempts = state.setdefault("meeting_compiler_attempts", [])
+    summary = _compiler_diagnostic_summary(getattr(result, "diagnostic", {}))
+    if summary:
+        trace["diagnostic_summary"] = summary
     attempts.append(trace)
     if not hasattr(result, "response_text"):
         return
@@ -675,6 +718,10 @@ def _record_compiler_output(state: dict, result, trace: dict, input_hash: str) -
         "status": result.status, "reason": result.reason,
         "response_text": result.response_text, "diagnostic": result.diagnostic,
     }
+    if getattr(result, "assembled_output", ""):
+        payload["assembled_output"] = result.assembled_output
+    if getattr(result, "repair_request", None):
+        payload["repair_request"] = result.repair_request
     encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     artifact.write_bytes(encoded)
     artifact.chmod(0o600)
@@ -796,8 +843,9 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
                 state, [f"缺少暂存产物: {agent_output.relative_to(REPO)}"],
             )
             return False, f"agent 输出尚未写入: {agent_output.relative_to(REPO)}"
-        proposal, parse_error, diagnostic = parse_proposal_detailed(
-            agent_output.read_text(encoding="utf-8")
+        proposal, parse_error, diagnostic = inspect_meeting_output(
+            agent_output.read_text(encoding="utf-8"), source_text=source_text,
+            evidence_catalog=build_evidence_catalog(source_text), guidance_catalog=guidance_catalog,
         )
         if proposal is None:
             state["_awaiting_agent_wiki_slots"] = True
@@ -827,6 +875,9 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             "context_hash": context_hash,
             "prompt": prompt,
             "errors": tuple(errors),
+            "source_text": source_text,
+            "evidence_catalog": build_evidence_catalog(source_text),
+            "guidance_catalog": guidance_catalog,
             **retry_context,
         })
         compiler_trace = result.trace() | {"context_hash": context_hash}

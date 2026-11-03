@@ -119,8 +119,8 @@ python3 .scripts/long_document_plan.py <已归档 raw 路径>
    - `<<<WIKI>>>`：conference-summary Wiki 草稿，Navigation 和 Content 保留研究问题、关键观察、方法限制与未决矛盾，不重复结构化清单；来源限制简明表述，不挤占研究背景。
    - `<<<MEETING_IR>>>`：顶层固定 `protocol_version: meeting-compiler-v3`，以及参会者、议题、汇报、决策、待办、受限扩展关系和 `person_updates`；每项必须引用 evidence ID。学术术语保留原文有依据的名称，不为双语格式猜测英文全称或替换缩写；topics/reports/relations 的大写缩写须可在该项引用的原文中定位，常规摄入与受管修复共用此校验。`person_updates` 只能指向候选目录中的已有学生记录，类别限进展、下一步、阻塞、决定、里程碑与方向变化。
    - Agent task 的 `protocol.template` 提供可由共享 parser 解析的完整语法骨架：META 使用逐行 `key: value`，PREPROCESS/MEETING_IR 使用 JSON，Wiki 含当前 frontmatter 与必需标题。`meeting_ir.fields/template` 与 validator 共用字段定义；Agent 根据原文填充叙事与有证据的记录，不能把空骨架当作语义完成，不通过静默补字段容忍非法输出。
-4. **程序编译派生物**：所有 replacement 必须命中原文，按一次非级联替换生成 staged `corrected.txt`；候选目录与 specialist 决策合并为 `entity-resolution.json`。程序从同一 MEETING_IR 确定性生成 `## Content` 内的 `### 会议导航`、`学生指导更新` 证据块与 semantic slots，使默认 `read-section #content` 能直接返回精确 Raw 引用。人物未解析不删除角色事实：attendees/reports 的 person、tasks 的 assignee 使用空串，原称呼与明确动作仍带证据投影到 Wiki，仅已解析人物角色进入 Graph，不以网名创建全局身份。概念保持全局可解析，决策和待办生成页面作用域 proposition/task，不进入全局 keyword 池；`decisions` 只允许最终仍有效的决定，禁止把已否定提案与后续纠正合并成同一决策。重叠、重复、无命中、无证据、相互冲突的决策或协议不完整均拒绝，不静默降级。
-5. **产物与导航校验**：MEETING_IR、Wiki、semantic、knowledge IR 和 graph plan 逐层校验集合一致；typed Meeting Compiler 核心语义边必须 100% 具备 Wiki section locator，并经脚注抵达精确 Raw 行号。任一硬错误带精确错误回到同一个 Meeting Compiler 做一次定向修订；warning 继续走局部确定性修复。
+4. **程序编译派生物**：所有 replacement 必须命中原文，格式合法且 original == replacement 的记录不执行替换，仍保留原提议；其余按一次非级联替换生成 staged `corrected.txt`，无变化记录不参与实际替换的重叠判定。候选目录与 specialist 决策合并为 `entity-resolution.json`。程序从同一 MEETING_IR 确定性生成 `## Content` 内的 `### 会议导航`、`学生指导更新` 证据块与 semantic slots，使默认 `read-section #content` 能直接返回精确 Raw 引用。人物未解析不删除角色事实：attendees/reports 的 person、tasks 的 assignee 使用空串，原称呼与明确动作仍带证据投影到 Wiki，仅已解析人物角色进入 Graph，不以网名创建全局身份。该留空规则不适用于 relations；重要但身份未关联的关系以原称呼、归属及 Raw 引用保留在正文，关系端点仍须完整。概念保持全局可解析，决策和待办生成页面作用域 proposition/task，不进入全局 keyword 池；`decisions` 只允许最终仍有效的决定，禁止把已否定提案与后续纠正合并成同一决策。正文同样连接前述质疑/方案与后续澄清、更正或撤回，保留未决分歧及来源强度，不将较晚的自述或助手解释自动视为证实。重叠实际替换、重复原串、无命中、无证据、相互冲突的决策或协议不完整均拒绝，不静默降级。
+5. **产物与导航校验**：MEETING_IR、Wiki、semantic、knowledge IR 和 graph plan 逐层校验集合一致；typed Meeting Compiler 核心语义边必须 100% 具备 Wiki section locator，并经脚注抵达精确 Raw 行号。可解析协议先一次汇总独立的结构、来源编号/术语和学生目录问题；API 的既有一次修订预算中，仅有具体 IR 记录问题时可只返回记录补丁（最多 16 条），程序按完整草稿与原记录哈希限定范围，保留会议正文及未点名记录，合并后重新执行原校验。仅可选关系和目录中无对应档案的学生更新投影可经程序逐条允许后带理由撤去；已有学生的键错误须纠正，核心决策/任务等不能删除。无学生档案不等于人物身份不明，会议事实仍由正文与 Raw 保留，不自动新建档案。旧提议、实际补丁与合并产物分开留存，中断仍保留完整基线供续跑；其他错误使用原完整协议恢复，首次编译不增加调用，失败不新增重试循环。Agent 获得相同汇总问题并继续原任务；warning 继续走局部确定性修复。
 6. **后端与恢复**：`INGEST_BACKEND=agent` 时脚本返回 `prepared + agent-task-v1`，当前宿主直接读取任务列出的原文、候选和协议，写入同一暂存输出后执行 resume；校验失败只更新原任务的 issues。`INGEST_BACKEND=api` 时程序通过 DSH 调用一次 Meeting Compiler；rejected、协议解析失败或预算耗尽保留 trace，并进入兼容 `agent_required`。两端共用同一事务与 validator，不把长原文复制进任务清单。文件名中的有效 `YYYY-MM-DD` 或 `YYYYMMDD` 是权威日期，先验证日历合法性，不将年份前缀误读为 `MMDD`；仅 `MMDD` 或无有效日期时才允许用摄入年推断，并在事务与 Wiki 中写 `date_inferred`。Compiler 提供非空 title 后，程序在落位前重算最终 meeting ID、Raw/Wiki 路径和 sources。
 7. **统一落图**：校验后的 semantic 经 `knowledge-ir-v1` → 绑定 IR SHA-256 的 `graph-plan-v1` → 唯一 writer `graph_ingest.py`。Meeting Compiler 不写 Raw、Wiki 或 `graph.db`，也不自报 IR 的确定性字段。
 8. **学生记录同事务投影**：Raw/Wiki 落位与 Graph 校验通过后，同一 ingest transaction 必须执行 `student_guidance_projection.py`。它只幂等更新已匹配的学生页 `## 会议更新` 受管块，同步 `notes/status.md` 的最新进展、下一步和日期。投影失败时整体状态不得进入 `completed`；保留原 transaction ID 从 `post_commit_projection` 幂等恢复，不重跑知识库提交。未匹配人物不自动建档，出席、能力/态度评价、隐私和推测内容不投影。
@@ -343,9 +343,38 @@ N 篇编码完成后一次性执行巩固阶段（步骤 4-10）：
 9. 追加 `wiki/log.md`，记录 `update | base_name (旧版本 → 新版本)`
 10. **收尾校验同创建模式步骤 11-13**：`ingest_check`（不省）→ `ingest_build` 派生同步 → 自检。更新同样改了 frontmatter/triples/section，确定性壳不因更新而降级
 
-已完成会议事务若发现人物被错误解析，或 Wiki/MEETING_IR 投影保留了被后文推翻的旧结论，使用 `repair_meeting_identity.py` 依据原 Raw、evidence-bound MEETING_IR 和既有学生候选目录执行 `plan-only → apply`。身份修复提交 exact mention、canonical entity 与学生更新；投影修复提交位于 `temp/meeting-repair/` 的 Wiki draft，以及完整 IR 或只精确替换一个旧决策的 `meeting-ir-repair-patch-v1`。该入口先验证 evidence、IR/Wiki 与回滚式 Graph plan，应用时事务化更新会议 Wiki、`entity-resolution.json`、MEETING_IR、semantic、Knowledge IR、Graph plan、Graph 来源边、学生指导投影与 `conflict-fix` 日志，最终执行 `ingest_check --graph`；失败恢复备份。不得直接手改 Raw 目录中的派生文件或裸改数据库。
+已完成会议事务若发现人物被错误解析，或 Wiki/MEETING_IR 投影保留了被后文推翻的旧结论，使用 `repair_meeting_identity.py` 依据原 Raw、evidence-bound MEETING_IR 和既有学生候选目录执行 `plan-only → apply`。身份修复提交 exact mention、canonical entity 与学生更新；投影修复提交位于 `temp/meeting-repair/` 的 Wiki draft，以及完整 IR 或只精确替换一个旧决策的 `meeting-ir-repair-patch-v1`。该入口先验证 evidence、IR/Wiki 与回滚式 Graph plan，应用时事务化更新会议 Wiki、`entity-resolution.json`、MEETING_IR、semantic、Knowledge IR、Graph plan、Graph 来源边、学生指导投影与 `conflict-fix` 日志，最终执行 `ingest_check --graph`；失败恢复备份。不得直接手改 Raw 目录中的派生文件或裸改数据库。对于旧 compiler 将多个姓名写法合并为 `甲/乙` 的待办，仅当整串不在原文且每个成员均逐字存在时允许按成员核验；归档的用户确认必须明确包含完整合并串及确认姓名。重复、重叠或缺失成员拒绝，逐个原文写法保存解析结果，不猜全局别名。
 
 ---
+
+### 用户确认会议姓名：统一准备与提交
+
+用户补充姓名时，优先使用 `repair_meeting_identity.py --prepare-confirmation`。宿主将用户原话和明确映射写入 JSON；程序不猜姓名或人物页身份。输入格式：
+
+```json
+{
+  "schema": "meeting-identity-confirmation-v1",
+  "date": "2026-11-03",
+  "statement": "用户的完整确认原话",
+  "corrections": [
+    {"mention": "原文写法", "label": "确认姓名", "canonical": "academic/wiki/authors/explicit-person-id"}
+  ]
+}
+```
+
+`mention` 必须选择该会议已有的一条 compiler identity decision，且逐字绑定 Raw；历史 `甲/乙` 合并项按上述规则核验。第一版接受 1–16 项、每项一个不同的显式人物页，人物页不存在时生成带日期、来源及事实引用的完整草稿；已有页须为同名 people 页。跨条目合并身份等复杂修订继续使用原投影修复入口。
+
+```bash
+python3 .scripts/repair_meeting_identity.py --transaction-id <已完成会议事务> --prepare-confirmation temp/confirmation-input.json
+# 按返回的 agent-task-v1 复核 bundle/wiki.md，再执行返回的 next_command：
+python3 .scripts/repair_meeting_identity.py --transaction-id <同一事务> --apply-confirmation temp/meeting-repair/<bundle>
+```
+
+prepare 只生成受管暂存材料：事实提案、人物页、引用、IR、姓名映射与 Wiki 草稿。宿主复核局部姓名修改，移除被本次确认取代的“身份待确认”正文，保留其他未决信息与来源限制；只编辑任务声明的 Wiki 草稿。程序生成文件与准备时的会议输入绑定哈希，失配时拒绝提交。`agent-task-v1` 交回当前宿主，不调用 DSH 或 API LLM。
+
+apply 先检查字段、日期、IR 与引用，再依次复用用户事实归档、会议修复及原批报告对账。缺字段等错误在 Raw/Graph 写入前返回；后续阶段保留原事务的提交后校验和回滚。归档成功但会议修复失败时返回 `confirmation_archived=true`；会议成功但报告失败时返回 `meeting_repaired=true`。重新执行同一 apply 命令只续跑剩余阶段，已完成会议须重新核对既有内容回执。用户事实已成功归档后不因下游失败回删。
+
+暂存事实只使用该 bundle 下的 `facts-pending.md`，不消费普通 inbox。stdout 返回计数、验证状态、报告及回执路径；详细资料留在原事务报告。此入口减少手工拼接，不放宽最终校验，也不新增语义模型调用；原始转写和历史 corrected 派生物不重写。
 
 ## 冲突处理分支
 
@@ -899,6 +928,8 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 **通用文档语义槽早停**：Wiki/Raw 落位前严格解析 `三元组:` section；非空槽中的每条关系必须是 `主体 | 谓词 | 客体` 三字段。Markdown 列表符和全角 pipe 可机械归一化；自然语言箭头、旧式 `行政主题/行政关系` 或非空但解析为零条关系均硬失败，禁止等到图编译空跑后才发现。
 
 **对话文档摄入（shared）**：附件/文件路径使用 `wg.py ingest <path> --keep-source --subproject <domain>`，纯粘贴正文使用 `wg.py ingest --stdin --name <title.txt|title.md> --subproject <domain>`；先受管暂存，再复用同一分类、去重、Agent/API adapter 与事务，不创建第二套提交管线。原始正文按 UTF-8 字节保存，不混入对话指令或预先摘要；文件原件即使位于 inbox 也不删除。原件保留标记、回执和恢复边界以 `operations/INBOX.md`「对话提交文档：同管线，保留原件」为准；普通 inbox 待处理项的清理规则不变。
+
+**会议角色与责任边界（shared）**：人物身份与角色分别取证。明确的出席名单、发言或互动支持参会；被提及、身份匹配、被布置会后任务均不单独支持参会，点名未回应也不能确认缺席。汇报者、指派者、执行者与协作对象按原文区分；自动会议助手的解释或推测保留归属及不确定性。MEETING_IR v3 允许有依据的 task 在执行者未明确时以空 `assignee` 和空 `assignee_label` 保留，Wiki 显示“责任人未明确”；有原称呼但身份尚未关联时保留 `assignee_label`、仅空 `assignee`。未知责任任务不生成虚构人物责任边，动作与来源仍可从 Wiki 到达。该契约由 API prompt 与 Agent manifest 共用；字段/来源校验不代替语义判断，不增加全篇二次审查或模型调用。
 
 **会议最终来源绑定（shared）**：Meeting Compiler META 确定最终标题后，程序重算 meeting-id 与 Raw/Wiki 目录，再由 `bind_meeting_source` 解析 YAML frontmatter，将 `sources` 统一回填为唯一的 `raw_dir/source_filename`。支持标量、行内/多行列表及省略该程序字段的草稿，不改变 Wiki 正文；无效 YAML 或非 mapping header 返回校验错误。`step_validate_wiki` 拒绝缺少事务路径、旧目录、占位或多余来源，Agent/API 共用该确定性边界。提交前检查目标路径绑定，落盘后用 `ingest_check --graph` 验证真实来源地址。已完成事务不因代码修复自动重跑；历史错链须依据真实 Raw 单独修复 Wiki 与图导航，不改 Raw，也不以暂存状态替代事实依据。
 

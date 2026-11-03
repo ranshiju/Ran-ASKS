@@ -71,6 +71,8 @@
 
 ### 摘要、引言与结论
 
+摘要的专项讨论、撰写和修改按 `operations/research/academic-abstract.md`；实际落笔可直接使用 `write/academic-abstract` profile，并组合本清单的物理证据边界。
+
 - 摘要是否沿正文同一物理逻辑推进，而不是罗列数值和阈值。
 - 引言是否用因果过渡介绍核心结果，而不是 mini 版目录。
 - 结论是否在更高概念层面收束，而不是重复开头。

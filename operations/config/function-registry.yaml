@@ -185,7 +185,7 @@ functions:
 
   artifact.write:
     title: 文稿写作与修改
-    summary: 基于可回溯材料生成或修改 Markdown、Word、PDF 和专业文稿。
+    summary: 基于可回溯材料生成或修改 Markdown、Word、PDF 和专业文稿，含学术摘要与论文系统改进；由 Agent 通读全文后依次改进摘要、标题、引言和全文。
     kind: function
     audience: [user, agent]
     control_owners: [host_agent]
@@ -198,7 +198,7 @@ functions:
       route_task_aliases:
         write: write/general
       route_capabilities:
-        write: [general, academic]
+        write: [general, academic, academic-abstract, academic-manuscript]
       executor: host_agent
 
   artifact.review:

@@ -334,6 +334,23 @@ def _wiki_admitted(item: dict, include_deprecated: bool) -> bool:
     return include_deprecated or "deprecated" not in (item.get("status"), item.get("page_status"))
 
 
+def _wiki_read_entry(page: str, text: str, *terms: str) -> dict:
+    """Select a real section from this scan, without publishing the scanned body."""
+    section = wl.best_cited_section(page, *terms, text=text)
+    if section is not None and section.level < 2:
+        section = None
+    if section is None:
+        sections, _definitions = wl.parse_wiki_text(text)
+        candidates = [s for s in sections if s.level >= 2 and s.slug not in {"sources", "来源"}]
+        section = next((s for s in candidates if s.slug == "navigation"), None)
+        if section is None:
+            section = next(iter(candidates), None)
+    if section is None:
+        return {}
+    return {"semantic_address": f"{page}#{section.slug}", "read_action": "read_section",
+            "read_input": {"page": page, "section": section.slug}}
+
+
 @scoped_query
 def wiki_recall(query: str = "", domain: str = "", topk: str = "8",
                 include_deprecated: bool = False) -> tuple[str, int]:
@@ -389,6 +406,7 @@ def _wiki_recall_data(conn, query: str, domain: str, limit: int,
                 "path": rel, "title": path.stem, "filename": path.stem,
                 "status": "unknown", "aliases": [], "navigation": "", "profile": "",
             })
+            item["_scan_text"] = text
             frontmatter = re.match(r"^---\r?\n(.*?)\r?\n---(?:\r?\n|$)", text, re.S)
             metadata = {}
             if frontmatter:
@@ -448,11 +466,14 @@ def _wiki_recall_data(conn, query: str, domain: str, limit: int,
             })
     for item in out:
         check_path_scope(item["path"])
+        text = pages.get(item["path"], {}).get("_scan_text")
+        if text is not None:
+            item.update(_wiki_read_entry(item["path"], text, query, item["title"]))
     result = {"query": query, "domain": domain or "all", "mode": mode, "count": len(out), "candidates": out,
           "include_deprecated": include_deprecated,
           "direction_profile_hits": direction_profile_hits,
           "sensitive_review": domain == "business",
-          "next": "read Navigation candidates, then Content/raw" if out else "no_candidate"}
+          "next": "read returned section entry, then Raw; candidates without an entry need a valid Wiki section" if out else "no_candidate"}
     return result, pages
 
 
@@ -771,9 +792,12 @@ def wiki_context_data(page: str, section: str, profile: str = "explanation",
 
 def wiki_context(page: str = "", section: str = "", profile: str = "explanation",
                  topk: str = "12") -> tuple[str, int]:
-    if not page or not section:
-        return "[ERROR 缺 page 或 section]", 0
-    result = wiki_context_data(page, section, profile, int(topk))
+    if not page:
+        return "[ERROR 缺 page]", 0
+    try:
+        result = wiki_context_data(page, section, profile, int(topk))
+    except (FileNotFoundError, ValueError, KeyError) as exc:
+        return f"[ERROR {exc}]", _tok(str(exc))
     text = json.dumps(result, ensure_ascii=False, indent=2)
     return text, _tok(text)
 

@@ -76,6 +76,10 @@ python3 .scripts/route.py --capability write --capability-profile academic
 
 该调用组合 `WRITE.md` 的共享落笔约定与对应学科写作 overlay；它不改变 `research` 工作上下文。同一连续写作回合已经加载后无需重复调用。论文讨论、数据核对、实验、查询和进度汇报阶段不调用。
 
+摘要起草与修改使用更聚焦的 `python3 .scripts/route.py --capability write --capability-profile academic-abstract`。仅讨论摘要时按需读取 `operations/research/academic-abstract.md`；该规范处理科学结论先于数据、比较证据边界、实验贡献和多轮意见落实，学科 overlay 按需组合。
+
+整篇论文改进使用 `python3 .scripts/route.py --capability write --capability-profile academic-manuscript`，仍保持 `research` 上下文。宿主 Agent 自行通读全文与补充材料，再按摘要、标题、引言、全文的顺序修改并回查一致性；流程维护于 `operations/research/manuscript-improvement.md`，摘要阶段复用摘要规范。只讨论时读取规范而不自动改稿，接续任务复用已完成的阅读。
+
 研究中需要查知识库文献、定位已有结果、回溯 raw 原文核验，或操作研究记忆，调用 `.scripts/wg.py`（统一 JSON 输出，跨功能、回合中可调）：
 
 **状态与记忆**：

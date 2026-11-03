@@ -48,6 +48,30 @@ def test_check_citations_unverified():
     assert r["unverified"] == ["x"]
 
 
+def test_check_citations_contained_line_and_page_spans():
+    read = ["raw/说明.md#L24-L43", "raw/report.pdf#page-3-5", "raw/original.docx"]
+    citations = ["raw/说明.md#L24", "raw/说明.md#L26-L28", "raw/说明.md#L43",
+                 "raw/说明.md#L24-43", "raw/report.pdf#page-4",
+                 "raw/report.pdf#page-4-5", "raw/original.docx"]
+    result = module._check_citations(citations, read)
+    assert result == {"ok": True, "status": "verified", "count": len(citations)}
+
+
+def test_check_citations_preserves_unread_span_boundaries():
+    read = ["raw/a.md#L4-L8", "raw/a.md#L12-L15", "raw/b.pdf#page-3-5",
+            "raw/c.md#heading", "raw/original.docx", "raw/bare.md",
+            "raw/headings.md#3-5", "raw/headings.md#page-3-5"]
+    citations = ["raw/a.md#L3-L5", "raw/a.md#L7-L9", "raw/a.md#L6-L13",
+                 "raw/a-v2.md#L5", "raw/a.md/other#L5", "raw/a.md#page-5",
+                 "raw/a.md#L0", "raw/a.md#L8-L4", "raw/a.md#heading",
+                 "raw/b.pdf#page-2-4", "raw/b.pdf#page-4-6", "raw/b.pdf#L4",
+                 "raw/c.md#L5", "raw/original.docx#page-1", "raw/bare.md#L1",
+                 "raw/headings.md#4", "raw/headings.md#page-4"]
+    result = module._check_citations(citations, read)
+    assert result["ok"] is False and result["unverified"] == citations
+    assert module._check_citations(["raw/c.md#heading"], read)["ok"]
+
+
 # ============ _api_decision_schema ============
 
 def test_schema_valid_discover():
@@ -89,6 +113,70 @@ def test_prompt_includes_last_results():
     prompt = module._build_api_prompt(s, results, 2)
     assert "found something" in prompt
     assert "graph_search" in prompt
+
+
+def test_navigation_prompt_compacts_json_losslessly():
+    import copy
+    import re
+
+    candidate = {"id": "KU-example", "kind": "statement", "revision": 2,
+                 "excerpt": "DISTINCTIVE FULL EXCERPT with conditions and uncertainty",
+                 "status": "draft", "limitations": ["not independently verified"],
+                 "evidence_preview": [{"locator": "academic/raw/demo.md#L8-L12"}],
+                 "lexical_match": {"matched_phrases": ["first"]}, "score": 0.2}
+    second = {**candidate, "lexical_match": {"matched_phrases": ["second"]},
+              "score": 0.1, "read_action": "knowledge_read",
+              "read_input": {"unit_id": "KU-example"}}
+    payloads = [{"candidates": [candidate], "issues": ["limited recall"]},
+                {"candidates": [second], "truncated": True}]
+    results = [{"action": action, "input": {}, "ok": True, "error": "",
+                "text": json.dumps(payload, ensure_ascii=False, indent=2)}
+               for action, payload in zip(("knowledge_search", "hybrid_recall"), payloads)]
+    original = copy.deepcopy(results)
+    session = QuerySession(query="q", stage="evidence", mode="api")
+    for r in results:
+        module._remember_read_options(session, r["text"])
+    handles = copy.deepcopy(session.read_options)
+    prompt = module._build_api_prompt(session, results, 2)
+    assert prompt.count(candidate["excerpt"]) == 2
+    assert "same_candidate_as" not in prompt and "candidate_ref" not in prompt
+    assert sum(len(module._navigation_prompt_text(r)) for r in results) < sum(len(r["text"]) for r in results)
+    assert results == original and session.read_options == handles and not session.read_sources
+
+    # Every candidate and warning survives serialization; duplicate and variant
+    # candidates retain their original ordering and full read inputs.
+    reconstructed = []
+    for match in re.finditer(r"^  - (?:knowledge_search|hybrid_recall)\([^\n]*\): ", prompt, re.M):
+        payload, _ = json.JSONDecoder().raw_decode(prompt[match.end():])
+        reconstructed.append(payload)
+    assert reconstructed == payloads
+    later = module._build_api_prompt(session, [results[1]], 3)
+    assert candidate["excerpt"] in later and "same_candidate_as" not in later
+
+
+def test_navigation_prompt_preserves_candidate_variants_and_read_bodies():
+    base = {"id": "KU-example", "kind": "statement", "revision": 1,
+            "excerpt": "shared excerpt", "status": "draft", "limitations": [],
+            "evidence_preview": [{"locator": "academic/raw/v1.md#L1"}]}
+    for key, value in [("revision", 2), ("excerpt", "different excerpt"),
+                       ("status", "deprecated"), ("limitations", ["new limit"]),
+                       ("evidence_preview", [{"locator": "academic/raw/v2.md#L1"}]),
+                       ("future_semantic_field", "must preserve")]:
+        payload = {"candidates": [base, {**base, key: value}]}
+        r = {"action": "knowledge_search", "input": {}, "ok": True,
+             "text": json.dumps(payload, indent=2)}
+        prompt = module._build_api_prompt(QuerySession(query="q"), [r], 1)
+        assert "same_candidate_as" not in prompt
+        compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        assert compact in prompt
+    text = json.dumps({"candidates": [base, base]}, indent=2)
+    for action, ok, body in [("read_raw", True, text), ("knowledge_read", True, text),
+                             ("calculate", True, text), ("knowledge_search", False, text),
+                             ("knowledge_search", True, "malformed {"),
+                             ("knowledge_search", True, '{"candidates":[null]}')]:
+        r = {"action": action, "input": {}, "ok": ok, "text": body}
+        prompt = module._build_api_prompt(QuerySession(query="q"), [r], 1)
+        assert body in prompt
 
 
 def test_usage_roles_are_action_derived_and_do_not_promote_failed_reads():
@@ -477,7 +565,7 @@ def test_read_ref_keeps_public_scope_and_does_not_certify_failed_reads():
     assert not session.read_sources
 
 
-def test_read_handle_index_does_not_repeat_or_retain_candidate_claims():
+def test_read_handle_labels_remain_navigation_after_discovery_leaves_context():
     session = QuerySession(query="which source applies", mode="api", stage="evidence")
     title = "UNREAD-CANDIDATE-CLAIM: the method always works"
     other_title = "ANOTHER-UNREAD-CLAIM: future work in unrelated systems"
@@ -491,20 +579,62 @@ def test_read_handle_index_does_not_repeat_or_retain_candidate_claims():
     discovery = {"action": "knowledge_search", "input": {"query": "method"},
                  "ok": True, "text": text}
     prompt = module._build_api_prompt(session, [discovery], 2)
-    assert prompt.count(title) == prompt.count(other_title) == 1
+    assert prompt.count(title) == prompt.count(other_title) == 2
     first, second = list(session.read_options)
     with patch.object(module.actions, "execute", return_value={
             "ok": True, "text": "ACTUAL-KU-BODY", "tokens": 2, "error": ""}) as execute:
         result = module.execute_plan(session, [{"action": "read_ref", "input": {"ref": first}}])
         later = module._build_api_prompt(session, result['results'], 3)
-        assert title not in later and other_title not in later
+        assert later.count(title) == later.count(other_title) == 1
+        assert "候选不是已读证据" in later
         assert later.count("ACTUAL-KU-BODY") == 1
         assert second in later and 'Q-second' in later
-        # The unselected entry is still executable after its title leaves context.
+        # Labels aid selection without blocking a genuinely useful later read.
         module.execute_plan(session, [{"action": "read_ref", "input": {"ref": second}}])
         assert execute.call_args_list[-1].args == ('knowledge_read', {'unit_id': 'Q-second'})
     assert json.dumps(session.read_options, sort_keys=True) == saved
     assert not session.read_sources
+
+
+def test_source_labels_survive_raw_read_and_session_restore():
+    session = QuerySession(query="explain the proposal", mode="api", stage="evidence")
+    target = 'academic/raw/sources/S-target/original.md#L1-L4'
+    other = 'academic/raw/sources/S-other/original.md#L1-L8'
+    module._remember_read_options(session, json.dumps({'candidates': [
+        {'kind': 'source', 'title': 'Scholarship proposal', 'locator': target},
+        {'kind': 'source', 'title': 'Research cooperation agreement', 'locator': other},
+    ]}))
+    first, second = list(session.read_options)
+    with patch.object(module.actions, 'execute', return_value={
+            'ok': True, 'text': 'TARGET-RAW-BODY', 'tokens': 5, 'error': ''}), \
+         patch.object(module.actions, 'raw_citation_sources', return_value=[target]):
+        read = module.execute_plan(session, [{'action': 'read_ref', 'input': {'ref': first}}])
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, 'SESSIONS_DIR', Path(directory)):
+        module._save(session)
+        restored = module._load(session.session_id)
+    prompt = module._build_api_prompt(restored, read['results'], 3)
+    assert 'Scholarship proposal' in prompt and 'Research cooperation agreement' in prompt
+    assert prompt.count('TARGET-RAW-BODY') == 1
+    assert restored.read_sources == [target] and other not in restored.read_sources
+    assert restored.read_options[second]['input'] == {'locator': other}
+    assert len(restored.retained_results) == 1
+    restored.stage = 'answer'
+    final = module._build_api_prompt(restored, [], 4)
+    assert second not in final and 'Research cooperation agreement' not in final
+    assert final.count('TARGET-RAW-BODY') == 1
+
+
+def test_titleless_old_read_handle_remains_usable():
+    session = QuerySession(query='legacy session', mode='api', stage='evidence')
+    locator = 'academic/raw/example.md#L1'
+    session.read_options['R-old'] = {'action': 'read_raw', 'input': {'locator': locator}}
+    prompt = module._build_api_prompt(session, [], 2)
+    assert 'R-old' in prompt and locator in prompt
+    with patch.object(module.actions, 'execute', return_value={
+            'ok': True, 'text': 'LEGACY-RAW', 'tokens': 2, 'error': ''}) as execute, \
+         patch.object(module.actions, 'raw_citation_sources', return_value=[locator]):
+        module.execute_plan(session, [{'action': 'read_ref', 'input': {'ref': 'R-old'}}])
+    assert execute.call_args.args == ('read_raw', {'locator': locator})
 
 
 def test_read_options_survive_session_save_and_load():
@@ -623,6 +753,30 @@ def test_navigation_and_failed_material_are_not_retained():
     assert not session.retained_results and not session.read_sources
     prompt = module._build_api_prompt(session, out["results"], 2)
     assert "binding failed" in prompt and "usage_role=source_material" not in prompt
+
+
+def test_failed_read_records_attempt_not_read_page_and_corrected_entry_runs():
+    session = QuerySession(query="q", mode="api", stage="evidence")
+    page = "teaching/wiki/demo"
+    missing = {"action": "read_section", "input": {"page": page}}
+    fail = {"ok": False, "text": "missing heading", "tokens": 3, "error": "missing heading"}
+    with patch.object(module.actions, "execute", return_value=fail) as execute:
+        result = module.execute_plan(session, [missing])
+        assert not result["results"][0]["ok"]
+        assert session.visited_action_keys and not session.visited_pages
+        again = module.execute_plan(session, [missing])
+        assert execute.call_count == 1
+        assert "已尝试" in again["results"][0]["error"]
+        assert "已读过" not in again["results"][0]["error"]
+    assert not session.read_sources and not session.retained_results
+    module._remember_read_options(session, json.dumps({"candidates": [{
+        "path": page, "read_action": "read_section",
+        "read_input": {"page": page, "section": "actual-rules"}}]}))
+    success = {"ok": True, "text": "read body", "tokens": 5, "error": ""}
+    with patch.object(module.actions, "execute", return_value=success), patch.object(module, "collect_evidence_facts"):
+        out = module.execute_plan(session, [{"action": "read_ref", "input": {"ref": next(iter(session.read_options))}}])
+    assert out["results"][0]["ok"] and session.visited_pages == [page]
+    assert session.token_used == 8 and not session.read_sources
 
 
 def test_old_sessions_load_without_inventing_retained_evidence():

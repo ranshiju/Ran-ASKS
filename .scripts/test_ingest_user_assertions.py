@@ -58,7 +58,7 @@ def _setup_repo(root: Path) -> tuple[Path, Path, Path, Path]:
     return pending, raw, graph, wiki
 
 
-def _write_proposal(root: Path, prepared: dict, wiki: Path, *, valid_wiki: bool = False) -> None:
+def _write_proposal(root: Path, prepared: dict, wiki: Path, *, valid_wiki: bool = True) -> None:
     locator = f"cross-domain/raw/facts/user-assertions.md#{FACT_ID}"
     if valid_wiki:
         content = (
@@ -166,7 +166,7 @@ def test_apply_rolls_back_every_layer_when_final_validation_fails():
         original_run = module._run_command
 
         def fail_validation(command, _repo):
-            if "graph_ingest.py" in command:
+            if any(str(part).endswith("graph_ingest.py") for part in command):
                 return subprocess.CompletedProcess(command, 0, stdout='{"status":"completed"}\n', stderr="")
             return subprocess.CompletedProcess(command, 1, stdout="ERROR=1", stderr="")
 
@@ -200,6 +200,61 @@ def test_apply_runs_real_graph_ingest_and_ingest_check_in_isolated_repo():
         assert FACT_LINE in raw.read_text(encoding="utf-8")
         assert FACT_ID in wiki.read_text(encoding="utf-8")
         assert FACT_LINE not in pending.read_text(encoding="utf-8")
+
+
+def test_frontmatter_failure_precedes_any_raw_or_graph_work():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        pending, raw, graph, wiki = _setup_repo(root)
+        prepared = module.prepare_transaction(repo=root)
+        _write_proposal(root, prepared, wiki)
+        proposal_path = root / prepared["write_to"]
+        valid = json.loads(proposal_path.read_text())
+        originals = [path.read_bytes() for path in (pending, raw, graph, wiki)]
+        original_run = module._run_command
+        def unexpected(*args):
+            raise AssertionError("invalid draft reached an expensive command")
+        module._run_command = unexpected
+        try:
+            for old, new, reason in [
+                ("date: 2026-09-05\n", "", "date"),
+                ("date: 2026-09-05", "date: 2026-02-30", "frontmatter"),
+                ("status: current", "status: invented", "status"),
+            ]:
+                proposal = json.loads(json.dumps(valid))
+                proposal["wiki_updates"][0]["content"] = proposal["wiki_updates"][0]["content"].replace(old, new)
+                proposal_path.write_text(json.dumps(proposal))
+                try:
+                    module.apply_transaction(prepared["transaction_id"], repo=root)
+                except ValueError as exc:
+                    assert reason in str(exc), exc
+                else:
+                    raise AssertionError("invalid frontmatter accepted")
+                assert [path.read_bytes() for path in (pending, raw, graph, wiki)] == originals
+                assert not (proposal_path.parent / "graph-before.db").exists()
+        finally:
+            module._run_command = original_run
+
+
+def test_managed_confirmation_intake_preserves_ordinary_inbox():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        pending, _raw, _graph, _wiki = _setup_repo(root)
+        before = pending.read_bytes()
+        scoped = root / "temp/meeting-repair/confirmation/facts-pending.md"
+        scoped.parent.mkdir(parents=True)
+        scoped.write_text(FACT_LINE + "\n")
+        prepared = module.prepare_transaction(path=scoped, repo=root)
+        manifest = json.loads((root / prepared["manifest_path"]).read_text())
+        assert manifest["pending_path"] == str(scoped.relative_to(root))
+        assert pending.read_bytes() == before
+        assert "date" in manifest["wiki_contract"]["required_frontmatter"]
+        try:
+            module.prepare_transaction(path=root / "other/facts-pending.md", repo=root)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("unmanaged input accepted")
 
 
 def test_incremental_assertion_preserves_existing_page_relations():

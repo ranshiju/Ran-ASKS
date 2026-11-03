@@ -7,6 +7,27 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-03
+
+### Version decision / 版本判断
+
+- MINOR: Add compatible meeting identity confirmation and scoped record recovery, reading improvements and host-Agent writing profiles; synchronize Gallery and reader documentation
+- MINOR（中文）：新增兼容的会议姓名确认与记录局部恢复，改进阅读入口和宿主Agent写作规范，同步Gallery与读者文档
+
+### Highlights
+
+- Added managed meeting-name confirmation and bounded failed-record repair with source checks, exact merge scope and complete-draft recovery. Missing student files are treated separately from unresolved people; core decisions and tasks remain protected.
+- Improved query reading entries and retained titles, failed-read tracking, source citation subspans and budgeted selection of explicitly requested KU sections.
+- Added host-Agent academic-abstract and whole-manuscript writing profiles; synchronized bilingual READMEs, the Chinese introduction/PDF and Gallery navigation to current documentation.
+- Reconciled prompt-audit coverage with registered tool names. Targeted checks support the mechanisms; no whole-ingestion speedup or large-corpus semantic-quality claim is made.
+
+### 主要更新
+
+- 新增受管会议姓名确认与失败记录局部修复，保留来源检查、明确合并范围和完整草稿续跑；区分无学生档案与身份未关联，核心决策和任务保持保护。
+- 改进查询阅读入口与跨轮标题、失败读取记录、来源引用子片段，以及原预算内的KU显式章节选择。
+- 新增宿主Agent学术摘要和整篇论文写作规范，同步双语README、中文说明/PDF及Gallery到当前系统文档的导航。
+- 提示审计按实际注册工具名称核对覆盖；针对性检查支持机制，不宣称完整摄入提速或大语料语义质量收益。
+
 ## [0.22.2] - 2026-11-03
 
 ### Version decision / 版本判断
@@ -698,5 +719,7 @@ manifests and checksums.
 
 [0.22.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.1
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.22.2...HEAD
 [0.22.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.2
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.23.0

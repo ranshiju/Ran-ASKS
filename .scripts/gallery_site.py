@@ -149,7 +149,7 @@ def shell(title: str, description: str, body: str, prefix: str = '') -> str:
 <header class="site-header"><a class="brand" href="{prefix}index.html" aria-label="ASKS Gallery 首页"><span class="brand-mark" aria-hidden="true">A<span>↗</span></span><span>ASKS <b>GALLERY</b></span></a>
 <nav aria-label="主导航"><a href="{prefix}index.html#works">作品</a><a href="{prefix}index.html#capabilities">功能</a><a href="{PUBLIC_REPO}">GitHub <span aria-hidden="true">↗</span></a></nav></header>
 <main id="main">{body}</main>
-<footer class="site-footer"><div><a class="footer-brand" href="{prefix}index.html">ASKS / GALLERY</a><p>每一件作品，都是知识的一种表达。</p></div><div class="footer-links"><a href="{prefix}rights.html">作品使用说明</a><a href="{PUBLIC_REPO}">关于 ASKS ↗</a><a href="mailto:sjran@cnu.edu.cn">联系作者 ↗</a></div><span class="footer-note">由 ASKS 创作 · 与你分享</span></footer>
+<footer class="site-footer"><div><a class="footer-brand" href="{prefix}index.html">ASKS / GALLERY</a><p>每一件作品，都是知识的一种表达。</p></div><div class="footer-links"><a href="{prefix}rights.html">作品使用说明</a><a href="{PUBLIC_REPO}/blob/main/README.zh-CN.md">当前系统说明 ↗</a><a href="{PUBLIC_REPO}/blob/main/CHANGELOG.md">更新日志 ↗</a><a href="mailto:sjran@cnu.edu.cn">联系作者 ↗</a></div><span class="footer-note">由 ASKS 创作 · 与你分享</span></footer>
 </body></html>'''
 
 

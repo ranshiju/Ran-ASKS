@@ -120,9 +120,15 @@ def _apply_identity_corrections(resolution: dict, source_text: str, corrections:
         } or any(not isinstance(value, str) or not value.strip() for value in correction.values()):
             raise ValueError("identity correction requires mention, canonical, label, source and quote strings")
         mention = correction["mention"]
-        if mention in seen or mention not in source_text:
+        # Older compiler decisions can group exact source spellings with '/'.
+        # The archived assertion still has to confirm the entire group below.
+        source_mentions = [mention] if mention in source_text else mention.split("/")
+        if (any(not value or value != value.strip() or value not in source_text
+                for value in source_mentions)
+                or len(set(source_mentions)) != len(source_mentions)
+                or seen.intersection(source_mentions)):
             raise ValueError("identity correction must name a unique exact Raw mention")
-        seen.add(mention)
+        seen.update(source_mentions)
         rows = [row for row in resolution.get("compiler_entity_resolutions", [])
                 if row.get("mention") == mention]
         if len(rows) != 1:
@@ -152,7 +158,8 @@ def _apply_identity_corrections(resolution: dict, source_text: str, corrections:
         if path not in [source_locator.split_locator(value)[0]
                         for value in frontmatter.get("sources", [])]:
             raise ValueError("identity correction people page lacks the assertion source")
-        validated.append({**correction, "source_sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+        validated.append({**correction, "source_mentions": source_mentions,
+                          "source_sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
     for correction in validated:
         mention = correction["mention"]
         decision = next(row for row in resolution["compiler_entity_resolutions"] if row["mention"] == mention)
@@ -161,10 +168,14 @@ def _apply_identity_corrections(resolution: dict, source_text: str, corrections:
             "reason": f"Archived user assertion: {correction['source']}",
             "identity_evidence": correction,
         })
-        matched = [row for row in resolution.get("resolved", []) if row.get("original") == mention]
-        if not matched:
-            matched = [{"original": mention}]
-            resolution.setdefault("resolved", []).extend(matched)
+        matched = []
+        for source_mention in correction["source_mentions"]:
+            rows = [row for row in resolution.get("resolved", [])
+                    if row.get("original") == source_mention]
+            if not rows:
+                rows = [{"original": source_mention}]
+                resolution.setdefault("resolved", []).extend(rows)
+            matched.extend(rows)
         for row in matched:
             row.update({"normalized": correction["label"], "entity": correction["canonical"],
                         "method": "user_assertion_repair", "confidence": "medium",
@@ -282,7 +293,8 @@ def repair(args: argparse.Namespace) -> dict:
                 ("tasks", "assignee", "assignee_label"),
             ):
                 for row in repaired_ir[section]:
-                    if row[label] in {correction["mention"], correction["label"]} and (
+                    if row[label] in {correction["mention"], correction["label"],
+                                      *correction["source_mentions"]} and (
                         row[endpoint] != correction["canonical"] or row[label] != correction["label"]
                     ):
                         raise ValueError("identity correction disagrees with the proposed role projection")
@@ -465,8 +477,26 @@ def main() -> None:
     parser.add_argument("--meeting-ir-patch-file")
     parser.add_argument("--wiki-file")
     parser.add_argument("--identity-corrections-file")
+    parser.add_argument("--prepare-confirmation", help="JSON with schema/date/statement and mention/label/canonical mappings")
+    parser.add_argument("--apply-confirmation", help="managed bundle returned by --prepare-confirmation")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
+    if args.prepare_confirmation or args.apply_confirmation:
+        if (bool(args.prepare_confirmation) == bool(args.apply_confirmation)
+                or any((args.mention, args.canonical_label, args.canonical_entity,
+                        args.updates_file, args.meeting_ir_file, args.meeting_ir_patch_file,
+                        args.wiki_file, args.identity_corrections_file, args.apply))):
+            parser.error("confirmation mode cannot be combined with legacy repair arguments")
+        import meeting_identity_confirmation as confirmation
+        try:
+            result = (confirmation.prepare(args.transaction_id, Path(args.prepare_confirmation))
+                      if args.prepare_confirmation else confirmation.apply(args.transaction_id, args.apply_confirmation))
+        except (ValueError, OSError, KeyError) as exc:
+            result = {"status": "validation_error", "errors": [str(exc)], "transaction_id": args.transaction_id}
+        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        if result["status"] in {"validation_error", "failed", "pending"}:
+            raise SystemExit(1)
+        return
     projection_mode = bool(
         args.meeting_ir_file or args.meeting_ir_patch_file or args.wiki_file
     )
