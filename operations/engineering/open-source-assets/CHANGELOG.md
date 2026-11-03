@@ -7,6 +7,21 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-11-03
+
+### Version decision / 版本判断
+
+- PATCH: Make the existing Gallery easier to discover through bilingual README navigation and selected-work previews without changing public capabilities or APIs
+- PATCH（中文）：通过双语README入口和精选作品预览提升既有Gallery的可见性，不改变公开功能或接口
+
+### Highlights
+
+- Made the Gallery prominent at the top of both READMEs with a clickable three-work preview, a linked heading and a direct browse link; complete works and capability notes remain on the independent site.
+
+### 主要更新
+
+- 在中英文 README 顶部增加醒目的 Gallery 展示区，提供可点击的三件作品预览、标题和直接入口；完整作品及功能说明集中在独立网站。
+
 ## [0.22.1] - 2026-11-03
 
 ### Version decision / 版本判断
@@ -681,5 +696,7 @@ manifests and checksums.
 
 [0.22.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.22.1...HEAD
 [0.22.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.1
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.22.2...HEAD
+[0.22.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.2

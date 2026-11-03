@@ -356,3 +356,10 @@ their original version context, and no unverified WeChat publication dates are
 asserted. Only exact-approved final files are public. The PDF keeps its 30
 reviewed pages and appends the same dated Gallery update. Scientific workflows,
 public APIs and frozen paper artifacts remain unchanged.
+
+The 2026-11-03 `v0.22.2` documentation PATCH makes the Gallery entry prominent
+near the top of both READMEs with a linked heading, a preview of three selected
+works and an explicit browse link. Readers open the standalone Gallery for full
+artifacts, downloads and concise capability descriptions. The entry avoids a
+fixed work count. The PDF retains its 31 reviewed pages and appends the same
+navigation guidance; public APIs and frozen paper artifacts are unchanged.

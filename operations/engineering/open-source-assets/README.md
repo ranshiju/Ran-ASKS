@@ -1,8 +1,16 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
 
-[English](README.md) | [简体中文](README.zh-CN.md) | **[Gallery · Selected works](https://ranshiju.github.io/Ran-ASKS/)**
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-Browse 14 works in the independent Gallery: MPE science and academic presentations, bilingual full academic CVs, and all 11 completed ASKS popular-science articles. Each article offers a full illustrated PDF, page previews and a short account of the ASKS functions used; filter by “科普文章” to read the collection.
+## [Gallery · See what ASKS can make](https://ranshiju.github.io/Ran-ASKS/)
+
+Explore science posters, academic talks, bilingual CVs and illustrated articles, with concise notes on the ASKS functions used.
+
+[![Selected ASKS works: a science-poster detail, an academic slide and a popular-science illustration](docs/assets/gallery-preview.png)](https://ranshiju.github.io/Ran-ASKS/)
+
+**[Browse all works →](https://ranshiju.github.io/Ran-ASKS/)**
+
+---
 
 **Contact:** [sjran@cnu.edu.cn](mailto:sjran@cnu.edu.cn)
 

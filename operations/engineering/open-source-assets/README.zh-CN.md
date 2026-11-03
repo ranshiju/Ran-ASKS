@@ -1,8 +1,16 @@
 # Ran-ASKS
 
-[English](README.md) | [简体中文](README.zh-CN.md) | **[Gallery · 精选作品](https://ranshiju.github.io/Ran-ASKS/)**
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-独立 Gallery 现收录 14 件作品：MPE 科普展板与学术报告、中英文学术长简历，以及 11 篇 ASKS 科普文章。每篇文章提供完整图文 PDF、页面预览和简明功能说明，可按“科普文章”筛选阅读。
+## [Gallery · 看看 ASKS 做出了什么](https://ranshiju.github.io/Ran-ASKS/)
+
+浏览科普展板、学术报告、双语简历和科普文章，了解每件作品用到了哪些 ASKS 功能。
+
+[![ASKS 作品精选：科普展板局部、学术报告页面与科普漫画配图](docs/assets/gallery-preview.png)](https://ranshiju.github.io/Ran-ASKS/)
+
+**[浏览全部作品 →](https://ranshiju.github.io/Ran-ASKS/)**
+
+---
 
 **联系邮箱：** [sjran@cnu.edu.cn](mailto:sjran@cnu.edu.cn)
 
