@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[Gallery · 精选作品](https://ranshiju.github.io/Ran-ASKS/)**
 
+独立 Gallery 现收录 14 件作品：MPE 科普展板与学术报告、中英文学术长简历，以及 11 篇 ASKS 科普文章。每篇文章提供完整图文 PDF、页面预览和简明功能说明，可按“科普文章”筛选阅读。
+
 **联系邮箱：** [sjran@cnu.edu.cn](mailto:sjran@cnu.edu.cn)
 
 **论文：** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)

@@ -28,6 +28,72 @@ include:
   - gallery/works/bilingual-academic-cv/metadata.json
   - gallery/works/bilingual-academic-cv/preview-en.webp
   - gallery/works/bilingual-academic-cv/preview-zh.webp
+  - gallery/works/asks-introduction/README.md
+  - gallery/works/asks-introduction/article.pdf
+  - gallery/works/asks-introduction/cover.webp
+  - gallery/works/asks-introduction/metadata.json
+  - gallery/works/asks-introduction/preview-01.webp
+  - gallery/works/asks-introduction/preview-04.webp
+  - gallery/works/asks-01-conversation-as-interface/README.md
+  - gallery/works/asks-01-conversation-as-interface/article.pdf
+  - gallery/works/asks-01-conversation-as-interface/cover.webp
+  - gallery/works/asks-01-conversation-as-interface/metadata.json
+  - gallery/works/asks-01-conversation-as-interface/preview-01.webp
+  - gallery/works/asks-01-conversation-as-interface/preview-03.webp
+  - gallery/works/asks-02-knowledge-drift/README.md
+  - gallery/works/asks-02-knowledge-drift/article.pdf
+  - gallery/works/asks-02-knowledge-drift/cover.webp
+  - gallery/works/asks-02-knowledge-drift/metadata.json
+  - gallery/works/asks-02-knowledge-drift/preview-01.webp
+  - gallery/works/asks-02-knowledge-drift/preview-03.webp
+  - gallery/works/asks-03-agent-needs-wiki/README.md
+  - gallery/works/asks-03-agent-needs-wiki/article.pdf
+  - gallery/works/asks-03-agent-needs-wiki/cover.webp
+  - gallery/works/asks-03-agent-needs-wiki/metadata.json
+  - gallery/works/asks-03-agent-needs-wiki/preview-01.webp
+  - gallery/works/asks-03-agent-needs-wiki/preview-02.webp
+  - gallery/works/asks-04-tokens-llms-agents/README.md
+  - gallery/works/asks-04-tokens-llms-agents/article.pdf
+  - gallery/works/asks-04-tokens-llms-agents/cover.webp
+  - gallery/works/asks-04-tokens-llms-agents/metadata.json
+  - gallery/works/asks-04-tokens-llms-agents/preview-01.webp
+  - gallery/works/asks-04-tokens-llms-agents/preview-03.webp
+  - gallery/works/asks-05-prompts-as-work-rules/README.md
+  - gallery/works/asks-05-prompts-as-work-rules/article.pdf
+  - gallery/works/asks-05-prompts-as-work-rules/cover.webp
+  - gallery/works/asks-05-prompts-as-work-rules/metadata.json
+  - gallery/works/asks-05-prompts-as-work-rules/preview-01.webp
+  - gallery/works/asks-05-prompts-as-work-rules/preview-03.webp
+  - gallery/works/asks-06-agent-development-collaboration/README.md
+  - gallery/works/asks-06-agent-development-collaboration/article.pdf
+  - gallery/works/asks-06-agent-development-collaboration/cover.webp
+  - gallery/works/asks-06-agent-development-collaboration/metadata.json
+  - gallery/works/asks-06-agent-development-collaboration/preview-01.webp
+  - gallery/works/asks-06-agent-development-collaboration/preview-03.webp
+  - gallery/works/asks-07-asks-first-use/README.md
+  - gallery/works/asks-07-asks-first-use/article.pdf
+  - gallery/works/asks-07-asks-first-use/cover.webp
+  - gallery/works/asks-07-asks-first-use/metadata.json
+  - gallery/works/asks-07-asks-first-use/preview-01.webp
+  - gallery/works/asks-07-asks-first-use/preview-04.webp
+  - gallery/works/asks-08-agent-tool-registry/README.md
+  - gallery/works/asks-08-agent-tool-registry/article.pdf
+  - gallery/works/asks-08-agent-tool-registry/cover.webp
+  - gallery/works/asks-08-agent-tool-registry/metadata.json
+  - gallery/works/asks-08-agent-tool-registry/preview-01.webp
+  - gallery/works/asks-08-agent-tool-registry/preview-03.webp
+  - gallery/works/asks-09-persistent-work/README.md
+  - gallery/works/asks-09-persistent-work/article.pdf
+  - gallery/works/asks-09-persistent-work/cover.webp
+  - gallery/works/asks-09-persistent-work/metadata.json
+  - gallery/works/asks-09-persistent-work/preview-01.webp
+  - gallery/works/asks-09-persistent-work/preview-04.webp
+  - gallery/works/asks-10-graph-model/README.md
+  - gallery/works/asks-10-graph-model/article.pdf
+  - gallery/works/asks-10-graph-model/cover.webp
+  - gallery/works/asks-10-graph-model/metadata.json
+  - gallery/works/asks-10-graph-model/preview-01.webp
+  - gallery/works/asks-10-graph-model/preview-03.webp
   - VERSION
   - pyproject.toml
   - uv.lock

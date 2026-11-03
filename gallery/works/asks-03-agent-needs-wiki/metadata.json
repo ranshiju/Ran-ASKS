@@ -1,0 +1,84 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-03-agent-needs-wiki",
+  "title": "从原始材料到共同理解：Agent 为什么需要 Wiki？",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 9,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-02-knowledge-drift",
+    "asks-04-tokens-llms-agents",
+    "asks-introduction"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2608.29612"
+    },
+    {
+      "url": "https://doi.org/10.1145/3586183.3606763"
+    },
+    {
+      "url": "https://arxiv.org/abs/2310.08560"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "55966531e85514afdc98638e7a8b063a28cb9902dffd2ca3165faed190ae4ac4",
+    "article.pdf": "03b6dc02839f02255875e9ce5bfb5aa59590c554d81be5e2d7ad35bc21b24d67",
+    "cover.webp": "8446303652ff37629af72f86c97ea3c4859df4b1c65fbb49f4d849ad4a794ddd",
+    "preview-01.webp": "8bd20136ea2186635d07572cf3d9fafb5ab1ec4954e61fa2fd67baada7d249e4",
+    "preview-02.webp": "c359ba38c7956b13589a9bef6e347cf2c55c325139f7e9c3fa55020cdfe7bc21"
+  },
+  "presentation": {
+    "name": "ASKS 科普 03 · Wiki 与共同理解",
+    "summary": "Agent 使用 Wiki 的根本价值，是把每次阅读和提问形成的理解持续整理为可检查、可修订、可复用的共同知识成果，而不是每次从头回答",
+    "type_label": "科普文章",
+    "format_label": "9 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-02.webp",
+        "label": "第 2 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 9 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 9 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}

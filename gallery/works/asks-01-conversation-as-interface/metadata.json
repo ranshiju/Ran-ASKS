@@ -1,0 +1,77 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-01-conversation-as-interface",
+  "title": "从点击按钮到交代任务：普通人如何通过对话使用 AI Agent？",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 9,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-introduction",
+    "asks-02-knowledge-drift"
+  ],
+  "references": [
+    {
+      "url": "https://github.com/ranshiju/Ran-ASKS"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "2f3bd99aeafbf6dbe36d7fb360ddec6fafdef9ecdf8e2801e7200131bf53d809",
+    "article.pdf": "ccbb6579f4abb1088b6bd4ce67d26eba3682e228c7d4459987a624a119e2bbbf",
+    "cover.webp": "2ec77f2c56075c0ab10c4c67ac7e205eb0e226eb92113f4805f33a26d4cec819",
+    "preview-01.webp": "2ee21dff152dcdba8795db3e85b85dd3b9b5df2f268ddefda4fa63e4ad9e1dd9",
+    "preview-03.webp": "3eb5e9f86223923be322c1fe84291f5538d900f87b9bea86e5028000e69ea8d4"
+  },
+  "presentation": {
+    "name": "ASKS 科普 01 · 对话式使用",
+    "summary": "在 Agent 时代，对话不再只是获得回答的渠道，而开始成为委托、执行和修正复杂任务的控制方式",
+    "type_label": "科普文章",
+    "format_label": "9 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-03.webp",
+        "label": "第 3 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 9 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 9 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}

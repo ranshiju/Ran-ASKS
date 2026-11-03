@@ -4,7 +4,18 @@
   "works": [
     "mpe-science-poster",
     "mpe-academic-talk",
-    "bilingual-academic-cv"
+    "bilingual-academic-cv",
+    "asks-introduction",
+    "asks-01-conversation-as-interface",
+    "asks-02-knowledge-drift",
+    "asks-03-agent-needs-wiki",
+    "asks-04-tokens-llms-agents",
+    "asks-05-prompts-as-work-rules",
+    "asks-06-agent-development-collaboration",
+    "asks-07-asks-first-use",
+    "asks-08-agent-tool-registry",
+    "asks-09-persistent-work",
+    "asks-10-graph-model"
   ],
   "capabilities": [
     {
@@ -42,6 +53,18 @@
       "label": "演示文稿制作",
       "description": "围绕论文或材料组织报告，逐页编排并保留可编辑内容。",
       "doc": "operations/PRESENTATION.md"
+    },
+    {
+      "id": "write",
+      "label": "科普写作",
+      "description": "依据材料组织科普叙事，通过对话修改正文，保留引用与适用边界。",
+      "doc": "operations/WRITE.md"
+    },
+    {
+      "id": "comic-generation",
+      "label": "漫画配图",
+      "description": "将文章机制编排成漫画分镜，生成并选用适合解释内容的配图。",
+      "doc": "operations/COMIC_GENERATION.md"
     }
   ]
 }

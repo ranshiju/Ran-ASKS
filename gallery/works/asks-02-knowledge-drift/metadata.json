@@ -1,0 +1,84 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-02-knowledge-drift",
+  "title": "知识库为什么会越用越偏？AI Agent 的知识漂移问题",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 7,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-01-conversation-as-interface",
+    "asks-03-agent-needs-wiki",
+    "asks-introduction"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2608.29612"
+    },
+    {
+      "url": "https://doi.org/10.18653/v1/2025.acl-long.301"
+    },
+    {
+      "url": "https://doi.org/10.18653/v1/2024.emnlp-main.1109"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "b232a30c62f3b25798c9d035316990779653628e05951b6a8a1ab930c997dac5",
+    "article.pdf": "f63632acd4da4a941e2b1ef4c3c497a3f94c7591f4ceac8d9e7cb2ec3f389c59",
+    "cover.webp": "d162d4d3b44269a26957d5f6af223c54d0bdf24fa1eca689a4b83b4fc3dc64ee",
+    "preview-01.webp": "fbc71de0791e822d3cd832ac440c016b61b2aba6682ad63ba753a3250679e6e6",
+    "preview-03.webp": "34715adc9409636611929a12d9d78a597aac45fc2328b3f77f86b6dca93fdf6f"
+  },
+  "presentation": {
+    "name": "ASKS 科普 02 · 知识漂移",
+    "summary": "Agent管理知识库时，真正危险的不只是一次出错，而是偏差被写入长期记忆并影响后续行动",
+    "type_label": "科普文章",
+    "format_label": "7 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-03.webp",
+        "label": "第 3 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 7 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 7 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}

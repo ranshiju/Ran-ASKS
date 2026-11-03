@@ -346,3 +346,13 @@ sources, Raw, local provenance and runtime records remain excluded. The manual
 Pages workflow deploys the generated site. This is a compatible MINOR update;
 frozen paper artifacts stay unchanged. The PDF retains its 29 reviewed pages
 and appends the same dated update for printing.
+
+The 2026-11-03 `v0.22.1` PATCH adds all 11 completed ASKS popular-science
+articles as individual Gallery works, bringing the collection to 14. Full
+illustrated PDFs, labeled page previews, section bookmarks, article filtering
+and related-work links support reading; concise descriptions identify the
+functions actually used to make each work. Historical article claims retain
+their original version context, and no unverified WeChat publication dates are
+asserted. Only exact-approved final files are public. The PDF keeps its 30
+reviewed pages and appends the same dated Gallery update. Scientific workflows,
+public APIs and frozen paper artifacts remain unchanged.

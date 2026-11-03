@@ -10,6 +10,24 @@
 | [MPE 学术报告](works/mpe-academic-talk/README.md) | 12 页学术报告 · PPTX / PDF | 演示文稿制作 · 版式与导出 |
 | [中英文学术长简历](works/bilingual-academic-cv/README.md) | 中文 / English · 完整长简历 PDF | 简历制作与维护 |
 
+## ASKS 科普文章
+
+现有完整图文稿逐篇收录：ASKS 总介绍与“通过 ASKS 智能知识系统看 AI Agent”系列第 1—10 篇。提供完整 PDF、页码明确的预览与实际使用功能说明；原文系统说明保留其版本背景。
+
+| 作品 | 形式 | 使用功能 |
+| --- | --- | --- |
+| [ASKS 总介绍](works/asks-introduction/README.md) | 16 页图文 PDF | 科普写作 · 版式与导出 |
+| [ASKS 科普 01 · 对话式使用](works/asks-01-conversation-as-interface/README.md) | 9 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 02 · 知识漂移](works/asks-02-knowledge-drift/README.md) | 7 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 03 · Wiki 与共同理解](works/asks-03-agent-needs-wiki/README.md) | 9 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 04 · Token、大模型与智能体](works/asks-04-tokens-llms-agents/README.md) | 10 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 05 · 提示词与工作规则](works/asks-05-prompts-as-work-rules/README.md) | 10 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 06 · Agent 开发协作](works/asks-06-agent-development-collaboration/README.md) | 13 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 07 · ASKS 初次使用](works/asks-07-asks-first-use/README.md) | 10 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 08 · 工具与能力注册](works/asks-08-agent-tool-registry/README.md) | 10 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 09 · 持续工作](works/asks-09-persistent-work/README.md) | 10 页图文 PDF | 科普写作 · 漫画配图 · 版式与导出 |
+| [ASKS 科普 10 · Graph 与知识关系](works/asks-10-graph-model/README.md) | 9 页图文 PDF | 科普写作 · 漫画配图 · 插图与图示 · 版式与导出 |
+
 ## 本地预览
 
 在仓库根目录运行：

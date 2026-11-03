@@ -165,7 +165,7 @@ def index_page(catalog: dict, works: list[dict]) -> str:
         p = featured['presentation']; slug = featured['id']
         hero_art = f'''<a class="hero-art" href="works/{slug}/index.html" aria-label="查看{esc(p['name'])}"><span class="art-caption"><span>FEATURED / 精选</span><span>{esc(p['format_label'])}</span></span>
 <div class="poster-stage"><img src="assets/works/{slug}/{esc(p['preview'])}" alt="{esc(p['name'])}作品预览" width="1800" height="2546" fetchpriority="high"></div><div class="art-bottom"><span>{esc(p['name'])}</span><span class="circle-arrow" aria-hidden="true">↗</span></div></a>'''
-    hero = f'''<section class="hero wrap"><div class="hero-copy"><p class="eyebrow"><span class="status-dot"></span> MADE WITH ASKS</p><h1>让知识成为<br>看得见的<span class="accent">作品。</span></h1><p class="hero-description">一张海报，一份简历，一次新的表达。<br>探索使用 ASKS 创作的成果，找到适合你的功能。</p><a class="button primary" href="#works">浏览精选作品 <span aria-hidden="true">↓</span></a><div class="hero-footnote"><span class="tiny-rule"></span> 从真实成果出发，了解系统能做什么。</div></div>{hero_art}</section>'''
+    hero = f'''<section class="hero wrap"><div class="hero-copy"><p class="eyebrow"><span class="status-dot"></span> MADE WITH ASKS</p><h1>让知识成为<br>看得见的<span class="accent">作品。</span></h1><p class="hero-description">文章、海报、报告与简历，呈现知识的不同表达。<br>探索使用 ASKS 创作的成果，找到适合你的功能。</p><a class="button primary" href="#works">浏览精选作品 <span aria-hidden="true">↓</span></a><div class="hero-footnote"><span class="tiny-rule"></span> 从真实成果出发，了解系统能做什么。</div></div>{hero_art}</section>'''
     filter_buttons = '<button class="filter active" data-capability="all" aria-pressed="true">全部功能 <span>'+str(len(works))+'</span></button>'
     features = ''
     for n, c in enumerate(catalog['capabilities'], 1):

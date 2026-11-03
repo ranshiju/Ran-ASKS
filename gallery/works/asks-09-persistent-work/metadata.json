@@ -1,0 +1,84 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-09-persistent-work",
+  "title": "让 AI 持续工作：怎样跨越多次对话，完成复杂任务？",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 10,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-08-agent-tool-registry",
+    "asks-10-graph-model",
+    "asks-introduction"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2608.29612"
+    },
+    {
+      "url": "https://arxiv.org/abs/2210.03629"
+    },
+    {
+      "url": "https://doi.org/10.1145/3586183.3606763"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "3f0dc00ccd14a19ba32f5db361459044c491ab9374f0e6f47289695b86c86154",
+    "article.pdf": "2c8448ee520173d273fbf21db606fd410ff7b5c6f146847b9e59bba1e155401b",
+    "cover.webp": "45d0a242aaa473079ea8ea9b3f3de6c2f0252fd82bf940f9fd4b623c4455237d",
+    "preview-01.webp": "c176ad6c50a67d48a11b44d11a593edbeefa999c0159964fdfe3491401c73d23",
+    "preview-04.webp": "de1e9c07e86dd2b2da32a3d68061e62e4b15e654e0e82566ebf0e5a13f4c7e5b"
+  },
+  "presentation": {
+    "name": "ASKS 科普 09 · 持续工作",
+    "summary": "持续工作把多次对话连接为可接续、可积累的协作：Agent 恢复当前进展、按反馈推进，并把有效约定与经核实的经验用于后续工作",
+    "type_label": "科普文章",
+    "format_label": "10 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-04.webp",
+        "label": "第 4 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 10 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 10 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}

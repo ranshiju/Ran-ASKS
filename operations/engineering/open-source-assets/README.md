@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[Gallery · Selected works](https://ranshiju.github.io/Ran-ASKS/)**
 
+Browse 14 works in the independent Gallery: MPE science and academic presentations, bilingual full academic CVs, and all 11 completed ASKS popular-science articles. Each article offers a full illustrated PDF, page previews and a short account of the ASKS functions used; filter by “科普文章” to read the collection.
+
 **Contact:** [sjran@cnu.edu.cn](mailto:sjran@cnu.edu.cn)
 
 **Paper:** [arXiv:2608.29612](https://arxiv.org/abs/2608.29612)

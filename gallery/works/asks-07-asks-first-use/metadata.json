@@ -1,0 +1,78 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-07-asks-first-use",
+  "title": "把软件交给 Agent：一种新的使用方式",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 10,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-06-agent-development-collaboration",
+    "asks-08-agent-tool-registry",
+    "asks-introduction"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2608.29612"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "740e85360bf9ec54c84e17c28a8f2eae1c115d272fbc881aff0f30eb9461bd60",
+    "article.pdf": "fb4819b0da1af1043e719836d41f373ffe8cb001f5d2488859676da61850dc63",
+    "cover.webp": "cd6913be2d8f283a7465d960e34dc7ed089b01c76777ee3f82c579c057b63fc7",
+    "preview-01.webp": "1a741532201a1a3e8f604c846ff87025f78118ce47239b863b95eb6c4b3eaec9",
+    "preview-04.webp": "02c914025c56b646bce0d707e62fab07f5cbf00fc0bf585a172ca00c029edc47"
+  },
+  "presentation": {
+    "name": "ASKS 科普 07 · ASKS 初次使用",
+    "summary": "Agent 时代，一类软件可以由 Agent 进入工作空间并代为操作；用户通过对话给出目标、材料和必要授权，系统规则负责约束具体步骤",
+    "type_label": "科普文章",
+    "format_label": "10 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-04.webp",
+        "label": "第 4 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 10 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 10 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}

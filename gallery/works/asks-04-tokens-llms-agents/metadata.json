@@ -1,0 +1,84 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-04-tokens-llms-agents",
+  "title": "词元（Token）、大模型和智能体：三者究竟是什么关系？",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 10,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-03-agent-needs-wiki",
+    "asks-05-prompts-as-work-rules",
+    "asks-introduction"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2608.29612"
+    },
+    {
+      "url": "https://doi.org/10.18653/v1/P16-1162"
+    },
+    {
+      "url": "https://arxiv.org/abs/2210.03629"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "8b2899914a5d9eecb88d6c47b3bf49b79ac0ac4e5675b88ec7ea28e72de233e9",
+    "article.pdf": "5e77c93819d06748d495dd37453f8ff051265f415d35dbe44c28414fbae04756",
+    "cover.webp": "999e4e3f37885dddabeca8144eb8c22b414a7b49a4b6e670c0c2720a37cfca18",
+    "preview-01.webp": "de28978eb91901b295e5a9984de408ad12e55c2f0ceebde8cfbc7b3ff01ec1d6",
+    "preview-03.webp": "f5a1f3241d84d5c7b341de18bd1f89015ca3973ebbb85aa17a81bf9ebac2a1a9"
+  },
+  "presentation": {
+    "name": "ASKS 科普 04 · Token、大模型与智能体",
+    "summary": "Token 是大模型处理信息的基本单位，在云端 API 中也常是计费单位；大模型提供语言能力，智能体把它接入工具、记忆和流程，转化为具体功能",
+    "type_label": "科普文章",
+    "format_label": "10 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-03.webp",
+        "label": "第 3 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 10 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 10 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}

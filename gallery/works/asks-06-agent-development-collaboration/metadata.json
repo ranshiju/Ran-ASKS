@@ -1,0 +1,87 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-06-agent-development-collaboration",
+  "title": "Agent 时代，为什么“大家一起改同一个软件”不够了？",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 13,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-05-prompts-as-work-rules",
+    "asks-07-asks-first-use",
+    "asks-introduction"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2608.29612"
+    },
+    {
+      "url": "https://doi.org/10.1287/mnsc.1060.0546"
+    },
+    {
+      "url": "https://doi.org/10.1080/13662710801970142"
+    },
+    {
+      "url": "https://doi.org/10.1016/j.infoandorg.2017.04.001"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "a1d89afd508738db87a5b73648451491353ffa2e2be71a27a70be393430d3799",
+    "article.pdf": "e21b34cfe692ddc76baf02d1d217ff0f02ec65abb3391123034ee5487debca74",
+    "cover.webp": "0488b0e23aef5bd40945da4e1ff51ba8079ce8899d7d07f7b2d038a8d1c97f84",
+    "preview-01.webp": "18fecdb487edcf89ce3442edcfa347dfebf191ac2c20cb527f34511ea2266b15",
+    "preview-03.webp": "94c3119f4d30653fdc5ab7b119be5bf94c44a451463cf7419791a8ab06f84359"
+  },
+  "presentation": {
+    "name": "ASKS 科普 06 · Agent 开发协作",
+    "summary": "Agent 系统需要通用工程、领域知识和真实评测共同参与，因此开发协作正从共同维护一个最终软件，扩展为共享可靠底座、允许领域系统独立生长，并让经过验证的通用改进回流。",
+    "type_label": "科普文章",
+    "format_label": "13 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-03.webp",
+        "label": "第 3 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 13 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 13 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}

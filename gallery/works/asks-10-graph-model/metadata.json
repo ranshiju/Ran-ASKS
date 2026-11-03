@@ -1,0 +1,85 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-10-graph-model",
+  "title": "Graph 是什么？Agent 怎样用“关系”组织和探索知识",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 9,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "illustration",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-09-persistent-work",
+    "asks-introduction"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2608.29612"
+    },
+    {
+      "url": "https://doi.org/10.1145/3447772"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "323afc7945411cbda06a8a2bed007ae668776ef2d574a4ea0d558585e4102ecd",
+    "article.pdf": "fcbfc00a67650cc3112823325463c6452d186a027fbfd8905ccb4b03e3a0b69e",
+    "cover.webp": "694d8ce3e55efd524a918ef03dfd28a1220b5b34e8555c960430d79b1b1df58c",
+    "preview-01.webp": "06e7d27d02c48b48e52a2996334ddf35b6589f5f9afb12f005e455749e352db0",
+    "preview-03.webp": "1f978a74a8fa23b428bd7c68cb5f0db761c76fdbce6f00a4dd42805beb216964"
+  },
+  "presentation": {
+    "name": "ASKS 科普 10 · Graph 与知识关系",
+    "summary": "Graph 是用对象及其关系描述复杂系统的数学模型；ASKS 用它组织知识之间的联系，帮助 Agent 查找和使用知识。",
+    "type_label": "科普文章",
+    "format_label": "9 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-03.webp",
+        "label": "第 3 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 9 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "illustration",
+        "text": "用原生图形精确绘制节点、箭头和关系标签，与漫画场景配合解释图模型。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 9 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}

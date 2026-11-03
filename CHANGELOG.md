@@ -7,6 +7,21 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-11-03
+
+### Version decision / 版本判断
+
+- PATCH: Expand the existing Gallery with eleven article reading editions and usage documentation without changing public capabilities or scientific APIs
+- PATCH（中文）：为既有Gallery增加十一篇科普文章阅读版及功能说明，不改变公开功能与科学接口
+
+### Highlights
+
+- Added PDF reading editions for all 11 completed ASKS popular-science articles, with full text and illustrations, page previews, section bookmarks and concise capability descriptions.
+
+### 主要更新
+
+- 收录 11 篇 ASKS 公众号科普文章阅读版，提供完整图文 PDF、页码预览、章节书签和简明功能说明。
+
 ## [0.22.0] - 2026-11-02
 
 ### Version decision / 版本判断
@@ -664,5 +679,7 @@ manifests and checksums.
 
 [0.21.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.21.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.22.0...HEAD
 [0.22.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.22.1...HEAD
+[0.22.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.1

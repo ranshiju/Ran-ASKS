@@ -1,0 +1,81 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "asks-08-agent-tool-registry",
+  "title": "Agent 的“十八般武艺”：工具怎样变成可靠的能力？",
+  "kind": "science-article",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-03",
+  "page_count": 10,
+  "capabilities": [
+    "write",
+    "comic-generation",
+    "visual-qa"
+  ],
+  "related_works": [
+    "asks-07-asks-first-use",
+    "asks-09-persistent-work",
+    "asks-introduction"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2608.29612"
+    },
+    {
+      "url": "https://doi.org/10.52202/075280-2997"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "4bc4bf194bd926af9812d76e90744b63d781a20aac1b73f44b3f2f2b959e9dec",
+    "article.pdf": "0838175adffb29eef1aba5506c0ee9e25fa4882d821aaec7e990645f4363a4ff",
+    "cover.webp": "59e0fde33cd24af9cabfc46664ea8f95a092d8d89d5d754b88ae04919942383f",
+    "preview-01.webp": "11241587ec43dd44add6e2ddb0487468b1a3d2e04728273a59d77744007c7c54",
+    "preview-03.webp": "015cde3329a0f4d025c401520d685de9c70e8c7b359b1169350b8bbd74f56682"
+  },
+  "presentation": {
+    "name": "ASKS 科普 08 · 工具与能力注册",
+    "summary": "Agent 的本领并非凭空产生；普通程序经过注册，变成有名称、有用法、有边界的工具，再根据任务配发给 Agent",
+    "type_label": "科普文章",
+    "format_label": "10 页 · 图文 PDF",
+    "audience": "对 ASKS 与 AI Agent 感兴趣的普通读者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 首页",
+        "document": "article.pdf"
+      },
+      {
+        "file": "preview-03.webp",
+        "label": "第 3 页 · 图文节选",
+        "document": "article.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "article.pdf",
+        "label": "阅读全文 PDF · 10 页"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "write",
+        "text": "围绕读者问题组织材料，形成科普叙事，并通过对话修改正文；保留来源、类比和适用边界。"
+      },
+      {
+        "id": "comic-generation",
+        "text": "按文章分镜生成漫画式配图，结合定向重绘和选图，用场景解释抽象机制；保留原图标识。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "将完整图文稿导出为可搜索的 PDF，核对文字、配图与实际页面，并生成同源预览。"
+      }
+    ],
+    "prompt": "请围绕一个 ASKS 或 AI Agent 主题制作面向普通读者的科普文章。依据材料先确定一个中心，用具体场景解释机制，保留事实依据与适用边界；按内容设计图示或漫画，最后输出含完整正文、配图、图注与参考文献的 PDF。",
+    "source_note": "根据现有完整公众号图文稿制作，保留正文、配图、图注和参考文献。文中系统说明及实验结果沿用原稿的版本背景。",
+    "credit": "与 ASKS 协作制作；原稿中的制作说明、引文和配图标识予以保留。",
+    "boundary": "完整阅读版共 10 页，页面展示首页与图文节选。配图和引用材料的权利由相应权利人保留。"
+  }
+}
