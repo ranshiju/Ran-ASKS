@@ -332,7 +332,7 @@ def search(query, *, repo=REPO, topk=5, domain="academic"):
                    bm25(chunks) AS rank FROM chunks c JOIN sources s ON s.source_id=c.source_id
                    WHERE chunks MATCH ? ORDER BY rank,c.source_id,c.locator LIMIT ?""",
                    (expression, limit*5)).fetchall()
-        checked, carriers, reference_lines = {}, {}, {}
+        checked, carriers, reference_lines, labels = {}, {}, {}, {}
         for row in rows:
             sid = row["source_id"]
             if sid not in checked:
@@ -345,6 +345,13 @@ def search(query, *, repo=REPO, topk=5, domain="academic"):
                     checked[sid] = r
                     carriers[sid] = managed(repo, p["text_path"]).read_text(encoding="utf-8").splitlines()
                     reference_lines[sid] = reference_section_lines(carriers[sid])
+                    labels[sid] = {"title": row["title"], "title_basis": r.get("title_basis", "unknown")}
+                    opening = next((line.strip() for line in carriers[sid] if line.strip()), "")
+                    heading = re.fullmatch(r"#\s+(.+?)(?:\s+#+)?", opening)
+                    if r.get("title_basis") == "filename_unverified" and heading:
+                        labels[sid] = {"title": heading[1][:200],
+                                       "title_basis": "opening_heading_unverified",
+                                       "filename_title": row["title"]}
                 except (OSError, ValueError, KeyError, TypeError) as exc:
                     checked[sid] = None
                     result["issues"].append({"source_id": sid, "error": str(exc)})
@@ -361,7 +368,7 @@ def search(query, *, repo=REPO, topk=5, domain="academic"):
                     row["body"] != "\n".join(carriers[sid][start-1:end])):
                 result["issues"].append({"source_id": sid, "error": "index excerpt mismatch; resume to rebuild"})
                 continue
-            result["candidates"].append({"kind": "source", "source_id": sid, "title": row["title"],
+            result["candidates"].append({"kind": "source", "source_id": sid, **labels[sid],
                 "source_path": record["original"], "parse_id": row["parse_id"], "locator": row["locator"],
                 "section_role": "references" if all(n in reference_lines[sid] or not carriers[sid][n-1].strip()
                                                      for n in range(start, end+1)) else "unspecified",

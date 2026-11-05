@@ -101,8 +101,7 @@ graph.db 是边唯一源。LINT 运行 `.scripts/graph_metrics.py` 与 `graph_du
 | 图连通性 | 从 Raw 文档包节点 BFS；只有 frontmatter 声明了 `sources` 却不可达的 Wiki 才是结构缺口。无 sources 的 Hub、纯导航页和实体节点可不连 Raw，只作信息统计 | `graph_metrics.py connectivity` |
 | 悬空边 | subject/object 指向不存在的 node（删页未清边） | 图查 edges subject/object NOT IN nodes |
 | 双向冗余 | 逆谓词对（指导↔师从/受指导于）双向都存；应只留高优先方向（ingest 已自动去重，LINT 复核残留） | 图查逆谓词对 |
-| 描述性短语节点/客体 | entity 节点名含括号，或边客体含谓语结构（为/是/导致/采用/基于）/中文标点且较长（脱离论文能否独立指代，见 INGEST.md「描述性短语校验」） | graph_ingest.py 已 WARN；LINT 补查 nodes LIKE '%(%' 及 edges object 匹配谓词/标点正则 |
-| 主谓宾结构未拆分（2026-08-03 新增） | entity 节点含主谓宾结构（is_descriptive_phrase 命中）但没有 `predicate='拆分'` 的出边——摄入时 3.3b/3.6b 应已处理，此处是历史存量检查。只报告不自动修复，人工确认后补拆分三元组 | `graph_metrics.py unsplit_phrases` |
+| 历史名称形态观察（可选） | 仅保留历史形态候选供按需查看。名称长、含括号/“基于”等词、缺少包含边均不构成质量缺陷，不列入修复待办，也不要求拆分或补边。仅在有实际检索歧义、来源不可达或关系错误证据时按对应检查处理；`all` 不扫描此项并显示按需入口 | `graph_metrics.py unsplit_phrases` |
 | 紧密簇→Hub 触发 | 无 Hub 覆盖的连通分量（>=4 节点），提示建 Hub（开发期即时提示，用户指令修补） | `graph_metrics.py tight_clusters --min-size 4` |
 | 谓词报告 | GROUP BY predicate，发现低频/可合并谓词（count=1 待归一化） | `graph_metrics.py predicates` |
 | 论文→方向边谓词 tier 登记 | 论文→研究方向 hub 的谓词须在 `predicate_tiers.yaml` 登记（未登记 = 新谓词，ingest 已 WARN + 默认 tier1）；LINT 全量复核未登记谓词清单，提示登记或归并 | 查 edges 中 object 为 research-direction hub 节点的谓词，比对 `predicate_tiers.yaml` keys，未登记告警 |

@@ -157,16 +157,27 @@ class PPTXTests(unittest.TestCase):
                 state = {'source': str(self.source.relative_to(self.repo)), 'source_filename': self.source.name,
                          'extract_dir': str(directory.relative_to(self.repo)), 'transaction_id': backend,
                          'subproject': 'admin', 'semantic_backend': backend}
-                with patch.object(ingest, 'call_text', side_effect=AssertionError('no API before review')):
-                    ok, _ = ingest.step_preprocess(state)
-                self.assertFalse(ok)
-                self.assertEqual(state['agent_task']['kind'], 'pptx_api_action')
-                self.assertFalse(any(x['path'].endswith('.png') for x in state['agent_task']['inputs']))
-                self.assertEqual(state['pre_handoff_status'], 'preprocess')
+                manifest = ppt.prepare(self.source, directory, render=False)
+                data = ingest.pptx_intake.structure.extract(self.source)
+                plan = {'schema': 'pptx-intake-plan-v1', 'source_sha256': manifest['source_sha256'],
+                        'native_sha256': manifest['native_sha256'],
+                        'structure_sha256': ingest.pptx_intake.structure.stable_hash(data),
+                        'pages': [{'number': p['number'], 'mode': 'native', 'reason': 'TEST-ONLY 原生文字满足导航，配图非主要信息',
+                                   'navigation': 'TEST-ONLY 导航主题', 'visual_object_ids': []} for p in data['pages']],
+                        'templates': [], 'library_reason': 'TEST-ONLY 既有版式足够'}
+                with patch.object(ingest, 'call_text', return_value={'ok': True, 'text': json.dumps(plan)}) as api:
+                    ok, message = ingest.step_preprocess(state)
+                    if backend == 'agent':
+                        self.assertFalse(ok)
+                        self.assertEqual(state['agent_task']['kind'], 'pptx_intake')
+                        self.assertFalse(any(x['path'].endswith('.png') for x in state['agent_task']['inputs']))
+                        self.assertEqual(state['pre_handoff_status'], 'preprocess')
+                        api.assert_not_called()
+                        (directory / 'pptx-plan.json').write_text(json.dumps(plan))
+                        ok, message = ingest.step_preprocess(state)
+                    else:
+                        self.assertEqual(api.call_count, 1)
                 self.assertEqual(state['semantic_backend'], backend)
-                manifest = json.loads((directory / 'pptx-manifest.json').read_text())
-                (directory / 'pptx-review.json').write_text(json.dumps(reviewed(manifest)))
-                ok, message = ingest.step_preprocess(state)
                 self.assertTrue(ok, message)
                 self.assertEqual(ingest._manifest_raw_files(state), [self.source.name, self.source.stem + '.md', self.source.name + '.source.json'])
                 with patch.object(ingest.ic, 'step_finalize', return_value=(True, 'committed')) as commit:

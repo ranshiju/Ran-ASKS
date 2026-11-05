@@ -703,6 +703,75 @@ def test_page_identity_abbreviation_is_not_a_free_edge_warning():
         conn.close()
 
 
+def test_statement_and_task_abbreviations_follow_endpoint_roles():
+    """Audit the same endpoint roles as the writer, without suppressing concepts."""
+    page = "academic/wiki/conferences/example"
+    decision = "论文标题暂用1000 PLUS并保留实验条件"
+    task = "将修改要点保存为TXT文件并发送给老师"
+    statement = "ABC方法证明在给定实验条件下能够实现更高精度的量子态重构"
+    triples = [
+        {"subject": page, "predicate": "决策", "object": decision},
+        {"subject": "研究者", "predicate": "待办", "object": task},
+        {"subject": statement, "predicate": "支持", "object": "DEF"},
+        {"subject": "GHI", "predicate": "支持", "object": statement},
+        {"subject": "JKL", "predicate": "基于", "object": "MNO"},
+        {"subject": page, "predicate": "研究关键词", "object": "PQR"},
+    ]
+    assert not graph_ingest._is_proposition_slot(statement, triples[2], "subject")
+    triples.append({"subject": page, "predicate": "核心创新点", "object": statement})
+    normalized, warnings = graph_ingest._build_subgraph(triples, page)
+    assert normalized == triples
+    bare = {(w["field"], w["value"]) for w in warnings if w["issue"] == "bare_abbreviation"}
+    assert bare == {("object", "DEF"), ("subject", "GHI"),
+                    ("subject", "JKL"), ("object", "MNO"), ("object", "PQR")}, bare
+    with tempfile.TemporaryDirectory() as directory:
+        conn = graph_ingest.gl.connect(Path(directory) / "graph.db")
+        graph_ingest.gl.init_schema(conn)
+        graph_ingest.gl.ensure_node(conn, page, "Example meeting", "page")
+        *_, committed_warnings = graph_ingest.add_knowledge_edges(conn, page, triples[:2])
+        assert not [w for w in committed_warnings if w["issue"] == "bare_abbreviation"]
+        for title, kind in ((decision, "proposition"), (task, "task")):
+            row = conn.execute("SELECT entity_subtype FROM nodes WHERE title=?", (title,)).fetchone()
+            assert row and row["entity_subtype"] == kind
+        conn.close()
+
+
+def test_long_term_names_keep_aliases_and_explicit_claims_keep_roles():
+    names = [
+        "基于自注意力的查询构造Query Formulation based on Self-attention(QFS)",
+        "P-表示采样P-representation sampling",
+        "基于密度矩阵的量子态表示与重构方法",
+        "Microsoft Research, Station Q",
+    ]
+    page = "academic/wiki/papers/role-test"
+    claim = "仅在给定温度下有效，不能推广到其他温度"
+    triples = [{"subject": "检索模块", "predicate": "结合", "object": name} for name in names]
+    triples += [{"subject": claim, "predicate": "支持", "object": names[0]},
+                {"subject": page, "predicate": "局限性", "object": claim}]
+    # No keyword anchor is required just to avoid guessing a type from spelling.
+    for ordered in (triples, list(reversed(triples))):
+        normalized, warnings = graph_ingest._build_subgraph(ordered, page)
+        assert normalized == ordered
+        assert not [w for w in warnings if w["issue"] == "descriptive_phrase"]
+        with tempfile.TemporaryDirectory() as directory:
+            conn = graph_ingest.gl.connect(Path(directory) / "graph.db")
+            graph_ingest.gl.init_schema(conn)
+            graph_ingest.gl.ensure_node(conn, page, "Role test", "page")
+            graph_ingest.add_knowledge_edges(conn, page, ordered)
+            for name in names:
+                row = conn.execute("SELECT path,entity_subtype FROM nodes WHERE title=?", (name,)).fetchone()
+                assert row and row["entity_subtype"] == "keyword", (name, dict(row) if row else None)
+            row = conn.execute("SELECT path,entity_subtype,title FROM nodes WHERE title=?", (claim,)).fetchone()
+            assert row and row["entity_subtype"] == "proposition" and row["title"] == claim
+            ti, ai, si = graph_ingest.gl.build_name_index(conn)
+            full, ambiguous = graph_ingest.gl.resolve_bare_name(names[0], ti, ai, si)
+            short, ambiguous_short = graph_ingest.gl.resolve_bare_name("QFS", ti, ai, si)
+            assert full and full == short and not ambiguous and not ambiguous_short
+            assert conn.execute("SELECT 1 FROM edges WHERE subject=? AND predicate='结合' AND object=?",
+                                ("检索模块", full)).fetchone()
+            conn.close()
+
+
 def test_metadata_venue_abbreviation_does_not_warn():
     """确定性 venue 简称是书目元数据，不进入自由语义边裸缩写审计。"""
     with tempfile.TemporaryDirectory() as directory:
@@ -1871,6 +1940,24 @@ def test_wiki_validation_retry_budget_hands_off_without_third_full_rewrite():
     assert "缺少 ## Content" in result["agent_prompt"]
 
 
+def test_protocol_revision_preserves_feedback_and_stops_after_one_retry():
+    from unittest.mock import patch
+    state = {"transaction_id": "protocol-feedback", "status": "write_wiki", "errors": []}
+    calls = []
+    error = "LLM 输出缺少 <<<WIKI>>> 段"
+
+    def write(current):
+        calls.append(list(current.get("wiki_errors", [])))
+        return False, error
+
+    spec = {"script_name": "test.py", "steps": {"write_wiki": write}}
+    with patch.object(ingest_pipeline, "_save"):
+        result = ingest_pipeline.run_pipeline(state, spec, lambda *a, **kw: None)
+    assert calls == [[], [error]], calls
+    assert result["recovery"]["attempts"]["wiki_revision"] == 1
+    assert result["status"] == "failed"
+
+
 def test_semantic_hard_error_gets_one_bounded_rewrite_then_handoff():
     state = {
         "transaction_id": "semantic-hard-retry-budget",
@@ -2167,6 +2254,35 @@ def test_resume_post_maintenance_uses_unified_inbox_tail():
             sys.modules["ingest_inbox"] = previous
 
 
+
+def test_resume_reconciles_single_item_report_preserving_initial_result():
+    import ingest_common as ic
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        reports = root / "cross-domain/ingest-reports"
+        reports.mkdir(parents=True)
+        path = reports / "20261104-120000.json"
+        initial = {"file": "paper.pdf", "status": "agent_required", "transaction_id": "txn",
+                   "errors": ["author conflict"], "next_action": "repair_api_workspace_then_resume"}
+        path.write_text(json.dumps({"session_id": "initial", "files": [initial],
+                                    "completed": 0, "awaiting_agent": 1}))
+        # A later resume report must not hide the originating intake report.
+        (reports / "resume-txn.json").write_text(json.dumps({"files": [initial]}))
+        state = {"status": "completed", "transaction_id": "txn", "wiki_path": "academic/wiki/papers/demo",
+                 "graph_report": {}, "quality_status": "complete", "execution_backend": "api"}
+        found_path, report = ic._reconcile_parent_batch_report(root, state)
+        assert found_path == path
+        assert report["completed"] == 1 and report["awaiting_agent"] == 0
+        assert report["files"][0]["status"] == "completed"
+        assert "next_action" not in report["files"][0]
+        assert report["initial_files"] == [initial]
+        assert report["reconciled_at"]
+        _path, repeated = ic._reconcile_parent_batch_report(root, state)
+        assert repeated["initial_files"] == [initial]
+        state["transaction_id"] = "unrelated"
+        assert ic._reconcile_parent_batch_report(root, state) is None
+
+
 def test_resume_reconciles_parent_batch_before_maintenance():
     import sys
     from types import ModuleType
@@ -2370,6 +2486,8 @@ def test_inbox_state_supersede_requires_completed_same_source():
 
 
 def main():
+    test_long_term_names_keep_aliases_and_explicit_claims_keep_roles()
+    test_optional_wiki_repair_uses_existing_budget_and_respects_backend()
     test_nature_author_block()
     test_publisher_wrapper_and_review_label_are_not_authors()
     test_initials_and_multiword_surname_particle_remain_one_author()
@@ -2395,6 +2513,7 @@ def main():
     test_is_citation_fragment_detection()
     test_add_knowledge_edges_skips_citation_fragment()
     test_add_knowledge_edges_warns_free_edge_bare_abbreviation()
+    test_statement_and_task_abbreviations_follow_endpoint_roles()
     test_page_identity_abbreviation_is_not_a_free_edge_warning()
     test_proposition_abbreviation_does_not_warn()
     test_locked_bibliography_edges_are_mechanical_and_single_source()
@@ -2440,6 +2559,7 @@ def main():
     test_legacy_protocol_failure_resume_migrates_to_handoff()
     test_resume_post_maintenance_uses_unified_inbox_tail()
     test_resume_reconciles_parent_batch_before_maintenance()
+    test_resume_reconciles_single_item_report_preserving_initial_result()
     test_inbox_state_finds_only_one_compatible_same_source_transaction()
     test_inbox_state_supersede_requires_completed_same_source()
     print("ingest pipeline regression: PASS")
@@ -2749,6 +2869,50 @@ def test_subprocess_stdout_honors_quiet_log_without_hiding_stderr():
     finally:
         ingest_common.close_progress_file()
         ingest_common.subprocess.run = original_run
+
+
+
+def test_optional_wiki_repair_uses_existing_budget_and_respects_backend():
+    from unittest.mock import patch
+    class ReachedSlots(Exception): pass
+    for case in ("repaired", "failed", "residual", "not_applicable", "exhausted", "agent"):
+        state = {"transaction_id": "wiki-hook-test", "status": "write_wiki", "errors": [],
+                 "extract_dir": "temp/inbox-extract/wiki-hook-test", "slots_content": "locked slots"}
+        if case == "exhausted":
+            state["recovery"] = {"policy_version": ingest_pipeline.rp.POLICY_VERSION, "attempts": {"wiki_revision": 1}}
+        calls = []
+        def write(current):
+            calls.append("write")
+            current["wiki_content"] = "invalid"
+            return True, ""
+        def validate(current):
+            return [] if current["wiki_content"] == "fixed" else ["脚注 [^r1] 错误"]
+        def repair(current, errors):
+            calls.append("repair")
+            assert errors
+            if case == "repaired": current["wiki_content"] = "fixed"
+            return ("repaired" if case == "residual" else case), "repair rejected"
+        def slots(current):
+            assert current["slots_content"] == "locked slots"
+            raise ReachedSlots()
+        spec = {"script_name": "test_driver.py", "steps": {
+            "write_wiki": write, "validate_wiki": validate, "repair_wiki": repair, "write_slots": slots},
+            "max_retries": 3, "max_wiki_validation_retries": 1}
+        with patch.object(ingest_pipeline, "_save"), \
+                patch.object(ingest_pipeline.agent_task, "ingest_backend", return_value="agent" if case == "agent" else "api"):
+            try:
+                result = ingest_pipeline.run_pipeline(state, spec, lambda *a, **kw: None)
+            except ReachedSlots:
+                assert case == "repaired"
+                assert calls == ["write", "repair"]
+            else:
+                assert case != "repaired"
+                assert result["status"] == "agent_required"
+                expected = ["write"] if case == "exhausted" else (
+                    ["write", "write"] if case == "agent" else (
+                    ["write", "repair", "write"] if case == "not_applicable" else ["write", "repair"]))
+                assert calls == expected, (case, calls)
+            assert state["recovery"]["attempts"]["wiki_revision"] == 1
 
 
 if __name__ == "__main__":

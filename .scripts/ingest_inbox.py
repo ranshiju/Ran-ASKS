@@ -32,6 +32,8 @@ import urllib.parse
 import unicodedata
 import uuid
 import inbox_source_policy
+import bibliography_sidecar
+import bibliography_update
 from datetime import datetime
 from pathlib import Path
 
@@ -186,6 +188,11 @@ def classify_file_details(path: Path) -> dict:
     """返回程序类型、得分、命中标记及是否需要 API 裁决。"""
     suffix = path.suffix.lower()
     if suffix == ".pdf":
+        from long_document_plan import pdf_profile
+        if pdf_profile(path).get("book_structure"):
+            return {"file_type": "document", "score": None, "threshold": None,
+                    "markers": ["pdf_chapter_structure"], "confidence": "high",
+                    "needs_api_review": False, "review_text": "", "source_kind": "ordinary"}
         text = read_pdf_text(path, max_pages=2)
         quality = _text_quality(text)
         if not text or len(text) < 200 or quality < 0.5:
@@ -462,6 +469,9 @@ def classify_academic_document(path: Path) -> str | None:
     text = path.stem
     suffix = path.suffix.lower()
     if suffix == ".pdf":
+        from long_document_plan import pdf_profile
+        if pdf_profile(path).get("book_structure"):
+            return "academic-reference"
         text += "\n" + read_pdf_text(path, max_pages=3)
     elif suffix in {".txt", ".md"}:
         try:
@@ -571,8 +581,9 @@ def scan_inbox() -> list[Path]:
     if not INBOX.is_dir():
         return []
     files = []
+    sidecars = bibliography_sidecar.associated_paths(INBOX)
     for p in sorted(INBOX.iterdir()):
-        if not p.is_file() or inbox_plan.is_ignored_entry(p):
+        if not p.is_file() or inbox_plan.is_ignored_entry(p) or p in sidecars:
             continue
         if p.name == "facts-pending.md" and inbox_plan.fact_entries(p) == 0:
             continue
@@ -920,7 +931,8 @@ def _resolve_inbox_file(value: str) -> Path:
 
 def stage_external_file(value: str, import_name: str = "") -> tuple[Path, dict]:
     """Copy one external attachment into inbox with a hash-bound intake receipt."""
-    source = Path(value).expanduser().resolve()
+    provided = Path(value).expanduser().absolute()
+    source = provided.resolve()
     if not source.is_file():
         raise ValueError(f"外部附件不存在: {value}")
     try:
@@ -947,10 +959,24 @@ def stage_external_file(value: str, import_name: str = "") -> tuple[Path, dict]:
                 if target.is_symlink() or not target.is_file() or _sha256_file(target) != digest:
                     raise ValueError(f"受管 inbox 目标冲突: {target.name}")
             action = "reused_exact" if target.exists() else "copied_with_hash_suffix"
-    if not target.exists():
-        shutil.copy2(source, target)
-    if _sha256_file(target) != digest:
-        raise ValueError("外部附件暂存后 SHA-256 不一致")
+    companions = bibliography_sidecar.import_companions(provided, target)
+    created = False
+    try:
+        if not target.exists():
+            with target.open("xb") as handle:
+                created = True
+                with source.open("rb") as source_handle:
+                    shutil.copyfileobj(source_handle, handle)
+            shutil.copystat(source, target)
+        if _sha256_file(target) != digest:
+            raise ValueError("外部附件暂存后 SHA-256 不一致")
+    except (OSError, ValueError):
+        if created:
+            target.unlink(missing_ok=True)
+        for companion in companions:
+            if companion["action"] == "copied":
+                Path(companion["staged_path"]).unlink(missing_ok=True)
+        raise
     receipt = {
         "schema": "inbox-intake-v1",
         "created_at": datetime.now().astimezone().isoformat(),
@@ -959,12 +985,21 @@ def stage_external_file(value: str, import_name: str = "") -> tuple[Path, dict]:
         "staged_path": str(target.relative_to(REPO)),
         "binary_sha256": digest,
         "action": action,
+        "bibliography_sidecars": companions,
     }
     receipt_path = (
         REPO / "temp/inbox-intake"
         / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-{digest[:12]}.json"
     )
-    _write_json_atomic(receipt_path, receipt)
+    try:
+        _write_json_atomic(receipt_path, receipt)
+    except OSError:
+        if created:
+            target.unlink(missing_ok=True)
+        for companion in companions:
+            if companion["action"] == "copied":
+                Path(companion["staged_path"]).unlink(missing_ok=True)
+        raise
     receipt["receipt_path"] = str(receipt_path.relative_to(REPO))
     return target, receipt
 
@@ -1002,6 +1037,7 @@ def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
     INBOX.mkdir(parents=True, exist_ok=True)
     target = INBOX / f"{Path(name).stem}-chat-{uuid.uuid4().hex[:12]}{Path(name).suffix}"
     created = False
+    companions = []
     try:
         with target.open("xb") as handle:
             created = True
@@ -1014,6 +1050,8 @@ def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
             shutil.copystat(original, target)  # Preserve source timestamps used by existing date inference.
         if _sha256_file(target) != digest:
             raise ValueError("对话原文暂存后 SHA-256 不一致")
+        if provided is not None:
+            companions = bibliography_sidecar.import_companions(provided, target)
     except (OSError, ValueError):
         # Only our exclusively created copy is disposable; never touch an original.
         if created:
@@ -1023,6 +1061,7 @@ def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
         "schema": "inbox-intake-v1",
         "created_at": datetime.now().astimezone().isoformat(),
         "origin": "chat_attachment" if original is not None else "chat_text",
+        "bibliography_sidecars": companions,
         "source_path": str(original) if original else None,
         "source_name": original.name if original else name,
         "staged_path": str(target.relative_to(REPO)),
@@ -1036,6 +1075,9 @@ def stage_chat_input(*, source: str | None = None, content: bytes | None = None,
         _write_json_atomic(receipt_path, receipt)
     except OSError:
         target.unlink(missing_ok=True)
+        for companion in companions:
+            if companion["action"] == "copied":
+                Path(companion["staged_path"]).unlink(missing_ok=True)
         raise
     receipt["receipt_path"] = str(receipt_path.relative_to(REPO))
     return target, receipt
@@ -1155,8 +1197,30 @@ def cleanup_exact_duplicate(source: Path, match: dict) -> dict:
         "binary_sha256": expected_hash,
         "verified_at": datetime.now().isoformat(timespec="seconds"),
     }
+    companions = bibliography_sidecar.duplicate_companion_status(source_path, raw_path)
+    if companions["status"] == "unarchived":
+        receipt.update(status="retained_bibliography", bibliography=companions)
+        _write_json_atomic(receipt_path, receipt)
+        return {"status": "retained_bibliography", "receipt_path": str(receipt_path.relative_to(REPO)),
+                "bibliography": companions}
+    if companions["status"] == "archived":
+        for item in companions["files"]:
+            inbox_source_policy.retain_original(REPO, source_path.parent / item["name"])
+        receipt["bibliography"] = companions
     _write_json_atomic(receipt_path, receipt)
     try:
+        if _sha256_file(source_path) != expected_hash or _sha256_file(raw_path) != expected_hash:
+            raise ValueError("写入清理回执后 source/Raw 已变化")
+        if source_path.suffix.lower() == ".pdf" and (
+                {path.name for path in bibliography_sidecar.discover(
+                    source_path, same_name_only=companions.get("discovery_scope") == "same-name")}
+                != {item["name"] for item in companions["files"]}):
+            raise ValueError("写入清理回执后书目文件集合已变化")
+        for item in companions["files"]:
+            path = source_path.parent / item["name"]
+            if (path.is_symlink() or not path.is_file() or path.stat().st_size > bibliography_sidecar.MAX_FILE_BYTES
+                    or _sha256_file(path) != item["sha256"]):
+                raise ValueError("写入清理回执后书目文件已变化")
         trash_util.trash_path(source_path)
         if source_path.exists():
             raise RuntimeError("trash 返回后源文件仍存在")
@@ -1933,11 +1997,11 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
         compact = {"file": item.get("file"), "status": item.get("status", "unknown")}
         for key in (
             "quality_status", "reason", "transaction_id", "retryable",
-            "next_action", "resume_from", "failure_signature", "bibliographic_worker",
+            "next_action", "resume_from", "failure_signature", "failure_domain", "bibliographic_worker",
             "relationship_worker", "semantic_repair_worker", "failure_disposition",
             "fact_entries", "write_to", "manifest_path", "apply_command", "cleanup",
             "agent_task", "workflow_status", "internal_status", "raw_dir", "wiki_path",
-            "receipt_path",
+            "receipt_path", "bibliography_update", "artifacts", "next_actions",
         ):
             if item.get(key) is not None:
                 compact[key] = item[key]
@@ -2358,17 +2422,48 @@ def main():
         if not match:
             continue
         try:
-            cleanup = cleanup_exact_duplicate(f, match)
+            supplement = bibliography_update.recover_pending(REPO, match["raw_path"])
+            if supplement and supplement["status"] != "completed":
+                cleanup = {"status": "retained_bibliography", "reason": supplement.get("reason", "")}
+            else:
+                cleanup = cleanup_exact_duplicate(f, match)
+            if cleanup["status"] == "retained_bibliography" and (supplement is None or supplement["status"] == "completed"):
+                recovered = supplement
+                supplement = bibliography_update.run(REPO, f, match["raw_path"])
+                if recovered is not None:
+                    supplement["recovered_transaction_id"] = recovered["transaction_id"]
+                if supplement["status"] == "completed":
+                    cleanup = cleanup_exact_duplicate(f, match)
+            retained = cleanup["status"] == "retained_bibliography"
             entry = {
                 "file": f.name,
                 "type": ftype,
-                "ok": True,
-                "status": "duplicate_found",
-                "reason": "binary_sha256 exact match; source moved to recoverable Trash",
+                "ok": not retained,
+                "status": "bibliographic_review_required" if retained else "duplicate_found",
+                "reason": ("PDF 已入库，但伴随书目尚未完成受管归档；已保留 PDF 和书目，需走已有论文增补流程"
+                           if retained else "binary_sha256 exact match; source moved to recoverable Trash"),
                 "raw_path": match["raw_path"],
                 "binary_sha256": match["binary_sha256"],
                 "cleanup": cleanup,
             }
+            if supplement is not None:
+                entry["bibliography_update"] = supplement
+                if supplement["status"] == "completed":
+                    entry["reason"] = "书目受管增补完成；已复核归档原件并处理重复 PDF"
+            if retained:
+                entry.update(retryable=False, next_action="resolve_bibliography_update_diagnostics")
+                if supplement:
+                    entry["reason"] = supplement.get("reason", entry["reason"])
+                    entry["status"] = supplement["status"] if supplement["status"] != "completed" else "bibliographic_review_required"
+                    for key in ("transaction_id", "apply_command", "retryable", "failure_domain", "next_action"):
+                        if key in supplement: entry[key] = supplement[key]
+                    if supplement.get("failure_disposition"):
+                        entry["telemetry"] = {"current_failure": supplement["failure_disposition"]}
+                    if supplement.get("plan"):
+                        entry.update(state_ref=None, runtime_status_ref=None,
+                                     artifacts={"bibliography_plan": supplement["plan"]})
+                    if supplement.get("apply_command"):
+                        entry["next_actions"] = {"resume": supplement["apply_command"]}
         except (OSError, RuntimeError, ValueError) as exc:
             entry = {
                 "file": f.name,

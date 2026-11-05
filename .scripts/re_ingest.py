@@ -133,6 +133,8 @@ def new_state_for_reingest(paper_id: str, raw_md_rel: str) -> dict:
     md_text = raw_md_path.read_text(encoding="utf-8")
     bibliography, corrections = ip.repair_archived_bibliography(
         ip.load_bibliographic_metadata(raw_md_path.parent), md_text)
+    ip.bs.copy_archived(bibliography.get("external_receipt") or {},
+                        raw_md_path.parent, extract_dir, md_text)
     return {
         "transaction_id": txn,
         "status": "write_wiki",

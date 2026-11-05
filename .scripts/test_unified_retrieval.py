@@ -229,6 +229,19 @@ class UnifiedRetrievalTests(unittest.TestCase):
         self.assertEqual(result["channels"]["source"]["status"],"unavailable")
         self.assertFalse((self.root/"academic/sources/index.sqlite").exists())
 
+    def test_legacy_wiki_actual_section_is_preserved_by_hybrid(self):
+        page = self.wiki(graph=False)
+        path = self.root / (page + ".md")
+        path.write_text(path.read_text().replace("## Navigation", "## Meeting rules")
+                        .replace(".[^r]", ".").split("\n[^r]:")[0])
+        wiki = next(r for r in self.recall()["candidates"] if r["kind"] == "wiki")
+        self.assertEqual(wiki["read_input"]["section"], "meeting-rules")
+        self.assertTrue(qa.execute(wiki["read_action"], wiki["read_input"])["ok"])
+        path.write_text("---\ntitle: Conditional result\n---\n# Conditional result\nNo subsections.")
+        wiki = next(r for r in self.recall()["candidates"] if r["kind"] == "wiki")
+        self.assertNotIn("read_action", wiki)
+        self.assertNotIn("read_input", wiki)
+
     def test_broken_ku_index_preserves_raw_source_discovery(self):
         self.statement()
         (self.root/"academic/knowledge/index.sqlite").write_bytes(b"not a database")

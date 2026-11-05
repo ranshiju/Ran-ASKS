@@ -8,7 +8,8 @@
   connectivity        图连通性统计:从 Raw 文档包 BFS；只把有 sources 却不可达的 Wiki 视为结构缺口
   tight_clusters      紧密簇检测:无 Hub 覆盖的连通分量(>=3 节点),提示建 Hub
   predicates          谓词报告:GROUP BY predicate,发现低频/可合并谓词
-  all                 全部检查
+  unsplit_phrases     可选历史形态观察（不判缺陷、不要求拆分）
+  all                 常规检查（历史形态观察按需运行）
 
 紧密簇状态:存 cross-domain/.graph-state.json,只提示本次新增(不重复刷屏)。
 形态 B(suggested questions 的知识库版):紧密簇→Hub 触发器,L3 领域地图触发器。
@@ -186,10 +187,11 @@ def predicate_report(conn):
 
 
 def check_unsplit_phrases(conn):
-    """扫描含主谓宾结构但没有「包含」边的 entity 节点(ADR-003: 拆分已统一为包含)（历史存量检查）。
-    判据：is_descriptive_phrase 命中（长度>20且含触发词或含标点），
-    且该节点没有 predicate='包含' 的出边。"""
-    import graph_ingest
+    """Optional legacy shape observations, not defects or split requirements.
+
+    Keep historical result keys for compatibility. Name shape and absence of a
+    containment edge alone provide no evidence of a knowledge/retrieval defect.
+    """
     from graph_ingest import is_descriptive_phrase
     rows = conn.execute("SELECT path FROM nodes WHERE type='entity'").fetchall()
     flagged = []
@@ -293,14 +295,14 @@ def consolidation_candidates(conn, min_sources=3, min_hub_members=5, limit=50):
 
 
 def fmt_unsplit_phrases(r):
-    lines = [f"主谓宾结构未拆分检查(查包含边)({r['flagged_count']}/{r['total_entities']} 个 entity 需拆分):"]
+    lines = [f"历史名称形态观察（可选，非质量缺陷）：{r['flagged_count']}/{r['total_entities']} 个候选"]
     for f in r["flagged"][:20]:
         lines.append(f"  [{f['edge_count']}边] {f['path']}")
     if r["flagged_count"] > 20:
         lines.append(f"  ... 共 {r['flagged_count']} 个")
     if r["flagged_count"]:
-        lines.append("\n提示:这些节点含主谓宾结构但未拆分。摄入时 3.3b/3.6b 应已处理，")
-        lines.append("此处是历史存量；建议 LINT 时人工确认后补包含边。")
+        lines.append("\n说明：名称较长或缺少包含边不代表质量问题，无须据此拆分或修补。")
+        lines.append("仅在发现实际检索歧义、来源不可达或关系错误时，另按对应证据检查。")
     return "\n".join(lines)
 
 
@@ -401,8 +403,10 @@ def main():
     if args.cmd in ("predicates", "all"):
         out.append(fmt_predicates(predicate_report(conn)))
         out.append("")
-    if args.cmd in ("unsplit_phrases", "all"):
+    if args.cmd == "unsplit_phrases":
         out.append(fmt_unsplit_phrases(check_unsplit_phrases(conn)))
+    elif args.cmd == "all":
+        out.append("历史名称形态观察为可选项：按需运行 unsplit_phrases；不计入缺陷或修复待办。")
     if args.cmd in ("consolidation", "all"):
         report = consolidation_candidates(
             conn, args.min_sources, args.min_hub_members, args.limit

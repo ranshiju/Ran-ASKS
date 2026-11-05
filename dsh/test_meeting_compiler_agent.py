@@ -284,6 +284,8 @@ def test_retry_messages_inject_output_and_use_error_specific_scope():
     assert "本轮只修复" in messages[3]["content"]
     assert "不添加 <<</PREPROCESS>>>" in messages[3]["content"]
     assert calls[-1][1]["retries"] == 0
+    assert calls[-1][1]["operation"] == "ingest_meeting_repair"
+    assert calls[-1][1]["allow_profile_fallback"] is False
     assert calls[-1][1]["max_tokens"] == task.budget.max_output_tokens
     for errors, details in [
         (("schema validation failed",), {"kind": "schema"}),
@@ -295,6 +297,8 @@ def test_retry_messages_inject_output_and_use_error_specific_scope():
         assert "按当前 schema/内容校验错误" in repair
     MeetingCompilerAgent(replace(task, errors=()), fake_call).run()
     assert calls[-1][1]["messages"] is None
+    assert calls[-1][1]["operation"] == "ingest_meeting_compile"
+    assert calls[-1][1]["allow_profile_fallback"] is True
 
 
 def main():

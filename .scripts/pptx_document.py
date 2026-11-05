@@ -179,7 +179,7 @@ def extract(source: Path) -> tuple[str, dict]:
     return text, manifest
 
 
-def prepare(source: Path, directory: Path) -> dict:
+def prepare(source: Path, directory: Path, *, render: bool = True) -> dict:
     """Stage native evidence and reuse existing local slide rendering, never remote QA."""
     import visual_qa
     directory = directory.resolve()
@@ -197,6 +197,8 @@ def prepare(source: Path, directory: Path) -> dict:
         path.write_text(_json(manifest) + "\n", encoding="utf-8")
     if manifest.get("schema") != SCHEMA or file_hash(directory / "pptx-native.md") != manifest["native_sha256"]:
         raise PPTXError("PPTX 原生提取产物发生变化")
+    if not render:
+        return manifest
     render_dir = directory / "pptx-renders"
     render_dir.mkdir(exist_ok=True)
     try:
@@ -255,6 +257,12 @@ def validated(source: Path, directory: Path) -> tuple[str, dict, list[dict]]:
     for page, original in zip(manifest["pages"], expected["pages"]):
         if any(page.get(k) != v for k, v in original.items()):
             raise PPTXError("PPTX 页清单内容与原件不一致")
+    if review.get("schema") == "pptx-selective-review-v1":
+        import pptx_intake
+        try:
+            return pptx_intake.validated(source, directory, manifest, review)
+        except ValueError as exc:
+            raise PPTXError(str(exc)) from exc
     if review.get("schema") == "pptx-api-review-v1":
         return _validated_api(source, directory, manifest, review)
     if review.get("schema") != REVIEW_SCHEMA or any(review.get(k) != manifest[k] for k in ("source_sha256", "native_sha256")):

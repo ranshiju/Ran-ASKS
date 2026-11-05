@@ -19,6 +19,22 @@ assert spec.loader is not None
 spec.loader.exec_module(module)
 
 
+def test_result_refs_can_describe_transactions_outside_inbox_state():
+    state = {"status": "failed", "transaction_id": "external-plan"}
+    default = module.inbox_state.output_payload(state, {})
+    assert default["state_ref"] == "temp/inbox-state/external-plan.json"
+    explicit = module.inbox_state.output_payload(
+        {**state, "state_ref": None, "runtime_status_ref": None},
+        {"artifacts": {"plan": "temp/other/plan.json"}, "next_actions": {"resume": "managed apply"}},
+    )
+    assert "state_ref" not in explicit and "runtime_status_ref" not in explicit
+    assert explicit["transaction_id"] == "external-plan"
+    assert explicit["artifact_refs"]["plan"] == "temp/other/plan.json"
+    assert explicit["next_actions"]["resume"] == "managed apply"
+    override = module.inbox_state.output_payload(state, {"state_ref": "temp/other/state.json", "runtime_status_ref": None})
+    assert override["state_ref"] == "temp/other/state.json" and "runtime_status_ref" not in override
+
+
 def test_extract_last_json_ignores_domain_status():
     content = (
         '{"hub_scope_route":{"candidates":[{"status":"active"}]}}\n'
@@ -2119,6 +2135,7 @@ def test_maintenance_recovers_quality_omitted_from_legacy_completed_output():
 
 
 def main():
+    test_result_refs_can_describe_transactions_outside_inbox_state()
     test_maintenance_recovers_quality_omitted_from_legacy_completed_output()
     test_result_entry_preserves_top_level_agent_task()
     test_extract_last_json_ignores_domain_status()

@@ -17,6 +17,24 @@
 
 ---
 
+## 论文伴随书目：RIS / BibTeX
+
+精确重复 PDF 携带尚未归档的 RIS/BIB 时，统一入口调用 shared `bibliography_update.py` 尝试已入库论文增补：PDF 必须与归档原件字节相同，一份 RIS 或 BibTeX 与原 Markdown 完成身份匹配、关联唯一论文 Wiki 即可，不需要另一种格式或额外在线交叉验证。接受的新记录可更正旧年份、期刊、作者写法等字段，即使旧记录已锁定；仅两个不同且非空的正式 DOI 仍作为身份矛盾阻断，缺少 DOI 不等同于冲突。旧回执原样归档，不作为新记录的接受门槛。成功路径零 HTTP/OCR/LLM，不向主 Agent 派发语义任务。新原件、旧 `source.yaml` 和本次接受记录受管归档；仅更新当前书目元数据、Wiki 书目显示和本页作者/发表图关系，科学正文、原 PDF/Markdown 和其他知识边保持。
+
+只有文件、原 validator、图和审计日志全部完成后，才复核归档原件并清理重复 PDF。外层状态为 `duplicate_found`，`bibliography_update.status=completed` 明示增补结果。明确身份冲突、不安全路径、多个 Wiki 或身份歧义均保留输入并返回具体 `bibliographic_review_required`；旧字段与新字段不同本身不阻断。清理按当前回执记载的同名/目录范围执行；未被选中的共享库留在 inbox，不标为已处理。旧回执没有范围字段时沿用目录规则。清理检查先比选中书目与旧回执声明的原件哈希；新文件直接进入增补，只有字节已匹配的重复原件才重放归档完整性校验。已有文件提交、图未提交时，统一入口在重复清理前恢复原计划；恢复校验文件/日志和限定图状态，拒绝漂移。旧事务恢复成功后，如当前伴随书目还有更新，同次调用继续增补当前记录，并保留 recovered_transaction_id；不会把旧恢复成功误当成当前输入已接受。已准备计划也可使用返回的 `apply_command`（`python3 .scripts/bibliography_update.py --apply <plan>`）恢复，此类计划不属于通用 `--resume` 的论文内容事务。被后续已接受记录取代的完成计划只作为历史；再次提供曾用过的导出会绑定当前来源建立新事务，不恢复过期计划。
+
+跨文件/SQLite 不具备原生原子提交。普通异常回滚，已落文件回执支持图提交前/后断点恢复；文件落位中途强杀且未写完回执时保守阻断，不承诺任意崩溃点自动修复。恢复所需计划、快照和回执应保留；它们仅为事务控制材料，事实依据仍是 Raw 原件与受管历史。不要直接改旧 Raw。
+
+增补失败按原因处理：明确临时 I/O（EAGAIN/EBUSY/EINTR/ETIMEDOUT）或 SQLite BUSY/LOCKED，对同一已准备计划最多自动重试一次，不重新解析准备、不调用模型；每次仍经过原事务校验。持续临时故障返回 failed、retryable=true 与程序重试指引，权限/磁盘不足等环境错误返回 failed 和环境修复指引，身份或来源校验问题才返回 bibliographic_review_required。已有计划在结果中给出真实 bibliography_plan artifact 和专用 apply 恢复命令，不提供不存在的通用状态文件。扫描到其他不可读/损坏计划时跳过该候选并保留有界告警；当前计划损坏仍阻断，不能覆盖。尝试次数只记本次调用，不成为来源事实。
+
+外部导入若回执写入失败，只回滚本次新建副本；原件、之前已存在且精确匹配的 PDF/书目不删除。本地冲突修正后可恢复原论文事务，程序先复验源和暂存包，复用提取结果，避免重跑 OCR。
+
+提供 `paper.pdf` 时附上一份 `paper.ris` 或 `paper.bib` 即可，不要求两份齐备。 同名文件匹配成功后就采用，不读取共享库；共享库损坏或存在不同记录不会干扰该结果。只有没有同名文件或同名未匹配时才查目录书目库。同名文件本身的解析错误或明确冲突保留诊断，不靠共享库掩盖。同目录未与其他 PDF 同名的书目库（如 `library.bib`）可供多篇匹配；不靠文件名认定论文身份。标准 UTF-8 导出无需模型解析；优先正式期刊/会议记录，遇正式记录冲突暂停，无法解析或未匹配时保留诊断并走原免费查询。
+
+外部 PDF 导入和对话附件入口自动带入同目录同名 RIS/BIB，随受管 PDF 同步重命名；外部共享书目库不会被顺带导入，需要明确放入 inbox。元数据里的 URL、附件路径和 TeX 命令只是数据，不触发读取、下载或执行。
+
+伴随文件不作为独立内容排队，计划在 PDF 项的 `bibliography_sidecars` 中列出。已暂存的 inbox 书目原件登记既有持久保留策略，在 `retained_sources` 中显示，PDF 清理后也保留供后续匹配；未关联 PDF 的孤立书目仍显示为待处理项，需要提供对应论文。原件经 manifest 随论文受管归档至 `bibliography/`，不直接写 Raw。本地记录明确标记“来源自述，未独立认证出版社来源”。
+
 ## 用途
 
 `inbox/` 暂存待分类和摄入的新文件。统一入口先由程序评分归类；不确定样本在 Agent backend 合并为一个 `agent-task-v1` 供当前宿主裁决，在 API backend 由受限分类器裁决。仍不确定时才由用户兜底。
@@ -52,6 +70,8 @@ Hub 的 `backlog_count/split_backlog_count` 是未达到创建或稳定分裂门
 首次摄入与直接 resume 使用共享报告发布入口，把维护回执及报告地址关联到本批所有已完成事务。历史报告缺少关联，或 Hub 分裂成功后回执尚未闭合时，运行 `python3 .scripts/ingest_inbox.py --reconcile-maintenance-report cross-domain/ingest-reports/<report>.json`：仅重建指定报告的关联、重放已有方向裁决，并只读核验分裂父 Hub 的 canonical 直接子 Hub、既有 split Scope history 与原候选成员迁移。每个原簇须完整迁入不同子 Hub，且不再保留父 membership，才标记对应 handoff 已应用并更新 split_count；已有子 Hub、手写 resolution 或数量变化本身不能证明完成。不重新摄入、不调用模型、不写 Raw 或图。独立质量告警和其他待审动作继续保留，缺图或无可验证候选时保留待审。
 
 维护语义以共享回执为准，事务仅持有同步快照。发布先在报告写 `maintenance.publication.status=pending` 检查点，再同步本批事务，最后标为 `completed`；方向闭环同步全部关联事务而非仅当前论文。I/O 失败单独返回 `maintenance.status=error`、`publication`、`retryable` 与 `next_action`，文件 `completed` 和失败计数不变。已落检查点可用上述 reconcile 命令继续，直接 resume 遇到 publication pending/error 也只重试发布，不重跑全局维护；检查点尚未落盘时明确返回 `report_persisted=false`，须先恢复报告持久化条件，不假称存在可恢复报告。
+
+书籍 PDF 的多章书签由共享只读探测器识别，进入通用文档分流；所属域仍由内容或显式参数决定，academic 使用 `academic-reference`。长文自动分窗与多页事务见 `operations/INGEST.md`「长文动态颗粒度」，原件保留、同事务 resume 和质量告警规则不变。
 
 > **代码驱动优先**：论文 PDF → `ingest_paper.py`；会议纪要 → `ingest_meeting.py`；学术非论文及行政/教学/商业文档 → `ingest_document.py`（详见 `memory/playbooks/index.md` 对应条目）。文件扩展名只选择提取器：`.docx/.doc/.pptx/.md` 若命中文件名或正文中的强会议速记标记，仍显式传 `source_kind=meeting`，不得退化为普通 official-doc。PDF/TXT 不确定分数只在 `--run` 时进入对应 backend 的一次合并裁决；中/高置信度具体类型可纠正程序初判，`ambiguous`、低置信或裁决失败时才在事务前停止。`academic` 非论文必须分类为 `editorial`、`academic-reference` 或 `conference-summary`；文件名或正文首个 H1 同时含会议实体词与事务记录词时可强判为 `conference-summary`，其余不确定样本停在 `classification_required`，不得回退到 `admin`。单文件可用 `--document-type` 显式定类；该参数直接选择通用文档分流，同时保留程序初判用于审计。
 
@@ -130,6 +150,8 @@ python3 .scripts/wg.py task status <transaction-id> | jq '.result | {workflow_st
 ## 批次身份与恢复
 
 API 论文批次的每项结果在所有状态都保留 `transaction_id`、`source`、Raw/Wiki 地址和实际 backend，尤其不能在 `graph_ready` 屏障丢失身份。直接 resume 按事务号回到原批次，文件统计和维护回执同步该批所有已完成项。历史报告若丢失身份，只依据该报告已保存的原批次输出与对应事务核对补齐，再恢复；不得仅凭文件名推测事务或把单篇维护冒充整批闭环。
+
+单文件和多文件批次共用恢复对账。首次对账把原文件结果保存在 `initial_files`，`files` 与统计更新为当前事务状态，记录 `reconciled_at`；恢复生成的 `resume-*` 报告不遮蔽原摄入批次。维护仍按原批次发布并绑定所有已完成事务，历史失败和当前成功分别可查。
 
 ## 用户申明事实
 

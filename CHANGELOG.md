@@ -7,6 +7,27 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-05
+
+### Version decision / 版本判断
+
+- MINOR: Add compatible bibliography intake, complete long-document reading and bounded API recovery while preserving evidence and transaction contracts
+- MINOR（中文）：新增兼容的书目接入、长文完整阅读与有界 API 恢复，保留证据与事务契约
+
+### Highlights
+
+- Added local RIS/BibTeX bibliography matching, bounded free publication lookup and managed updates for companions supplied with an already archived PDF. One matched local record is sufficient; formal publication metadata takes priority and dates need only the year.
+- Added complete windowed reading and evidence-bound chapter planning for long documents, plus selective visual reading and source-bound reusable-slide selection for PPTX intake.
+- Routed eligible API validation failures to configured recovery workers within existing budgets, with persistent failure and resume state. Full-document EV review is not required, and Agent/API control loops remain independent.
+- Removed label-length and wording heuristics from blocking semantic checks; legacy long-phrase observations are optional. Source/citation validation, relationship coverage and extraction warnings remain. Improved batch reconciliation, source-link maintenance and public reader/Gallery guidance.
+
+### 主要更新
+
+- 新增本地 RIS/BibTeX 匹配、免费在线发表信息查询，以及已归档 PDF 补交书目的受管更新。一份匹配记录即可，优先正式发表元信息，日期只要求年份。
+- 长文支持完整分窗阅读与证据绑定的章节规划；PPTX 支持按需视觉识读与来源绑定的可复用页面选择。
+- 符合条件的 API 校验失败由配置的恢复模型在原预算内处理，保留失败与续跑记录；不要求逐篇 EV 全文复核，Agent/API 控制循环保持独立。
+- 移除阻断语义检查中的名称长度与措辞猜测，旧长句观察改为可选；保留来源、引用、关系覆盖和提取告警。同步批次对账、来源链接维护及读者文档和 Gallery 使用指引。
+
 ## [0.23.0] - 2026-11-03
 
 ### Version decision / 版本判断
@@ -721,5 +742,7 @@ manifests and checksums.
 
 [0.22.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.22.2
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.23.0...HEAD
 [0.23.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.23.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.24.0

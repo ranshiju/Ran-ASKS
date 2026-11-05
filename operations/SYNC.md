@@ -39,6 +39,8 @@ private 使用独立 `private/graph.db`，不进入主库 Sync 范围。
 3. Wiki 缺节点时交给标准 ingest；Raw 缺文档包、alias 或来源边时交给标准 graph repair。
 4. Raw 文档包可以暂时没有 Wiki 消费者，报告为信息项，不按事实缺失处理。
 
+`graph_ingest_status.py` 的清单和统计使用同一组去重后的现存 Wiki 路径：已进图数取与合法页面类型节点的交集，待补数取差集。图中已无对应文件的节点不抵扣待补数量；误记为普通 entity 的 Wiki 仍列为待补。
+
 ### 第三层：结构与派生物一致性
 
 1. 运行 `graph_validate.py` 检查 schema、节点引用和 semantic address。
@@ -68,3 +70,9 @@ private 使用独立 `private/graph.db`，不进入主库 Sync 范围。
 - page-catalog 等可重建索引由程序生成；`wiki/index.md` 的分组和描述属于人工策展语义。
 - Hub 的创建、Scope、分裂和合并遵循 `HUB.md`；Sync 只检查引用、状态与 page/graph 一致性。
 - 不一致必须进入报告；信息不足时保留缺口，不猜测关系或事实。
+
+### 用户指定的失效 Raw 链接修复
+
+普通 Sync 不修改 Raw。用户明确要求修复已定位的历史失效链接时，可单独调用 shared `relativize_internal_symlinks.py --materialize-link <链接> --source-file <同目录原件> --expected-sha256 <已核验哈希>` 预检，再加 `--apply` 执行受管单文件修复。宿主先核对原件与 companion 的文档身份；程序仅接受公共域 Raw 内同目录、同扩展名的真实原件，拒绝有效链接、越界和符号链接祖先，不读取旧链接目标。
+
+修复将实体副本原子替换到原链接位置，不改原件或 companion；`temp/raw-link-repair/` 回执保留旧目标、原件哈希及 prepared/completed/rolled_back 状态。提交后验证失败恢复旧链接；中断留下 prepared 回执时先核对现场，不把它视为成功。重复执行只在已是相同哈希实体文件时返回 already_materialized。完成后检查受影响 Wiki 并追加日志；旧 source.yaml 是历史接入记录，不覆写其来源。

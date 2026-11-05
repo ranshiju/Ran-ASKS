@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """graph_metrics consolidation candidate regression tests."""
 import importlib.util
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest.mock import patch
 import sqlite3
 import sys
 import tempfile
@@ -52,6 +55,35 @@ def test_consolidation_candidates_are_read_only_and_thresholded():
     assert ("CREATE_REVIEW", "hub-a") in actions
     assert report["writes"] is False
     assert before == after
+
+
+def test_legacy_shape_observation_is_optional_and_not_a_repair_request():
+    name = "基于自注意力的查询构造Query Formulation based on Self-attention(QFS)"
+    for command in ("all", "unsplit_phrases"):
+        conn = gl.connect(":memory:")
+        gl.init_schema(conn)
+        gl.ensure_node(conn, name, name, "entity", entity_subtype="keyword")
+        changes = conn.total_changes
+        report = module.check_unsplit_phrases(conn)
+        assert report["flagged_count"] == 1  # Keep historical observations visible on demand.
+        assert conn.total_changes == changes
+        output = StringIO()
+        with patch.object(module, "connect", return_value=conn), \
+                patch.object(module, "load_state", return_value={}), \
+                patch.object(sys, "argv", ["graph_metrics.py", command]), \
+                patch.object(module, "check_unsplit_phrases", wraps=module.check_unsplit_phrases) as scan, \
+                redirect_stdout(output):
+            module.main()
+        text = output.getvalue()
+        assert "需拆分" not in text and "建议 LINT" not in text
+        if command == "all":
+            assert scan.call_count == 0
+            assert "unsplit_phrases" in text and "不计入缺陷或修复待办" in text
+            assert "连通性" in text and "谓词" in text
+            assert name not in text
+        else:
+            assert scan.call_count == 1 and name in text
+            assert "非质量缺陷" in text and "无须据此拆分或修补" in text
 
 
 def main():

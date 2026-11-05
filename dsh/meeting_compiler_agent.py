@@ -193,12 +193,14 @@ class MeetingCompilerAgent:
         repair_request = self._row_repair_request()
         prompt = self._row_repair_prompt(repair_request) if repair_request else self.task.prompt
         messages = None if repair_request else self._repair_messages(system)
+        repairing = bool(self.task.errors and self.task.previous_output)
         result = self.llm_call_fn(
             prompt,
             messages=messages,
             max_tokens=budget.max_output_tokens,
             retries=0,
-            operation="ingest_meeting_compile",
+            operation="ingest_meeting_repair" if repairing else "ingest_meeting_compile",
+            allow_profile_fallback=not repairing,
             reasoning_context={
                 "document_kind": "meeting",
                 "input_chars": (sum(len(message["content"]) for message in messages)

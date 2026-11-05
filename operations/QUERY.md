@@ -150,7 +150,7 @@ private 是标准 query 的存储范围，不是另一套问答方法。共用 `
 
 **Wiki Locator（2026-08-25）**：Wiki 是可重建的阅读导航层，使用稳定 heading slug，不使用 Wiki 行号。调用 `python3 .scripts/wg.py read-section '<wiki-page>.md#<heading-slug>'` 时，程序只返回目标 heading 到下一个同级/更高标题之间的正文，并解析该节实际使用的 `[^rN]` 脚注，返回 `raw_citations`。回答事实时再把这些 Raw locators 交给 `read-raw`；不得因读取 Wiki section 而自动读取整页或整份 Raw。
 
-**可执行章节入口**：`wiki_recall/admin_recall`候选中的`read_action/read_input`指向当前页面实际存在的章节；优先使用返回入口，API可通过对应`read_ref`执行。候选和入口仍是导航，事实答案继续下钻Raw。裸Wiki地址的错误会列出可用章节；修正section或使用page#section后再读。API记录失败尝试用于去重，但失败不进入已读页面，也不登记Raw证据；不重复提交同一缺参数请求。
+**可执行章节入口**：`wiki_recall/admin_recall/hybrid_recall`候选中的`read_action/read_input`指向当前页面实际存在的章节；优先使用返回入口，API可通过对应`read_ref`执行。候选和入口仍是导航，事实答案继续下钻Raw。裸Wiki地址的错误会列出可用章节；修正section或使用page#section后再读。API记录失败尝试用于去重，但失败不进入已读页面，也不登记Raw证据；不重复提交同一缺参数请求。
 
 **Semantic Address 与 Context Envelope（v10）**：`<wiki-page>#<heading-slug>` 是跨 Wiki/Graph 的正式语义地址。边填写该地址时必须可解析到真实 section；新摄入 section 必须带精确 Raw 脚注，历史缺失由 validator 聚合为迁移 WARN。`wg.py read-section ... --with-context --profile <intent>` 可动态附加受限 Graph neighbors、Hub 和来源局部 gloss；overlay 不回写 Wiki，也不是事实证据。
 

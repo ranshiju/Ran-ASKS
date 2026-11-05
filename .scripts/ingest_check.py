@@ -497,6 +497,25 @@ def check_bibliographic_consistency(path, fm):
     bibliography = source_data.get("bibliographic")
     if not isinstance(bibliography, dict):
         return []
+    if bibliography.get("external_receipt"):
+        import external_bibliography as eb
+        verified = eb.replay(bibliography["external_receipt"], raw_path.read_text(encoding="utf-8"), raw_path.parent)
+        if not verified:
+            return ["bibliographic: 外部书目回执与 Raw 无法离线复验"]
+        errors = []
+        fields = ["title", "authors", "year", "venue", "doi", "arxiv_id"]
+        if bibliography["external_receipt"].get("protocol_version") == "local-bibliography-v1":
+            fields.extend(("publication_type", "volume", "issue", "pages"))
+            if "field_record_evidence" in bibliography:
+                fields.append("field_record_evidence")
+        for field in fields:
+            if bibliography.get(field) != verified.get(field):
+                errors.append(f"bibliographic: 归档 {field} 与外部回执不一致")
+        if str(fm.get("date") or "") != verified["year"]:
+            errors.append(f"bibliographic: wiki date 与正式发表 year={verified['year']} 冲突")
+        if _venue_key(fm.get("venue")) != _venue_key(verified["venue"]):
+            errors.append("bibliographic: wiki venue 与正式发表期刊冲突")
+        return errors
     evidence_lines = bibliography.get("first_page_evidence") or []
     if not isinstance(evidence_lines, list):
         evidence_lines = [evidence_lines]

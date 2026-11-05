@@ -379,3 +379,16 @@ remain unverified; frozen paper artifacts are unchanged.
 KU显式章节选择和宿主Agent学术写作规范。Gallery保留14件已批准作品，并提供当前
 系统说明入口，历史作品主张不改写。Markdown与追加并标准化的PDF页面同步；
 完整摄入提速和大语料语义收益尚未证实，冻结论文产物不变。
+
+The 2026-11-05 `v0.24.0` update covers local RIS/BibTeX matching, bounded free
+publication metadata lookup, complete windowed long-document intake, selective
+PPTX visual reading and failure-triggered API recovery within existing budgets.
+One matched local bibliography record is sufficient; formal publication and
+year-level metadata are preferred. Length-based node warnings are optional,
+while evidence checks remain. The Markdown and appended PDF page share the
+same update; frozen paper artifacts and historical Gallery works are unchanged.
+
+2026年11月5日的 `v0.24.0` 更新包含本地 RIS/BibTeX 匹配、免费发表信息查询、
+长文完整分窗摄入、PPTX 按需视觉识读，以及原预算内由校验失败触发的 API 恢复。
+一份匹配书目即可，优先正式发表信息并记录年份；长句观察可选，证据检查保留。
+Markdown 与 PDF 追加页采用同一补充；冻结论文产物与历史 Gallery 成品保持原状。

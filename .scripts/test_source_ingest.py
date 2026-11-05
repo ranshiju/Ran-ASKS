@@ -71,6 +71,35 @@ class SourceIngestTests(unittest.TestCase):
         self.source.write_text("A scientifically different version.\n")
         self.assertNotEqual(self.ingest()["source_id"], a["source_id"])
 
+    def test_search_labels_same_filename_sources_from_bound_opening_headings(self):
+        sources = []
+        for name, title in (("a", "Trainability of classifiers"), ("b", "Classification with tensor networks")):
+            folder = self.root / name
+            folder.mkdir()
+            path = folder / "paper.md"
+            path.write_text(f"# {title}\nClassifier result.\n")
+            sources.append(self.ingest(path))
+        before = {p: p.read_bytes() for p in (self.root / "academic").rglob("*") if p.is_file()}
+        hits = si.search("Classifier", repo=self.root)["candidates"]
+        self.assertEqual({h["title"] for h in hits}, {"Trainability of classifiers", "Classification with tensor networks"})
+        for hit in hits:
+            self.assertEqual(hit["filename_title"], "paper")
+            self.assertEqual(hit["title_basis"], "opening_heading_unverified")
+            self.assertTrue(qa.execute("read_raw", {"locator": hit["locator"]})["ok"])
+        self.assertEqual(before, {p: p.read_bytes() for p in before})
+
+    def test_search_heading_is_only_an_opening_navigation_label(self):
+        for body in ("Introductory prose.\n# Later result\nClassifier result.",
+                     "```md\n# Code example\n```\nClassifier result.",
+                     "## Abstract\nClassifier result."):
+            with self.subTest(body=body):
+                self.source.write_text(body)
+                source = self.ingest()
+                hit = next(h for h in si.search("Classifier", repo=self.root, topk=20)["candidates"]
+                           if h["source_id"] == source["source_id"])
+                self.assertEqual(hit["title"], "input")
+                self.assertEqual(hit["title_basis"], "filename_unverified")
+
     def test_late_match_excerpt_keeps_bound_full_passage_locator(self):
         body = "Background context. " * 60 + "\nOnly after approval, quarterly reports include the next work plan.\n"
         self.source.write_text(body)

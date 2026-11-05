@@ -1617,7 +1617,9 @@ def test_candidate_author_rejection_keeps_distinct_spellings_and_proposal_confli
     decision["selections"]["authors"].update(accepted_ids=[], rejected_ids=["author-01"],
         proposed=[{"value": "Alice Example", "evidence": "paper.md#L3"}], status="corrected")
     review = module.compile_bibliographic_decision(decision, catalog, text)
-    assert "authors 不能同时出现在 value 和 rejected" in module.validate_bibliographic_review(review, candidates, text)
+    diagnostics = module.validate_bibliographic_review(review, candidates, text)
+    assert "authors 不能同时出现在 value 和 rejected" in diagnostics
+    assert any("Alice Example" in error and "author-01" in error for error in diagnostics)
 
 
 def test_candidate_id_v2_compiles_evidence_bound_author_proposals():
@@ -2725,8 +2727,8 @@ def test_new_state_for_pdf_uses_relative_source_and_unique_transactions():
 
 
 def test_paper_id_no_authors():
-    # 无 Published 信息 → arxiv 编号 1234.5678 → 2012（提交年）
-    md = "# Some Random Title\n\narXiv:1234.5678\n"
+    # 无 Published 信息 → 有效 arxiv 编号 1204.5678 → 2012（提交年）
+    md = "# Some Random Title\n\narXiv:1204.5678\n"
     pid = module.generate_paper_id(md)
     assert pid == "paper-2012-some-random-title", f"got {pid}"
 
@@ -3159,7 +3161,7 @@ def test_paper_materialization_repairs_inline_citation_without_model_rewrite():
             assert direction.raw_citations == (f"{raw_path}#L1",)
 
 
-def test_api_initial_paper_workspace_uses_one_combined_model_call():
+def _exercise_api_paper_workspace(*, broken_initial=False):
     calls = []
     bibliography = {
         "title": "Stable Paper", "authors": ["Alice Example"], "year": "2024",
@@ -3191,6 +3193,9 @@ def test_api_initial_paper_workspace_uses_one_combined_model_call():
 
     def fake_call(prompt, **kwargs):
         calls.append({"prompt": prompt, **kwargs})
+        if broken_initial and len(calls) == 1:
+            return {"ok": True, "status": "ok", "history": [{"attempt": 1}],
+                    "text": "<<<WIKI>>>\n" + wiki}
         return {
             "ok": True, "status": "ok", "history": [{"attempt": 1}],
             "text": (
@@ -3228,7 +3233,17 @@ def test_api_initial_paper_workspace_uses_one_combined_model_call():
             module.REPO, module.call_text, module.ingest_mode = original_repo, original_call, original_mode
     assert success, message
     assert slots_success, slots_message
-    assert len(calls) == 1
+    assert len(calls) == (2 if broken_initial else 1)
+    if broken_initial:
+        assert calls[1]["operation"] == "ingest_content_repair"
+        assert state["wiki_retry"] == 1
+        assert calls[1]["retries"] == 0 and calls[1]["recovery_limits"] is None
+        assert calls[1]["allow_profile_fallback"] is False
+        telemetry = state["telemetry"]["api_ingest"]
+        assert telemetry["first_pass_validation"]["workspace_protocol"] == "failed"
+        assert telemetry["last_validation"]["workspace_protocol"] == "passed"
+        assert state["agent_workspace"]["api_worker"]["history"] == [{"attempt": 1}]
+        assert state["agent_workspace"]["api_protocol_repair"]["status"] == "applied"
     assert calls[0]["operation"] == module.API_WORKSPACE_OPERATION
     assert '"protocol_version": "candidate-id-v2"' in calls[0]["prompt"]
     assert calls[0]["prompt"].count("[唯一输出格式]") == 1
@@ -3246,6 +3261,129 @@ def test_api_initial_paper_workspace_uses_one_combined_model_call():
     assert "agent_ingest" not in state["telemetry"]
     assert state["telemetry"]["api_ingest"]["last_validation"]["bibliography"] == "passed"
     assert sum(item["stage"] == "bibliography" for item in state["telemetry"]["api_ingest"]["validation_history"]) == 1
+
+
+def test_api_initial_paper_workspace_uses_one_combined_model_call():
+    with patch.object(module.inbox_state, "save"):
+        _exercise_api_paper_workspace()
+
+
+def test_api_protocol_repair_returns_through_shared_materializer():
+    with patch.object(module.inbox_state, "save"):
+        _exercise_api_paper_workspace(broken_initial=True)
+
+
+def test_api_protocol_repair_budget_failure_and_drift_boundaries():
+    scenarios = ["success", "malformed", "transport", "exhausted", "unlocked", "ambiguous",
+                 "agent", "presave_failure", "replace_failure", "paper.md", "paper.pdf", "skeleton.md",
+                 "bibliographic-candidates.json", "agent-workspace.txt", "preexisting_drift", "bundle"]
+    for scenario in scenarios:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "temp/repair"
+            folder.mkdir(parents=True)
+            paths = [folder / name for name in ("paper.md", "paper.pdf", "skeleton.md", "bibliographic-candidates.json")]
+            for path in paths:
+                path.write_text("original " + path.name)
+            output = folder / "agent-workspace.txt"
+            failed_text = "<<<WIKI>>>\nold candidate missing slots"
+            output.write_text(failed_text)
+            guarded = {path: module._file_sha256(path) for path in paths}
+            decision = {"review_status": "clean", "locked": True}
+            state = {"transaction_id": "repair", "status": "prepared", "agent_workspace": {
+                "execution_backend": "api", "output_path": "temp/repair/agent-workspace.txt",
+                "api_worker": {"history": ["original-call"]}}}
+            if scenario == "exhausted":
+                state["wiki_retry"] = 1
+            if scenario == "unlocked":
+                decision = None
+            if scenario == "ambiguous":
+                decision["review_status"] = "manual_required"
+            if scenario == "agent":
+                state["agent_workspace"]["execution_backend"] = "agent"
+            if scenario == "bundle":
+                state["agent_workspace"]["artifact_bundle_sha256"] = "bundle-before"
+            if scenario == "preexisting_drift":
+                paths[0].write_text("changed before repair")
+            saved = []
+            calls = []
+            original_replace = module.os.replace
+            def replace(source, target):
+                if scenario == "replace_failure":
+                    raise OSError("disk unavailable during replacement")
+                return original_replace(source, target)
+            def save(_txn, value):
+                if scenario == "presave_failure":
+                    raise OSError("disk unavailable")
+                saved.append(json.loads(json.dumps(value)))
+            def call(_prompt, **kwargs):
+                assert saved[-1]["recovery"]["attempts"]["wiki_revision"] == 1
+                assert saved[-1]["agent_workspace"]["api_protocol_repair"]["status"] == "prepared"
+                assert kwargs["allow_profile_fallback"] is False
+                assert kwargs["retries"] == 0 and kwargs["recovery_limits"] is None
+                calls.append(kwargs)
+                if scenario in {p.name for p in paths} | {output.name}:
+                    (folder / scenario).write_text("changed during request")
+                if scenario == "transport":
+                    return {"ok": False, "status": "error", "error": "timeout", "history": ["failed-call"]}
+                return {"ok": True, "status": "ok", "history": ["repair-call"],
+                        "text": "still malformed" if scenario == "malformed" else
+                        '<<<BIBLIOGRAPHIC>>>\n{"tampered": true}\n<<<WIKI>>>\nnew wiki\n<<<SLOTS>>>\nnew slots'}
+            with patch.object(module, "REPO", root), patch.object(module.inbox_state, "save", side_effect=save), \
+                    patch.object(module, "call_text", side_effect=call), \
+                    patch.object(module.os, "replace", side_effect=replace), \
+                    patch.object(module, "_current_artifact_bundle_sha256", side_effect=["bundle-before", "bundle-after"]):
+                try:
+                    success, message = module._repair_api_workspace_protocol(
+                        state, "original prompt", output, decision, guarded, "missing slots")
+                except (ValueError, OSError) as exc:
+                    success, message = False, str(exc)
+            assert success == (scenario == "success"), (scenario, message)
+            no_call = scenario in {"exhausted", "unlocked", "ambiguous", "agent", "presave_failure", "preexisting_drift"}
+            assert len(calls) == (0 if no_call else 1), scenario
+            if success:
+                parsed, wiki, slots = module._parse_agent_workspace(output.read_text())
+                assert parsed == decision and wiki == "new wiki" and slots == "new slots"
+            else:
+                assert output.read_text() == ("changed during request" if scenario == output.name else failed_text)
+            assert state["agent_workspace"]["api_worker"]["history"] == ["original-call"]
+            if calls:
+                trace = state["agent_workspace"]["api_protocol_repair"]
+                assert (root / trace["original_path"]).read_text() == failed_text
+                assert trace["history"] == (["failed-call"] if scenario == "transport" else ["repair-call"])
+                assert saved[-1]["agent_workspace"]["api_protocol_repair"]["status"] == trace["status"]
+                with patch.object(module, "REPO", root), patch.object(module, "call_text", side_effect=AssertionError("extra call")):
+                    # Exhaustion survives serialization and a second invocation.
+                    reloaded = json.loads(json.dumps(state))
+                    current = {p: module._file_sha256(p) for p in paths}
+                    reloaded["agent_workspace"].pop("artifact_bundle_sha256", None)
+                    assert not module._repair_api_workspace_protocol(reloaded, "prompt", output, decision, current, "bad")[0]
+
+
+def test_api_workspace_transport_or_unlocked_protocol_failure_skips_ev():
+    for failure in ("transport", "unlocked", "ambiguous"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "temp/check"
+            folder.mkdir(parents=True)
+            paper_md = folder / "paper.md"
+            paper_md.write_text("# Evidence\n")
+            skeleton = folder / "skeleton.md"
+            skeleton.write_text("# Skeleton\n")
+            state = {"status": "extract", "transaction_id": "check", "extract_dir": "temp/check"}
+            decision = {"review_status": "clean"} if failure == "transport" else (
+                {"review_status": "manual_required"} if failure == "ambiguous" else None)
+            response = ({"ok": False, "status": "error", "error": "timeout", "history": ["failed"]}
+                        if failure == "transport" else {"ok": True, "status": "ok", "text": "missing segments"})
+            with patch.object(module, "REPO", root), patch.object(module.inbox_state, "save"), \
+                    patch.object(module, "call_text", return_value=response) as call, \
+                    patch.object(module, "resume_agent_workspace", side_effect=AssertionError("invalid materialization")):
+                ok, message = module.execute_api_paper_workspace(
+                    state, {"decision": decision}, paper_md,
+                    skeleton_bundle=(skeleton, skeleton.read_text(), "raw-placeholder"))
+            assert not ok and call.call_count == 1, (failure, message)
+            assert state.get("wiki_retry", 0) == 0
+            assert "api_protocol_repair" not in state["agent_workspace"]
 
 
 def test_api_workspace_persists_prepared_checkpoint_before_worker_call():
@@ -3405,6 +3543,34 @@ def test_build_slots_retry_prompt_includes_previous_output_and_exact_count():
     assert prompt.index("<<<SLOTS>>>") < prompt.index("<<</SLOTS>>>")
 
 
+def test_paper_wiki_revision_uses_specialist_without_changing_initial_route():
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract = root / "temp/revision"
+        extract.mkdir(parents=True)
+        (extract / "paper.md").write_text("# Paper\nSource evidence.")
+        (extract / "skeleton.md").write_text("# Skeleton")
+        (extract / "wiki.md").write_text("# Previous Wiki")
+        with patch.object(module, "REPO", root), patch.object(module, "ingest_mode", return_value="api"), \
+                patch.object(module, "call_text", return_value={"ok": False, "error": "stop"}) as call:
+            for retry, errors in ((0, []), (1, []), (1, ["缺少 <<<WIKI>>> 段"])):
+                state = {"transaction_id": "revision", "extract_dir": "temp/revision",
+                         "paper_id": "revision", "raw_dir": "academic/raw/references/revision",
+                         "wiki_path": "academic/wiki/papers/revision", "wiki_retry": retry,
+                         "wiki_errors": errors, "api_workspace_initial_attempted": True}
+                ok, _ = module.step_write_wiki(state)
+                assert not ok
+                kwargs = call.call_args.kwargs
+                assert kwargs["operation"] == ("ingest_content_repair" if errors else "ingest_wiki_write")
+                if errors:
+                    assert errors[0] in call.call_args.args[0]
+                    assert "# Previous Wiki" in call.call_args.args[0]
+                    assert kwargs["allow_profile_fallback"] is False
+                    assert kwargs["retries"] == 0 and kwargs.get("recovery_limits") is None
+            assert call.call_count == 3
+
+
 def test_paper_slots_retry_passes_semantic_reasoning_context():
     captured = {}
 
@@ -3435,7 +3601,9 @@ def test_paper_slots_retry_passes_semantic_reasoning_context():
         finally:
             module.REPO, module.call_text, module.ingest_mode = original_repo, original_call, original_mode
     assert success, message
-    assert captured["operation"] == "ingest_semantic_extract"
+    assert captured["operation"] == "ingest_content_repair"
+    assert captured["allow_profile_fallback"] is False
+    assert captured["retries"] == 0 and captured.get("recovery_limits") is None
     assert captured["reasoning_context"]["document_kind"] == "paper"
     assert captured["reasoning_context"]["failure_kind"] == "semantic"
     assert captured["reasoning_context"]["retry"] == 1
@@ -3566,6 +3734,26 @@ def test_proposition_abbreviation_is_not_a_keyword_format_warning():
 def test_descriptive_object_matches_graph_rule():
     assert module.is_clearly_descriptive("矩阵乘积态matrix product state(MPS)表示")
     assert not module.is_clearly_descriptive("自洽方程")
+
+
+def test_long_term_passes_shared_and_paper_checks_without_loosening_hard_errors():
+    name = "基于自注意力的查询构造Query Formulation based on Self-attention(QFS)"
+    good = "三元组:\n检索模块 | 结合 | " + name + "\n"
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        path = root / "semantic.txt"
+        for backend in ("agent", "api"):
+            for invalid in (False, True):
+                text = good + ("检索模块 | 不合法 谓词 | 方法\n" if invalid else "")
+                path.write_text(text)
+                state = {"semantic_path": "semantic.txt", "wiki_path": "academic/wiki/papers/test"}
+                with patch.object(module, "REPO", root), patch.object(module, "ingest_mode", return_value=backend):
+                    hard, warnings = module.step_validate_semantics(state)
+                    shared_hard, shared_warnings = module.ic.validate_semantics(
+                        dict(state), root, {"结合"}, module.NON_BLOCKING_ISSUES)
+                assert bool(hard) == invalid and bool(shared_hard) == invalid, (backend, invalid, hard, shared_hard)
+                assert not warnings and not shared_warnings, (warnings, shared_warnings)
+                assert path.read_text() == text
 
 
 def test_concept_predicate_role_overrides_descriptive_phrase_heuristic():
@@ -6678,6 +6866,7 @@ def test_api_local_repair_uses_one_patch_call_preserves_slots_and_records_valida
             assert state["bibliographic_meta"] == {"title": "Locked title"}
             assert len(calls) == 1 and calls[0]["operation"] == "ingest_wiki_repair"
             assert calls[0]["retries"] == 0
+            assert calls[0]["allow_profile_fallback"] is False
             telemetry = state["telemetry"]["api_ingest"]
             assert telemetry["first_pass_validation"]["wiki"] == "failed"
             assert telemetry["last_validation"]["wiki"] == "passed"
@@ -7096,8 +7285,16 @@ def test_api_candidate_catalog_compaction_preserves_all_evidence_and_identity():
     view = module._api_candidate_catalog(catalog)
     assert "providers" not in view
     for field, entries in catalog["fields"].items():
-        for entry, compact in zip(entries, view["fields"][field]):
-            assert compact == {key: value for key, value in entry.items() if key not in {"provider", "authority"}}
+        rendered_entries = view["fields"][field]
+        if field == "authors":
+            rendered_entries = [
+                {"value": group["value"], **candidate}
+                for group in rendered_entries["exact_value_groups"] for candidate in group["candidates"]
+            ]
+        assert {entry["id"]: entry for entry in rendered_entries} == {
+            entry["id"]: {key: value for key, value in entry.items() if key not in {"provider", "authority"}}
+            for entry in entries
+        }
     assert view["excluded_affiliations"][0]["value"] == "Example University"
     assert view["excluded_affiliations"][0]["evidence"] == "pdf_layout_front_matter.page1.block4"
     assert catalog == original
@@ -7110,6 +7307,105 @@ def test_api_candidate_catalog_compaction_preserves_all_evidence_and_identity():
         assert rendered in prompt
         assert "candidate_only" in prompt
     assert module.compile_bibliographic_decision(_candidate_id_decision(catalog), catalog, text)
+
+
+
+def test_year_candidate_rejects_dimensions_body_citations_and_invalid_arxiv_months():
+    for source in (
+        "# Paper\nAlice Example\nThe model has dimension 2048.\n",
+        "# Paper\n## Introduction\nPublished 2023 in an earlier study.\n",
+        "# Paper\n" + "\n" * 70 + "Hidden dimension 2048.\n",
+        "# Paper\narXiv:2699.12345\n",
+        "# Paper\nMay use 2048 neurons.\n",
+        "# Paper\nResults published between 2020 and 2024 were compared.\n",
+        "# Paper\n## References\n[1] Paper, 2023.\n",
+    ):
+        assert module.extract_year_from_md(source) == "", source
+    for source, expected, locator in (
+        ("# Paper\nPublished 5 October 2026\narXiv:2509.12345\n", "2026", "paper.md#L2"),
+        ("# Paper\narXiv:2609.12345v1\nHidden dimension 2048.\n", "2026", "paper.md#L2"),
+        ("# Paper\n21 Sep 2026\n", "2026", "paper.md#L2"),
+        ("# Paper\nReceived January 2025; Published February 2026\n", "2026", "paper.md#L2"),
+        ("# Paper\nPhys. Rev. B 106, 115117 (2022)\n", "2022", "paper.md#L2"),
+    ):
+        assert module._markdown_year_evidence(source) == (expected, locator)
+        catalog = module.build_bibliographic_candidate_catalog(
+            module.build_bibliographic_candidates({}, source), {}, source)
+        year = next(x for x in catalog["fields"]["year"] if x["value"] == expected)
+        assert year["evidence"] == locator
+
+
+def test_api_author_groups_preserve_duplicate_provider_evidence_and_distinct_names():
+    catalog = {"fields": {"authors": [
+        {"id": "author-01", "value": "Alice Example", "evidence": "pdf_metadata.author"},
+        {"id": "author-02", "value": "Bob Example", "evidence": "paper.md#L3"},
+        {"id": "author-03", "value": "Alice Example", "evidence": "pdf_layout_front_matter.page1.block3"},
+        {"id": "author-04", "value": "Alice Examples", "evidence": "paper.md#L3"},
+    ]}}
+    original = json.loads(json.dumps(catalog))
+    groups = module._api_candidate_catalog(catalog)["fields"]["authors"]["exact_value_groups"]
+    assert [g["value"] for g in groups] == ["Alice Example", "Bob Example", "Alice Examples"]
+    assert groups[0]["candidates"] == [
+        {"id": "author-01", "evidence": "pdf_metadata.author"},
+        {"id": "author-03", "evidence": "pdf_layout_front_matter.page1.block3"},
+    ]
+    assert catalog == original
+
+
+def test_condition_packet_keeps_middle_method_equations_and_limits_together():
+    lines = ["# Paper", "## Abstract", "A tractable model.", "## Introduction"]
+    disclaimer = "We claim no computational advantage; the smallest variant remains below the baseline."
+    lines += [disclaimer, ""] + ["Introductory background " * 35] * 40
+    lines += ["## Methods", "### Encoding", "Setup description " * 35] * 20
+    packet = [
+        "### Local derivative analysis", "",
+        "Let the readout be defined by the following expression.", "", "$$ z = a b c $$", "",
+        "Under independent reference initialisation we obtain:", "", "$$ V_a = 1/48 $$", "",
+        "while differentiation with respect to the other coordinates gives:", "", "$$ V_b = 1/32 $$", "",
+        "This result does not characterise the full loss gradient and does not explain downstream accuracy.",
+    ]
+    offset = len(lines)
+    lines += packet + ["### Training"] + ["Training details " * 35] * 40
+    lines += ["## References", "This result does not guarantee REFERENCE_ONLY."]
+    source = "\n".join(lines)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "paper.md"
+        path.write_text(source)
+        diagnostics = {}
+        context = module._api_paper_context(source, path, "academic/raw/references/demo/paper.md", diagnostics)
+    assert len(context) <= module.REDUCED_CONTEXT_MAX_CHARS
+    for i, line in enumerate(packet[1:], offset + 2):
+        if line:
+            assert f"<academic/raw/references/demo/paper.md#L{i}> {line}" in context
+    assert "REFERENCE_ONLY" not in context
+    assert disclaimer in context
+
+
+def test_api_validation_history_distinguishes_repaired_artifacts_and_legacy_unknowns():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        workspace = root / "workspace.txt"
+        workspace.write_text("initial invalid bibliography")
+        state = {"agent_workspace": {"execution_backend": "api", "output_path": "workspace.txt"}}
+        with patch.object(module, "REPO", root):
+            module._record_api_validation(state, "workspace_protocol", [])
+            module._record_api_validation(state, "bibliography", ["conflict"])
+            first_hash = state["telemetry"]["api_ingest"]["initial_workspace_sha256"]
+            workspace.write_text("repaired bibliography and corrected wiki")
+            state["wiki_content"] = "corrected wiki"
+            module._record_api_validation(state, "bibliography", [])
+            module._record_api_validation(state, "wiki", [])
+            t = state["telemetry"]["api_ingest"]
+            assert t["initial_artifact_validation"] == {"workspace_protocol": "passed", "bibliography": "failed"}
+            assert t["last_validation"]["bibliography"] == "passed"
+            assert t["first_pass_validation_scope"] == "first_check_per_stage"
+            assert t["validation_history"][-1]["workspace_sha256"] != first_hash
+            assert t["validation_history"][-1]["artifact_sha256"]["wiki_content"]
+            legacy = {"agent_workspace": state["agent_workspace"], "telemetry": {"api_ingest": {
+                "validation_history": [{"stage": "bibliography", "validation": "failed"}]}}}
+            module._record_api_validation(legacy, "bibliography", [])
+            assert "initial_workspace_sha256" not in legacy["telemetry"]["api_ingest"]
+            assert "workspace_sha256" not in legacy["telemetry"]["api_ingest"]["validation_history"][0]
 
 
 def main():
@@ -7136,6 +7432,31 @@ def main():
     print(f"ingest_paper regression: {passed}/{len(tests)} PASS")
     return 0
 
+
+
+def test_api_wiki_patch_rejects_source_drift_before_write():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract = root / "temp/patch"
+        extract.mkdir(parents=True)
+        wiki = _local_patch_wiki()
+        (extract / "wiki.md").write_text(wiki)
+        (extract / "paper.md").write_text("# Evidence\nSecond source line.\n")
+        state = {"transaction_id": "patch", "extract_dir": "temp/patch",
+                 "raw_dir": "academic/raw/references/example", "wiki_content": wiki,
+                 "slots_content": "locked slots"}
+        errors = ["脚注 [^r1] 不是精确 Raw locator: bad-locator"]
+        def drifting_worker(_prompt, _schema, **_kwargs):
+            catalog = module._api_wiki_patch_catalog(wiki, errors)
+            (extract / "paper.md").write_text("source edited while waiting\n")
+            return {"ok": True, "parsed": _local_patch_decision(catalog, [
+                "[^r1]: academic/raw/references/example/paper.md#L1"]), "history": [{}]}
+        with patch.object(module, "REPO", root), patch.object(module, "ingest_mode", return_value="api"), \
+                patch.object(module.inbox_state, "save"), patch.object(module, "call_json", side_effect=drifting_worker):
+            success, message = module.step_repair_api_wiki(state, errors)
+        assert not success and "来源" in message
+        assert (extract / "wiki.md").read_text() == wiki
+        assert state["wiki_content"] == wiki and state["slots_content"] == "locked slots"
 
 if __name__ == "__main__":
     raise SystemExit(main())

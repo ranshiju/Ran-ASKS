@@ -74,7 +74,7 @@ def validate_routing_policy() -> dict:
         "preferred": (catalog.get("preferred") or {}).get("semantic_recovery_agent"),
         "fallback": (catalog.get("fallback") or {}).get("semantic_recovery_agent"),
     }
-    text_model = global_policy.get("text_model")
+    text_model = profile.get("text_model") or global_policy.get("text_model")
     if text_model and selected["preferred"] != text_model:
         raise ValueError(
             "preferred model must match fixed text sub-agent policy: "
@@ -90,7 +90,8 @@ def validate_routing_policy() -> dict:
     return {
         "selected": selected,
         "text_model": text_model,
-        "policy_status": global_policy.get("status"),
+        "policy_status": profile.get("status") or global_policy.get("status"),
+        "global_text_model": global_policy.get("text_model"),
         "runtime_model_selection": global_policy.get("runtime_model_selection"),
         "automatic_promotion": global_policy.get("automatic_promotion"),
         "excluded_families": sorted(set(excluded_values)),
@@ -134,6 +135,8 @@ def score_case(case: dict, result) -> dict:
             checks.append(patch.get("action") == "replace" and len(lines) == 1 and lines[0] in accepted)
         content_score = sum(checks) / len(checks) if checks else 0.0
     budget_score = 1.0 if result.repeated_actions == 0 else 0.0
+    case_passed = bool(outcome_score and content_score == 1.0 and budget_score
+                       and coverage_score == 1.0)
     score = round(
         0.35 * outcome_score + 0.45 * content_score
         + 0.10 * coverage_score + 0.10 * budget_score,
@@ -148,7 +151,11 @@ def score_case(case: dict, result) -> dict:
         "content_score": content_score,
         "coverage_score": coverage_score,
         "budget_score": budget_score,
+        "case_passed": case_passed,
+        "autonomously_resolved": case_passed and expected["status"] == "resolved",
+        "correct_abstention": case_passed and expected["status"] == "abstained",
         "turns": result.turns,
+        "api_calls": result.api_calls,
         "tool_calls": result.tool_calls,
         "tokens": result.total_tokens,
         "latency_sec": result.elapsed_sec,
@@ -180,6 +187,8 @@ def run_exam(exam: dict, model: str) -> dict:
     latencies = [item["latency_sec"] for item in results]
     safety_violations = sum(item["repeated_actions"] > 0 for item in results)
     quality_score = round(statistics.mean(scores), 4)
+    cases_passed = sum(item["case_passed"] for item in results)
+    resolved = sum(item["autonomously_resolved"] for item in results)
     total_tokens = sum(item["tokens"] for item in results)
     average_latency = round(statistics.mean(latencies), 3)
     fallback_cases = sum(item["models"] != [model] for item in results)
@@ -190,6 +199,7 @@ def run_exam(exam: dict, model: str) -> dict:
         "tokens": total_tokens <= int(gates.get("max_total_tokens", 10**18)),
         "latency": average_latency <= float(gates.get("max_average_latency_sec", 10**18)),
         "route_purity": not gates.get("require_route_purity") or fallback_cases == 0,
+        "all_cases_correct": cases_passed == len(results),
     }
     return {
         "protocol_version": exam["protocol_version"],
@@ -209,6 +219,13 @@ def run_exam(exam: dict, model: str) -> dict:
         "gates": gate_results,
         "passed": all(gate_results.values()),
         "total_tokens": total_tokens,
+        "total_api_calls": sum(item["api_calls"] for item in results),
+        "cases_passed": cases_passed,
+        "autonomously_resolved": resolved,
+        "correct_abstentions": sum(item["correct_abstention"] for item in results),
+        "unresolved_cases": len(results) - resolved,
+        "tokens_per_correct_resolution": round(total_tokens / resolved, 2) if resolved else None,
+        "production_commit_verified": False,
         "average_latency_sec": average_latency,
         "max_latency_sec": round(max(latencies), 3),
         "cases": results,

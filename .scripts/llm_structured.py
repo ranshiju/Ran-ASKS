@@ -132,6 +132,7 @@ OPERATION_REASONING_PROFILES = {
     "ingest_meeting_compile": "standard",
     "ingest_paper_workspace": "standard",
     "ingest_wiki_write": "standard",
+    "ingest_content_repair": "standard",
     "ingest_wiki_repair": "fast",
     "ingest_semantic_extract": "standard",
     "ingest_semantic_fill": "fast",
@@ -217,6 +218,7 @@ def load_env() -> dict[str, str]:
         "INGEST_GENERATION_API_BASE", "INGEST_GENERATION_API_KEY", "INGEST_GENERATION_MODEL",
         "INGEST_PROPOSITION_API_BASE", "INGEST_PROPOSITION_API_KEY", "INGEST_PROPOSITION_MODEL",
         "SEMANTIC_RECOVERY_API_BASE", "SEMANTIC_RECOVERY_API_KEY", "SEMANTIC_RECOVERY_MODEL",
+        "WIKI_RECOVERY_API_BASE", "WIKI_RECOVERY_API_KEY", "WIKI_RECOVERY_MODEL",
     }
     return env_config.load_env(
         REPO / ".env", keys=known, prefixes=("LLM_REASONING_",)
@@ -268,9 +270,13 @@ def api_profiles(config: dict[str, str], operation: str) -> list[dict[str, str]]
         prefixes = ["INGEST_KEYWORD"]
     elif operation == "ingest_api_repair":
         prefixes = ["INGEST_REPAIR"]
+    elif operation in {"ingest_long_document_repair", "ingest_meeting_repair", "ingest_content_repair"}:
+        prefixes = ["SEMANTIC_RECOVERY", "INGEST_GENERATION"]
+    elif operation == "ingest_wiki_repair":
+        prefixes = ["WIKI_RECOVERY", "INGEST_GENERATION"]
     elif operation in {
         "ingest_meeting_compile", "ingest_paper_workspace",
-        "ingest_wiki_write", "ingest_wiki_repair",
+        "ingest_wiki_write", "ingest_long_document",
     }:
         prefixes = ["INGEST_GENERATION"]
     elif operation == "ingest_proposition":
@@ -291,7 +297,8 @@ def api_profiles(config: dict[str, str], operation: str) -> list[dict[str, str]]
             "model": config.get(f"{prefix}_MODEL", ""),
         }
         if all(specialist[key] for key in ("base", "key", "model")) \
-                and specialist["model"] != primary["model"] \
+                and (prefix == "WIKI_RECOVERY" or operation in {"ingest_long_document_repair", "ingest_meeting_repair", "ingest_content_repair"}
+                     or specialist["model"] != primary["model"]) \
                 and specialist["model"] not in seen_models:
             profiles.append(specialist)
             seen_models.add(specialist["model"])
@@ -393,7 +400,7 @@ def _retry_available(category: str, used: dict[str, int], limits: dict[str, int]
     return attempt < legacy_retries
 
 
-def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束的知识库组件，只输出要求的 JSON。", max_tokens: int = 800, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", timeout_sec: float = 90) -> dict:
+def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束的知识库组件，只输出要求的 JSON。", max_tokens: int = 800, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", timeout_sec: float = 90, allow_profile_fallback: bool = True) -> dict:
     config = load_env()
     is_ingest = operation == "ingest" or operation.startswith("ingest_")
     if operation == "oral_exam":
@@ -418,6 +425,8 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
     reasoning_options = reasoning_request_options(config, profile_name)
     recovery_reasoning_options = reasoning_request_options(config, "fast")
     profiles = api_profiles(config, operation)
+    if not allow_profile_fallback:
+        profiles = profiles[:1]
     if not all(profiles[0][key] for key in ("base", "key", "model")):
         variable = "INGEST_BACKEND" if is_ingest else "QUERY_BACKEND"
         _cfg_err = {"ok": False, "status": "configuration_error", "mode": "api", "error": f"{variable}=api 时必须配置 LLM_API_BASE、LLM_API_KEY、LLM_MODEL", "event_kind": "configuration", "call_id": call_id, "recovery_policy_version": rp.POLICY_VERSION, "recovery_class": "configuration", "retryable": False}
@@ -527,7 +536,7 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
     return _final
 
 
-def call_text(prompt: str, *, system: str = "你是受程序约束的知识库组件，只输出要求的文本。", max_tokens: int = 1600, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "") -> dict:
+def call_text(prompt: str, *, system: str = "你是受程序约束的知识库组件，只输出要求的文本。", max_tokens: int = 1600, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", allow_profile_fallback: bool = True) -> dict:
     """受限 LLM 文本调用：返回原始文本，不做 JSON 解析或 schema 校验。
 
     用于需要长文本输出的场景（如 wiki 页面撰写 + 语义槽），镜像 call_json 的 API 调用与重试逻辑，
@@ -557,6 +566,8 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
     reasoning_options = reasoning_request_options(config, profile_name)
     recovery_reasoning_options = reasoning_request_options(config, "fast")
     profiles = api_profiles(config, operation)
+    if not allow_profile_fallback:
+        profiles = profiles[:1]
     if not all(profiles[0][key] for key in ("base", "key", "model")):
         variable = "INGEST_BACKEND" if is_ingest else "QUERY_BACKEND"
         _cfg_err = {"ok": False, "status": "configuration_error", "mode": "api", "error": f"{variable}=api 时必须配置 LLM_API_BASE、LLM_API_KEY、LLM_MODEL", "event_kind": "configuration", "call_id": call_id, "recovery_policy_version": rp.POLICY_VERSION, "recovery_class": "configuration", "retryable": False}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import inbox_source_policy
+import bibliography_sidecar
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +52,11 @@ def classify(path: Path) -> dict:
             "fact_entries": fact_entries(path),
         }
     if suffix in PAPER_SUFFIXES:
+        from long_document_plan import pdf_profile
+        if pdf_profile(path).get("book_structure"):
+            return {"kind": "document", "subproject": None, "mode": "create",
+                    "content": "other", "source_kind": "ordinary", "requires_review": True,
+                    "reason": "PDF 含多章书籍结构；按内容选择域，academic 使用 academic-reference。"}
         return {
             "kind": "paper-pdf", "subproject": "academic", "mode": "create",
             "content": "paper", "source_kind": "ordinary", "requires_review": False,
@@ -78,13 +84,19 @@ def classify(path: Path) -> dict:
 def build_plan(inbox: Path) -> dict:
     items = []
     retained_sources = []
+    sidecars = bibliography_sidecar.associated_paths(inbox)
     for path in sorted(inbox.iterdir() if inbox.exists() else [], key=lambda item: item.name.lower()):
         if is_ignored_entry(path) or not path.is_file():
             continue
         if inbox_source_policy.is_retained(REPO, path):
             retained_sources.append(str(path.relative_to(REPO)))
             continue
+        if path in sidecars:
+            continue
         details = classify(path)
+        if path.suffix.lower() == ".pdf":
+            details["bibliography_sidecars"] = [str(p.relative_to(REPO))
+                                                for p in bibliography_sidecar.discover(path)]
         items.append({"path": str(path.relative_to(REPO)), "size_bytes": path.stat().st_size, **details})
     ordinary = [item for item in items if item["kind"] != "user-assertions"]
     batch_candidates = [item for item in ordinary if item["subproject"] == "academic" and item["content"] == "paper"]

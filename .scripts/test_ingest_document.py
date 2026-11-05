@@ -435,6 +435,10 @@ def test_document_agent_api_share_evidence_and_status_rules():
         assert "末尾直接复制" in instruction
         assert "物理行号" in instruction
         assert "不要写 `## Sources` 或脚注定义" in instruction
+        assert task["protocol"]["semantics"]["responsibility_rule"] == module.DOCUMENT_RESPONSIBILITY_RULE
+        assert module.DOCUMENT_RESPONSIBILITY_RULE in module.build_doc_slots_prompt("wiki", subproject)
+        assert module.DOCUMENT_RESPONSIBILITY_RULE in module.build_doc_wiki_slots_prompt(
+            "source", "test-id", "", subproject, document_type=document_type)
         for builder in (module.build_doc_wiki_prompt, module.build_doc_wiki_slots_prompt):
             prompt = builder("拟修订落实原则", "test-id", "", subproject,
                              document_type=document_type)
@@ -548,6 +552,43 @@ def test_agent_mode_slots_roundtrip():
         assert "_awaiting_agent_slots" not in state
     finally:
         shutil.rmtree(extract_dir, ignore_errors=True)
+
+
+def test_api_content_revision_routes_only_failed_output_to_specialist():
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract = root / "temp/inbox-extract/revision"
+        extract.mkdir(parents=True)
+        (extract / "doc.md").write_text("原文只说明联系人为张老师。")
+        (extract / "wiki.md").write_text("# 上次 Wiki 候选")
+        (extract / "semantic.txt").write_text("三元组:\n本文件 | 负责人 | 张老师")
+        base = {"transaction_id": "revision", "extract_dir": str(extract.relative_to(root)),
+                "admin_id": "revision", "source_filename": "revision.md", "subproject": "admin",
+                "wiki_content": "# 当前 Wiki", "date_str": ""}
+        with patch.object(module, "REPO", root), patch.object(module, "ingest_mode", return_value="api"), \
+                patch.object(module, "call_text", return_value={"ok": False, "error": "stop"}) as call:
+            for step, counter, field, message, normal in (
+                (module.step_write_wiki, "wiki_retry", "wiki_errors", "缺少 <<<WIKI>>> 段", "ingest_wiki_write"),
+                (module.step_write_slots, "slots_retry", "slots_errors", "负责人缺少原文证据", "ingest_semantic_extract"),
+            ):
+                for retry, errors in ((0, []), (1, []), (1, [message])):
+                    state = {**base, counter: retry, field: errors}
+                    ok, _ = step(state)
+                    assert not ok
+                    prompt = call.call_args.args[0]; kwargs = call.call_args.kwargs
+                    assert kwargs["operation"] == ("ingest_content_repair" if errors else normal)
+                    if errors:
+                        assert message in prompt
+                        assert kwargs["allow_profile_fallback"] is False
+                        assert kwargs["retries"] == 0 and kwargs.get("recovery_limits") is None
+                        if step == module.step_write_slots:
+                            assert "原文只说明联系人为张老师" in prompt
+                            assert "本文件 | 负责人 | 张老师" in prompt
+                            assert "<<</SLOTS>>>" in prompt
+                            assert "不写入语义槽或附加解释" in prompt
+                    assert not state.get("agent_required")
+            assert call.call_count == 6
 
 
 def test_short_api_document_combines_wiki_and_slots_in_one_call():
@@ -1022,6 +1063,78 @@ def test_validate_semantics_rejects_responsibility_inferred_from_speech():
         shutil.rmtree(extract_dir, ignore_errors=True)
 
 
+def test_responsibility_exact_clauses_and_triple_wrappers():
+    from unittest.mock import patch
+    positives = [
+        ("张三", "项目负责人：张三"),
+        ("张三", "张三负责安全检查。"),
+        ("张三", "张三是安全检查的责任人，负责组织实施。"),
+        ("院（系）主要负责人", "院（系）主要负责人是导师培训的责任人，负责组织实施日常培训。"),
+    ]
+    negatives = [
+        ("院系主要负责人", positives[-1][1]),
+        ("张三", "张三校长讲话。"),
+        ("张三", "张三不是安全检查的责任人。"),
+        ("张三", "拟由张三负责安全检查。"),
+        ("张三", "是否由张三负责安全检查？"),
+        ("张三", "张三是安全检查的责任人吗？"),
+        ("张三", "张三是安全检查的\n责任人。"),
+    ]
+    for person, source in positives:
+        assert module._responsibility_supported(person, source), (person, source)
+    for person, source in negatives:
+        assert not module._responsibility_supported(person, source), (person, source)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "doc.md").write_text("项目负责人：张三")
+        state = {"extract_dir": ".", "slots_content": "三元组:\n<安全检查 | 负责人 | 张三>"}
+        with patch.object(module, "REPO", root), patch.object(module.ic, "validate_semantics", return_value=([], [])):
+            assert module.step_validate_semantics(state) == ([], [])
+            (root / "doc.md").write_text("张三校长讲话。")
+            errors, _ = module.step_validate_semantics(state)
+            assert errors == ["负责人关系缺少原文同一行的明确职责措辞: 张三"], errors
+            issue = module.ic.build_structured_semantic_issues(errors, [], state["slots_content"])[0]
+            assert issue["retryable"] and issue["line"] == "<安全检查 | 负责人 | 张三>"
+            duplicate = state["slots_content"] + "\n安全检查 | 负责人 | 张三"
+            assert not module.ic.build_structured_semantic_issues(errors, [], duplicate)[0]["retryable"]
+
+
+def test_missing_responsibility_name_has_distinct_feedback_and_no_predicate_recovery():
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract = root / "temp/inbox-extract/name-feedback"
+        extract.mkdir(parents=True)
+        source = "院（系）主要负责人是导师培训的责任人，负责组织实施日常培训。"
+        (extract / "doc.md").write_text(source)
+        semantic = "三元组:\n导师日常培训 | 负责人 | 院系主要负责人"
+        path = extract / "semantic.txt"
+        path.write_text(semantic)
+        state = {"transaction_id": "name-feedback", "extract_dir": str(extract.relative_to(root)),
+                 "semantic_path": str(path.relative_to(root)), "slots_content": semantic}
+        with patch.object(module, "REPO", root), patch.object(module.ic, "validate_semantics", side_effect=lambda *a: ([], [])):
+            errors, _ = module.step_validate_semantics(state)
+            assert errors == ["负责人称谓未在原文逐字出现: 院系主要负责人"], errors
+            issue = module.ic.build_structured_semantic_issues(errors, [], semantic)[0]
+            assert issue["issue_code"] == "missing_responsibility_name"
+            assert issue["field"] == "object" and issue["observed"] == "院系主要负责人"
+            assert not issue["retryable"] and issue["suggested_actions"] == ["abstain"]
+            legacy = module.ic.build_structured_semantic_issues(
+                ["负责人关系缺少原文同一行的明确职责措辞: 院系主要负责人"], [], semantic)[0]
+            assert legacy["retryable"] and legacy["field"] == "predicate"
+            with patch.object(module.ic.agent_task, "ingest_backend", side_effect=AssertionError("must stop before API/Agent routing")):
+                ok, reason = module.ic.try_semantic_recovery(state, root, errors, [], lambda s: ([], []))
+            assert not ok and "locator" in reason
+            assert "recovery" not in state and path.read_text() == semantic
+            state['slots_content'] = semantic.replace('院系主要负责人', '院（系）主要负责人')
+            assert module.step_validate_semantics(state) == ([], [])
+            # Exact identity does not imply a supported role.
+            (extract / 'doc.md').write_text('院（系）主要负责人讲话。')
+            errors, _ = module.step_validate_semantics(state)
+            assert errors == ['负责人关系缺少原文同一行的明确职责措辞: 院（系）主要负责人']
+            assert module.ic.build_structured_semantic_issues(errors, [], state['slots_content'])[0]['retryable']
+
+
 def test_semantic_validation_refreshes_cache_before_responsibility_checks():
     import tempfile
     from unittest.mock import patch
@@ -1296,7 +1409,10 @@ def test_rollback_removes_manifest_companion_restores_graph_and_marks_receipt():
 
 
 def main():
+    test_api_citation_patch_validates_preserves_and_rejects_drift()
     test_companion_repair_transaction_and_guards()
+    test_companion_repair_transaction_and_guards(".docx")
+    test_companion_repair_transaction_and_guards(".doc")
     test_tabular_principles_shared_by_agent_api_and_route()
     test_spreadsheet_extraction_preserves_rows_and_structure()
     test_spreadsheet_preprocess_keeps_original_and_companion()
@@ -1326,6 +1442,7 @@ def main():
     test_agent_mode_wiki_roundtrip()
     test_agent_mode_slots_roundtrip()
     test_short_api_document_combines_wiki_and_slots_in_one_call()
+    test_api_content_revision_routes_only_failed_output_to_specialist()
     test_agent_required_output_has_write_to()
     test_unknown_source_date_is_not_replaced_with_ingestion_date()
     test_source_date_accepts_filename_formats_and_validates_calendar()
@@ -1344,6 +1461,8 @@ def main():
     test_normalize_document_wiki_compiles_overlapping_line_handles_exactly()
     test_transcript_normalization_sets_provenance_and_drops_inferred_department()
     test_validate_semantics_rejects_responsibility_inferred_from_speech()
+    test_responsibility_exact_clauses_and_triple_wrappers()
+    test_missing_responsibility_name_has_distinct_feedback_and_no_predicate_recovery()
     test_semantic_validation_refreshes_cache_before_responsibility_checks()
     test_api_semantic_backend_requests_ocr_authorization_in_same_transaction()
     test_resume_rejects_semantic_backend_switch_with_nonzero_exit()
@@ -1861,23 +1980,33 @@ def test_spreadsheet_preprocess_keeps_original_and_companion():
         assert source.read_bytes() == before
 
 
-def test_companion_repair_transaction_and_guards():
+def test_companion_repair_transaction_and_guards(suffix=".xls"):
     from unittest.mock import patch
     import inbox_finalize
     import xlwt
     for failure in (None, "source", "wiki", "companion", "sidecar", "semantics", "metadata", "heading", "locator", "validator"):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory).resolve()
-            source = repo / "admin/raw/profile/table.xls"
+            source = repo / ("admin/raw/profile/table" + suffix)
             wiki = repo / "admin/wiki/profile/page.md"
             source.parent.mkdir(parents=True)
             wiki.parent.mkdir(parents=True)
-            book = xlwt.Workbook()
-            book.add_sheet("Sheet1").write(0, 0, "原始事实")
-            book.save(str(source))
+            if suffix == ".xls":
+                book = xlwt.Workbook()
+                book.add_sheet("Sheet1").write(0, 0, "原始事实")
+                book.save(str(source))
+            else:
+                import shutil
+                if not shutil.which("textutil"):
+                    print(f"SKIP native Word repair {suffix}: textutil unavailable")
+                    return
+                text_source = repo / "input.txt"
+                text_source.write_text("原始事实\n", encoding="utf-8")
+                subprocess.run(["textutil", "-convert", suffix[1:], "-output", str(source),
+                                str(text_source)], check=True, capture_output=True)
             original = source.read_bytes()
             original_wiki = ("---\ntitle: Demo\ntype: profile\nsources:\n"
-                             "  - admin/raw/profile/table.xls\nupdated: 2026-01-01\n---\n"
+                             f"  - admin/raw/profile/table{suffix}\nupdated: 2026-01-01\n---\n"
                              "# Demo\n\n## Facts\n原始事实\n")
             wiki.write_text(original_wiki, encoding="utf-8")
             log = repo / "admin/wiki/log.md"
@@ -1900,7 +2029,7 @@ def test_companion_repair_transaction_and_guards():
                 elif failure == "companion":
                     (extract / "table.md").write_text("invented", encoding="utf-8")
                 elif failure == "sidecar":
-                    (extract / "table.xls.source.json").write_text("{}", encoding="utf-8")
+                    (extract / (source.name + ".source.json")).write_text("{}", encoding="utf-8")
                 elif failure == "semantics":
                     draft.write_text(draft.read_text().replace("原始事实", "虚构事实"), encoding="utf-8")
                 elif failure == "metadata":
@@ -1929,6 +2058,72 @@ def test_companion_repair_transaction_and_guards():
                         assert "missing" in str(exc)
                     else:
                         raise AssertionError("existing companion overwritten")
+
+
+
+def test_api_citation_patch_validates_preserves_and_rejects_drift():
+    from unittest.mock import patch
+    for case in ("valid", "unlisted", "prose", "source_drift", "wiki_drift", "residual", "abstain",
+                 "body", "long", "agent", "meeting"):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extract = root / "temp/inbox-extract/citation-test"
+            extract.mkdir(parents=True)
+            source = extract / "source.md"
+            source.write_text("# 通知\n企业提供实践基地。\n", encoding="utf-8")
+            raw = "admin/raw/references/source.md"
+            original = ("---\ntitle: 实践基地\ntype: reference\nsource_type: official-doc\n"
+                        "confidence: high\ndate: null\ndate_status: unknown\nsources:\n"
+                        f"  - {raw}\n---\n\n## Navigation\n\n## Content\n"
+                        f"企业提供实践基地。[^r1]\n\n## Sources\n\n[^r1]: {raw}#L9999\n")
+            wiki = extract / "wiki.md"
+            wiki.write_text(original, encoding="utf-8")
+            state = {"transaction_id": "citation-test", "extract_dir": str(extract),
+                     "wiki_content": original, "slots_content": "locked semantic slots",
+                     "source_filename": "source.docx", "locator_source_filename": "source.md",
+                     "raw_locator": raw, "source_kind": "ordinary", "subproject": "admin"}
+            if case == "long": state["long_document"] = True
+            if case == "meeting": state["source_kind"] = "meeting"
+            calls = []
+            def worker(_prompt, schema, **kwargs):
+                calls.append(kwargs)
+                assert kwargs["allow_profile_fallback"] is False
+                assert kwargs["operation"] == "ingest_wiki_repair"
+                replacement = f"[^r1]: {raw}#L2\n"
+                if case == "unlisted": replacement = "[^r1]: admin/raw/other.md#L2\n"
+                if case == "prose": replacement += "模型新增了正文。\n"
+                if case == "source_drift": source.write_text("changed source\n")
+                if case == "wiki_drift": wiki.write_text("external edit\n")
+                parsed = {"protocol_version": module.wp.API_WIKI_PATCH_PROTOCOL,
+                          "review_status": "manual_required" if case == "abstain" else "patched",
+                          "patches": [{"target_id": "target-01", "replacement_text": replacement}],
+                          "review_notes": []}
+                assert schema(parsed)
+                return {"ok": True, "parsed": parsed, "history": [{"usage": {"total_tokens": 3}}]}
+            with patch.object(module, "REPO", root), \
+                    patch.object(module, "ingest_mode", return_value="agent" if case == "agent" else "api"), \
+                    patch.object(module.inbox_state, "save"), patch.object(module, "call_json", side_effect=worker):
+                errors = module.step_validate_wiki(state)
+                assert any("脚注" in error for error in errors), errors
+                if case == "body": errors = ["Content 含明确占位陈述"]
+                if case == "residual":
+                    with patch.object(module, "step_validate_wiki", return_value=["remaining invalid citation"]):
+                        status, _ = module.step_repair_wiki(state, errors)
+                else:
+                    status, _ = module.step_repair_wiki(state, errors)
+                if case == "valid":
+                    assert status == "repaired", state
+                    assert not module.step_validate_wiki(state)
+                    assert state["wiki_content"] == original.replace("#L9999", "#L2")
+                elif case in {"body", "long", "agent", "meeting"}:
+                    assert status == "not_applicable" and not calls
+                else:
+                    assert status == "failed", (case, state)
+                    assert state["wiki_content"] == original
+                assert state["slots_content"] == "locked semantic slots"
+                expected = "external edit\n" if case == "wiki_drift" else state["wiki_content"]
+                assert wiki.read_text() == expected
+                assert len(calls) <= 1
 
 
 if __name__ == "__main__":

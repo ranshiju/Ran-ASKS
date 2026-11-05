@@ -202,10 +202,13 @@ class SemanticRecoveryAgent:
         tokens = []
         for value in values:
             tokens.extend(part for part in re.split(r"[\s,，。；;、|/()（）]+", value) if len(part) >= 3)
+            tokens.extend(re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}|[0-9]{3,}", value))
         return [value for value in [*values, *tokens] if value]
 
     @staticmethod
     def _best_excerpt(text: str, needles: list[str], max_chars: int) -> str:
+        if text and len(text) <= max_chars:
+            return text
         for needle in needles:
             excerpt = _bounded_excerpt(text, needle, max_chars)
             if excerpt != "[NO MATCH]":
@@ -255,10 +258,14 @@ class SemanticRecoveryAgent:
 1. 调查：{{"decision":"tool","tool":"工具名","arguments":{{...}},"reason":"为什么需要"}}
 2. 提案：{{"decision":"propose","proposal":{{"protocol_version":"{PROTOCOL_VERSION}","review_status":"patched|manual_required","patches":[{{"issue_id":"issue-01","action":"replace|abstain","replacement_lines":["一行替换文本"]}}],"review_notes":[]}}}}
 
-规则：每个 issue 必须且只能出现一次；每个 replace 只能返回一行；只修 issue 定位的行；证据不足必须 abstain。若需调查，优先一次 inspect 全部相关 issue；获得足够上下文后下一轮必须 propose，不得逐个读取同一上下文。不得请求写文件、修改 Raw/Wiki/Graph、生成 locator 或改变事务状态。"""
+规则：每个 issue 必须且只能出现一次；每个 replace 只能返回一行；只修 issue 定位的行；证据不足必须 abstain，仍保留 replacement_lines 空数组，例如 {{"issue_id":"issue-01","action":"abstain","replacement_lines":[]}}，review_status 为 manual_required。若需调查，优先一次 inspect 全部相关 issue；获得足够上下文后下一轮必须 propose，不得逐个读取同一上下文。不得请求写文件、修改 Raw/Wiki/Graph、生成 locator 或改变事务状态。"""
 
     @staticmethod
     def _token_count(result: dict) -> int:
+        history = result.get("history") or []
+        if history:
+            return sum(SemanticRecoveryAgent._token_count(
+                {"usage": attempt.get("usage")}) for attempt in history)
         usage = result.get("usage") or {}
         return int(usage.get("total_tokens") or (
             int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
@@ -301,12 +308,17 @@ class SemanticRecoveryAgent:
         })
 
         for turn in range(1, budget.max_turns + 1):
-            if time.monotonic() - started >= budget.max_elapsed_sec:
+            remaining_sec = budget.max_elapsed_sec - (time.monotonic() - started)
+            if remaining_sec <= 0:
                 return self._result("escalated", "time_budget_exhausted", started, turn - 1,
                                     tool_calls, total_tokens, repeated_actions,
                                     api_calls=api_calls, models=models)
             if total_tokens >= budget.max_total_tokens:
                 return self._result("escalated", "token_budget_exhausted", started, turn - 1,
+                                    tool_calls, total_tokens, repeated_actions,
+                                    api_calls=api_calls, models=models)
+            if api_calls >= budget.max_model_calls:
+                return self._result("escalated", "model_call_budget_exhausted", started, turn - 1,
                                     tool_calls, total_tokens, repeated_actions,
                                     api_calls=api_calls, models=models)
             result = self.llm_call_fn(
@@ -318,7 +330,8 @@ class SemanticRecoveryAgent:
                 operation="ingest_semantic_recovery",
                 reasoning="standard",
                 transaction_id=self.envelope.transaction_id,
-                timeout_sec=budget.request_timeout_sec,
+                timeout_sec=min(budget.request_timeout_sec, remaining_sec),
+                allow_profile_fallback=False,
             )
             total_tokens += self._token_count(result)
             history = result.get("history") or []
@@ -326,6 +339,8 @@ class SemanticRecoveryAgent:
                 api_calls += len(history)
                 attempted_models = [str(item.get("model") or "") for item in history]
             else:
+                if result.get("event_kind") != "configuration":
+                    api_calls += 1
                 attempted_models = [str(result.get("model") or "")]
             for model in attempted_models:
                 if model and model not in models:

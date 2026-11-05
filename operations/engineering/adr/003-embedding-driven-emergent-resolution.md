@@ -2,6 +2,7 @@
 
 > 状态：已批准（2026-08-07）
 > 影响：graph_lib.py / graph_ingest.py / graph_metrics.py / SYNC.md / INGEST.md / code-guidance.md
+> 关于名称形态分类和“未拆分”检查，以文末 2026-11-05 修订为准；下文原决策与统计保留历史记录。
 
 ## 背景
 
@@ -100,3 +101,11 @@ proposition 保留（不同颗粒度知识有价值），但拆分改程序化�
 - `node_glosses` 保存逐来源的 description + Raw locator；`nodes.description` 是可重建的主导航说明。首条合格 gloss 可初始化空描述，后续来源不得盲目覆盖非空主描述。
 - GraphDelta 身份解析优先使用当前文档局部说明作为 context。精确名称多候选仍 soft abstain 并跳过边；没有精确名称碰撞、仅 semantic identity gate 未过时，保留本地 keyword、原始边与 gloss。
 - 此修订不降低 label/semantic/combined threshold，也不授权 embedding 单独触发 merge。
+
+## 2026-11-05 修订：形态观察不等于结构化义务
+
+- 名称长度、括号、标点或“基于/表示”等词不证明其为命题，也不构成质量缺陷。旧“纯名词/描述性短语”表不再指导实时摄入定型；显式命题、决策和待办按已有关系角色保留，概念与论断的事实依据仍回溯 Wiki/Raw。
+- `graph_metrics.py unsplit_phrases` 只提供按需历史形态观察，保持旧命令与结果字段兼容。缺少包含边不代表需要拆分；观察结果不计为质量错误或修复待办。`all` 不扫描此项，仅显示按需入口。
+- 图只保留有独立导航或检索价值的关系。已有稀疏包含边与完整命题可继续保留，不要求将全文逐句结构化，不自动修改存量节点或边。
+- 用户明确要求暂保留论文少于4条关系的现有检查，以及提取引擎提示；本修订不改变这两项。
+- 当前执行规则见 `operations/LINT.md` 的“历史名称形态观察”及 `operations/INGEST.md` 的“结构化范围”。

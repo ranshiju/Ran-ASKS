@@ -280,11 +280,19 @@ def render_artifacts(folder):
         library.qa.render_page(kind, rendered, i, folder/f'preview-{i}.png', dpi=90)
 
 
-def prepare(component, profile, target, name):
+def prepare(component, profile, target, name, *, allow_staged=False):
     component = Path(component).absolute()
     safe_input(component/'receipt.json')
-    require(component.resolve().is_relative_to((library.REPO/'slide-library/templates').resolve()), 'Use a collected component')
+    collected = component.resolve().is_relative_to((library.REPO/'slide-library/templates').resolve())
+    staged = allow_staged and component.resolve().is_relative_to((library.REPO/'temp').resolve())
+    require(collected or staged, 'Use a collected component or an explicitly staged intake candidate')
     parent = library.verify_bundle(component)
+    if staged:
+        origin = (library.REPO/parent['source']).resolve()
+        parts = origin.relative_to(library.REPO).parts if origin.is_relative_to(library.REPO) else ()
+        require(len(parts) >= 3 and parts[0] in {'academic', 'admin', 'teaching', 'business'} and parts[1] == 'raw',
+                'Staged reuse requires an archived public Raw source')
+        require(library.vision.digest(origin) == parent['source_sha256'], 'Staged Raw source changed')
     source = component/'component.pptx'
     data = structure.extract(source)
     validate_profile(profile, data)

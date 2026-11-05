@@ -247,12 +247,11 @@ def load_arxiv_direction_scopes():
 # ===== 辅助函数 =====
 
 def is_descriptive_phrase(obj):
-    """机械近似:客体疑似描述性短语 → WARN。判据见 INGEST.md「描述性短语校验」:
-    脱离论文能否独立指代;机械近似为长度>阈值且含谓词结构或中文标点。
-    双门槛(2026-08-03调优,降低误伤):
-      - 长度<=15:合法概念名直接放过(原8太严,10-15字概念名常见)
-      - 长度16-20:仅标点判定(谓语词在此区间多为概念名修饰,误伤率高)
-      - 长度>20且含触发词:判为描述性短语(真正的描述性短语又长又含谓语句式)"""
+    """Legacy shape heuristic for historical metrics/experiment compatibility only.
+
+    Not evidence of an invalid term or a proposition; live ingestion and graph
+    endpoint typing must use declared relation roles instead.
+    """
     if len(obj) <= 15:
         return False
     # ADR-003: 公式内逗号(括号内如 R(ρ,σ))不触发;去括号内容再查
@@ -741,6 +740,53 @@ def extract_teaching_prerequisite_edges(page_path, fm):
 
 
 # ===== 机械边提取 =====
+
+def bibliography_graph_state(conn, page):
+    """Stable scoped snapshot for provenance-only paper updates; no semantic edges."""
+    node = conn.execute("SELECT title,date FROM nodes WHERE path=?", (page,)).fetchone()
+    rows = conn.execute(
+        "SELECT id,subject,predicate,object,source FROM edges WHERE "
+        "(subject=? AND predicate='发表于') OR (object=? AND predicate IN ('作者','第一作者'))",
+        (page, page),
+    ).fetchall()
+    return {"node": list(node) if node else None, "edges": sorted([
+        [row["subject"], row["predicate"], row["object"], row["source"] or "",
+         sorted([list(origin) for origin in conn.execute(
+             "SELECT origin_page,source FROM edge_origins WHERE edge_id=?", (row["id"],))])]
+        for row in rows
+    ])}
+
+
+def refresh_paper_bibliography(conn, page, fm, evidence_source):
+    """Replace owned mechanical bibliography only, in the caller's transaction."""
+    if fm.get("type") != "paper-summary" or not page.startswith("academic/wiki/papers/"):
+        raise ValueError("bibliography refresh requires an academic paper page")
+    previous = bibliography_graph_state(conn, page)
+    if previous["node"] is None:
+        raise ValueError("existing paper graph node is missing")
+    for edge in previous["edges"]:
+        if any(origin[0] != page for origin in edge[4]):
+            raise ValueError("bibliographic edge has another page owner; refusing replacement")
+    conn.execute(
+        "DELETE FROM edges WHERE (subject=? AND predicate='发表于') "
+        "OR (object=? AND predicate IN ('作者','第一作者'))", (page, page),
+    )
+    conn.execute("UPDATE nodes SET title=?,date=? WHERE path=?",
+                 (str(fm.get("title") or ""), str(fm.get("date") or ""), page))
+    triples = [item for item in extract_mechanical_edges(page, fm)
+               if item["predicate"] in {"发表于", "作者", "第一作者"}]
+    for item in triples:
+        item.update(source=evidence_source, confidence=gl.DEFAULT_CONFIDENCE)
+    delta = gd.build_document_delta(page, fm, triples, deterministic_triple_count=len(triples))
+    plan = gd.plan_attachment(conn, delta)
+    if plan.get("abstained"):
+        raise ValueError("bibliographic identity attachment is ambiguous")
+    inspection = gd.inspect_delta(conn, delta, attach_plan=plan)
+    result, _ = gd.fuse_with_savepoint(conn, delta, lambda: add_knowledge_edges(
+        conn, page, gd.knowledge_edges(delta), attach_plan=plan), inspection=inspection)
+    if result.edges_added + result.dedup_skipped != len(triples):
+        raise ValueError("not all bibliographic relations were materialized")
+    return bibliography_graph_state(conn, page)
 
 def extract_mechanical_edges(page_path, fm=None):
     """从 frontmatter 机械提取边(0 token)。
@@ -1937,27 +1983,20 @@ def _ensure_entity_node(conn, name, node_path, entity_subtype, title_idx, alias_
 
 
 def _is_proposition_slot(name, triple, key):
-    """判断 name 是否应建为 proposition 节点（三路判据，方向 A）。
-
-    1. 命题谓词（核心创新点/局限性/未来展望）的 object → 直接判 proposition：
-       谓词本身已表明是论断，跳过 is_descriptive_phrase 的长度+trigger 双门槛
-       （22字含「证明」的短命题不被长度门槛误拦）。
-    2. 结构性谓词（包含）的 subject → proposition（包含边 subject 按定义是命题）。
-    3. 其他（自由边 object/subject）→ 回退 is_descriptive_phrase（trigger+长度门槛兜底）。
-    """
+    """Use explicit relation roles; term spelling never establishes a claim."""
     pred = triple.get("predicate", "")
-    if pred in PROPOSITION_PREDICATES and key == "object":
-        # 谓词本身已定义语义角色（局限性/创新点/展望 = 论断），直接判 proposition
-        # 不走 has_predicate_structure（只认中文触发词，漏 NP-hard 等英文谓词含义）
-        return True
-    if pred in CONCEPT_KW_PREDICATES and key == "object":
-        return False
-    # 会议决策谓词的 object 是论断（会议说了什么），作 proposition 节点
-    if pred == "决策" and key == "object":
-        return True
-    if pred == "包含" and key == "subject":  # 仅包含;相似(对称概念边)subject 非命题
-        return True
-    return is_descriptive_phrase(name)
+    return (kir.relation_endpoint_kind(pred, key) == "proposition"
+            or (pred == "包含" and key == "subject"))
+
+
+def _declared_proposition_mentions(triples):
+    """Carry an explicit claim role across this batch, independent of edge order."""
+    return {
+        t.get(key, "").strip()
+        for t in triples
+        for key in ("subject", "object")
+        if _is_proposition_slot(t.get(key, ""), t, key)
+    }
 
 
 def _is_task_slot(triple, key):
@@ -1981,6 +2020,7 @@ def _build_subgraph(triples, page_path):
     """
     normalized = []
     warns = []
+    proposition_mentions = _declared_proposition_mentions(triples)
     for t in triples:
         t = dict(t)
         subj_raw = t.get("subject", "").strip()
@@ -1997,14 +2037,6 @@ def _build_subgraph(triples, page_path):
                           "object": obj_raw, "issue": "fragment_token"})
             continue
         pred = t.get("predicate", "")
-        # 描述性短语审计（非阻断）：结构性谓词+命题谓词跳过
-        # ADR-003: 命题谓词(核心创新点/局限性/未来展望/决策)的 object 本身是论断,跳过
-        if pred not in STRUCTURAL_PREDICATES and pred not in PROPOSITION_PREDICATES \
-                and pred not in CONCEPT_KW_PREDICATES \
-                and pred not in TITLE_OBJECT_PREDICATES and pred != "决策" \
-                and is_descriptive_phrase(obj_raw):
-            warns.append({"subject": t.get("subject", ""), "predicate": pred,
-                          "object": obj_raw, "issue": "descriptive_phrase"})
         # keyword 裸缩写校验（缩写须在括号内，格式「中文英文(缩写)」）
         if pred in CONCEPT_KW_PREDICATES and is_bare_abbreviation(obj_raw):
             warns.append({"subject": t.get("subject", ""), "predicate": pred,
@@ -2018,6 +2050,10 @@ def _build_subgraph(triples, page_path):
                 and pred not in PROPOSITION_PREDICATES:
             for _field, _val in (("subject", subj_raw), ("object", obj_raw)):
                 if _field == "subject" and _val == page_path:
+                    continue
+                # Use the writer's endpoint roles: statements and task text
+                # are prose, even when the predicate is outside the paper set.
+                if _is_task_slot(t, _field) or _val in proposition_mentions:
                     continue
                 if _val and is_bare_abbreviation(_val):
                     warns.append({"subject": subj_raw, "predicate": pred,
@@ -2193,13 +2229,7 @@ def add_knowledge_edges(
         ]
     # A proposition keeps its role when also used by another relation, regardless
     # of edge order. Match GraphDelta's role-based identity boundary.
-    proposition_mentions = {
-        t.get(key, "").strip()
-        for t in normalized_triples
-        for key in ("subject", "object")
-        if (key == "object" and kir.relation_endpoint_kind(t.get("predicate", ""), key) == "proposition")
-        or (key == "subject" and t.get("predicate") == "包含")
-    }
+    proposition_mentions = _declared_proposition_mentions(normalized_triples)
 
     def is_proposition_mention(name, triple, key):
         return name in proposition_mentions or _is_proposition_slot(name, triple, key)
@@ -3284,6 +3314,52 @@ def _cmd_ingest_locked(args):
         pass
     conn.close()
     print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+class DocumentBundleRollbackError(RuntimeError):
+    """A bundle failed and its graph snapshot could not be restored; retain its files."""
+
+
+def ingest_document_bundle(arguments, snapshot):
+    """Commit one source's overview/chapters under one graph writer lock.
+
+    Each page uses the normal IR/compiler/page validator. A failed page restores
+    the snapshot before releasing the lock, so another writer cannot be erased.
+    """
+    from contextlib import redirect_stdout
+    from io import StringIO
+    if not arguments:
+        raise ValueError("empty document bundle")
+    target = _graph_db_path_for(arguments[0])
+    if any(_graph_db_path_for(args).resolve() != target.resolve() for args in arguments):
+        raise ValueError("document bundle must use a single graph")
+    snapshot = Path(snapshot)
+    with gl.graph_scope(target), gl.graph_writer_lock(target):
+        snapshot.unlink(missing_ok=True)
+        conn = gl.connect(target)
+        try:
+            gl.backup_graph(conn, snapshot)
+        finally:
+            conn.close()
+        reports = []
+        try:
+            for args in arguments:
+                args.validate_page = True
+                with redirect_stdout(StringIO()) as output:
+                    _cmd_ingest_locked(args)
+                report = json.loads(output.getvalue())
+                if not isinstance(report, dict) or "edges_added" not in report:
+                    raise ValueError("invalid document graph report")
+                reports.append(report)
+        except BaseException as failure:
+            try:
+                gl.restore_graph(snapshot, target)
+            except Exception as restore_error:
+                raise DocumentBundleRollbackError(
+                    f"bundle failed: {failure}; graph rollback failed: {restore_error}"
+                ) from failure
+            raise
+        return reports
 
 
 @_graph_write_command

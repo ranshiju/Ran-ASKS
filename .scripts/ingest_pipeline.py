@@ -18,6 +18,7 @@ spec 字段：
                          update_graph/validate_graph/finalize_tail；统一语义 Worker。
                          可另提供 post_commit_projection，在图校验后、完成态前执行
                          可另提供 prepare_unified_handoff(state, errors, handoff_reason)
+                         API可选repair_wiki返回repaired/not_applicable/failed，使用原wiki_revision预算
 
 step 签名约定：
   dedup_check(state)->(bool,str); preprocess(state)->(bool,str)
@@ -248,6 +249,7 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                 progress(f"  ↳ 失败: {msg}", flush=True)
                 if (_revisionable_protocol_error(msg)
                         and rp.consume(state, "wiki_revision", recovery_limits, msg)):
+                    state["wiki_errors"] = [str(msg)]
                     state["wiki_content"] = ""
                     if spec.get("unified_semantic_worker"):
                         state["slots_content"] = ""
@@ -278,9 +280,19 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             progress("通过" if not wiki_errors else f"{len(wiki_errors)}个错误", flush=True)
             if wiki_errors:
                 state["wiki_errors"] = wiki_errors
-                if not rp.consume(
-                        state, "wiki_revision", recovery_limits,
-                        "; ".join(wiki_errors)):
+                revision_available = rp.consume(
+                    state, "wiki_revision", recovery_limits, "; ".join(wiki_errors))
+                if (revision_available and "repair_wiki" in steps
+                        and agent_task.ingest_backend() == "api"):
+                    repair_status, repair_message = steps["repair_wiki"](state, wiki_errors)
+                    if repair_status == "repaired":
+                        wiki_errors = steps["validate_wiki"](state)
+                        state["wiki_errors"] = wiki_errors
+                        revision_available = not wiki_errors
+                    elif repair_status != "not_applicable":
+                        wiki_errors = [*wiki_errors, repair_message or "Wiki 局部修复失败"]
+                        revision_available = False
+                if wiki_errors and not revision_available:
                     if spec.get("unified_semantic_worker"):
                         prepare_handoff = steps.get("prepare_unified_handoff")
                         if prepare_handoff is None:
@@ -311,18 +323,19 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                     state["_awaiting_agent_wiki"] = True
                     state["agent_write_to"] = str(wiki_path)
                     state["agent_prompt"] = (
-                        "API wiki 已达格式重写上限。只修复 write_to 现有草稿的下列问题，"
+                        "API Wiki 已耗尽修订预算。只修复 write_to 现有草稿的下列问题，"
                         "保留已核对的事实内容与 Raw 证据：\n- " + "\n- ".join(wiki_errors)
                     )
                     state["errors"] = wiki_errors
                     _save(state)
                     return state
-                state["wiki_content"] = ""
-                if spec.get("unified_semantic_worker"):
-                    state["slots_content"] = ""
-                    state["compiler_errors"] = list(wiki_errors)
-                _save(state)
-                continue
+                if wiki_errors:
+                    state["wiki_content"] = ""
+                    if spec.get("unified_semantic_worker"):
+                        state["slots_content"] = ""
+                        state["compiler_errors"] = list(wiki_errors)
+                    _save(state)
+                    continue
             _advance(state, "write_slots", "wiki_validated")
             _save(state)
         # 第二阶段：写语义槽

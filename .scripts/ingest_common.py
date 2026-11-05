@@ -330,6 +330,14 @@ def _paper_condition_evidence(text: str, raw_source: str | None, budget: int = 6
     reference_start = _paper_reference_start(lines)
     end = reference_start if reference_start is not None else len(lines)
     candidates = []
+    headings = [i for i, line in enumerate(lines[:end]) if re.match(r"^#{1,6}\s", line)]
+
+    def render(numbers):
+        return "\n".join(
+            f"<{raw_source}#L{i + 1}> {lines[i]}" if raw_source else lines[i]
+            for i in numbers
+        )
+
     for line_number, line in enumerate(lines[:end], 1):
         if re.match(r"^#{1,6}\s+(?:acknowledg(?:e)?ments|data availability)\b", line.strip(), re.I):
             break
@@ -337,28 +345,70 @@ def _paper_condition_evidence(text: str, raw_source: str | None, budget: int = 6
             continue
         probability = re.search(r"\bwith probability\b", line, re.I)
         condition = re.search(
-            r"\b(?:sufficiently|provided that|assuming|only if|under (?:the )?(?:conditions?|assumptions?))\b",
+            r"\b(?:sufficiently|provided that|assuming|only if|"
+            r"under\b[^.\n]{0,100}\b(?:conditions?|assumptions?|initiali[sz]ation))\b",
             line, re.I,
         )
         scope = re.search(
-            r"\b(?:do(?:es)? not conclusively|does not (?:apply|cover)|not (?:valid|applicable) in general|"
+            r"\b(?:do(?:es)? not conclusively|do(?:es)? not (?:apply|cover|guarantee|characteri[sz]e|explain|establish)|"
+            r"(?:claim|claims) no\b[^.\n]{0,60}\badvantage|not (?:valid|applicable) in general|"
             r"remains? (?:an? )?(?:important )?open (?:problem|question))\b",
             line, re.I,
         )
-        score = 3 * bool(probability) + 3 * bool(scope) + bool(condition)
+        # Explicit limits take precedence over generic probability descriptions
+        # (e.g. a corruption process), especially when tied to an equation.
+        explicit_disclaimer = re.search(r"\bclaims? no\b", line, re.I)
+        score = 3 * bool(probability) + 6 * bool(scope) + bool(condition) + 2 * bool(explicit_disclaimer)
         if score:
-            rendered = f"<{raw_source}#L{line_number}> {line}" if raw_source else line
-            candidates.append((score, line_number, rendered))
+            index = line_number - 1
+            start = max((i for i in headings if i < index), default=-1) + 1
+            stop = next((i for i in headings if i > index), end)
+            section = [i for i in range(start, stop) if lines[i].strip()]
+            # Small mathematical subsections are indivisible evidence packets:
+            # definitions, displayed equations and qualifications travel together.
+            has_equation = any("$$" in lines[i] or r"\[" in lines[i] for i in section)
+            if has_equation and len(render(section)) <= budget - 150:
+                numbers = section
+                score += 4
+            else:
+                # Keep the complete paragraph plus immediately connected equations
+                # and their definitions, never a clipped formula or half sentence.
+                left, right = index, index + 1
+                while left > start and lines[left - 1].strip():
+                    left -= 1
+                while right < stop and lines[right].strip():
+                    right += 1
+                numbers = list(range(left, right))
+                cursor = right
+                while cursor < stop:
+                    while cursor < stop and not lines[cursor].strip():
+                        cursor += 1
+                    if cursor >= stop or not re.match(
+                            r"\s*(?:\$\$|\\\[|where\b|while\b|with\b|Here\b)", lines[cursor], re.I):
+                        break
+                    block_end = cursor + 1
+                    while block_end < stop and lines[block_end].strip():
+                        block_end += 1
+                    numbers.extend(range(cursor, block_end))
+                    cursor = block_end
+                if (len(render(numbers)) > budget - 150
+                        and not any("$$" in lines[i] or r"\[" in lines[i] for i in numbers)):
+                    # Some parsers put the entire prose body in one block with
+                    # no blank lines. Preserve the original complete anchor line.
+                    numbers = [index]
+            candidates.append((score, line_number, numbers))
     header = "--- [条件与适用范围补读候选；不表示已覆盖所有限定条件] ---\n"
     remaining = budget - len(header)
-    selected = []
-    for _score, line_number, rendered in sorted(candidates, key=lambda item: (-item[0], item[1])):
-        if len(rendered) + 1 <= remaining:
-            selected.append((line_number, rendered))
-            remaining -= len(rendered) + 1
-    selected.sort()
-    return (header + "\n".join(line for _number, line in selected),
-            [number for number, _line in selected]) if selected else ("", [])
+    selected = set()
+    anchors = []
+    for _score, line_number, numbers in sorted(candidates, key=lambda item: (-item[0], item[1])):
+        added = [i for i in numbers if i not in selected]
+        cost = len(render(added)) + (1 if selected and added else 0)
+        if cost <= remaining:
+            selected.update(added)
+            anchors.append(line_number)
+            remaining -= cost
+    return (header + render(sorted(selected)), sorted(set(anchors))) if selected else ("", [])
 
 
 def build_source_context(kind: str, text: str, *, source_path: Path | str | None = None,
@@ -524,8 +574,37 @@ def _semantic_issue_fingerprint(issue: dict) -> str:
     ).hexdigest()[:20]
 
 
+def _ignored_paper_relation(error: str) -> tuple[list[str] | None, list[str]]:
+    """Read the current validator's exact relation and allowed replacement roles."""
+    match = re.fullmatch(
+        r"论文级方向/标签谓词会在图编译时被忽略: (.+)；请依据 Wiki 证据改为([^，]+)，或删除该关系",
+        error,
+    )
+    if not match:
+        return None, []
+    return _split_triple(match.group(1)), match.group(2).split("/")
+
+
 def _locate_hard_error_line(error: str, semantic_text: str) -> tuple[str, str, str]:
     """Return (line, field, observed) for safely targetable hard errors."""
+    relation, _ = _ignored_paper_relation(error)
+    if relation:
+        candidates = [line.strip() for line in semantic_text.splitlines()
+                      if (parts := _split_triple(line.strip()))
+                      and parts[1:] == relation[1:]
+                      and parts[0] in {relation[0], "本论文", "本文", "本研究"}]
+        if len(candidates) == 1:
+            return candidates[0], "predicate", relation[1]
+        return "", "", ""
+    responsibility = re.fullmatch(r"负责人关系缺少原文同一行的明确职责措辞:\s*(.+)", error)
+    if responsibility:
+        person = responsibility.group(1).strip()
+        candidates = [line.strip() for line in semantic_text.splitlines()
+                      if (parts := _split_triple(line))
+                      and parts[1:] == ["负责人", person]]
+        if len(candidates) == 1:
+            return candidates[0], "predicate", "负责人"
+        return "", "", ""
     match = re.search(
         r"谓词格式不合法:\s*(.*?)\s*\((?:主体=(.*?),\s*)?客体=(.*?)\)$",
         error,
@@ -559,6 +638,9 @@ def build_structured_semantic_issues(hard_errors: list, warnings: list[dict],
         line, field, observed = _locate_hard_error_line(message, semantic_text)
         issue_code = (
             "malformed_predicate" if message.startswith("谓词格式不合法:")
+            else "missing_responsibility_name" if message.startswith("负责人称谓未在原文逐字出现:")
+            else "unsupported_responsibility" if message.startswith("负责人关系缺少原文同一行的明确职责措辞:")
+            else "ignored_paper_relation" if _ignored_paper_relation(message)[0]
             else "semantic_parse_error" if "解析失败" in message
             else "semantic_structure_error"
         )
@@ -569,12 +651,27 @@ def build_structured_semantic_issues(hard_errors: list, warnings: list[dict],
             "line": line,
             "field": field,
             "observed": observed or message,
-            "expected": "可由语义槽 parser 和 validator 接受的单行结构",
+            "expected": ("原文明确支持的关系谓词；可纠正不受支持的原谓词，保持主体与客体不变；没有替代关系证据则 abstain"
+                         if issue_code == "unsupported_responsibility"
+                         else "可由语义槽 parser 和 validator 接受的单行结构"),
             "reason": message,
             "suggested_actions": ["replace"] if line else ["abstain"],
             "retryable": bool(line),
             "is_triple": bool(line and line.count("|") == 2),
         }
+        if issue_code == "missing_responsibility_name":
+            issue.update(
+                field="object", observed=message.split(":", 1)[1].strip(),
+                expected="核对原文完整称谓及具体职责范围；仅改谓词不能修复名称缺证，当前 specialist 不改实体身份。",
+                retryable=False, suggested_actions=["abstain"],
+            )
+        if issue_code == "ignored_paper_relation":
+            issue["allowed_values"] = _ignored_paper_relation(message)[1]
+            issue["expected"] = (
+                "仅选择 allowed_values 中有原文依据的概念关系；保持主体与客体不变，"
+                "保留原关系的事实含义，不为通过校验强行改类；无合适关系则 abstain。"
+                "本恢复入口不删除关系，也不转换为命题。"
+            )
         issue["fingerprint"] = _semantic_issue_fingerprint(issue)
         issues.append(issue)
     for warning in warnings:
@@ -662,10 +759,15 @@ def apply_semantic_recovery_proposal(semantic_text: str, proposal: dict,
         current_triple = _split_triple(lines[target].strip())
         if current_triple and new_triple and field in {"subject", "predicate", "object"}:
             field_index = {"subject": 0, "predicate": 1, "object": 2}[field]
+            allowed_values = issue.get("allowed_values")
+            if allowed_values is not None and new_triple[field_index] not in allowed_values:
+                return None
             current_triple[field_index] = new_triple[field_index]
             indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
             lines[target] = indent + " | ".join(current_triple)
         else:
+            if issue.get("allowed_values") is not None:
+                return None
             indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
             lines[target] = indent + replacement
     return "\n".join(lines) + ("\n" if semantic_text.endswith("\n") else "")
@@ -968,10 +1070,10 @@ def validate_semantics(state: dict, REPO: Path, allowed_predicates: set[str],
     """校验语义槽合法性。返回 (hard_errors, slot_warnings)。
 
     hard_errors: 结构性错误（谓词非法、解析失败、同行 header），需早停交接。
-    slot_warnings: 客体内容问题（描述性短语、裸缩写、重复行），可走局部修复。
+    slot_warnings: 裸缩写、重复行等具体问题；不按名称长度猜测语义类型。
     """
     import graph_ingest
-    from graph_ingest import is_bare_abbreviation, is_descriptive_phrase
+    from graph_ingest import is_bare_abbreviation
     semantic_path = REPO / state["semantic_path"]
     sem_text = semantic_path.read_text(encoding="utf-8")
     state["slots_content"] = sem_text
@@ -1038,13 +1140,6 @@ def validate_semantics(state: dict, REPO: Path, allowed_predicates: set[str],
                         "subject": t.get("subject", ""),
                         "object": obj,
                     })
-            if (obj and pred not in graph_ingest.CONCEPT_KW_PREDICATES
-                    and is_descriptive_phrase(obj)):
-                slot_warnings.append({
-                    "section": "三元组", "line": f"{t.get('subject','')}|{pred}|{obj}",
-                    "issue": "descriptive_phrase",
-                    "reason": "客体含逗号/句号等标点，应为规范概念名",
-                })
             if is_bare_abbreviation(obj):
                 slot_warnings.append({
                     "section": "三元组", "line": f"{t.get('subject','')}|{pred}|{obj}",
@@ -1976,18 +2071,20 @@ def _resume_result_item(state: dict, *, file_name: str = "") -> dict:
 
 
 def _reconcile_parent_batch_report(repo: Path, state: dict):
-    """Refresh the newest multi-item inbox report containing this transaction."""
+    """Refresh the originating inbox report, including single-item batches."""
     report_dir = repo / "cross-domain" / "ingest-reports"
     transaction_id = str(state.get("transaction_id") or "")
     if not transaction_id or not report_dir.is_dir():
         return None
     for report_path in sorted(report_dir.glob("*.json"), reverse=True):
+        if report_path.name.startswith("resume-"):
+            continue
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         files = report.get("files") if isinstance(report, dict) else None
-        if not isinstance(files, list) or len(files) < 2:
+        if not isinstance(files, list) or not files:
             continue
         if not any(item.get("transaction_id") == transaction_id for item in files):
             continue
@@ -2008,8 +2105,10 @@ def _reconcile_parent_batch_report(repo: Path, state: dict):
             else:
                 refreshed.append(item)
         from ingest_inbox import _report_counts, _write_json_atomic
+        report.setdefault("initial_files", files)
         report["files"] = refreshed
         report.update(_report_counts(refreshed))
+        report["reconciled_at"] = datetime.now(timezone.utc).isoformat()
         _write_json_atomic(report_path, report)
         return report_path, report
     return None
@@ -2075,7 +2174,7 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
             )
             report["maintenance"] = envelope
             report.setdefault("plan_notes", []).append(
-                "batch report reconciled after direct Agent resumes"
+                "inbox report reconciled after direct resumes; initial_files preserves the original results"
             )
             publish_maintenance_report(report_path, report)
             compact = compact_maintenance(report["maintenance"])
@@ -2276,6 +2375,10 @@ def step_finalize(state: dict, REPO: Path, config: dict) -> tuple[bool, str]:
         if not raw_files:
             return False, "extract_dir 无可归档的 raw 文件"
         manifest = {"raw_files": raw_files, "wiki_file": "wiki.md"}
+        if state.get("long_document"):
+            manifest["document_bundle"] = True
+        if state.get("wiki_artifacts"):
+            manifest["wiki_artifacts"] = state["wiki_artifacts"]
         (extract_dir / "manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False) + "\n", encoding="utf-8")
     cmd = [sys.executable, str(REPO / ".scripts/inbox_finalize.py"),

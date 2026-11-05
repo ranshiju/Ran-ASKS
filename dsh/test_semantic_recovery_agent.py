@@ -92,6 +92,7 @@ def test_proposal_is_returned_without_write_tools():
     assert all("write" not in name and "commit" not in name for name in agent.registry.names())
     assert calls[0]["retries"] == 0
     assert calls[0]["operation"] == "ingest_semantic_recovery"
+    assert calls[0]["allow_profile_fallback"] is False
 
 
 def test_duplicate_tool_action_stops_immediately():
@@ -122,8 +123,8 @@ def test_attempted_fallback_models_are_traced():
             "status": "ok",
             "model": "GLM-5.3-Flash",
             "history": [
-                {"model": "candidate-model", "status": "api_error", "usage": {}},
-                {"model": "GLM-5.3-Flash", "status": "ok", "usage": {}},
+                {"model": "candidate-model", "status": "validation_error", "usage": {"total_tokens": 30}},
+                {"model": "GLM-5.3-Flash", "status": "ok", "usage": {"total_tokens": 40}},
             ],
             "usage": {},
             "parsed": {
@@ -148,6 +149,77 @@ def test_attempted_fallback_models_are_traced():
     assert result.status == "resolved"
     assert result.models == ["candidate-model", "GLM-5.3-Flash"]
     assert result.api_calls == 2
+    assert result.total_tokens == 70
+
+
+def test_remaining_time_and_request_budget_bound_next_call():
+    calls = []
+
+    def fake_call(*_args, **kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "model": "candidate", "usage": {"total_tokens": 5},
+                "parsed": {"decision": "tool", "tool": "inspect_issue_context",
+                           "arguments": {"issue_ids": ["issue-01"]}, "reason": "inspect"}}
+
+    budget = AgentBudget(max_model_calls=1, max_elapsed_sec=5, request_timeout_sec=30)
+    result = SemanticRecoveryAgent(_envelope(budget), "semantic", "wiki", "source", fake_call).run()
+    assert len(calls) == 1 and 0 < calls[0]["timeout_sec"] <= 5
+    assert result.reason == "model_call_budget_exhausted"
+    assert result.api_calls == 1
+
+
+def test_failed_attempt_tokens_can_exhaust_budget():
+    def fake_call(*_args, **_kwargs):
+        return {"ok": True, "usage": {"total_tokens": 2},
+                "history": [{"model": "candidate", "usage": {"total_tokens": 90}},
+                            {"model": "candidate", "usage": {"total_tokens": 2}}]}
+
+    result = SemanticRecoveryAgent(
+        _envelope(AgentBudget(max_total_tokens=80)), "semantic", "wiki", "source", fake_call).run()
+    assert result.reason == "token_budget_exhausted" and result.total_tokens == 92
+
+
+def test_exam_distinguishes_repair_abstention_and_wrong_proposal():
+    cases = sre.load_exam(sre.DEFAULT_EXAM)["cases"]
+    case = cases[0]
+    result = AgentResult(status="resolved", task_id="exam", api_calls=2, proposal={
+        "patches": [{"issue_id": "issue-01", "action": "replace", "replacement_lines": ["wrong"]}]})
+    score = sre.score_case(case, result)
+    assert not score["case_passed"] and not score["autonomously_resolved"]
+    assert score["api_calls"] == 2
+    result.proposal["patches"][0]["replacement_lines"] = case["expected"]["accepted_replacements"]["issue-01"][:1]
+    assert sre.score_case(case, result)["autonomously_resolved"]
+    result.status = "abstained"
+    result.proposal["patches"][0].update(action="abstain", replacement_lines=[])
+    score = sre.score_case(cases[-1], result)
+    assert score["case_passed"] and score["correct_abstention"]
+    assert not score["autonomously_resolved"]
+
+
+def test_small_and_cross_language_context_is_delivered_within_budget():
+    text = "The experiment verifies entanglement entropy growth."
+    assert SemanticRecoveryAgent._best_excerpt(text, ["纠缠熵增长"], 500) == text
+    long_text = "irrelevant " * 1000 + "epochs should be scaled slightly faster" + " tail" * 1000
+    needles = SemanticRecoveryAgent._needles({"line": "本文 | 发现 | epoch增长快于参数增长"})
+    excerpt = SemanticRecoveryAgent._best_excerpt(long_text, needles, 500)
+    assert "epochs should be scaled slightly faster" in excerpt and len(excerpt) <= 500
+    assert SemanticRecoveryAgent._best_excerpt(long_text, ["missing"], 500) == "[NO MATCH]"
+
+
+def test_responsibility_issue_targets_only_unique_predicate():
+    error = "负责人关系缺少原文同一行的明确职责措辞: 李某"
+    text = "三元组:\n项目甲 | 负责人 | 李某\n项目甲 | 涉及 | 联合培养\n"
+    issues = ic.build_structured_semantic_issues([error], [], text)
+    assert issues[0]["retryable"] and issues[0]["field"] == "predicate"
+    assert issues[0]["issue_code"] == "unsupported_responsibility"
+    assert "保持主体与客体不变" in issues[0]["expected"]
+    proposal = {"patches": [{"issue_id": "issue-01", "action": "replace",
+                            "replacement_lines": ["任意主体 | 联系人 | 任意对象"]}]}
+    candidate = ic.apply_semantic_recovery_proposal(text, proposal, issues)
+    assert candidate == text.replace(" | 负责人 | ", " | 联系人 | ")
+    for ambiguous in [text + "项目乙 | 负责人 | 李某\n", "三元组:\n项目甲 | 负责人 | 王某\n"]:
+        issue = ic.build_structured_semantic_issues([error], [], ambiguous)[0]
+        assert not issue["retryable"] and issue["line"] == ""
 
 
 def test_turn_budget_is_hard_limit():
@@ -341,13 +413,54 @@ def test_eval_routing_policy_allows_no_fallback_and_excludes_gpt():
             sre.MODEL_CATALOG = original_catalog
 
 
+def test_specialist_model_override_does_not_change_global_default():
+    from unittest.mock import patch
+    catalog = {"models": ["GLM-5.3-Flash", "GLM-5.3-EV"],
+               "sub_agent_policy": {"text_model": "GLM-5.3-Flash", "excluded_families": ["GPT"]},
+               "agent_profiles": {"semantic_recovery_agent": {"text_model": "GLM-5.3-EV"}},
+               "preferred": {"semantic_recovery_agent": "GLM-5.3-EV"}}
+    with patch.object(sre, "model_catalog", return_value=catalog):
+        assert sre.validate_routing_policy()["text_model"] == "GLM-5.3-EV"
+    assert catalog["sub_agent_policy"]["text_model"] == "GLM-5.3-Flash"
+
+
+
+def test_ignored_paper_relation_targets_unique_concept_role_only():
+    prefix = "论文级方向/标签谓词会在图编译时被忽略: "
+    suffix = "；请依据 Wiki 证据改为研究基础/核心方法/对比方法，或删除该关系"
+    error = prefix + "本论文 | 主要研究 | 蒙特卡洛模拟" + suffix
+    text = "三元组:\n本文 | 主要研究 | 蒙特卡洛模拟\n算法甲 | 应用于 | 自旋模型\n"
+    issues = ic.build_structured_semantic_issues([error], [], text)
+    issue = issues[0]
+    assert issue["retryable"] and issue["field"] == "predicate"
+    assert issue["issue_code"] == "ignored_paper_relation"
+    assert issue["allowed_values"] == ["研究基础", "核心方法", "对比方法"]
+    proposal = {"patches": [{"issue_id": "issue-01", "action": "replace",
+                            "replacement_lines": ["changed subject | 研究基础 | changed object"]}]}
+    assert ic.apply_semantic_recovery_proposal(text, proposal, issues) == text.replace(" | 主要研究 | ", " | 研究基础 | ")
+    for replacement in ("本文 | 核心创新点 | 蒙特卡洛模拟", "本文 | 涉及 | 蒙特卡洛模拟", "invalid line"):
+        proposal["patches"][0]["replacement_lines"] = [replacement]
+        assert ic.apply_semantic_recovery_proposal(text, proposal, issues) is None
+    for ambiguous in (text + "本论文 | 主要研究 | 蒙特卡洛模拟\n", text.replace("本文 |", "其他论文 |"), "三元组:\n"):
+        assert not ic.build_structured_semantic_issues([error], [], ambiguous)[0]["retryable"]
+    # A concept-to-concept relation is never selected as the paper relation.
+    unrelated = "三元组:\n算法甲 | 主要研究 | 蒙特卡洛模拟\n"
+    assert not ic.build_structured_semantic_issues([error], [], unrelated)[0]["retryable"]
+
 if __name__ == "__main__":
     test_proposal_is_returned_without_write_tools()
     test_duplicate_tool_action_stops_immediately()
     test_attempted_fallback_models_are_traced()
+    test_remaining_time_and_request_budget_bound_next_call()
+    test_failed_attempt_tokens_can_exhaust_budget()
+    test_exam_distinguishes_repair_abstention_and_wrong_proposal()
+    test_small_and_cross_language_context_is_delivered_within_budget()
+    test_responsibility_issue_targets_only_unique_predicate()
+    test_ignored_paper_relation_targets_unique_concept_role_only()
     test_turn_budget_is_hard_limit()
     test_ingest_accepts_only_validator_passed_proposal()
     test_ingest_restores_rejected_candidate()
     test_ingest_rejects_non_staged_semantic_path_without_model_call()
     test_eval_routing_policy_allows_no_fallback_and_excludes_gpt()
+    test_specialist_model_override_does_not_change_global_default()
     print("semantic recovery agent tests: OK")

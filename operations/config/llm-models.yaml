@@ -1,4 +1,4 @@
-updated: '2026-09-26'
+updated: '2026-11-04'
 source: user-provided-provider-catalog
 enforced: false
 notes:
@@ -23,7 +23,7 @@ preferred:
   image_ocr_review: GLM-5.3-FlashX
   presentation_artwork: GLM-5.3-FlashX
   visual_reconstruction: GLM-5.3-Flash
-  semantic_recovery_agent: GLM-5.3-Flash
+  semantic_recovery_agent: GLM-5.3-EV
 fallback:
   image_ocr: GLM-4.6V
   visual_qa: GLM-4.6V
@@ -72,6 +72,39 @@ image_generation:
       task: text_to_image
       probe_status: pending
 agent_profiles:
+  content_repair_worker:
+    status: limited_pilot
+    text_model: GLM-5.3-EV
+    runtime_operation: ingest_content_repair
+    api_profile: SEMANTIC_RECOVERY
+    scope: existing_paper_and_ordinary_document_wiki_or_semantic_revision_budget
+    evaluation_report: projects/ASKS/outputs/ev-content-recovery-validation-2026-11-05.md
+    notes: 仅有实际校验错误的已有修订改用EV，一次选中profile调用；论文语义重放通过但旧Wiki仍不合格，普通文档两次独立试验均有残余错误。不开启全文复核，不增加预算，不宣称全文自动恢复。
+  meeting_repair_worker:
+    status: limited_pilot
+    text_model: GLM-5.3-EV
+    runtime_operation: ingest_meeting_repair
+    api_profile: SEMANTIC_RECOVERY
+    scope: existing_second_compiler_revision_with_bound_output_and_validator_diagnostics
+    evaluation_report: projects/ASKS/outputs/meeting-api-recovery-validation-2026-11-05.md
+    notes: 复用已配置恢复模型与原两次预算；失败不隐藏回退。三份自然会议的局部修订均通过程序校验，仍有内容条件与议题关系问题，未证明整体语义正确或EV普遍优于FlashX。
+  long_document_repair_worker:
+    status: limited_pilot
+    text_model: GLM-5.3-EV
+    runtime_operation: ingest_long_document_repair
+    api_profile: SEMANTIC_RECOVERY
+    scope: second_bounded_unit_revision_with_original_candidate_and_complete_validator_issues
+    evaluation_report: projects/ASKS/outputs/natural-recovery-validation-2026-11-04.md
+    notes: 复用已选恢复模型，不复用语义槽补丁协议；单元内原两次预算不变。自然失败首单元修复成功，下一单元仍失败，未证明全文自动通过或EV普遍优于FlashX。
+  wiki_recovery_worker:
+    status: evaluated_not_promoted
+    runtime_operation: ingest_wiki_repair
+    api_profile: WIKI_RECOVERY
+    candidate_model: GLM-5.3-EV
+    active_model_policy: inherit_ingest_generation_until_natural_failure_evidence
+    scope: existing_wiki_revision_budget_and_validator_bounded_patch
+    evaluation_report: projects/ASKS/outputs/wiki-recovery-validation-2026-11-04.md
+    notes: 两例存量来源故障注入中 FlashX 与 EV 均成功，EV 延迟更高；专用路由就绪但本地未启用，不扩展全局 Sub-Agent 策略。
   meeting_compiler_agent:
     status: active
     primary_role: inherit_text_sub_agent_policy
@@ -79,11 +112,21 @@ agent_profiles:
     api_profile: INGEST_GENERATION
     required_capabilities: [long_context, structured_text, evidence_bounded_normalization]
   semantic_recovery_agent:
-    status: pending_evaluation
-    primary_role: inherit_text_sub_agent_policy
+    status: limited_pilot
+    text_model: GLM-5.3-EV
+    primary_role: bounded_semantic_repair
     excluded_families: [GPT]
     required_capabilities: [structured_json, multi_turn_tool_use, evidence_bounded_repair]
-    activation: inherit_primary_model_until_evaluated
+    activation: explicit_user_request_2026_11_04_after_paired_probe_and_validator_replay
+    scope: existing_unique_semantic_issue_patch_only
+    evaluation_report: projects/ASKS/outputs/api-fallback-validation-2026-11-04.md
+    requested_candidate:
+      model: GLM-5.3-EV
+      requested_at: '2026-11-04'
+      status: limited_pilot_enabled
+      previous_provider_error: team_model_access_denied
+      probe: temp/api-fallback-20261104/ev-reprobe.json
+      notes: 权限恢复后完成小样本对照和真实恢复入口校验；仅在已有语义局部修复边界试用，不宣称模型全面优于FlashX。
 visual_capabilities:
   visual_review_selection:
     date: '2026-09-26'
@@ -209,6 +252,7 @@ models:
   - Qwen3.5-27B
   - GLM-4-Plus
   - GLM-5.3
+  - GLM-5.3-EV
   - GLM-5.3-FlashX
   - GLM-5.3-Flash
   - GLM-5.2

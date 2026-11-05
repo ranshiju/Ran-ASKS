@@ -88,7 +88,7 @@ nodes:
   inbox_finalize:
     path: .scripts/inbox_finalize.py
     kind: implementation
-    role: shared-versioned-artifact-manifest-finalizer-with-nested-bundle-integrity-and-hash-guarded-wiki-update-rollback
+    role: shared-versioned-artifact-manifest-finalizer-with-nested-bundle-integrity-hash-guarded-wiki-update-and-multipage-create-rollback
   relocate_own_ip:
     path: .scripts/relocate_own_ip.py
     kind: implementation
@@ -452,7 +452,7 @@ nodes:
   graph_ingest:
     path: .scripts/graph_ingest.py
     kind: implementation
-    role: graph-delta-driven-wiki-centered-sparse-proposition-fusion-field-aware-semantic-endpoint-abbreviation-audit-database-scoped-serialized-writes-and-bounded-derived-hub-membership-refresh
+    role: graph-delta-driven-wiki-centered-sparse-proposition-fusion-field-aware-semantic-endpoint-abbreviation-audit-database-scoped-serialized-writes-atomic-document-bundles-and-bounded-derived-hub-membership-refresh
   knowledge_ir:
     path: .scripts/knowledge_ir.py
     kind: implementation
@@ -829,10 +829,18 @@ nodes:
     path: .scripts/ingest_plan.py
     kind: planner
     role: non-destructive-incremental-plan
+  long_document_ingest:
+    path: .scripts/long_document_ingest.py
+    kind: implementation
+    role: shared-evidence-bound-long-document-compilation-with-independent-agent-api-adapters-and-resumable-multipage-publication
+  long_document_ingest_test:
+    path: .scripts/test_long_document_ingest.py
+    kind: test
+    role: isolated-long-document-coverage-evidence-resume-and-multipage-rollback-regression
   long_document_plan:
     path: .scripts/long_document_plan.py
     kind: planner
-    role: read-only-long-document-granularity-plan
+    role: shared-read-only-long-document-outline-full-coverage-windows-and-native-pdf-source-map
   direction_matcher:
     path: .scripts/direction_matcher.py
     kind: implementation
@@ -1102,6 +1110,30 @@ nodes:
     path: .scripts/rebuild_triples.py
     kind: legacy
     role: markdown-triples-compatibility
+  bibliography_sidecar:
+    path: .scripts/bibliography_sidecar.py
+    kind: implementation
+    role: shared-bounded-local-ris-bibtex-source-matching-and-managed-sidecar-staging-with-offline-replay
+  bibliography_sidecar_test:
+    path: .scripts/test_bibliography_sidecar.py
+    kind: test
+    role: local-bibliography-parser-identity-preprint-conflict-intake-bundle-and-dual-backend-regression
+  bibliography_update:
+    path: .scripts/bibliography_update.py
+    kind: implementation
+    role: shared-managed-existing-paper-bibliography-update-with-provenance-history-and-scoped-graph-commit
+  bibliography_update_test:
+    path: .scripts/test_bibliography_update.py
+    kind: test
+    role: managed-bibliography-update-preservation-rollback-resume-and-zero-model-regression
+  external_bibliography:
+    path: .scripts/external_bibliography.py
+    kind: implementation
+    role: shared-free-formal-publication-first-bounded-crossref-arxiv-and-doi-less-conference-resolution-with-source-bound-offline-replay
+  external_bibliography_test:
+    path: .scripts/test_external_bibliography.py
+    kind: test
+    role: free-bibliography-identity-provenance-network-boundary-and-ingest-integration-regression
   ingest_paper:
     path: .scripts/ingest_paper.py
     kind: implementation
@@ -1122,6 +1154,14 @@ nodes:
     path: .scripts/pptx_document.py
     kind: implementation
     role: shared-native-pptx-extraction-and-source-bound-api-or-legacy-review-validation
+  pptx_intake:
+    path: .scripts/pptx_intake.py
+    kind: implementation
+    role: shared-source-bound-page-triage-selective-navigation-review-and-post-ingest-template-enrichment-with-agent-api-planning
+  pptx_intake_test:
+    path: .scripts/test_pptx_intake.py
+    kind: test
+    role: selective-vision-no-image-text-path-plan-integrity-and-idempotent-library-enrichment-regression
   pptx_structure:
     path: .scripts/pptx_structure.py
     kind: implementation
@@ -1334,6 +1374,10 @@ nodes:
     path: .scripts/test_ingest_user_assertions.py
     kind: test
     role: user-assertion-transaction-rollback-anchor-and-idempotency-regression
+  wiki_patch:
+    path: .scripts/wiki_patch.py
+    kind: implementation
+    role: shared-pure-hash-bound-wiki-target-catalog-and-patch-validator-for-paper-and-document-citation-repair
   wiki_locator:
     path: .scripts/wiki_locator.py
     kind: implementation
@@ -1421,7 +1465,7 @@ nodes:
   relativize_internal_symlinks:
     path: .scripts/relativize_internal_symlinks.py
     kind: implementation
-    role: absolute-to-relative-symlink-repair
+    role: shared-absolute-to-relative-symlink-repair-and-hash-bound-single-broken-raw-link-materialization
   test_direction_matcher:
     path: .scripts/test_direction_matcher.py
     kind: test
@@ -1443,6 +1487,108 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - inbox_state
+  - tested_by
+  - ingest_inbox_dispatch_test
+- - ingest_paper
+  - uses
+  - bibliography_sidecar
+- - bibliography_update
+  - uses
+  - bibliography_sidecar
+- - bibliography_update
+  - uses
+  - external_bibliography
+- - bibliography_update
+  - uses
+  - inbox_finalize
+- - bibliography_update
+  - uses
+  - ingest_check
+- - bibliography_update
+  - uses
+  - graph_ingest
+- - bibliography_update
+  - uses
+  - graph_lib
+- - ingest_inbox
+  - uses
+  - bibliography_update
+- - bibliography_update
+  - tested_by
+  - bibliography_update_test
+- - inbox_finalize
+  - tested_by
+  - bibliography_update_test
+- - graph_ingest
+  - tested_by
+  - bibliography_update_test
+- - bibliography_update
+  - documented_by
+  - guidance
+- - ingest_paper
+  - uses
+  - inbox_source_policy
+- - external_bibliography
+  - uses
+  - bibliography_sidecar
+- - ingest_check
+  - uses
+  - bibliography_sidecar
+- - inbox_plan
+  - uses
+  - bibliography_sidecar
+- - ingest_inbox
+  - uses
+  - bibliography_sidecar
+- - re_ingest
+  - uses
+  - bibliography_sidecar
+- - bibliography_sidecar
+  - tested_by
+  - bibliography_sidecar_test
+- - ingest_paper
+  - tested_by
+  - bibliography_sidecar_test
+- - inbox_finalize
+  - tested_by
+  - bibliography_sidecar_test
+- - bibliography_sidecar
+  - documented_by
+  - guidance
+- - ingest_paper
+  - uses
+  - external_bibliography
+- - ingest_check
+  - uses
+  - external_bibliography
+- - ingest_check
+  - tested_by
+  - external_bibliography_test
+- - external_bibliography
+  - tested_by
+  - external_bibliography_test
+- - ingest_paper
+  - tested_by
+  - external_bibliography_test
+- - external_bibliography
+  - documented_by
+  - guidance
+- - ingest_paper
+  - uses
+  - wiki_patch
+- - ingest_document
+  - uses
+  - wiki_patch
+- - wiki_patch
+  - uses
+  - wiki_locator
+- - wiki_patch
+  - tested_by
+  - ingest_paper_test
+- - wiki_patch
+  - tested_by
+  - ingest_document_test
 - - manuscript_improvement_ops
   - uses
   - academic_abstract_ops
@@ -2151,6 +2297,27 @@ edges:
 - - slide_library
   - uses
   - pptx_structure
+- - ingest_document
+  - uses
+  - pptx_intake
+- - pptx_document
+  - uses
+  - pptx_intake
+- - pptx_intake
+  - uses
+  - pptx_structure
+- - pptx_intake
+  - uses
+  - pptx_visual
+- - pptx_intake
+  - uses
+  - slide_library
+- - pptx_intake
+  - uses
+  - slide_reuse
+- - pptx_intake
+  - tested_by
+  - pptx_intake_test
 - - slide_reuse
   - uses
   - slide_library
@@ -2919,6 +3086,30 @@ edges:
 - - ingest
   - specifies
   - long_document_plan
+- - ingest_document
+  - uses
+  - long_document_ingest
+- - long_document_ingest
+  - uses
+  - long_document_plan
+- - long_document_ingest
+  - uses
+  - graph_ingest
+- - long_document_ingest
+  - uses
+  - inbox_finalize
+- - long_document_ingest
+  - uses
+  - agent_task
+- - long_document_ingest
+  - tested_by
+  - long_document_ingest_test
+- - ingest_inbox
+  - uses
+  - long_document_plan
+- - inbox_plan
+  - uses
+  - long_document_plan
 - - long_document_plan
   - tested_by
   - long_document_plan_test
@@ -3679,6 +3870,7 @@ capabilities:
     - ingest_build
     - ingest_plan
     - long_document_plan
+    - long_document_ingest
     - derivation_state
     forbidden:
     - triples_legacy
@@ -4122,6 +4314,10 @@ verification:
   - python3 .scripts/test_env_config.py
   pptx_structure:
   - python3 .scripts/test_pptx_academic.py
+  pptx_intake:
+  - python3 .scripts/test_pptx_intake.py
+  - python3 .scripts/test_pptx_document.py
+  - python3 .scripts/test_pptx_academic.py
   pptx_visual:
   - python3 .scripts/test_pptx_academic.py
   - python3 .scripts/test_pptx_document.py
@@ -4316,6 +4512,10 @@ verification:
   - python3 .scripts/engineering_graph.py validate
   schemas:
   - python3 .scripts/test_ingest_check.py
+  long_document_ingest:
+  - python3 .scripts/test_long_document_ingest.py
+  - python3 .scripts/test_ingest_document.py
+  - python3 .scripts/test_inbox_finalize.py
   long_document_plan:
   - python3 .scripts/test_long_document_plan.py
   prompt_test:
@@ -4444,6 +4644,83 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  bibliography_update:
+    preconditions:
+    - invalid enumeration candidates are isolated with bounded visible diagnostics; the current content-addressed plan still fails closed and is never overwritten
+    - prepared apply may retry once only for explicit transient errno or SQLite BUSY/LOCKED; every attempt revalidates original guards, no parsing or model restart; storage failures remain distinct from bibliographic review and recovery context is retained
+    - bind only selected local sidecars and reuse their resolved result within the current run; source construction is shared and pure, filesystem snapshots are not cached across commit or recovery boundaries
+    - shared same-PDF local formal bibliography supplement; one matched RIS or BibTeX is sufficient, unique associated Wiki, distinct nonempty formal DOI identities still block; no HTTP, OCR or semantic model calls
+    - accepted local metadata supersedes older locked descriptive fields; old receipts are preserved as history rather than re-evaluated to authorize the replacement; missing DOI is not a conflicting identity
+    - completed plans superseded by another accepted update are history, not resume candidates for a new submission of the same export
+    - managed source.yaml replacement must archive hash-identical previous provenance in the same manifest; preserve original PDF/Markdown and non-bibliographic Wiki content
+    - writer-locked graph transaction changes only page bibliography metadata and owned author/venue edges; file receipt plus graph verification required for completion, resume rejects drift
+    - duplicate cleanup must first recover any landed incomplete bibliography update; only complete file receipts support automatic graph replay, partial file landing without receipt fails closed
+    - after successful pending recovery, process any new incoming bibliography in the same invocation before cleanup; report both recovery and current update without a false review handoff
+    writes:
+    - prepared plan and immutable source snapshots; managed provenance history and sidecar additions, source.yaml and constrained Wiki update, owned mechanical graph relations and audit log
+    forbidden:
+    - direct Agent Raw edits, deleting old source provenance, full-page graph clean, rewriting scientific content, overriding distinct formal DOI identities or shared graph ownership
+    verify:
+    - python3 .scripts/test_bibliography_update.py
+    - python3 .scripts/test_bibliography_sidecar.py
+    - python3 .scripts/test_ingest_paper.py
+    - python3 .scripts/test_ingest_check.py
+    - python3 .scripts/test_inbox_finalize.py
+    - python3 .scripts/test_ingest_inbox_dispatch.py
+    - python3 .scripts/engineering_graph.py validate
+  bibliography_sidecar:
+    preconditions:
+    - shared same-name-first selection stops after a verified named record; directory fallback only when named files are absent or no-match, never masking named conflicts or parse errors; selection scope is replayable and legacy receipts keep directory scope
+    - fresh resolution evaluates selected records once; staging validates snapshot bytes without re-parsing; independent replay at apply, archived validation and cleanup remains mandatory
+    - exact duplicate PDF cleanup requires every discovered bibliography file to match a source-bound archived local receipt and its actual files; missing/new/unsafe metadata retains the PDF and companions for a managed update, without network or model calls
+    - compare incoming sidecar hashes with receipt file hashes before replay; a new export goes to managed update without parsing the older metadata, while exact archived matches still require full integrity replay
+    - shared title-first filtering skips only decodable nonmatching records before full field parsing; syntax errors and uncertain titles remain fail-closed; letter accent commands require TeX command boundaries
+    - merge missing optional fields only for identical normalized title, ordered authors, year, venue and publication type; preserve per-field record provenance; distinct nonempty DOI values retain punctuation and conflict
+    - archived local bibliography revalidation compares optional publication fields and any stored per-field provenance with replay; legacy receipts without additive field provenance remain replayable
+    - shared bounded UTF-8 RIS/BibTeX parsing and exact source identity; formally typed journal/conference records with venue/year/authors preferred over preprints; conflicting formal records unresolved, local file origin never asserted publisher-verified
+    - local first in fresh paper transactions; same-name and same-directory batch metadata only, no recursive discovery, links or TeX execution; staged snapshots and replay bound to source and original file hashes
+    - accepted files are manifest-declared bibliography artifacts archived through existing managed transaction; archived validator verifies actual sidecar bytes; retained metadata does not create independent paper intake items
+    - staged inbox bibliography originals reuse existing source-retention policy so shared catalogs remain available after PDF cleanup without becoming standalone intake items; orphan metadata stays visible
+    writes:
+    - staged bibliography/*.ris and *.bib, local receipt in staged source.yaml; external import copies only same-name companions with hash receipts
+    forbidden:
+    - direct Raw/graph writes, unknown macros guessed as text, source-directed execution or URL traversal, fuzzy identity or silent formal conflicts, local records called publisher-authenticated
+    verify:
+    - python3 .scripts/test_bibliography_sidecar.py
+    - python3 .scripts/test_external_bibliography.py
+    - python3 .scripts/test_ingest_paper.py
+    - python3 .scripts/test_ingest_check.py
+    - python3 .scripts/test_inbox_finalize.py
+    - python3 .scripts/engineering_graph.py validate
+  external_bibliography:
+    preconditions:
+    - shared free Semantic Scholar bulk fallback only within the existing four-request budget; accept DOI-less conference records only with exact source identity, Conference type, conference venue, DBLP conf key and valid year; preserve indexed author abbreviations and year precision, reject repository or ambiguous records
+    - shared bibliography candidates exclude reference-list and explicitly cited arXiv identifiers with audit reasons; own headers and identifiers without source counterevidence remain eligible; cache telemetry separates current requests/time from original fetch cost
+    - shared deterministic free Crossref/arXiv lookup; new PDF transactions default external-first, legacy transactions retain policy, re-ingest only replays archived receipts
+    - exact normalized title and author corroboration required; formal journal/proceedings metadata takes precedence, print/published/online dates remain distinct, content version never upgraded by metadata lookup
+    - bounded fixed-host requests without credentials or uploaded documents; same-source transaction cache freezes success and failure; replay validates response hashes and identity without network or LLM
+    - ingest_check replays archived receipt against Raw text; verified formal year/venue take precedence over PDF preprint/online evidence, invalid receipts fail closed
+    writes:
+    - staged transaction external-bibliography.json cache; accepted receipt embedded in source.yaml bibliographic metadata and archived only through existing managed ingestion
+    forbidden:
+    - direct Raw or graph writes, paid services, arbitrary URL fetching, source-driven instructions, missing search results interpreted as unpublished
+    verify:
+    - python3 .scripts/test_external_bibliography.py
+    - python3 .scripts/test_ingest_paper.py
+    - python3 .scripts/test_ingest_check.py
+    - python3 .scripts/engineering_graph.py validate
+  wiki_patch:
+    preconditions:
+    - shared 纯函数复用既有 paper-wiki-patch-v1 协议；目标目录绑定 Wiki SHA-256，精确定位失败脚注或已有支持的正文错误，不读取文件或调用模型
+    - 补丁只覆盖已有target ID；引用只允许提供的Raw地址，拒绝正文/frontmatter/章节越界及重叠目标；未点名区域逐字保持
+    - document adapter 仅使用 citations 目标，普通短单页文本；不改变事实正文或语义槽
+    writes: []
+    forbidden:
+    - 模型调用、文件读写、Graph提交或通过未知locator猜测证据
+    verify:
+    - python3 .scripts/test_ingest_paper.py
+    - python3 .scripts/test_ingest_document.py
+    - python3 .scripts/engineering_graph.py validate
   artifact_usage:
     preconditions:
     - shared deterministic use instructions describe navigation/source/knowledge/result boundaries, never confidence or certification; roles come from successful actions or packet structure, not source assertions
@@ -4534,6 +4811,7 @@ script_contracts:
   source_ingest:
     preconditions:
     - shared deterministic Source-first profile; first release accepts academic PDF/Markdown/plain text, with no semantic LLM or Graph dependency
+    - shared Source search may display the bound carrier's opening H1 for filename_unverified titles; title_basis remains explicitly unverified and filename_title is preserved, without changing ranking, receipts, indexes or Raw
     - Source and KU discovery use shared contiguous match-centered excerpts within the existing 700-character cap, with zero-based end-exclusive body offsets; ranking and full reading locators remain unchanged, excerpts are not evidence and never rewrite or concatenate source text
     - source search recognizes explicit bibliography sections after source binding checks and prefers other matched passages within each source for ordinary queries; bibliography queries keep literal ranking, no passages are removed, and no model or index migration is introduced
     - trusted explicit knowledge none records source_only/not_required without semantic classification; skip defers; reindex preserves intent and prior executed knowledge, while explicit prepare/run can opt in
@@ -4673,8 +4951,22 @@ script_contracts:
     - 在调用方重复实现不一致的 dotenv 解析、变量展开或 URL 拼接
     verify:
     - python3 .scripts/test_env_config.py
+  pptx_intake:
+    preconditions:
+    - shared 生成纯文字原生页面上下文和模板库导航；Agent 持有页面判别与模板语义选择，API adapter 只在 API backend 调用文本模型；不使用面积或字数阈值代替语义判断
+    - 每页声明 native/visual、理由和主题导航；visual 绑定承载主要信息的图片或复杂图形对象；native 不伪装为视觉已检查；计划与原件/结构/原生文字哈希绑定
+    - 模板限少量代表页，须给出相对既有库的新增价值及合法 direct/adaptable profile；完成来源提交后通过原模板事务发布，失败记录警告并可复用合法候选重试
+    writes:
+    - temp 下源绑定计划与选择性识读回执；最终经既有摄入和模板库事务分别发布，原件不直接修改
+    forbidden:
+    - 逐页隐式上传、宿主看图回落、未完成视觉标记通过、伪造用户批准、以模板失败回滚有效来源
+    verify:
+    - python3 .scripts/test_pptx_intake.py
+    - python3 .scripts/test_pptx_document.py
+    - python3 .scripts/test_pptx_academic.py
   pptx_visual:
     preconditions:
+    - PPT摄入先由原语义后端按原生信息判别页面；只有图片或不可原生读取的图形承载主要信息才调用 content API，以主题、图意、用途及页码导航为目标
     - API-only 视觉 adapter，shared 负责本地结构、渲染、schema、源哈希与回执校验；主 Agent 只消费文字，不回落宿主看图或 DSH 控制循环
     - content/layout/form-check 三个模式独立；远程调用须绑定显式授权的来源和页范围；private 不经公共模板或视觉入口上传
     - 默认导出不触发三项辅助动作；形式检查和引用脱敏仍须用户指令，证据核查只处理具体疑问
@@ -4688,6 +4980,7 @@ script_contracts:
     - python3 .scripts/test_visual_qa.py
   slide_library:
     preconditions:
+    - PPT摄入机制可在用户摄入范围内由原语义后端择优选少量代表页，声明新增价值和 direct/adaptable profile；来源完成校验后受管收藏，失败不回滚来源
     - shared 只读源原生页与关系依赖；候选提取写 temp，正式收藏须有选页指令且来源已受管归档公共域 Raw
     - v2 组件通过 reuse.json 区分 direct（直接使用型）与 adaptable（套用填充型）；同源不同类型/槽位版本不误去重；v1/旧平铺组件为未分类，不能冒充已有填充槽位
     - v2 collect 可附 API layout 回执，绑定实际衍生 PPTX/逐页结构/图像；只作为设计分析，不替代用户最终检查或批准
@@ -4700,7 +4993,7 @@ script_contracts:
     - python3 .scripts/test_slide_reuse.py
   slide_reuse:
     preconditions:
-    - shared 确定性内核只消费 Agent 编写的用途/限制/槽位 profile 与已收藏来源，语义选择由当前 Agent 执行；视觉另调现有 API，内核不自动联网
+    - shared 确定性内核只消费原语义后端编写的用途/限制/槽位profile；普通入口使用已收藏来源，PPT摄入可显式使用已归档公共域Raw的temp候选并重验源哈希；视觉另调现有API，内核不自动联网
     - direct 保留原页内容；adaptable 将明确对象映射为文本/图片槽位并清理衍生页原演讲备注，来源组件及 Raw 不变；文字容量仅机械预算，不保证实际排版
     writes:
     - temp 下完整 v2 候选；用户授权范围内经 slide_library collect 原子收藏；fill/use 向新 temp 目录或受管工作区 drafts 下的新单页子目录生成独立实例/PPTX/预览与输入来源回执；项目输出限定单页
@@ -5007,6 +5300,8 @@ script_contracts:
     - python3 .scripts/test_open_source_release.py
   ingest_inbox:
     preconditions:
+    - shared external intake receipt failure rolls back only exclusively created PDF and bibliography copies; exact reused files and originals survive
+    - duplicate PDF cleanup with unarchived bibliography returns bibliographic_review_required and preserves inputs; only fully hash-verified archived local sidecars may pass cleanup, and those originals reuse persistent retention
     - shared 统一结果适配同时透传嵌套 agent_task 与合法顶层 agent-task-v1，首次 prepared 回执保留 inputs/outputs/protocol/commands/control，不为找回已生成任务要求再次 inspect
     - API agent_required 的单项与 batch reason 优先保留具体校验诊断；无诊断时仅说明等待宿主复核或修正，不从状态名推断自动恢复耗尽
     - inbox_plan 与执行扫描共用隐藏控制项/系统元数据过滤契约；这些条目不得进入分类、batch eligibility 或摄入队列
@@ -5190,6 +5485,7 @@ script_contracts:
   graph_metrics:
     preconditions:
     - graph.db 已存在；巩固阈值只用于产生候选，不代表自动写入授权
+    - shared 历史 unsplit_phrases 仅按需提供形态观察，不计质量缺陷或修复待办，不因长名称或缺包含边要求拆分；all 不扫描此项并明示可选入口，旧命令与结果字段保持兼容
     writes: []
     forbidden:
     - 根据 degree、来源页数或 Hub 成员数自动创建、更新或删除 Wiki/Graph 对象
@@ -5354,9 +5650,23 @@ script_contracts:
     - 未经确认写入指纹状态
     verify:
     - python3 .scripts/test_derivation_state.py
+  long_document_ingest:
+    preconditions:
+    - shared 处理源绑定章节计划、全覆盖窗口、证据校验与多页编译；语义执行显式区分 agent/api
+    - note validator 汇总可独立检查的字段、长度、逐字引文与 handle 错误；多余字段不得遮蔽可解析 evidence 的问题，错误类型不允许继续解析时仅停止依赖该类型的检查，验收门不放宽
+    - Agent 只返回 agent-task-v1；API adapter 有界调用、缓存复用，不隐式跨 backend
+    - API 每个 long-document 单元最多两次语义生成；首次 INGEST_GENERATION，内容复验失败后的第二次 ingest_long_document_repair 使用 SEMANTIC_RECOVERY，带原候选及 issues；专用配置失败不切换模型，client 失败不外层重试，耗尽状态跨 resume 保持
+    writes:
+    - temp/inbox-extract 下的计划、证据与页面候选；正式 Raw/Wiki/Graph 经原受管事务
+    forbidden:
+    - 按长度自动发布章节页或把暂存笔记作为事实源
+    - 跳过任何原文窗口、引用重编号、失败后重复已验证语义调用
+    verify:
+    - python3 .scripts/test_long_document_ingest.py
   long_document_plan:
     preconditions:
-    - raw 已归档且为 Markdown/TXT；仅用于评估颗粒度，不替代语义确认
+    - shared 主标题数量只触发结构发现；自动章节评审须达到现有 char_threshold 且有至少两个实质章节，短文保留完整上下文；既有 long_document 事务继续原控制路径，不重置预算
+    - 已归档或事务内暂存 Markdown/TXT；PDF 仅本地结构探测和忠实提取，不替代语义确认
     writes: []
     forbidden:
     - 修改 raw/wiki/graph.db
@@ -5447,6 +5757,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   graph_ingest:
     preconditions:
+    - shared 实时摄入不因端点名称长度、标点或“基于/表示”等触发词产生 descriptive_phrase 警告或猜测 proposition；命题由明确关系角色及同批该角色的端点声明确定，审计与 writer 同步传播。保留原文字、证据、别名、引用残片/重复/歧义检查；不要求全文逐句结构化，不新增模型调用。旧形态启发式仅服务历史指标兼容，不作为实时验收依据
     - shared writer 在同批关系中统一保留由命题角色确定的端点类型；同一命题再作为关联端点时不得降为 keyword 或进入 concept_map，关系输入顺序不改变其完整 title 与 proposition 身份
     - shared 命题向量相似度只提供导航关联，不证明同一性；非逐字相同命题不得因任何相似度分数替换原文。cosine ≥ 0.9 的异文候选可建置信性质为推断的关联边，逐字相同不建自环并交原 GraphDelta 精确复用；保留作者归属、推测语气、条件、否定与数量差异
     - shared 单次 add_knowledge_edges 对同一既有/已确认 concept surface 复用 ASCII 词边界 pattern，CJK 保留原文包含；缓存仅在本页 writer 内存生效，不改变候选快照、单字过滤、大小写/词边界或歧义排除，不跨文档缓存图或语义裁决
@@ -5480,7 +5791,7 @@ script_contracts:
     - knowledge-ir-v1 与绑定其 hash 的 graph-plan-v1 写入事务临时目录并在命令 JSON 返回摘要
     - 版本/补充材料/翻译等 Raw 结构边由 --raw-relationship-json 确定性编译进 IR/plan，并与 GraphDelta 共用外层 SQLite commit
     - 完整 proposition 节点，以及 proposition→包含→concept 的稀疏程序派生边；候选仅来自本页已确认概念和主图唯一精确 title/alias
-    - bare_abbreviation 检查 keyword concept 规范名称与自由边的真实语义端点；完整 proposition 正文、结构性派生边、确定性书目端点与 canonical page path subject 不触发重复或内部标识 warning
+    - bare_abbreviation 检查 keyword concept 规范名称与自由边的真实概念端点；审计复用 writer 的端点角色判定，完整 proposition/task 正文（包括会议决策与待办）、结构性派生边、确定性书目端点与 canonical page path subject 不触发重复或内部标识 warning
     forbidden:
     - 常规使用 init
     - 以 rebuild_triples 写当前关系
@@ -5690,6 +6001,7 @@ script_contracts:
   query_actions:
     preconditions:
     - shared query scope selects public or private across discovery, Wiki, Raw and companion reads; nested actions cannot change storage domain
+    - shared hybrid Wiki entries use a cited capsule or the existing section selector on the same scanned text; missing sections never produce a fabricated Navigation read action
     - private uses the same actions with private/graph.db, physical path checks and local-only embedding fallback; no public scans or provider calls
     - hybrid_recall 的 intent 必须是 fact/relation/explanation/exploration/lineage；结果只是候选，不形成 identity 或事实断言
     - hybrid_recall 在 academic/公共范围融合 Source/Statement/Question 与已有 Wiki/Graph 导航排名；其他域和 private 不读取 academic 来源或 KU。候选携带 kind 和受限 read_action/read_input，读取 KU 不计入 Raw citation。
@@ -5744,7 +6056,9 @@ script_contracts:
     - LLM infrastructure/output_transport 恢复只由 llm_structured client 处理；pipeline 收到失败结果后不得原样再次调用 provider step
     - validator、commit 前复验、resume 复验、graph 写后校验和 LINT 是独立正确性闸门，不计入 recovery budget
     - commit/resume 复验必须允许领域 spec 接收同轮非阻断 warning 并持久化质量状态，不得只判断阻断项后丢弃 warning
-    - spec.unified_semantic_worker=true 时，Wiki 或 semantic 硬错误必须清空同轮成对产物并回到同一 write_wiki provider，重新通过两套 validator；其他 pipeline 不改变既有恢复点
+    - API spec 可选 repair_wiki hook 复用原 wiki_revision 预算；repaired 后原 validator 复验并保留 slots，failed 或复验失败交接，not_applicable 才沿用原重写；Agent 不调用 hook
+    - 缺少协议段触发 wiki_revision 时必须将本次错误写入 wiki_errors，供原 provider 定向修订；不以空错误重复初次生成
+    - spec.unified_semantic_worker=true 时，除已验证的仅引用局部补丁外，Wiki 或 semantic 硬错误必须清空同轮成对产物并回到同一 write_wiki provider，重新通过两套 validator；其他 pipeline 不改变既有恢复点
     - spec 声明 post_commit_projection 时，必须在 validate_graph 通过后、finalize_tail 和 completed 之前执行；失败转 failed 并保存 resume_from=post_commit_projection，恢复时不重放 finalize/update_graph
     - graph 写入失败且领域 spec 不提供落位回滚时，必须保存 resume_from=graph_ready；修复外部依赖后从同一事务重试 graph，不重放 Raw/Wiki finalize
     writes:
@@ -5760,10 +6074,15 @@ script_contracts:
     - python3 .scripts/test_ingest_admin.py
   ingest_common:
     preconditions:
+    - shared 论文缩减上下文按有界证据段组保留公式、邻接定义和限制，子节可完整容纳时整体选择；总预算与原始行号不变，候选选择不构成语义完整性证明
+    - shared resume 对单文件和多文件原批次使用同一对账入口，保留首次文件结果快照并刷新当前事务状态；历史回执只供审计，不作为事实源
     - API 长论文证据包在既有总预算内优先保留正文明确概率、充分条件与局限语句的完整原始行，仍绑定原始行号；首段摘要能在单节预算内完整保留时不因平均分配而丢掉整行；匹配只是补读候选，不证明条件完整或语义蕴含，不扩大预算或增加模型调用
     - shared 耗时记录只追加当前事务 telemetry，不充当事实证据或恢复控制状态；子进程保留兼容的最近结果并追加逐次执行记录
     - 有界论文上下文在 section 部分命中或全部缺失时，以原文正文的分散窗口补足；在明确参考文献标题、带发表证据的连续编号参考条目或末尾非科研材料边界截断窗口，章节选段同样排除可识别参考文献；保留整行证据，尾部长行在总预算内时重新分配头尾份额，Raw handle、标题与省略标记均计入预算，不要求论文必须具有全部标准章节
     - 共享摄入器只接收事务内 staged Wiki/semantic、结构化 validator issues 与受限候选目录
+    - unsupported_responsibility 的唯一行定位复用 shared semantic triple parser；整行尖括号、列表包装不进入姓名，多个等价候选仍拒绝猜选
+    - missing_responsibility_name 表示客体称谓缺少原文逐字支持；标记为 object 且不可由仅改谓词的 specialist 修复，不生成自动替代名或消耗 subagent 预算，交由既有内容修订/Agent 核对原文
+    - 论文级被忽略的方向/标签关系只有在完整三元组唯一匹配时才能交 API 受限恢复；仅改谓词，允许值来自 validator 的概念关系集合，保持主体/客体及事实含义，无法支持合法关系则弃答；不自动删除关系或转换为命题
     - Agent backend 生成 agent-task-v1 并等待当前宿主提交；API backend 才调用 semantic patch Worker
     - 通用文档语义槽非空但未解析出任何三元组、三元组区存在非 pipe 三字段行或仍使用旧行政主题/行政关系 section 时，必须在 finalize 前作为结构硬错误拒绝
     - 事实与图校验通过后，finalize_tail 按各摄入器显式声明的 Raw 源实体与文本 companion 登记可重建指纹；指纹缓存失败只记质量告警，不回滚已验证的事实提交
@@ -5784,6 +6103,7 @@ script_contracts:
     - python3 .scripts/test_prompt_audit.py
   inbox_state:
     preconditions:
+    - output_payload permits trusted adapters to explicitly override or suppress default state/runtime refs; transactions stored outside inbox-state expose their actual plan artifact and executable resume command instead of fabricated state paths
     - status 必须属于已登记摄入状态；每次持久化的前向推进与 failed/agent_required 等非线性恢复都必须命中声明式转换图，pending transition 只记录原因且不能自行授权跳级
     - completed/duplicate_found 自动生成 verification-receipt-v1，绑定稳定事务字段、转换轨迹、validator 回执哈希与已声明最终产物哈希；只读复验对缺失或变化 fail closed
     - superseded 只用于关闭同源重复事务；旧事务必须仍未提交，新事务必须 completed/duplicate_found，且 source 与已有 source_hash 均一致，关闭动作仍经 transition 与原子 save 留审计轨迹；事务 ID 接受文档入口生成的 Unicode 字母数字、下划线及既有点号/连字符，拒绝路径分隔符
@@ -5820,8 +6140,12 @@ script_contracts:
     - ingest_proposition 仅作兼容 operation 保留 call_json Schema + fast 档；默认论文 3.6c 不再调用
     - ingest_bibliographic_review 使用 call_json Schema + fast 档，仅做候选裁决与版本含义识别；不得绕过调用方的候选边界
     - ingest_paper_workspace 使用 call_text + standard 档，一次传输 evidence-bound bibliography、Wiki 与 semantic slots；沿用 INGEST_GENERATION specialist profile，调用方仍须分别解析和校验三段产物
+    - 论文 API 初次成功返回但 workspace 协议解析失败且书目已锁定时，可在原 wiki_revision 预算内调用一次 ingest_content_repair；先持久化预算、保留初次产物并绑定源/草稿哈希，返回后程序回填锁定书目并重新解析，漂移/失败/耗尽不接受。未锁书目、网络/权限失败不进入该内容恢复
     - ingest_relation_review 与 ingest_semantic_fill 使用 call_json Schema + fast 档；前者只选 relation candidate ID，后者只按 issue ID 返回局部 patch，均不得自由改写程序定位或提交状态
-    - ingest_semantic_recovery 使用 standard 档和可选 SEMANTIC_RECOVERY_* specialist profile；三项配置不完整时回退主模型，不得因目录推荐值缺失或模型上下线阻断摄入
+    - ingest_wiki_repair 优先完整 WIKI_RECOVERY_* 专用配置；未配置时沿用原 INGEST_GENERATION/primary，调用方关闭隐式模型回退；不增加wiki_revision预算
+    - ingest_content_repair 为 API 论文/普通文档已有 Wiki 或语义内容修订，使用 standard 档及 SEMANTIC_RECOVERY→INGEST_GENERATION→primary 配置选择；须已有修订计数和实际校验错误，retries=0 且 allow_profile_fallback=false，不增加阶段预算或启用全量复核，Agent 不进入该操作
+    - 论文和文档 Wiki 修复 adapter 写回前核对调用期间来源 SHA-256 与 Wiki 内容未变；专用路由即使模型名与 primary 相同也尊重完整独立配置
+    - ingest_semantic_recovery 使用 standard 档和可选 SEMANTIC_RECOVERY_* specialist profile；三项配置不完整时沿用主模型；完整专用配置调用失败后不隐式退回主模型。call_json 的 allow_profile_fallback=false 限定本次只用首个已解析 profile，其他调用方保持原行为
     - 空输出且 finish_reason=length 时下一尝试必须切到已配置的 fast/low effort 并扩大输出预算；不得以省略字段冒充禁用默认思考
     - chat endpoint 由 LLM_API_BASE 与 LLM_API_PATH（默认 /v1/chat/completions）规范化拼接；兼容服务可显式覆盖 path
     writes:
@@ -5894,6 +6218,7 @@ script_contracts:
     - shared 允许格式合法的 original 等于 replacement；应用时先验证全部原串在来源中精确存在，再跳过无变化项，原提议保留追踪；实际替换仍校验重复/重叠并非级联应用
     - shared record contract 的身份留空说明只给 attendees/reports/tasks；relations 端点必填，重要但未关联身份的关系保留在 Wiki 原称呼和 Raw 引用中，不生成空端点或猜人物
     - shared Wiki 叙事连接前述质疑/方案与后续澄清、更正或撤回，保留未决分歧及来源归属；较晚的自述和助手解释不自动视为已证实结论
+    - shared decisions/tasks/person_updates 同样保留后续澄清、撤回及适用条件；摘要与后段不一致时明确未决，不把早期任务继续作为无条件执行项。学生投影仅限已有目录，关系需直接依据而非共现
     - shared 记录含义区分身份匹配与角色证据；attendees/reports 需要明确出席/发言/汇报依据，任务中的协作对象不自动成为责任人，会议助手推测保留归属与不确定性
     - v3 tasks 在动作有依据但责任人未明确时允许 assignee 和 assignee_label 同为空；明确称呼但身份未关联仍保留 label。既有字段与协议版本保持，不增加语义判断型 validator
     - shared 有证据目录时检查 topics/reports/relations 中的新增大写缩写须在该项引用的原文中出现；无依据的全称扩写保留原称呼，不因双语格式偏好补造名称，常规摄入与受管修复共用此门
@@ -5911,13 +6236,18 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_paper:
     preconditions:
+    - shared unsubmitted local bibliography conflicts can resume in the same transaction after source text, PDF and staged bundle hashes are reverified; corrected sidecars clear only obsolete local conflict flags and reuse verified extraction, frozen external receipts and workspace states are not reopened by this path
+    - shared bibliographic-candidate-provider-v10 排除 References and Notes、作者形态数字引文及明确他引 arXiv，逐条留存 excluded_identifiers 原因与来源行；保留本篇 header、无原文反证元数据及原 workspace 版本刷新规则；外部回执恢复遥测分开本次 execution 与原始 source_fetch
+    - shared 新 PDF 事务先经 external_bibliography 免费正式发表查询；成功使用独立可离线复验回执并跳过两种 backend 的书目生成，未决才进入下述本地证据协议；旧在途事务和无已归档回执的 re-ingest 不隐式联网
+    - shared Markdown 年份候选仅取前部发表语境、有效 arXiv 月份，拒绝正文任意四位数字；API 作者目录按完全相同姓名分组展示全部候选 ID 与证据，不据此断言人物同一或放宽 proposed 冲突门
+    - api-only 校验历史绑定实际 workspace 与 Wiki/slots 内容哈希，首产物校验与各阶段首次校验分列；旧历史不追填未知哈希，不把修复后通过冒充初稿通过
     - shared Wiki/semantic 提示及 Agent 结构化任务保留原文的作者归属、论断强度和适用条件；来源明确的猜想或预期可按原角色进入完整命题，不以副词扩增谓词，不把摄入模型的不确定或无依据关系包装成来源猜想。该语义指导不新增 schema、模型调用或程序科学判真门
     - candidate-id 作者裁决先校验 ID 互斥与证据；不同 ID 的完全相同姓名若一条接受一条拒绝，只在编译后的 rejected 姓名列表排除已接受值并记录候选 ID 审计，完整 decision/catalog/双方 evidence 保留；不归一近似姓名、不处理 proposed 模式、不放宽直接 review 的矛盾校验
     - API 书目规则区分空 DOI/arXiv 可选标识与必要字段未决；可选缺失保留 ambiguous 不猜补，真实候选冲突仍由原 schema/证据门阻断，不根据全局状态自动放行
     - shared combined workspace 的 bibliographic_review_required 交接可在原事务重读已修正书目段，经原输入哈希、schema、证据和下游 validator 后恢复；prepared/agent_required 书目草稿仍受原门控，completed/failed 不得重新开启，不新增模型调用
     - agent-only 阅读契约一次批量读取已明确需要的章节并携带原始来源行号；shared reader 识别二至六级标题与短父节的层级/罗马数字字母子节，主文优先于同名显式附录；总阅读预算与证据缺口补读责任不变，展开子节和非连续片段不得重编号；短文全文也使用原始行号
     - shared 版式增强复用现有 ACM 模板族定位器，支持首页 self-citation 独立/同行 marker 与解析标签；仅在 PDF 前部布局块与 Markdown 的 DOI、完整有序作者名单一致时补充尚缺姓名候选；缺少 PDF 证据、OCR 分歧、References/正文之后、截断作者或题名冲突均不补充，不建立逐刊状态机或放宽自动锁定与原 validator
-    - API candidate catalog 的有损字段裁剪禁止触及 id/value/evidence/year-kind 与排除机构证据；只省略已在协议统一声明的重复 provider/authority 元数据，完整目录仍保存在事务，Agent 取证与 schema 不变；效率以离线跨文档输入长度和语义字段保真对照验收，不把字符数冒充模型 token/账单或已验证的线上错误率
+    - API candidate catalog 的有损字段裁剪禁止触及 id/value/evidence/year-kind 与排除机构证据；仅省略已在协议统一声明的重复 provider/authority 元数据；API 展示按完全相同作者值分组，组内保留全部 ID/evidence，完整目录仍保存在事务，Agent 取证与 schema 不变；效率以离线跨文档输入长度和语义字段保真对照验收，不把字符数冒充模型 token/账单或已验证的线上错误率
     - API candidate-id-v2 及旧 Agent 兼容协议共享字段级 schema 诊断；authors 候选经原文核验可完整覆盖时优先有序候选 ID，proposed 项严格使用 value/evidence，错误键不得静默转换；既有 evidence-bibliography-v1 Agent 契约保持独立
     - CLI --raw 是 shared 兼容入口，以参数列表转交 re_ingest.py --raw 并原样继承 backend、输出与退出码；复用其版本保护、统一 workspace 和 clean commit，不再创建独立 from_raw 编译任务；--force 仅在直接调用 re_ingest 时显式给出
     - inbox 学术 PDF；paper.md 生成后，Agent/API 共用 paper-agent-workspace-v1 外层产物协议，一次产出书目裁决、Wiki 与语义槽；Agent 书目段使用 evidence-bibliography-v1 直接提取并逐字段绑定 source/locator/quote，API adapter 保留 candidate-id-v2，二者编译为同一规范化 review 后再共享 validator、IR、Graph preflight 与提交
@@ -5934,7 +6264,7 @@ script_contracts:
     - Wiki 物化可显式复用已定义脚注，把正文中完全相同的裸 Raw 行 locator 或非链接的单中括号 Raw 行 locator 转成对应脚注；单中括号形式保留引用式链接、图片、转义和注释，不猜地址或片段；API 还可对本次已提供的精确 Raw handle 白名单确定性分配新脚注并在既有 Sources 节补定义；只改变引用表示，不推断地址、不改事实文本，不处理代码/链接/来源定义，重复 Sources 或脚注冲突不自动转换，随后仍通过原 locator 与结构 validator
     - batch 顶层 workflow_status、terminal、committed 与 counts 只从 items 派生；prepared/partial 等旧顶层状态只保留为兼容 status，不得覆盖 item 四态或产生独立统计口径
     - 确定性 PDF metadata、首页规则与 MinerU 解析器仍在后台注册带 provenance 的 candidate provider；API 由 candidate-id-v2 锁定，Agent 不接收候选目录且以原始证据直接提取，程序仅把候选用于 fast path、去重和字段冲突诊断
-    - bibliographic-candidate-provider-v8 保留 PDF 前两页 layout block 的 self DOI、完整 venue 和 candidate_only 作者，affiliation 单列排除，日期候选绑定 published/published_online/accepted/received/revised/preprint kind；ACM self-citation 作者补充须通过上述双来源一致性检查，冲突仍交同一 candidate-id-v2 workspace 裁决
+    - bibliographic-candidate-provider-v9 保留 PDF 前两页 layout block 的 self DOI、完整 venue 和 candidate_only 作者，affiliation 单列排除，日期候选绑定 published/published_online/accepted/received/revised/preprint kind；ACM self-citation 作者补充须通过上述双来源一致性检查，冲突仍交同一 candidate-id-v2 workspace 裁决
     - 旧锁定 Raw 进入 re-ingest 时，title/authors/year/venue 等事实标量在裁决前保持不变，但 front_matter_blocks、layout_candidates 与 first_page_evidence 必须从原 PDF 按当前 provider 重算；候选门裁决只写事务与 Wiki/Graph，不回写 Raw
     - awaiting_output workspace 的 candidate provider 版本落后时，--resume 仅在 paper.md 哈希未变且 workspace 输出尚不存在时刷新同一事务；已有未提交输出必须经显式 --agent-refresh 归档旧输出及哈希后刷新，不得静默覆盖或新建事务
     - --agent-refresh 可显式修复旧事务在受管书目回填并重算 manifest 后未同步的 workspace bundle 基线；仅当磁盘 bundle 与顶层 state 哈希相等、source.yaml.bibliographic 与已锁定书目完全相等、workspace 仍为 awaiting_output 时更新基线并留存审计；其他任何漂移继续阻断
@@ -6093,11 +6423,12 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_document:
     preconditions:
-    - shared 旧 Excel companion 修复复用原生提取与 manifest finalizer；仅补缺失 companion/sidecar，原件 SHA-256 保持不变；Agent 持有脚注修订控制循环，不调用 API
+    - shared 职责检查与 issue locator 复用语义三元组 parser，整行尖括号不属于实体名；先区分“负责人称谓未在原文逐字出现”与称谓存在但缺职责句式，同一行明确的“某人是某事项的责任人”可作为职责证据，否定/未定/疑问不据此接受。语义执行者须保持具体事项范围，不把局部责任扩大为本文件或整个机构负责人
+    - shared 旧 Excel/Word companion 修复复用现有原生提取与 manifest finalizer；仅接受 xls/xlsx/doc/docx 且只补缺失 companion/sidecar，提交时用同一格式提取器重新核验，原件 SHA-256 保持不变；Agent 持有脚注修订控制循环，不调用 API
     - companion 修复只允许 Wiki 新增精确脚注与 updated 日期，不改变 sources、正文事实或 Graph；源、旧 Wiki、暂存产物与日志均以哈希守卫，校验失败回滚新增 Raw、Wiki 和日志，重复 resume 不重复提交
     - shared PPTX 原生解析按 presentation 顺序输出逐页 Markdown、对象坐标、列表层级、原生表格空值与合并范围及独立备注；不以 pandoc plain 作为摄入正文
     - PPTX 复用 visual_qa 本地渲染与独立 pptx_visual API 内容识读；显式授权后调用，缺权限/配置/失败返回纯文字 pptx_api_action；保持原 semantic_backend，不将图像交给主 Agent 或切换 DSH；旧 pptx_review 回执仅保留历史兼容
-    - PPTX 内容识读覆盖全部页；关键未决项阻断，非关键限制持久化；API 逐页回执绑定源、原生文字、结构与渲染哈希；形式检查与内容识读是不同模式
+    - PPTX 每页原生提取并按主要信息判别；native 页保存无需视觉的理由，visual 页须有源绑定API回执；关键导航未决项阻断，非关键限制持久化；旧全页API回执保持历史兼容；模板筛选随计划一次完成，成功摄入后独立受管收藏
     - PPTX 来源日期仅取原始文件名或 inbox 来源目录中的明确日期；封面报告日期、引用文献日期及宣传活动日期留在正文，不由通用正文日期正则冒充源文件日期
     - PPTX 原件、逐页 companion 与同源 source.json 同事务落位；finalize 重校源/渲染/原生文本/复核与 companion 哈希及 sidecar，任何缺失或变更均拒绝；页图/PDF 仅暂存，不进入 Raw manifest
     - shared 表格清单原则只维护于 INGEST「表格型清单与台账」；Agent 路由与任务输入 locator 指向该段，API wiki/slots adapter 加载同一段，不新增分类调用或控制循环
@@ -6122,6 +6453,8 @@ script_contracts:
     - 所有通用文档 Wiki frontmatter 都由程序确定性写入 confidence，不依赖 Worker 自行提供
     - API 模式下不超过 30000 字符的通用文档由单次受限 Worker 同时产出 wiki 与候选语义槽；更长文档使用缩减上下文的 wiki→slots 两阶段路径
     - 合并 Worker 的 wiki 与语义槽仍分别经过 3.4/3.6 校验；语义槽硬错误最多基于已校验 wiki 定向重写 1 次
+    - API普通短单页文档的精确脚注错误复用wiki_patch，在原一次wiki_revision预算内局部修补；补丁成功复验后保持正文与slots，不再整页重写；不适用才走旧重写，实际补丁失败或复验失败直接交接
+    - 文档引用补丁绑定来源与Wiki当前字节；未知Raw地址、来源/草稿漂移、非引用目标或事实变化均拒绝，不放宽validator
     - 'shared 来源日期解析消费原始 source 路径：依次采用文件名、正文明确标注的整理/编制/成文/签发/发布/更新日期、inbox 内由近到远的子文件夹名；支持点/横线/下划线分隔、紧凑数字和中文完整日期，并校验日历合法性。不读取 inbox 外祖先目录或文件时间戳；页面 ID 使用同一日期结果。嵌套 inbox 来源生成 <原文件名>.source.json 保存原始相对路径与文件夹名，随 manifest 受管落位 Raw，不能只依赖 temp 事务保存来源证据。conference-summary 的正文会议日期仅作事件事实；无来源日期写 date: null + date_status: unknown，created/updated 记录摄入日，ID 使用 undated 前缀'
     - 通用文档 Agent/API 语义协议只含 WIKI 与 SLOTS；来源日期和 ID 由程序裁决，不接受 LLM META 改写
     - shared 通用文档去重只接受重新核验 Raw 原件的 SHA-256 完全相同；标题或同名只作候选，指纹索引未命中时定向检查同名 Raw，包含独立子目录中的历史原件
@@ -6295,9 +6628,10 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   dsh_semantic_recovery_agent:
     preconditions:
-    - 仅处理确定性清理和单次 semantic-patch Worker 后仍未解决的局部阻断语义问题
+    - 仅处理确定性清理和单次 semantic-patch Worker 后仍未解决的局部阻断语义问题；普通文档负责人证据错误仅在语义槽中按原对象唯一定位时允许修谓词，重复/未知目标继续交接
     - 输入使用事务 ID、结构化 issue、staged artifact locator/hash 与硬预算；不得复制完整事务或扩大到书目、Graph identity、Hub lifecycle
     - 专用 ToolRegistry 只注册 staged semantic/wiki/source 的有界只读工具；相同 tool+arguments 在同一任务中最多执行一次
+    - 已在单次摘录预算内的上下文完整返回；长文本按原字面或英文/数字子词定位，明确返回无匹配，不以中文行与英文原文不相等推断证据不存在
     - 输出必须是 semantic-patch-v1 typed Proposal；程序负责应用到 staged semantic artifact、全量复验、resume 与 commit
     writes:
     - 不直接写任何文件；仅返回 AgentResult，并由调用方把脱敏 trace/预算/issue delta 持久化到 inbox transaction state
@@ -6305,6 +6639,7 @@ script_contracts:
     - 读写 raw/、wiki/、graph.db 或调用任何提交工具
     - 处理 API timeout/429/403、空输出、schema 错误、代码异常等非语义决策失败
     - 超过 max_turns/max_tool_calls/max_elapsed_sec，重复调用同一 tool+arguments，或在证据不足时猜测修补
+    - 专用模型失败后隐式回退低成本主模型；真实请求数和 token 必须累计所有失败/恢复 history，下一请求 timeout 不得超过剩余时间预算
     verify:
     - python3 dsh/test_semantic_recovery_agent.py
     - python3 .scripts/test_ingest_pipeline.py
@@ -6315,7 +6650,7 @@ script_contracts:
     - 仅处理已通过会议去重的 .txt；输入为只读原始纪要、确定性人物候选、程序生成的 meeting ID/目标来源路径与本轮 validator 错误
     - api-only 修订复用最近一次同源完整输出与汇总诊断；仅有可定位 IR 记录错误时返回 meeting-ir-row-repair-v1 补丁，由共享内核按 hash 和范围合并；其余情况仍返回完整协议，均消费原有修订预算
     - API result 保留原始 response_text、diagnostic 及局部修复时的 assembled_output/repair_request；失败/超时/预算耗尽保留完整基线；ingest_meeting 在现有私有 attempt 文件中分开留存实际补丁与合并协议，续跑以绑定 hash 的合并协议为基线，普通 trace 不包含响应正文
-    - API 模式运行 operation=ingest_meeting_compile，优先复用 INGEST_GENERATION profile；模型目录只作审计，运行时选择仍服从 llm_structured/.env
+    - API 初次运行 operation=ingest_meeting_compile 使用 INGEST_GENERATION；有原产物和校验错误的有界修订运行 ingest_meeting_repair，优先 SEMANTIC_RECOVERY，未配置时继承生成模型；修订只调用选中 profile，不在失败后隐藏回退，原两次编译/修订预算不增加
     - 初次编译只允许一个 Meeting Compiler execution，同时返回 meeting-compiler-v3 的转写纠错决策、实体决策、精简 Wiki 草稿和 evidence-bound typed MEETING_IR/person_updates；不得拆给多个语义 Worker，provider transport/fallback 仍由 llm_structured 受控处理
     - transcript replacements 必须逐条精确命中原文且不可级联；调用方确定性应用后生成 staged corrected.txt，并从同一 MEETING_IR 投影 Wiki 导航和语义槽后校验一致性与 Raw locator 覆盖
     - INGEST_BACKEND=agent 时只生成带 write_to 的同一协议 handoff；resume 必须先校验 agent 输出再恢复原事务
@@ -6333,8 +6668,9 @@ script_contracts:
   dsh_semantic_recovery_eval:
     preconditions:
     - 每类 specialist 使用独立版本化试卷；case 明确期望 resolve/abstain、允许修补与预算
-    - 候选模型必须存在于 llm-models.yaml；试卷通过只更新评测报告，不自动修改 preferred/fallback 或生产 .env
+    - 候选模型必须存在于 llm-models.yaml；试卷通过只更新评测报告，不自动修改 preferred/fallback 或生产 .env；专项 profile 可声明独立 text_model，未声明时继承全局 text_model，不因一个修复器的选型改变其他子Agent
     - 模型晋级同时满足质量、安全、预算、延迟和成本门槛；不得只按最终文本相似度排名
+    - 候选运行限定该模型，不以主模型回退结果替代；逐题记录实际请求、全部尝试 token、精确题目通过与正确自主解决数；正确 abstain 与成功修复分别统计，不把提案得分当生产提交验收
     writes:
     - temp/agent-evals/*.json（显式 --run 的脱敏逐题结果与汇总，不是事实源）
     forbidden:

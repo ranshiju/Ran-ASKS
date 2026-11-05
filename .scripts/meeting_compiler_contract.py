@@ -29,12 +29,29 @@ MEETING_IR_RECORD_FIELDS = {
     "person_updates": ("person", "person_label", "kind", "text", "evidence_ids"),
 }
 UNRESOLVED_PERSON_FIELDS = {"attendees": "person", "reports": "person", "tasks": "assignee"}
+CURRENT_ACTION_EVIDENCE = (
+    "先通读同一事项的后续澄清、否决、替代和条件，再决定当前记录；"
+    "决策、待办与学生下一步使用同一讨论结束状态。被撤回的早期行动只留在正文背景。"
+    "保留比较对象、实验或模拟范围、前置条件及待确认事项；引用支持当前状态的证据，"
+    "不能只引开头自动摘要或早期建议。摘要与后段不一致且无法确定时明确标记待确认，"
+    "不把原行动无条件保留；较晚出现的助手评论不自动优先于直接陈述。"
+    "交付前逐条对照 tasks.text 与 decisions.text：正文或决策中的取消、替代、范围限制"
+    "必须落实到该任务的 text 和 evidence_ids，不能仅在正文另作说明。"
+)
 ROLE_EVIDENCE = {
     "attendees": "依据明确出席名单、实际发言或互动记录。人物身份匹配、被提及、被布置会后任务均不单独证明参会；点名无回应也不证明缺席。",
     "reports": "依据该人的实际汇报，区分汇报者与被谈论的人；自动会议助手是记录载体，助手的解释或推测保持来源归属。",
+    "decisions": CURRENT_ACTION_EVIDENCE,
     "tasks": "区分指派者、执行者与协作对象，结合上下文保留行动及各方关系。每条记录只对应一位执行者，assignee 与 assignee_label 指同一人，已匹配姓名复用候选目录的对应标签。原文明示多人共同执行时逐人记录，复用共同动作与证据，在 text 中保留协作关系；仅被提及的协作对象不自动成为执行者。动作明确但执行者未明确时 assignee、assignee_label 同为空；执行者称呼明确但全局身份未匹配时仅 assignee 为空并保留原称呼。",
     "relations": "扩展关系只连接证据明确的概念或已关联的人物，两端均为非空的确定端点。涉及身份未关联的人物时，重要关系保留在 Wiki 正文中，使用原称呼、来源归属及 Raw 引用；该关系不进入 relations，不填空端点或猜测人物身份。",
 }
+ROLE_EVIDENCE["tasks"] += CURRENT_ACTION_EVIDENCE
+ROLE_EVIDENCE["person_updates"] = (
+    "仅投影学生目录内已存在的 student_key，人物图候选不等于学生档案。"
+    "目录外人物的事实保留在正文/汇报/待办，不生成其 person_updates；目录无匹配时返回空数组。"
+    + CURRENT_ACTION_EVIDENCE
+)
+ROLE_EVIDENCE["relations"] += "同场讨论、相邻段落或共享术语不足以证明议题间关系；每条关系须有直接支持两端联系的证据。"
 WIKI_CONTENT_CONTRACT = (
     "Navigation 概述检索主题，Content 保留研究问题、关键观察、解释、方法限制和未决矛盾，来源限制简明表述。"
     "参会者、议题、汇报、决策、待办和学生指导的完整清单、人物链接及记录条数由程序从 MEETING_IR 生成。"

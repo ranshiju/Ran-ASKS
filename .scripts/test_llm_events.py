@@ -282,6 +282,93 @@ def test_http_classifier_retries_only_transient_failures():
     assert module._classify_http_error(ValueError("local bug"))[0] is False
 
 
+@_isolated_events
+def test_specialist_can_disable_profile_fallback_without_changing_default():
+    from unittest.mock import patch
+    config = {"INGEST_BACKEND": "api", "LLM_API_BASE": "https://example.invalid",
+              "LLM_API_KEY": "key", "LLM_MODEL": "primary",
+              "SEMANTIC_RECOVERY_API_BASE": "https://example.invalid",
+              "SEMANTIC_RECOVERY_API_KEY": "key", "SEMANTIC_RECOVERY_MODEL": "candidate"}
+    requested = []
+
+    class Response:
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+                               "usage": {"total_tokens": 3}}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def urlopen(request, **_kwargs):
+        model = json.loads(request.data)["model"]
+        requested.append(model)
+        if model == "candidate":
+            raise module.urllib.error.HTTPError(request.full_url, 403, "Forbidden", None, None)
+        return Response()
+
+    with patch.object(module, "load_env", return_value=config), \
+            patch.object(module.urllib.request, "urlopen", side_effect=urlopen):
+        result = module.call_json("probe", lambda value: value == {}, retries=0,
+                                  operation="ingest_semantic_recovery", allow_profile_fallback=False)
+        assert not result["ok"] and requested == ["candidate"]
+        assert not result["fallback_used"] and len(result["history"]) == 1
+        requested.clear()
+        result = module.call_json("probe", lambda value: value == {}, retries=0,
+                                  operation="ingest_semantic_recovery")
+        assert result["ok"] and requested == ["candidate", "primary"]
+        assert result["fallback_used"] and len(result["history"]) == 2
+        requested.clear()
+        for operation in ("ingest_meeting_repair", "ingest_content_repair"):
+            requested.clear()
+            result = module.call_text("probe", retries=0, operation=operation,
+                                      allow_profile_fallback=False)
+            assert not result["ok"] and requested == ["candidate"]
+            assert not result["fallback_used"] and len(result["history"]) == 1
+        requested.clear()
+        result = module.call_text("probe", retries=0, operation="ingest_meeting_repair")
+        assert result["ok"] and requested == ["candidate", "primary"]
+        assert result["fallback_used"] and len(result["history"]) == 2
+
+
+
+def test_wiki_recovery_profile_isolated_and_optional():
+    config = {"LLM_API_BASE": "https://primary.invalid", "LLM_API_KEY": "key", "LLM_MODEL": "primary"}
+    for prefix, model in (("INGEST_GENERATION", "flash"), ("WIKI_RECOVERY", "ev")):
+        config.update({f"{prefix}_API_BASE": "https://specialist.invalid",
+                       f"{prefix}_API_KEY": "key", f"{prefix}_MODEL": model})
+    assert module.api_profiles(config, "ingest_wiki_repair")[0]["model"] == "ev"
+    assert module.api_profiles(config, "ingest_wiki_write")[0]["model"] == "flash"
+    assert module.api_profiles(config, "ingest_paper_workspace")[0]["model"] == "flash"
+    assert module.api_profiles(config, "ingest_semantic_recovery")[0]["model"] == "primary"
+    config["WIKI_RECOVERY_MODEL"] = "primary"
+    assert module.api_profiles(config, "ingest_wiki_repair")[0]["name"] == "wiki_recovery"
+    config.pop("WIKI_RECOVERY_API_KEY")
+    assert module.api_profiles(config, "ingest_wiki_repair")[0]["model"] == "flash"
+
+
+
+def test_long_document_recovery_reuses_specialist_and_keeps_generation_separate():
+    config = {"LLM_API_BASE": "https://primary.invalid", "LLM_API_KEY": "key", "LLM_MODEL": "main"}
+    for prefix, model in (("INGEST_GENERATION", "flash"), ("SEMANTIC_RECOVERY", "ev")):
+        config.update({f"{prefix}_API_BASE": "https://specialist.invalid", f"{prefix}_API_KEY": "key", f"{prefix}_MODEL": model})
+    assert module.api_profiles(config, "ingest_long_document")[0]["model"] == "flash"
+    assert module.api_profiles(config, "ingest_long_document_repair")[0]["model"] == "ev"
+    assert module.api_profiles(config, "ingest_meeting_compile")[0]["model"] == "flash"
+    assert module.api_profiles(config, "ingest_meeting_repair")[0]["model"] == "ev"
+    assert module.api_profiles(config, "ingest_content_repair")[0]["model"] == "ev"
+    config['SEMANTIC_RECOVERY_MODEL'] = 'main'
+    assert module.api_profiles(config, "ingest_long_document_repair")[0]["name"] == 'semantic_recovery'
+    assert module.api_profiles(config, "ingest_meeting_repair")[0]["name"] == 'semantic_recovery'
+    assert module.api_profiles(config, "ingest_content_repair")[0]["name"] == 'semantic_recovery'
+    config.pop('SEMANTIC_RECOVERY_API_KEY')
+    assert module.api_profiles(config, "ingest_long_document_repair")[0]["model"] == "flash"
+    assert module.api_profiles(config, "ingest_meeting_repair")[0]["model"] == "flash"
+    assert module.api_profiles(config, "ingest_content_repair")[0]["model"] == "flash"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -640,6 +640,10 @@ def _navigation_recall_data(query, intent, domain, limit, include_deprecated):
     for path in ranked:
         capsule = capsules[path]
         item = wiki_by_path.get(path, {})
+        if not capsule.get("semantic_address"):
+            text = wiki_pages.get(path, {}).get("_scan_text")
+            if text is not None:
+                capsule = {**capsule, **_wiki_read_entry(path, text, query, item.get("title", ""))}
         candidates.append({
             "path": path,
             "title": item.get("title") or path.rsplit("/", 1)[-1],
@@ -696,7 +700,8 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
         item = {**candidate, "kind": "wiki", "id": candidate["path"], "navigation_score": candidate["score"]}
         address = item.get("semantic_address", "")
         page, _, section = address.partition("#")
-        item.update(read_action="read_section", read_input={"page": page or item["path"], "section": section or "navigation"})
+        if page and section:
+            item.update(read_action="read_section", read_input={"page": page, "section": section})
         groups["navigation"].append(item)
 
     if domain in {"", "academic"}:

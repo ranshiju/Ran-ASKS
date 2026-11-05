@@ -56,28 +56,28 @@ path remains traceable.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.23.0
+## What changes in v0.24.0
 
-Meeting intake can collect independent validation errors and repair only the
-failed records within its existing revision budget. The shared merge keeps
-unaffected content and rechecks the complete result; interrupted repairs retain
-a complete draft for recovery. A managed name-confirmation entry records the
-user's evidence before updating related meeting navigation. Student-file
-eligibility is separate from person identity: an unavailable downstream file does
-not erase the meeting facts or authorize a new student record.
+Paper intake accepts one correctly matched RIS or BibTeX record as its
+bibliographic source; it does not require both formats or an additional online
+cross-check. Without an accepted local record, bounded free metadata lookup can
+use Crossref, Semantic Scholar and arXiv publication links, preferring verified
+formal publication information and recording the year. A managed update also
+supports bibliography companions supplied with an already archived identical PDF.
 
-Search now supplies readable Wiki section entries and keeps titles across query
-rounds. Failed reads do not count as read pages, and citations can identify a
-subspan of one already read source range. Explicitly requested KU sections
-compete within the existing packet budget. New host-Agent writing profiles cover
-[academic abstracts](operations/research/academic-abstract.md) and
-[whole-manuscript improvement](operations/research/manuscript-improvement.md).
+API ingestion uses the normal generation model first and deterministic checks
+next. Configured recovery workers handle eligible validation failures within the
+existing revision budgets; they do not review every document in full. Missing
+configuration or unresolved errors remain visible. Agent mode keeps its own
+control loop. Long documents can be read through complete, source-addressed
+windows before deciding whether separate chapter pages help retrieval.
 
-The Gallery links completed works to usage notes and current system documentation;
-historical articles retain their original version context. Targeted regressions
-support these mechanisms, but whole-ingestion speedup and unchanged semantic
-quality across a large corpus are not established. See the
-[Changelog](CHANGELOG.md) for the release scope.
+PPTX intake uses native content where sufficient and requests visual reading for
+pages that need it. Long node labels alone no longer imply a quality defect or a
+required split; source, citation, relationship-coverage and extraction checks
+remain. Gallery keeps its 14 approved works and links to current usage guidance.
+These changes do not establish a measured corpus-wide quality or cost gain. See
+the [Changelog](CHANGELOG.md) for the release scope.
 
 ## Source-first ingestion and Knowledge Units (preview)
 

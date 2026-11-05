@@ -188,6 +188,8 @@ def build_verification_receipt(state: dict, repo: Path | None = None) -> dict:
         key: _artifact_digest(repo, key, str(state.get(key) or ""))
         for key in artifact_keys if state.get(key)
     }
+    for index, page in enumerate(state.get("long_document_pages", [])):
+        artifacts[f"chapter_{index + 1}"] = _artifact_digest(repo, "wiki_path", page["wiki_path"])
     receipt_values = {
         key: value for key, value in state.items()
         if "receipt" in key and key != "verification_receipt" and value
@@ -409,8 +411,15 @@ def output_payload(state: dict, payload: dict) -> dict:
     if transaction_id:
         result["transaction_id"] = transaction_id
         result["transaction_ids"] = [transaction_id]
-        result["state_ref"] = f"temp/inbox-state/{transaction_id}.json"
-        result["runtime_status_ref"] = f"temp/inbox-state/{transaction_id}.status.md"
+        for key, default in (
+            ("state_ref", f"temp/inbox-state/{transaction_id}.json"),
+            ("runtime_status_ref", f"temp/inbox-state/{transaction_id}.status.md"),
+        ):
+            reference = result.get(key, state.get(key, default))
+            if reference is None:
+                result.pop(key, None)
+            else:
+                result[key] = reference
     next_actions = result.get("next_actions")
     if not next_actions and result.get("next_action"):
         next_actions = {"resume": result["next_action"]}

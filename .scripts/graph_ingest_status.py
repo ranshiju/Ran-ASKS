@@ -40,7 +40,7 @@ def collect_wiki_pages():
                 continue
             s = str(p.relative_to(gl.REPO))[:-3].replace("\\", "/")
             pages.append(s)
-    return sorted(pages)
+    return sorted(set(pages))
 
 
 def ingested_pages(conn):
@@ -49,6 +49,8 @@ def ingested_pages(conn):
 
 
 def build_report(pages, ingested):
+    pages = sorted(set(pages))
+    ingested = set(pages) & set(ingested)
     pending = [p for p in pages if p not in ingested]
     by_sub = {}
     for p in pending:
@@ -85,7 +87,7 @@ def main():
     if args.write:
         PENDING_PATH.write_text(report, encoding="utf-8")
         print(f"已写入 {PENDING_PATH}")
-        n = len(pages) - len(ingested)
+        n = len(set(pages) - ingested)
         print(f"  待补: {n}/{len(pages)}")
     else:
         print(report)

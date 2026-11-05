@@ -37,6 +37,7 @@ import student_guidance_projection as sgp
 from meeting_compiler_repair import inspect_output as inspect_meeting_output
 import wiki_locator as wl
 from meeting_compiler_contract import (
+    CURRENT_ACTION_EVIDENCE,
     MEETING_IR_DELIMITER,
     PREPROCESS_DELIMITER,
     PROTOCOL_VERSION as MEETING_COMPILER_PROTOCOL,
@@ -271,6 +272,10 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
 1. 判断必要的转写/人物纠错；
 2. 编译会议叙事性 wiki 草稿；
 3. 抽取带证据绑定的结构化 MEETING_IR。
+
+[编译顺序与任务终态]
+开头自动摘要和待办清单只是候选。先通读逐时讨论并按同一事项核对最终状态，再填写正文和结构化记录，最后交叉检查 decisions 与 tasks；tasks 不是开头待办清单的转抄。
+{CURRENT_ACTION_EVIDENCE}
 
 [会议纪要原文，只读事实源]
 {source_text}

@@ -44,8 +44,23 @@ def test_long_unstructured_document_does_not_auto_split():
     assert plan["recommended_structure"] == "single-source-page"
 
 
+
+def test_short_dense_headings_are_discovered_without_multistage_review():
+    text = '\n'.join(f'## 第{i}章\n' + '完整事实与适用条件。' * 45 for i in range(4))
+    plan = long_document_plan.plan_text(text)
+    assert len(text) < long_document_plan.DEFAULT_CHAR_THRESHOLD
+    assert plan['candidate_trigger'] and plan['heading_count'] == 4
+    assert not plan['semantic_review_required']
+    assert plan['recommended_structure'] == 'single-source-page'
+    assert not any(unit['page_candidate'] for unit in plan['units'])
+    # The existing configurable size threshold, not another hidden limit, controls review.
+    assert long_document_plan.plan_text(text, char_threshold=len(text))['semantic_review_required']
+    assert not long_document_plan.plan_text(text, char_threshold=len(text)+1)['semantic_review_required']
+
+
 if __name__ == "__main__":
     test_short_document_stays_single_page()
+    test_short_dense_headings_are_discovered_without_multistage_review()
     test_long_structured_document_requires_semantic_review()
     test_long_unstructured_document_does_not_auto_split()
     print("long document plan regression: PASS")

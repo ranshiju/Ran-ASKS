@@ -39,6 +39,15 @@ python3 .scripts/presentation_runtime.py smoke
 - 正文和标题优先 native text；适合用文字、几何图形和连接线准确表达的图，优先使用 PPTX 原生可编辑对象，包括普通框图、流程图和简洁量子线路。复杂插画、纹理或科研原图等适合整体图片的内容可独立嵌入；表格和有明确源数据的受支持图表逐步原生化。API 主创与可编辑对象可以组合：API 生成构图和图元，程序转换为原生对象，导出后回读确认可编辑性。不从图像估读并重造数据，不默认整页图片化。
 - 现有 `slide-library` 及图片/PDF 重建保持独立、不迁移、不重构。旧页整页拷贝与 IR 重建不是同一种能力；任意模板、现有 deck 无损编辑、动画、SmartArt、复杂公式和第二 renderer 不在首版承诺内。
 
+### 既有模板适配与用户修订复盘
+
+适用于行政汇报、学院建设等参考已有 PPT 制作的任务，也适用于其他模板复用。宿主在制作与用户修订学习中落实以下规则；这些规则不增加默认形式检查、远程 API、逐步审批或用户确认环节，也不扩展现有 renderer 的能力边界。
+
+- **清理模板残留对象**：替换标题后，检查原标题占位符与新标题是否同时保留。原位替换或删除已无用途的空文字框、占位符，保持一个实际标题入口；有填充、边框或版式作用的图形分别判断，不能因无文字一并删除。
+- **文字以所属容器为边界**：卡片、栏框、色带中的文字框按该容器的内容区设置，统一左右内边距与中心线，明确对齐方式。页面以内不等于容器以内；收窄文字框后同步处理换行与高度，不用缩字号掩盖容器不匹配。
+- **先对应页面，再比较修订**：版本可能删页、重排，按标题、正文与原生对象匹配页面后比较。结合用户说明判断修改意图，用户明确指出的误操作不提炼为缺陷修复、偏好或制作规则。记录有意义的文字、几何、字号、对象增删；图片关系编号、空文本 run 与段落结束样式的等效转换、保存软件补写默认值等，不直接视为用户修改或偏好。无法机械确认的可见差别再按当前任务边界定向查看。
+- **区分通用修正与本次取舍**：将重复展开、篇幅与主次问题用于改进内容组织，按本轮用途和已知时长安排主稿与专题展开。删页只证明本次成品的范围，不自动撤销用户此前明确要求的主题，也不形成以后固定删除或固定页数的规则。
+
 ## 单篇论文制作方式选择
 
 三种制作方式是 `presentation` 功能中的协作选项，沿用当前工作上下文。用户希望围绕一篇指定论文制作 PPT 时，在内容规划开始前向用户说明以下三种方式，并请用户选择。已有明确选择时简短确认并沿用；接续同一报告时读取既有选择。
@@ -359,6 +368,8 @@ python3 .scripts/presentation_delivery.py commit --store <store> --result <resul
 
 三个视觉模式共用 `.scripts/pptx_visual.py`：`content` 是摄入内容识读，`layout` 是设计与组件用途分析，`form-check` 是用户按需形式检查。主 Agent 不打开页图；纯文字语义 backend 保持不变。API 失败返回文字状态，不能回落宿主看图。缓存按原件、页图、结构、模式、模型与协议绑定；回执记录真实执行身份，不能认证人类批准或研究结论。
 
+摄入按 INGEST「演示文稿（PPTX）」先做原生页面判别，仅图片或不可原生读取图形承载主要信息的页调用content API，结果以主题、图意和原页导航为目标。原生内容充分的页面记录无需视觉的理由，不逐页上传。页面判别和0至5个模板候选选择由同一Agent/API文字任务完成；原生结构和已有库帮助选择，不额外自动调用layout API。
+
 ```bash
 # 只读结构提取，不联网；保存逐页字体/字号/布局/利用率/表格/图表/框图/示意图参数。
 python3 .scripts/pptx_structure.py inbox/example.pptx --output temp/pptx-example/structure.json
@@ -368,7 +379,7 @@ INGEST_BACKEND=agent python3 .scripts/wg.py ingest inbox/example.pptx --subproje
 python3 .scripts/pptx_visual.py inbox/example.pptx --mode layout --pages 1,3 --directory temp/pptx-example/analysis --allow-remote
 # 查询模板不调用视觉 API；兼容旧库说明与新受管组件。
 python3 .scripts/slide_library.py search '方法 对比'
-# 提取候选，不等于收藏；用户选定后 collect，仅接受已归档公共域 Raw 来源。
+# 单独选页可直接提取/收藏；摄入机制也可按源绑定计划择优收藏，仅接受已归档公共域Raw来源。
 python3 .scripts/slide_library.py extract --source academic/raw/reference-documents/example.pptx --pages 1,3 --name 方法对比 --output temp/pptx-example/candidate --layout-report temp/pptx-example/analysis/layout-analysis.json
 python3 .scripts/slide_library.py collect --prepared temp/pptx-example/candidate --name 方法对比 --instruction '用户实际选页指令'
 ```
@@ -376,6 +387,8 @@ python3 .scripts/slide_library.py collect --prepared temp/pptx-example/candidate
 结构参数和视觉分析一起用于设计：精确值读取原生对象；视觉解释负责阅读顺序、层级与可读性。覆盖率是裁到画布后的对象包围盒并集估算，单独列出疑似背景排除项及含背景上界，不表示越高越好。声明/主题解析字体与实际渲染字体分开；图表缓存数据不重算，图像不可冒充可编辑表格或精确数据。
 
 受管组件保存 component.pptx、component.md、structure.json、原版式分析回执和缩略图。复制保留所选原生页及其关系依赖；涉及未选页的跨页依赖拒绝提取，防止悄悄带入其他页。原始内容不自动通用化/脱敏；模板库复制与现有三个 IR 版式是独立能力，不承诺任意旧页自动套用。`reindex` 可恢复受管索引；正式收藏失败不撤销报告摄入。
+
+摄入收藏按用途区分direct/adaptable，并使用明确的槽位profile。源绑定计划解释新增价值，shared核验profile、来源、选页及依赖，复用现有事务发布；精确重复只保留一份，近似版式由语义执行者判断。没有实际执行的视觉分析保留为not_executed；模板收藏不等于最终形式检查或用户批准。
 
 ### 直接使用型与套用填充型
 

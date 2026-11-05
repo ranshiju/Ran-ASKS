@@ -128,12 +128,54 @@ def run_ingest_check(project_root: Path, wiki_path: Path) -> None:
         raise ValueError(f"ingest_check failed; temporary extraction is retained: {detail}")
 
 
+def _completed_bundle_receipt(project_root: Path, paper_id: str, manifest_path: Path,
+                              raw_dir: Path, wiki_path: Path) -> Path | None:
+    """Recover the durable file-commit receipt after a caller checkpoint interruption."""
+    from glob import escape
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not (manifest.get("document_bundle") or manifest.get("wiki_artifacts")):
+        return None
+    for receipt_path in (project_root / "temp/inbox-receipts").glob(escape(paper_id) + "-*.json"):
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if (receipt.get("status") != "committed" or
+                    receipt.get("manifest_sha256") != sha256_file(manifest_path) or
+                    receipt.get("raw_dir") != str(raw_dir.relative_to(project_root)) or
+                    receipt.get("wiki_path") != str(wiki_path.relative_to(project_root))):
+                continue
+            _raw_entries, wiki_name = load_manifest(manifest_path)
+            expected = [(wiki_path, receipt["wiki_file"]),
+                        (manifest_file(manifest_path.parent, wiki_name, "wiki_file"), receipt["wiki_file"])]
+            for entry in receipt["raw_files"]:
+                path = raw_dir / entry["path"]
+                require_within(path.resolve(), raw_dir, "receipt raw file")
+                expected.append((path, entry))
+                expected.append((manifest_file(manifest_path.parent, entry["path"], "raw receipt", nested=True), entry))
+            for entry in receipt.get("wiki_artifacts", []):
+                path = project_root / entry["path"]
+                if path.parent.resolve() != wiki_path.parent:
+                    raise ValueError("receipt chapter must be beside overview")
+                expected.append((path, entry))
+                declared = next(item for item in manifest["wiki_artifacts"] if item["destination"] == entry["path"])
+                expected.append((manifest_file(manifest_path.parent, declared["path"], "wiki receipt", nested=True), entry))
+            for path, entry in expected:
+                verify_real_file(path)
+                verify_manifest_artifact(path, entry)
+            return receipt_path
+        except (OSError, ValueError, KeyError, TypeError, StopIteration):
+            continue
+    return None
+
+
 def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
              extract_dir: Path, manifest_path: Path, cleanup: bool,
              allow_existing_raw_dir: bool = False, *,
              expected_wiki_sha256: str | None = None,
              raw_guards: tuple[tuple[Path, str], ...] = (),
-             update_log: tuple[Path, str] | None = None) -> Path:
+             update_log: tuple[Path, str] | None = None,
+             provenance_update: dict | None = None, commit_hook=None) -> Path:
+    if commit_hook is not None and cleanup:
+        raise ValueError("commit hook requires retained staging for recovery")
     if expected_wiki_sha256 is not None and wiki_path.is_symlink():
         raise ValueError("existing wiki must not be a symlink")
     if any(original.is_symlink() for original, _digest in raw_guards):
@@ -156,6 +198,18 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
         raise ValueError(f"wiki path must be below a wiki/ directory: {wiki_path}")
     if raw_dir.is_symlink():
         raise ValueError(f"destination raw directory must not be a symlink: {raw_dir}")
+    if expected_wiki_sha256 is None and wiki_path.is_file():
+        completed = _completed_bundle_receipt(project_root, paper_id, manifest_path, raw_dir, wiki_path)
+        if completed is not None:
+            if cleanup:
+                receipt = json.loads(completed.read_text(encoding="utf-8"))
+                run_ingest_check(project_root, wiki_path)
+                for entry in receipt.get("wiki_artifacts", []):
+                    run_ingest_check(project_root, project_root / entry["path"])
+                shutil.rmtree(extract_dir)
+                receipt["cleanup"] = "completed"
+                completed.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return completed
     if raw_dir.exists() and not raw_dir.is_dir():
         raise ValueError(f"destination raw path must be a directory: {raw_dir}")
     if raw_dir.exists() and not allow_existing_raw_dir:
@@ -167,6 +221,20 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
         raise ValueError(f"destination wiki file already exists: {wiki_path}")
 
     original_wiki = wiki_path.read_bytes() if expected_wiki_sha256 is not None else None
+    original_provenance = None
+    replaced_provenance = False
+    new_provenance_hash = None
+    if provenance_update is not None:
+        if expected_wiki_sha256 is None or not allow_existing_raw_dir:
+            raise ValueError("provenance replacement requires a guarded existing-Wiki update")
+        current = raw_dir / "source.yaml"
+        if current.is_symlink() or not current.is_file() or sha256_file(current) != provenance_update.get("sha256"):
+            raise ValueError("existing provenance hash changed")
+        archive = PurePosixPath(str(provenance_update.get("archive_path") or ""))
+        if (len(archive.parts) != 3 or archive.parts[0] != "bibliography-history"
+                or archive.parts[-1] != "source.yaml" or ".." in archive.parts or "\\" in str(archive)):
+            raise ValueError("provenance history path must be bibliography-history/<id>/source.yaml")
+        original_provenance = current.read_bytes()
     log_path = None
     original_log = None
     if update_log is not None:
@@ -180,6 +248,10 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
     def check_update_guards():
         if expected_wiki_sha256 is not None and sha256_file(wiki_path) != expected_wiki_sha256:
             raise ValueError("existing wiki hash changed")
+        if provenance_update is not None:
+            expected = new_provenance_hash if replaced_provenance else provenance_update["sha256"]
+            if (raw_dir / "source.yaml").is_symlink() or sha256_file(raw_dir / "source.yaml") != expected:
+                raise ValueError("provenance hash changed during update")
         for original, expected_hash in raw_guards:
             require_within(original.resolve(), raw_dir, "existing raw guard")
             if original.is_symlink() or not original.is_file() or sha256_file(original) != expected_hash:
@@ -192,6 +264,14 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
     check_update_guards()
 
     raw_entries, wiki_name = load_manifest(manifest_path)
+    if provenance_update is not None:
+        entries = {entry["path"]: entry for entry in raw_entries}
+        archived = entries.get(provenance_update["archive_path"], {})
+        current = entries.get("source.yaml", {})
+        if (archived.get("sha256") != provenance_update["sha256"] or not current.get("sha256")
+                or len(entries) != len(raw_entries)):
+            raise ValueError("provenance replacement requires an exact old snapshot and new source.yaml in manifest")
+        new_provenance_hash = current["sha256"]
     is_v2 = all(entry.get("bytes") is not None for entry in raw_entries)
     raw_sources = []
     for entry in raw_entries:
@@ -202,12 +282,42 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
         )
         verify_manifest_artifact(source, entry)
         raw_sources.append((entry, source))
+    if provenance_update is not None:
+        # Land the immutable old snapshot before replacing the current pointer.
+        raw_sources.sort(key=lambda item: item[0]["path"] == "source.yaml")
     wiki_source = manifest_file(extract_dir, wiki_name, "wiki_file")
     if wiki_source in {source for _entry, source in raw_sources}:
         raise ValueError("manifest wiki_file must not also be a raw_files entry")
+    extra_pages = []
+    declared_pages = json.loads(manifest_path.read_text(encoding="utf-8")).get("wiki_artifacts", [])
+    if not isinstance(declared_pages, list):
+        raise ValueError("manifest.wiki_artifacts must be a list")
+    if declared_pages and expected_wiki_sha256 is not None:
+        raise ValueError("multi-page artifacts are create-only")
+    destinations = {wiki_path}
+    for entry in declared_pages:
+        if not isinstance(entry, dict) or set(entry) != {"path", "destination", "sha256", "bytes"}:
+            raise ValueError("wiki artifact requires path/destination/sha256/bytes")
+        source = manifest_file(extract_dir, entry["path"], "wiki_artifacts", nested=True)
+        if type(entry["bytes"]) is not int or not isinstance(entry["sha256"], str):
+            raise ValueError("invalid wiki artifact integrity fields")
+        verify_manifest_artifact(source, entry)
+        destination_name = PurePosixPath(entry["destination"])
+        if destination_name.is_absolute() or ".." in destination_name.parts or "\\" in entry["destination"]:
+            raise ValueError("unsafe wiki artifact destination")
+        destination = project_root.joinpath(*destination_name.parts)
+        if destination.parent.resolve() != wiki_path.parent or destination.suffix != ".md":
+            raise ValueError("chapter pages must be siblings of the overview")
+        if destination in destinations or destination.exists() or destination.is_symlink():
+            raise ValueError(f"destination wiki file already exists or is duplicated: {destination}")
+        if source in {raw_source for _entry, raw_source in raw_sources} or source == wiki_source:
+            raise ValueError("wiki artifact must not reuse a raw or overview artifact")
+        destinations.add(destination)
+        extra_pages.append((entry, source, destination))
     if raw_dir.exists():
         collisions = [entry["path"] for entry, _source in raw_sources
-                      if raw_dir.joinpath(*PurePosixPath(entry["path"]).parts).exists()]
+                      if raw_dir.joinpath(*PurePosixPath(entry["path"]).parts).exists()
+                      and not (provenance_update is not None and entry["path"] == "source.yaml")]
         if collisions:
             raise ValueError(f"destination raw files already exist: {', '.join(collisions)}")
 
@@ -222,6 +332,9 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
     committed_raw = False
     committed_wiki = False
     committed_log = False
+    raw_existed = raw_dir.exists()
+    staged_extra = []
+    landed_wikis = []
     landed_paths: list[Path] = []
     try:
         staged_raw.mkdir()
@@ -235,13 +348,25 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
             receipt["role"] = entry["role"]
             raw_receipt.append(receipt)
         wiki_receipt = staged_copy(wiki_source, staged_wiki)
+        extra_receipts = []
+        for entry, source, destination in extra_pages:
+            staged = destination.with_name(f".{destination.name}.inbox-finalize-{token}")
+            staged_extra.append(staged)
+            record = staged_copy(source, staged, entry["destination"])
+            verify_manifest_artifact(staged, entry)
+            extra_receipts.append(record)
         check_update_guards()
         if raw_dir.exists():
             for entry, _source in raw_sources:
                 relative = Path(*PurePosixPath(entry["path"]).parts)
                 destination = raw_dir / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                if expected_wiki_sha256 is not None:
+                if provenance_update is not None and relative.as_posix() == "source.yaml":
+                    if sha256_file(destination) != provenance_update["sha256"]:
+                        raise ValueError("existing provenance changed before replacement")
+                    os.replace(staged_raw / relative, destination)
+                    replaced_provenance = True
+                elif expected_wiki_sha256 is not None:
                     os.link(staged_raw / relative, destination)
                     landed_paths.append(destination)
                     (staged_raw / relative).unlink()
@@ -253,8 +378,17 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
             os.replace(staged_raw, raw_dir)
         committed_raw = True
         check_update_guards()
-        os.replace(staged_wiki, wiki_path)
+        if extra_pages:
+            # link fails on a concurrent collision; never overwrite another transaction's page.
+            os.link(staged_wiki, wiki_path)
+            staged_wiki.unlink()
+        else:
+            os.replace(staged_wiki, wiki_path)
         committed_wiki = True
+        for staged, (_entry, _source, destination) in zip(staged_extra, extra_pages):
+            os.link(staged, destination)
+            landed_wikis.append(destination)
+            staged.unlink()
         if expected_wiki_sha256 is not None:
             run_ingest_check(project_root, wiki_path)
             for original, expected_hash in raw_guards:
@@ -270,17 +404,24 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
             "paper_id": paper_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "manifest": str(manifest_path.relative_to(project_root)),
+            "manifest_sha256": sha256_file(manifest_path),
             "raw_dir": str(raw_dir.relative_to(project_root)),
             "wiki_path": str(wiki_path.relative_to(project_root)),
             "raw_files": raw_receipt,
             "wiki_file": wiki_receipt,
+            "wiki_artifacts": extra_receipts,
             "existing_raw_guards": [{"path": str(original.relative_to(project_root)), "sha256": digest}
                                     for original, digest in raw_guards],
             "replaced_wiki_sha256": expected_wiki_sha256,
+            "provenance_update": provenance_update,
         }
         receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if commit_hook is not None:
+            commit_hook()
     except Exception:
         receipt_path.unlink(missing_ok=True)
+        for destination in reversed(landed_wikis):
+            destination.unlink(missing_ok=True)
         if committed_wiki and wiki_path.exists():
             if original_wiki is None:
                 wiki_path.unlink()
@@ -291,8 +432,10 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
                 log_path.unlink(missing_ok=True)
             else:
                 log_path.write_bytes(original_log)
+        if replaced_provenance:
+            (raw_dir / "source.yaml").write_bytes(original_provenance)
         if raw_dir.exists() and (committed_raw or landed_paths):
-            if allow_existing_raw_dir:
+            if allow_existing_raw_dir and raw_existed:
                 for landed in reversed(landed_paths):
                     if landed.exists():
                         landed.unlink()
@@ -308,9 +451,13 @@ def finalize(project_root: Path, paper_id: str, raw_dir: Path, wiki_path: Path,
             shutil.rmtree(staged_raw)
         if staged_wiki.exists():
             staged_wiki.unlink()
+        for staged in staged_extra:
+            staged.unlink(missing_ok=True)
 
     if cleanup:
         run_ingest_check(project_root, wiki_path)
+        for _entry, _source, destination in extra_pages:
+            run_ingest_check(project_root, destination)
         shutil.rmtree(extract_dir)
         receipt["cleanup"] = "completed"
         receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
