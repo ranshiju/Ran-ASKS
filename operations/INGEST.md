@@ -920,7 +920,9 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 
 **普通文档 API Wiki 引用恢复（2026-11-04）**：普通短单页文档的脚注错误在原一次 `wiki_revision` 内先尝试局部补丁。`wiki_patch.py` 与论文共享纯目标定位和 `paper-wiki-patch-v1` 校验；文档只开放脚注定义，提供完整有界来源和精确 Raw handle，不改正文或语义槽。源/Wiki 漂移、越界地址、模型弃答或原 validator 复验失败均拒绝候选；已写入候选但复验失败时还原草稿，转入原交接，不追加全文重写。不适用的结构、正文、长文或会议错误继续既有流程。Agent backend 保持原 task/validator，不调用此 API hook。
 
-**Wiki 专用模型路由**：`ingest_wiki_repair` 优先完整 `WIKI_RECOVERY_API_BASE/API_KEY/MODEL`；缺配置时沿用 `INGEST_GENERATION`/主模型，完整专用配置失败不隐式回退。2026-11-04 存量来源故障注入的论文/文档各一例，FlashX 与 EV 均通过；EV 在这两例耗时更高，因此暂不启用 WIKI_RECOVERY=EV，引用修复继续 FlashX，SEMANTIC_RECOVERY 的 EV 限定试用保持。该结果不证明科学内容正确、自然失败恢复率或端到端净收益。
+**API 模型选择**：用户指定摄入 LLM（`LLM_MODEL`，可用 `INGEST_GENERATION_*` 覆盖）与兜底子 agent LLM（`SEMANTIC_RECOVERY_*`），并提供各自 API 地址和 key。具体型号与供应商由用户选择；命题抽取默认继承摄入模型，独立命题模型和 Wiki 引用专用模型属于可选进阶覆盖。FlashX/EV 仅记录维护者个人试用配置，不是系统默认要求。兜底只处理现有恢复边界内的校验失败，仍受原预算和提交校验约束。
+
+**Wiki 专用模型路由**：`ingest_wiki_repair` 优先完整 `WIKI_RECOVERY_API_BASE/API_KEY/MODEL`；缺配置时沿用 `INGEST_GENERATION`/主模型，完整专用配置失败不隐式回退。维护者个人在2026-11-04的两例故障注入中选择引用修复沿用摄入模型；该试验不规定其他用户的模型选择，也不证明自然失败恢复率或端到端净收益。
 
 **Typed RecoveryPolicy**：恢复动作按 `infrastructure`、`output_transport`、`wiki_revision`、`semantic_revision`、`deterministic_repair`、`subagent` 独立计数，限额表示首轮之后允许的恢复次数。`llm_structured` 只负责前两类；pipeline 不会因 API 失败再原样调用 write step，DSH 也不重跑整个摄入子进程。validator、commit 前复验、resume 复验、写图后校验和 LINT 仍完整执行，不计入恢复预算。旧事务的 `wiki_retry/slots_retry` 仅一次性迁移为阶段恢复次数，不能用来推算模型调用数。
 
@@ -928,7 +930,7 @@ python3 .scripts/re_ingest.py --manifest            # 全量（忽略版本）
 
 **分阶段文档 API 恢复（2026-11-04）**：每个长文/章节处理单元保持最多两次语义生成，首次用 `INGEST_GENERATION`；候选校验失败后第二次 `ingest_long_document_repair` 复用 `SEMANTIC_RECOVERY` 模型配置，传递原失败候选和完整 issues，专用配置失败不隐式切回主模型。缺配置时沿用生成模型。client 报告传输/配置失败后外层不重跑该单元，失败状态跨 resume 保留。证据校验汇总可独立检查的字段、长度、逐字引文和缺失引用行，额外字段不得遮蔽引文错误；原逐字证据门不放宽。缓存的已验证单元不重做，预算耗尽仍保留同一暂存任务交接。当前小样本仅证实首个失败单元可恢复，未证明全文免宿主。
 
-**API 专项修复与候选评测（2026-11-04）**：语义恢复器复用 `SEMANTIC_RECOVERY_*` 专用配置；未完整配置时沿用主模型，完整专用配置失败后结束本次专项恢复，不隐式退回主模型重复调用。修复器累计每次响应 history 中的全部请求与 token，发起下一请求前检查请求次数和时间余额，timeout 不超过剩余时间；token 在响应后结算，不能据此承诺单请求绝不超额。短上下文在摘录预算内完整交付，长文本支持英文/数字子词定位，未匹配明确报告。受管提交仍由原 validator 决定；主 Agent 交接与有限预算保留，尚未扩展为任意 Wiki/书目修复。候选评测分别记录正确修复、正确 abstain、未解决项和全部成本；合成试卷的字面答案得分不代替事实核验或生产提交验收。EV 权限恢复后经小样本对照与隔离的原validator回放，已按用户授权作为 SEMANTIC_RECOVERY 限定试用；常规生成保持FlashX。普通文档负责人证据错误仅在对象唯一定位时开放谓词替换，按角色证据问题交接并保持主体/客体不变；不预填替代谓词，无替代证据则弃答。论文级旧方向/标签关系仅在完整三元组唯一匹配时开放谓词修复，允许值来自原 validator；主体/客体不变，不自动删除或改成命题，无语义等价的合法关系则弃答。
+**API 专项修复与候选评测（2026-11-04）**：语义恢复器复用 `SEMANTIC_RECOVERY_*` 专用配置；未完整配置时沿用主模型，完整专用配置失败后结束本次专项恢复，不隐式退回主模型重复调用。修复器累计每次响应 history 中的全部请求与 token，发起下一请求前检查请求次数和时间余额，timeout 不超过剩余时间；token 在响应后结算，不能据此承诺单请求绝不超额。短上下文在摘录预算内完整交付，长文本支持英文/数字子词定位，未匹配明确报告。受管提交仍由原 validator 决定；主 Agent 交接与有限预算保留，尚未扩展为任意 Wiki/书目修复。候选评测分别记录正确修复、正确 abstain、未解决项和全部成本；合成试卷的字面答案得分不代替事实核验或生产提交验收。维护者个人试用采用 FlashX 生成、EV 恢复；其他用户通过上述配置自主指定两类模型。普通文档负责人证据错误仅在对象唯一定位时开放谓词替换，按角色证据问题交接并保持主体/客体不变；不预填替代谓词，无替代证据则弃答。论文级旧方向/标签关系仅在完整三元组唯一匹配时开放谓词修复，允许值来自原 validator；主体/客体不变，不自动删除或改成命题，无语义等价的合法关系则弃答。
 
 **低频运行状态**：每次事务状态持久化时覆盖写 `temp/inbox-state/<txn>.status.md`，内容固定为 transaction、signal、stage、updated_at、最近事件、建议检查秒数及详细 state/log locator，保持在 1 KB 内；它是 `temp/` 运行提示，不是事实源。`running` 默认 `next_check_after_seconds=60`，主 Agent 采用工具支持的长等待，仅在 yield 后且达到该间隔时读取，不连续短轮询或读取完整日志；`attention`/进程非零退出时立即读取一次，语义接管先取得原事务的结构化 task 及 issues/commands，其他故障按 locator 定向查看必要的 state 或日志尾部；`done` 不再轮询。API 兼容 `agent_required` 只表示交接宿主，不从状态名推断重试次数或预算耗尽；具体校验错误优先进入摘要。MinerU 等子流程的终止失败随事务错误进入该快照，内部自动恢复成功的瞬时错误不升级为 attention，避免无行动价值的噪声。
 

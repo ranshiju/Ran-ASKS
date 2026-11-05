@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前 main 版本: v0.24.0
+> 当前 main 版本: v0.24.1
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -52,15 +52,17 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
 
-## v0.24.0 的主要改进
+## v0.24.1 的主要改进
 
 论文摄入可采用一份正确匹配 PDF 的 RIS 或 BibTeX 作为书目信息，不要求同时提供两种
 格式，也不追加在线交叉核对。没有可接受的本地记录时，可在预算内查询 Crossref、
 Semantic Scholar 和 arXiv 的发表线索，优先采用核实后的正式发表信息，日期记录到
 年份。已归档的相同 PDF 后续补交书目文件，也可通过受管入口更新。
 
-API 摄入先由正常生成模型处理，再进行程序校验；符合恢复条件的失败由已配置的
-API 恢复模型在原修订预算内处理，不对每份文档进行全文复核。配置缺失或未解决的
+API 摄入只需选择两个模型角色：摄入 LLM 和兜底子 agent LLM。具体型号与供应商由
+用户指定；FlashX、EV 是维护者的个人配置示例，不是系统要求。摄入 LLM 先生成，
+再进行程序校验；符合恢复条件的失败由兜底模型在原修订预算内处理，不逐篇全文复核。
+配置缺失或未解决的
 错误明确保留，Agent 模式保持独立控制循环。长文先按完整、可定位来源的窗口阅读，
 再判断是否有必要建立章节页，以实际检索价值决定颗粒度。
 
@@ -545,9 +547,19 @@ Agent 路径不隐式回落到 API。
 ## 使用真实材料
 
 只有所选工作流需要模型或远程提取后端时，才把 `.env.example` 复制为 `.env`。
-摄入编排由独立的
-`INGEST_BACKEND` 选择；API 摄入还可以通过 `INGEST_GENERATION_*` 和
-`INGEST_PROPOSITION_*` 分别设置生成模型与命题抽取模型，未设置时复用主 LLM。
+摄入编排由独立的 `INGEST_BACKEND` 选择。API 摄入的文本模型只需指定两个角色，
+并提供相应服务地址与 API key：
+
+| 角色 | 配置 | 用途 |
+| --- | --- | --- |
+| 摄入 LLM | `LLM_MODEL`，可用 `INGEST_GENERATION_*` 单独覆盖 | 正常内容生成与抽取 |
+| 兜底子 agent LLM | `SEMANTIC_RECOVERY_MODEL` 及对应的 API 地址、key | 原恢复预算内符合条件的校验失败 |
+
+示例让生成与命题抽取继承所选摄入模型，无须再选命题模型。`INGEST_PROPOSITION_*`
+和 `WIKI_RECOVERY_*` 是进阶覆盖项；仅修 Wiki 引用的流程未单独配置时仍使用摄入模型。
+两个角色可以使用同一或不同供应商。可从[模型中立示例](examples/providers/openai-compatible.env.example)
+开始；FlashX、EV 只是个人配置示例，不是必需型号。Embedding、视觉模型和 PDF
+解析器仍按具体工作流独立配置。
 可选漫画生成使用 `COMIC_IMAGE_*`、已登记图片模型，并要求每次真实调用显式传入
 `--allow-remote`；详见 `operations/COMIC_GENERATION.md`。
 随后阅读 `AGENTS.md`：

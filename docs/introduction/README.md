@@ -392,3 +392,13 @@ same update; frozen paper artifacts and historical Gallery works are unchanged.
 长文完整分窗摄入、PPTX 按需视觉识读，以及原预算内由校验失败触发的 API 恢复。
 一份匹配书目即可，优先正式发表信息并记录年份；长句观察可选，证据检查保留。
 Markdown 与 PDF 追加页采用同一补充；冻结论文产物与历史 Gallery 成品保持原状。
+
+The 2026-11-05 `v0.24.1` patch clarifies model choice: users select an ingestion
+LLM and a recovery subagent LLM. FlashX/EV identify a personal setup, not required
+models. Generation and proposition extraction inherit the chosen ingestion LLM
+in the examples; separate stage overrides remain optional. The last PDF page
+is corrected from the same Markdown; its preceding 33 pages are retained.
+
+2026年11月5日的 `v0.24.1` 修正模型选择说明：用户指定摄入 LLM 与兜底子 agent LLM，
+FlashX/EV 仅是个人配置，不构成强制要求。示例中的生成与命题抽取继承所选摄入模型，
+阶段专用覆盖仍可选。PDF 最后一页按同一 Markdown 更正，前33页保持。

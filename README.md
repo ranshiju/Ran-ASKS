@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Driven Scientific Knowledge System
-> Current main version: v0.24.0
+> Current main version: v0.24.1
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -57,7 +57,7 @@ path remains traceable.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.24.0
+## What changes in v0.24.1
 
 Paper intake accepts one correctly matched RIS or BibTeX record as its
 bibliographic source; it does not require both formats or an additional online
@@ -66,8 +66,10 @@ use Crossref, Semantic Scholar and arXiv publication links, preferring verified
 formal publication information and recording the year. A managed update also
 supports bibliography companions supplied with an already archived identical PDF.
 
-API ingestion uses the normal generation model first and deterministic checks
-next. Configured recovery workers handle eligible validation failures within the
+API ingestion lets you choose an ingestion LLM and a recovery subagent LLM.
+No specific model or provider is required: FlashX and EV are the maintainer's
+personal choices, not system requirements. The ingestion LLM generates content
+first, followed by deterministic checks. Recovery workers handle eligible failures within the
 existing revision budgets; they do not review every document in full. Missing
 configuration or unresolved errors remain visible. Agent mode keeps its own
 control loop. Long documents can be read through complete, source-addressed
@@ -720,10 +722,22 @@ identities and requires archived source evidence for explicit identity repairs.
 
 Copy `.env.example` to `.env` only when a selected workflow needs a model or
 remote extraction backend. Ingestion
-orchestration is selected independently with `INGEST_BACKEND`; API ingestion can
-also assign separate generation and proposition models through
-`INGEST_GENERATION_*` and `INGEST_PROPOSITION_*`, while unset values reuse the
-main LLM settings. Optional comic generation uses `COMIC_IMAGE_*`, a registered
+orchestration is selected independently with `INGEST_BACKEND`. For API ingestion,
+choose two model roles and provide the corresponding API endpoint and key:
+
+| Role | Configuration | Purpose |
+| --- | --- | --- |
+| Ingestion LLM | `LLM_MODEL`, optionally overridden by `INGEST_GENERATION_*` | Normal content generation and extraction |
+| Recovery subagent LLM | `SEMANTIC_RECOVERY_MODEL` with its API base and key | Eligible validation failures within existing recovery budgets |
+
+The sample makes generation and proposition extraction inherit your ingestion
+model. Separate `INGEST_PROPOSITION_*` or `WIKI_RECOVERY_*` profiles are optional
+advanced overrides; citation-only Wiki repair otherwise follows the ingestion
+model. You can use the same or different providers for the two roles. Start with
+[the model-neutral example](examples/providers/openai-compatible.env.example);
+FlashX and EV are personal configuration examples, not required models.
+Embedding, visual models and PDF parsers remain separate workflow dependencies.
+Optional comic generation uses `COMIC_IMAGE_*`, a registered
 image model, and an explicit `--allow-remote` flag for every real call; see
 `operations/COMIC_GENERATION.md`. Then read
 `AGENTS.md`: it is the operating contract that classifies a request, protects
