@@ -20,8 +20,8 @@ Explore science posters, academic talks, bilingual CVs and illustrated articles,
 
 **Project updates:** [CHANGELOG.md](CHANGELOG.md)
 
-**Platform editions:** This repository is the macOS version developed by Shi-Ju
-Ran. A [Windows version](https://github.com/RuichengQu/Ran-ASKS-Windows) is
+**Platform editions:** This repository maintains and validates only the macOS
+edition developed by Shi-Ju Ran. A [Windows version](https://github.com/RuichengQu/Ran-ASKS-Windows) is
 developed and maintained by other collaborators. Consult each repository for its
 installation and support scope; this link does not certify cross-platform
 compatibility or grant Reference Distribution status.
@@ -56,13 +56,13 @@ path remains traceable.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.25.1
+## What changes in v0.25.2
 
-The v0.25.1 patch fixes failures exposed by the first platform CI run: invalid
-UTF-8 from managed Python children now raises in the caller on Windows,
-LibreOffice discovery tolerates an unavailable user home, and the CI environment
-installs the analysis dependencies used by token-budget tests. Core installation
-requirements are unchanged. Platform support remains scoped to tested workflows.
+The main repository's release and runtime CI now run only on macOS, matching
+its maintained edition. Windows and Linux are outside this repository's support
+and release gates. Repository-owned skills and persistent-work recovery remain
+available to capable Agent hosts; that portability does not imply support for
+another operating system. Existing shared reliability fixes are retained.
 
 Manuscript evaluation identifies the core scientific question, classifies each
 contribution and scores its importance from 1 to 10, with a separate assessment
@@ -87,8 +87,8 @@ environments, installed libraries and actual user work instances are excluded.
 WorkBuddy and zcode compatibility has not been certified.
 
 Shared file locking, path checks and Python subprocess encoding now have
-platform-specific implementations and a Windows/Linux/macOS CI matrix. This
-does not certify every workflow on Windows. Intake preserves actionable failure
+platform-specific implementations, with runtime regression coverage on macOS.
+Intake preserves actionable failure
 details, improves source-footnote guidance and flags PPTX content-coverage risks
 for review. Gallery adds an 11-slide Layer Edelstein Effect talk with PDF and
 editable PPTX downloads, bringing the approved collection to 15 works. See the

@@ -8,6 +8,8 @@
 
 The public release is an engineering template, never a copy of the personal knowledge base. The authoritative allowlist is `open-source-manifest.yaml`; a file not named there is private by default.
 
+The GitHub main repository maintains, publishes and validates the macOS edition only. Public-release and runtime CI run on macOS. Repository-owned skills and resumable work remain portable between capable Agent hosts; this is not a Windows/Linux support commitment. Other operating-system editions belong to their maintainers' repositories and are not release gates here.
+
 All reusable functions, skills, and persistent-work types follow the repository-owned portability requirements in [shared conventions](../shared-conventions.md). Publish their generic entry points, implementation, schemas, and initialization/resume templates together; exclude actual user instances and installed runtimes. Validate the affected workflows from the generated tree, including initialization and cross-process recovery for persistent work, rather than treating source-workspace success as release completeness.
 
 - **Public**: generic specifications, scripts, tests, schemas, agents, DSH loops and guards, templates, architecture documentation, explicitly approved frozen paper artifacts, and exact-file-approved Gallery exhibition assets.

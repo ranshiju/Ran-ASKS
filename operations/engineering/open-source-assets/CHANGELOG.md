@@ -7,6 +7,25 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-11-06
+
+### Version decision / 版本判断
+
+- PATCH: Align repository maintenance, release verification and runtime CI with its macOS-only scope while retaining Agent-host portability
+- PATCH（中文）：将仓库维护、发布验收和运行时 CI 对齐仅负责 macOS 的范围，保留跨智能体可移植交付要求
+
+### Highlights
+
+- Scoped the main repository's maintenance and release responsibility to macOS, and moved both release verification and runtime CI to macOS only.
+- Preserved repository-owned skills, persistent-work portability and shared reliability fixes. Earlier Windows/Linux exploration is historical and does not create a support commitment or release gate here.
+- Synchronized bilingual guidance, engineering contracts and the Chinese introduction PDF without changing the frozen paper artifacts or existing tags.
+
+### 主要更新
+
+- 明确主仓库仅负责 macOS 的维护与发布，发布校验和运行时 CI 均收敛到 macOS。
+- 保留仓库内 skill、持续工作的可移植交付与共享可靠性修复；此前 Windows/Linux 探索归档，不构成本仓库的支持承诺或发布门槛。
+- 同步双语说明、工程契约和中文介绍 PDF，冻结论文产物及既有标签保持。
+
 ## [0.25.1] - 2026-11-06
 
 ### Version decision / 版本判断
@@ -811,5 +830,7 @@ manifests and checksums.
 
 [0.25.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.25.1...HEAD
 [0.25.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.1
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.25.2...HEAD
+[0.25.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.2

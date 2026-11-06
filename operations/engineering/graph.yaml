@@ -12,7 +12,7 @@ nodes:
   windows_compat_plan:
     path: operations/engineering/windows-compatibility-plan.md
     kind: spec
-    role: windows-portability-causal-fixes-and-regression-plan
+    role: archived-windows-portability-investigation-outside-macos-release-support
   windows_compat_test:
     path: .scripts/test_windows_compat.py
     kind: script
@@ -20,7 +20,7 @@ nodes:
   windows_compat_ci:
     path: .github/workflows/platform-compat.yml
     kind: config
-    role: explicit-windows-and-posix-platform-regression-matrix
+    role: shared-macos-runtime-regression-ci-without-windows-or-linux-support-commitment
   citing_papers:
     path: .scripts/citing_papers.py
     kind: script
@@ -1032,7 +1032,7 @@ nodes:
   public_release_ci:
     path: .github/workflows/public-release.yml
     kind: automation
-    role: github-side-public-release-boundary-engineering-graph-and-regression-gate
+    role: github-side-macos-public-release-boundary-engineering-graph-and-regression-gate
   paper_artifact:
     path: .scripts/paper_artifact.py
     kind: implementation

@@ -431,3 +431,15 @@ The PDF's last page adds the same correction; its first 34 pages are preserved.
 2026年11月6日的 `v0.25.1` 修复首次平台 CI 暴露的 Windows 解码异常传播、主目录
 不可用时的 LibreOffice 查找及测试分词依赖缺失问题。Core 要求与不可变的 `v0.25.0`
 标签保留；PDF 最后一页补入相同说明，前34页保留。
+
+The 2026-11-06 `v0.25.2` update makes the maintained scope explicit: the main
+repository publishes and validates macOS only, and both CI workflows use macOS.
+Earlier Windows/Linux experiments are historical, not ongoing release gates.
+Portable skills and resumable work remain repository-owned and available to
+capable Agent hosts. The final PDF page adds the same scope note; earlier pages
+and immutable version tags are retained.
+
+2026年11月6日的 `v0.25.2` 明确主仓库只负责 macOS，发布和运行时 CI 均使用 macOS。
+此前 Windows/Linux 调查保留为历史记录，不再是活动发布门槛；仓库内 skill 与持续
+工作仍支持具备所需能力的智能体调用和接续。PDF 最后一页补入相同范围说明，
+保留此前页面和不可变版本标签。
