@@ -7,6 +7,25 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-11-06
+
+### Version decision / 版本判断
+
+- PATCH: Fix platform CI decoding and LibreOffice discovery failures and supply token-budget test dependencies without changing Core requirements
+- PATCH（中文）：修复平台 CI 发现的解码异常传播与 LibreOffice 查找问题，补齐 token 预算测试依赖，保持 Core 要求
+
+### Highlights
+
+- Fixed managed Python subprocess decoding so invalid stdout or stderr raises in the caller on Windows; nonzero exits retain decoded diagnostics and normalized newlines.
+- Kept explicit and system LibreOffice discovery available when a user home cannot be resolved. Added analysis dependencies to platform CI for fixed token-budget regressions; Core requirements are unchanged.
+- Synchronized reader guidance and the introduction PDF, preserving the immutable v0.25.0 tag and scoped platform-support claims.
+
+### 主要更新
+
+- 修复 Windows 受管 Python 子进程解码异常的传播，非法 stdout/stderr 向调用者报错，非零退出保留解码后的诊断并统一换行。
+- 用户主目录不可解析时，显式与系统 LibreOffice 路径仍可发现；平台 CI 补齐固定 token 预算测试所需的 analysis 依赖，Core 要求保持。
+- 同步读者说明与介绍 PDF，保留不可变的 v0.25.0 标签及按已测试流程界定的平台支持范围。
+
 ## [0.25.0] - 2026-11-06
 
 ### Version decision / 版本判断
@@ -790,5 +809,7 @@ manifests and checksums.
 
 [0.24.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.24.1
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.25.0...HEAD
 [0.25.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.25.1...HEAD
+[0.25.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.1

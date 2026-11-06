@@ -177,9 +177,18 @@ class PlatformTests(unittest.TestCase):
         code = 'import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())'
         result = pc.run_python([sys.executable, '-c', code], input=payload.encode(), capture_output=True, env=env)
         self.assertEqual(result.stdout, payload)
-        with self.assertRaises(UnicodeDecodeError):
-            pc.run_python([sys.executable, '-c', 'import sys; sys.stdout.buffer.write(bytes([255]))'], capture_output=True)
+        for stream in ('stdout', 'stderr'):
+            with self.subTest(stream=stream), self.assertRaises(UnicodeDecodeError):
+                pc.run_python([sys.executable, '-c', f'import sys; sys.{stream}.buffer.write(bytes([255]))'], capture_output=True)
         self.assertEqual(env['PYTHONIOENCODING'], 'cp936')
+
+    def test_python_failure_retains_decoded_diagnostics_and_normalizes_newlines(self):
+        code = 'import sys; sys.stdout.buffer.write(b"line\\r\\nnext\\r"); print("诊断",file=sys.stderr); sys.exit(7)'
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            pc.run_python([sys.executable, '-c', code], capture_output=True, check=True)
+        self.assertEqual(raised.exception.returncode, 7)
+        self.assertEqual(raised.exception.stdout, 'line\nnext\n')
+        self.assertEqual(raised.exception.stderr, '诊断\n')
 
     def test_wg_and_agent_boundaries_override_cp936(self):
         env = dict(os.environ, PYTHONIOENCODING='cp936', PYTHONUTF8='0')
@@ -232,7 +241,8 @@ class PlatformTests(unittest.TestCase):
         office = self.root / 'Program Files' / 'LibreOffice' / 'program' / 'soffice.exe'
         office.parent.mkdir(parents=True); office.write_bytes(b'test only'); office.chmod(0o700)
         with patch.dict(os.environ, {'ProgramFiles': str(self.root / 'Program Files')}, clear=True), \
-                patch.object(qa.shutil, 'which', return_value=None):
+                patch.object(qa.shutil, 'which', return_value=None), \
+                patch.object(qa.Path, 'home', side_effect=RuntimeError('no user home')):
             self.assertEqual(qa._find_soffice(), office)
 
     def test_content_signals_are_advisory_and_do_not_claim_omissions(self):

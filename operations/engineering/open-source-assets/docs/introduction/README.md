@@ -421,3 +421,13 @@ frozen paper artifacts remain unchanged.
 Windows、Linux、macOS CI 矩阵，不认证所有工作流或第三方智能体宿主。摄入改进
 失败详情与来源脚注指引；Gallery 新增11页物理学术报告，作品增至15件。兼容新增
 能力按 MINOR 发布；PDF 保留前34页并追加与 Markdown 相同的更新，冻结论文产物不变。
+
+The 2026-11-06 `v0.25.1` patch addresses initial platform CI failures: managed
+Python decoding errors propagate on Windows, LibreOffice discovery tolerates
+missing home information, and token-budget tests receive their analysis
+dependencies. Core requirements and the immutable `v0.25.0` tag are retained.
+The PDF's last page adds the same correction; its first 34 pages are preserved.
+
+2026年11月6日的 `v0.25.1` 修复首次平台 CI 暴露的 Windows 解码异常传播、主目录
+不可用时的 LibreOffice 查找及测试分词依赖缺失问题。Core 要求与不可变的 `v0.25.0`
+标签保留；PDF 最后一页补入相同说明，前34页保留。

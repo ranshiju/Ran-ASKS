@@ -56,7 +56,13 @@ path remains traceable.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.25.0
+## What changes in v0.25.1
+
+The v0.25.1 patch fixes failures exposed by the first platform CI run: invalid
+UTF-8 from managed Python children now raises in the caller on Windows,
+LibreOffice discovery tolerates an unavailable user home, and the CI environment
+installs the analysis dependencies used by token-budget tests. Core installation
+requirements are unchanged. Platform support remains scoped to tested workflows.
 
 Manuscript evaluation identifies the core scientific question, classifies each
 contribution and scores its importance from 1 to 10, with a separate assessment

@@ -226,8 +226,11 @@ def _find_soffice(explicit: str | None = None) -> Path:
         if os.environ.get(variable):
             candidates.append(Path(os.environ[variable]) / "LibreOffice" / "program" / "soffice.exe")
     candidates.append(Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"))
-    runtime_root = Path.home() / ".cache" / "codex-runtimes"
-    if runtime_root.exists():
+    try:
+        runtime_root = Path.home() / ".cache" / "codex-runtimes"
+    except RuntimeError:
+        runtime_root = None
+    if runtime_root is not None and runtime_root.exists():
         candidates.extend(sorted(runtime_root.glob(
             "*/dependencies/bin/override/soffice"
         )))

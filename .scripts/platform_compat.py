@@ -212,11 +212,16 @@ def run_python(args, **kwargs):
     kwargs["env"] = python_env(kwargs.get("env"))
     for name in ("text", "encoding", "errors", "universal_newlines"):
         kwargs.pop(name, None)
-    if isinstance(kwargs.get("input"), bytes):
-        result = subprocess.run(args, **kwargs)
-        if isinstance(result.stdout, bytes):
-            result.stdout = result.stdout.decode("utf-8")
-        if isinstance(result.stderr, bytes):
-            result.stderr = result.stderr.decode("utf-8")
-        return result
-    return subprocess.run(args, text=True, encoding="utf-8", errors="strict", **kwargs)
+    if isinstance(kwargs.get("input"), str):
+        kwargs["input"] = kwargs["input"].encode("utf-8")
+    check = kwargs.pop("check", False)
+    # Windows subprocess readers run in threads: text-mode decode failures there
+    # need not reach the caller. Capture bytes and decode on the calling thread.
+    result = subprocess.run(args, **kwargs)
+    for name in ("stdout", "stderr"):
+        value = getattr(result, name)
+        if isinstance(value, bytes):
+            setattr(result, name, value.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"))
+    if check:
+        result.check_returncode()
+    return result
