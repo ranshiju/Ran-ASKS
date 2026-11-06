@@ -21,6 +21,15 @@ include:
   - gallery/works/mpe-academic-talk/preview-10.webp
   - gallery/works/mpe-academic-talk/talk.pdf
   - gallery/works/mpe-academic-talk/talk.pptx
+  - gallery/works/layer-edelstein-academic-talk/README.md
+  - gallery/works/layer-edelstein-academic-talk/cover.webp
+  - gallery/works/layer-edelstein-academic-talk/metadata.json
+  - gallery/works/layer-edelstein-academic-talk/preview-01.webp
+  - gallery/works/layer-edelstein-academic-talk/preview-03.webp
+  - gallery/works/layer-edelstein-academic-talk/preview-05.webp
+  - gallery/works/layer-edelstein-academic-talk/preview-08.webp
+  - gallery/works/layer-edelstein-academic-talk/talk.pdf
+  - gallery/works/layer-edelstein-academic-talk/talk.pptx
   - gallery/works/bilingual-academic-cv/README.md
   - gallery/works/bilingual-academic-cv/cover.webp
   - gallery/works/bilingual-academic-cv/cv-en.pdf
@@ -103,6 +112,7 @@ include:
   - AGENTS.md
   - .env.example
   - .gitignore
+  - .github/workflows/platform-compat.yml
   - .github/workflows/public-release.yml
   - .github/workflows/gallery-pages.yml
   - preprocess.py
@@ -114,6 +124,26 @@ include:
   - .codex/skills/manuscript-diagnosis/agents/openai.yaml
   - .codex/skills/manuscript-diagnosis/scripts/diagnosis_preflight.py
   - .codex/skills/manuscript-diagnosis/scripts/test_diagnosis_preflight.py
+  - .codex/skills/academic-abstract/SKILL.md
+  - .codex/skills/academic-abstract/agents/openai.yaml
+  - .codex/skills/manuscript-improvement/SKILL.md
+  - .codex/skills/manuscript-improvement/agents/openai.yaml
+  - .codex/skills/manuscript-evaluation/SKILL.md
+  - .codex/skills/manuscript-evaluation/agents/openai.yaml
+  # Reusable project initialization only; never include projects/**.
+  - projects/_templates/research/AGENTS.md
+  - projects/_templates/research/README.md
+  - projects/_templates/research/schema.yaml
+  - projects/_templates/research/notes/status.md
+  - projects/_templates/research/codes/README.md
+  - projects/_templates/research/codes/docs/README.md
+  - projects/_templates/research/codes/docs/PHYSICS.md
+  - projects/_templates/research/codes/experiments/README.md
+  - projects/_templates/research/codes/analysis/README.md
+  - projects/_templates/research/codes/tests/README.md
+  - projects/_templates/research/codes/formulas/.gitkeep
+  - projects/_templates/research/manu/.gitkeep
+  - projects/_templates/research/outputs/.gitkeep
   - agents/**
   - dsh/**
   # Generic host instructions live under operations; local memory remains excluded.
@@ -205,7 +235,13 @@ template_dirs:
 
 documentation_omissions:
   - paths: ["*.md"]
-    except: [.codex/skills/manuscript-diagnosis/SKILL.md]
+    # Exact runtime routing instructions, not reader-facing descriptions.
+    except:
+      - .codex/skills/manuscript-diagnosis/SKILL.md
+      - .codex/skills/academic-abstract/SKILL.md
+      - .codex/skills/manuscript-improvement/SKILL.md
+      - .codex/skills/manuscript-evaluation/SKILL.md
+      - operations/research/manuscript-evaluation.md
     terms:
       - 稿件诊断
       - manuscript-diagnosis

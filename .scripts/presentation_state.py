@@ -6,7 +6,7 @@ import argparse
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
-import fcntl
+from platform_compat import fcntl, fsync_path, safe_open
 import json
 import math
 import os
@@ -258,11 +258,7 @@ def _checkpoint(name):
 
 
 def _sync_dir(path):
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    fsync_path(path)
 
 
 def _write(path, data):
@@ -294,7 +290,7 @@ class Store:
         require(self.root.resolve() == self.root, 'Store path changed to a symlink')
         self.root.mkdir(parents=True, exist_ok=True)
         path = safe_path(self.root, '.writer.lock')
-        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        fd = safe_open(path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
             yield

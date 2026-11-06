@@ -1074,6 +1074,53 @@ _SEMANTIC_ENVELOPE_MARKERS = {
 }
 
 
+def _recover_gloss_suffix(sections, section_lines):
+    """Recover only a complete, anchored two-field gloss block; never fill fields.
+
+    This is bounded syntax recovery, not a judgment that a description is true.
+    Explicit gloss sections remain authoritative (including empty/invalid ones).
+    """
+    if "概念说明" in sections or "三元组" not in sections:
+        return []
+    items = sections["三元组"]
+    split = next((i for i, row in enumerate(items)
+                  if kir.parse_semantic_triple_line(row) is None), len(items))
+    if split == 0 or split == len(items):
+        return []
+    triples = [kir.parse_semantic_triple_line(row) for row in items[:split]]
+    concepts = {
+        obj for subject, predicate, obj in triples
+        if subject in {"本论文", PAPER_SUBJECT_PLACEHOLDER}
+        and predicate in CONCEPT_KW_PREDICATES - {"研究关键词"}
+    }
+    if not concepts:
+        return []
+    mentions = set()
+    for row in items[split:]:
+        # Without a header, pipes inside math cannot be distinguished from fields.
+        parts = [part.strip() for part in row.split("|")]
+        if len(parts) != 2 or not all(parts):
+            return []
+        mention, description = parts
+        if (mention not in concepts or mention in mentions
+                or description in concepts or is_placeholder_value(description)
+                or len(re.sub(r"\s", "", description)) <= 12
+                or not re.search(r"[，。；！？,.!?;]", description)):
+            return []
+        mentions.add(mention)
+    if mentions != concepts:
+        return []
+    sections["概念说明"] = items[split:]
+    sections["三元组"] = items[:split]
+    return [{
+        "kind": "missing_concept_gloss_header",
+        "rule": "complete_anchored_gloss_suffix_v1",
+        "line_numbers": section_lines["三元组"][split:],
+        "recovered_count": len(mentions),
+        "source_modified": False,
+    }]
+
+
 def parse_semantic_sections(text):
     """Parse semantic sections and retain machine-actionable structure diagnostics."""
     sections = {}
@@ -1083,8 +1130,11 @@ def parse_semantic_sections(text):
     triple_like_outside_section = []
     malformed_triple_lines = []
     malformed_gloss_lines = []
+    section_lines = {}
+    section_counts = {}
+    current_line_numbers = []
 
-    for line in text.splitlines():
+    for line_number, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
         if (not stripped or stripped.startswith("#")
                 or stripped in _SEMANTIC_ENVELOPE_MARKERS):
@@ -1095,8 +1145,11 @@ def parse_semantic_sections(text):
             if header and "|" not in header:
                 if current_section:
                     sections[current_section] = current_items
+                    section_lines[current_section] = current_line_numbers
                 current_section = header
+                section_counts[header] = section_counts.get(header, 0) + 1
                 current_items = []
+                current_line_numbers = []
                 continue
         parts = kir.parse_semantic_triple_line(stripped)
         triple_like = parts is not None
@@ -1104,6 +1157,7 @@ def parse_semantic_sections(text):
             stripped = " | ".join(parts)
         if current_section:
             current_items.append(stripped)
+            current_line_numbers.append(line_number)
             if current_section == "三元组" and not triple_like:
                 malformed_triple_lines.append(stripped)
             elif current_section == "概念说明":
@@ -1114,6 +1168,16 @@ def parse_semantic_sections(text):
             triple_like_outside_section.append(stripped)
     if current_section:
         sections[current_section] = current_items
+        section_lines[current_section] = current_line_numbers
+
+    # Duplicate section errors must not be hidden by the legacy last-section map.
+    current_malformed = [row for row in sections.get("三元组", [])
+                         if kir.parse_semantic_triple_line(row) is None]
+    repairs = (_recover_gloss_suffix(sections, section_lines)
+               if (section_counts.get("三元组") == 1
+                   and current_malformed == malformed_triple_lines) else [])
+    if repairs:
+        malformed_triple_lines = []
 
     triple_section_present = "三元组" in sections
     bare_triples_recovered = 0
@@ -1141,6 +1205,7 @@ def parse_semantic_sections(text):
         "malformed_gloss_lines": malformed_gloss_lines,
         "concept_gloss_count": concept_gloss_count,
         "meaningful_line_count": len(meaningful_lines),
+        "format_repairs": repairs,
     }
     return sections, diagnostics
 
@@ -3020,6 +3085,7 @@ def _cmd_ingest_locked(args):
         else:
             sem_text = (Path(semantic_path).read_text(encoding="utf-8")
                         if semantic_path else "三元组:\n")
+            _, report["semantic_slot_diagnostics"] = parse_semantic_sections(sem_text)
             sem_triples, keywords, main_dir, corresponding, cross_dirs, dir_preds = parse_semantic_text(
                 sem_text, page, fm
             )

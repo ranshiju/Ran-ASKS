@@ -6,6 +6,8 @@ the recovery authority; SQLite contains disposable search projections only.
 """
 from __future__ import annotations
 
+from platform_compat import fcntl, fsync_path
+
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -85,8 +87,7 @@ def copy_original(source, target, expected):
         shutil.copyfile(source, tmp)
         if digest(tmp) != expected or digest(source) != expected:
             raise ValueError("source changed while receiving")
-        with tmp.open("rb") as stream:
-            os.fsync(stream.fileno())
+        fsync_path(tmp)
         os.replace(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
@@ -99,24 +100,11 @@ def source_lock(repo, source_id):
     path = managed(repo, f"temp/source-ingest/{source_id}.lock")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as stream:
-        if os.name == "nt":
-            import msvcrt
-            stream.seek(0)
-            stream.write(b"0")
-            stream.flush()
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(stream, fcntl.LOCK_EX)
+        fcntl.flock(stream, fcntl.LOCK_EX)
         try:
             yield
         finally:
-            if os.name == "nt":
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream, fcntl.LOCK_UN)
+            fcntl.flock(stream, fcntl.LOCK_UN)
 
 
 def receipt_path(repo, source_id):

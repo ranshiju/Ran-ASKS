@@ -6,6 +6,8 @@
 
 ## 触发与任务判定
 
+论文核心问题与贡献评估使用独立的 `manuscript-evaluation` capability，见[论文评估规范](research/manuscript-evaluation.md)。它逐条分类贡献、评定重要性与证据强度并推荐强调顺序；评估不自动改稿。摘要与全文实质修改前复用该判断，先向用户展示科学问题和推荐主线，并按规范处理定位确认。
+
 整篇学术论文改进使用 `write/academic-manuscript`，流程见 [论文改进规范](research/manuscript-improvement.md)。宿主 Agent 先通读主文、图表与补充材料，再依次改进摘要、标题、引言和全文，最后回查一致性；保持 `research` 上下文，摘要阶段复用现有摘要规范。
 
 用户要求撰写、准备、起草、生成、改写、压缩或排版以下材料时，路由为 `write`：

@@ -3115,14 +3115,19 @@ def test_api_wiki_handoff_message_does_not_claim_agent_backend():
 
 
 def test_paper_materialization_repairs_inline_citation_without_model_rewrite():
-    for backend, wrapped in ((backend, wrapped) for backend in ("agent", "api") for wrapped in (False, True)):
+    cases = [(backend, wrapper, True) for backend in ("agent", "api")
+             for wrapper in ("bare", "bracket", "angle")]
+    cases.append(("api", "angle", False))  # New footnote from an actually supplied handle.
+    for backend, wrapper, existing in cases:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             extract_dir = root / "temp/paper-inline-citation"
             extract_dir.mkdir(parents=True)
-            (extract_dir / "paper.md").write_text("Bell inequalities\n", encoding="utf-8")
+            (extract_dir / "paper.md").write_text("Bell inequalities\nClassical bounds\n", encoding="utf-8")
             raw_path = "academic/raw/references/demo/paper.md"
-            inline = f"[{raw_path}#L1]" if wrapped else f"{raw_path}#L1"
+            address = f"{raw_path}#L{1 if existing else 2}"
+            inline = {"bare": address, "bracket": f"[{address}]", "angle": f"<{address}>"}[wrapper]
+            reference = "[^r1]" if existing else "[^r2]"
             wiki = (
                 f"---\ntitle: Demo\nsources:\n  - {raw_path}\n---\n"
                 f"# Demo\n\n## Navigation\n\n贝尔不等式 [^r1]。\n"
@@ -3152,13 +3157,15 @@ def test_paper_materialization_repairs_inline_citation_without_model_rewrite():
                 assert module.step_write_slots(state)[0]
             finally:
                 module.REPO, module.ingest_mode, module.call_text = original_repo, original_mode, original_call
-            expected = wiki.replace(f"经典界 {inline}。", "经典界 [^r1]。")
+            expected = wiki.replace(f"经典界 {inline}。", f"经典界 {reference}。")
+            if not existing:
+                expected += f"\n{reference}: {address}\n"
             expected = expected.replace(f"  - {raw_path}", f'  - "{raw_path}"').strip()
-            assert state["wiki_content"] == expected
+            assert state["wiki_content"].strip() == expected
             assert state["slots_content"].strip() == slots.strip()
             sections, _definitions = module.wl.parse_wiki_text(state["wiki_content"])
             direction = next(section for section in sections if section.title == "研究方向定位")
-            assert direction.raw_citations == (f"{raw_path}#L1",)
+            assert direction.raw_citations == (address,)
 
 
 def _exercise_api_paper_workspace(*, broken_initial=False):
@@ -7043,6 +7050,30 @@ def test_api_semantic_telemetry_records_actual_revalidation_after_repair():
         assert telemetry["first_pass_validation"]["semantics"] == "failed"
         assert telemetry["last_validation"]["semantics"] == "passed"
         assert len(telemetry["validation_history"]) == 2
+
+
+def test_missing_gloss_header_uses_shared_validator_without_worker_or_file_rewrite():
+    text = ("三元组:\n本论文 | 核心方法 | 稳定方法\n"
+            "稳定方法 | 本文用它生成低维表示，并保持数据之间的相似关系。\n")
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        semantic = root / "semantic.txt"
+        semantic.write_text(module.normalize_slots(text), encoding="utf-8")
+        original = semantic.read_bytes()
+        for backend in ("agent", "api"):
+            state = {"transaction_id": "missing-gloss-" + backend,
+                     "semantic_path": "semantic.txt", "wiki_path": "academic/wiki/papers/example",
+                     "agent_workspace": {"execution_backend": backend}}
+            with patch.object(module, "REPO", root), \
+                    patch.object(module.ic, "load_raw_abbr_map", return_value={}), \
+                    patch.object(module, "call_json", side_effect=AssertionError("no model needed")):
+                errors, warnings = module.step_validate_semantics(state)
+            assert not errors, errors
+            assert not warnings, warnings
+            assert state["semantic_triple_count"] == 1
+            assert state["concept_gloss_count"] == 1
+            assert state["semantic_slot_diagnostics"]["format_repairs"][0]["line_numbers"] == [3]
+            assert semantic.read_bytes() == original
 
 
 def test_api_prepare_uses_one_local_wiki_revision_then_hands_off_without_regeneration():

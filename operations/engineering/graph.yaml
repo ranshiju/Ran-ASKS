@@ -1,6 +1,62 @@
 version: 1
 purpose: WikiRan 工程元图：用于任务上下文和建设影响面，不存业务知识关系。
 nodes:
+  platform_compat:
+    path: .scripts/platform_compat.py
+    kind: implementation
+    role: shared-platform-lock-safe-file-open-durability-path-and-python-utf8-primitives-without-semantic-control
+  platform_compat_ops:
+    path: operations/engineering/platform-compatibility.md
+    kind: spec
+    role: shared-platform-contracts-and-explicit-windows-durability-boundary
+  windows_compat_plan:
+    path: operations/engineering/windows-compatibility-plan.md
+    kind: spec
+    role: windows-portability-causal-fixes-and-regression-plan
+  windows_compat_test:
+    path: .scripts/test_windows_compat.py
+    kind: script
+    role: portable-real-process-lock-unicode-path-and-win32-safety-regression
+  windows_compat_ci:
+    path: .github/workflows/platform-compat.yml
+    kind: config
+    role: explicit-windows-and-posix-platform-regression-matrix
+  citing_papers:
+    path: .scripts/citing_papers.py
+    kind: script
+    role: shared-reusable-citing-literature-discovery-collection-deduplication-and-provenance-export-without-semantic-models
+  citing_papers_ops:
+    path: operations/CITING_PAPERS.md
+    kind: spec
+    role: reusable-citing-literature-cli-python-api-and-metadata-provenance-contract
+  citing_papers_plan:
+    path: operations/engineering/citing-papers-plan.md
+    kind: spec
+    role: citation-capability-extraction-compatibility-and-validation-plan
+  citing_papers_test:
+    path: .scripts/test_citing_papers.py
+    kind: script
+    role: standalone-citation-collection-offline-reuse-provenance-and-impact-integration-regression
+  paper_impact:
+    path: .scripts/paper_impact.py
+    kind: script
+    role: shared-paper-citation-snapshot-ranking-kb-matching-and-raw-bound-evidence-kernel-with-agent-only-semantic-handoff
+  paper_impact_discovery:
+    path: .scripts/paper_impact_discovery.py
+    kind: script
+    role: compatibility-import-facade-over-shared-citing-papers-discovery
+  paper_impact_ops:
+    path: operations/PAPER_IMPACT.md
+    kind: spec
+    role: agent-only-paper-impact-four-step-workflow-and-claim-boundary-contract
+  paper_impact_plan:
+    path: operations/engineering/paper-impact-plan.md
+    kind: spec
+    role: paper-impact-implementation-scope-and-regression-plan
+  paper_impact_test:
+    path: .scripts/test_paper_impact.py
+    kind: script
+    role: isolated-citation-discovery-ranking-source-attribution-and-evidence-workflow-regression
   agents:
     path: AGENTS.md
     kind: constitution
@@ -37,14 +93,30 @@ nodes:
     path: operations/research/physics-manuscript-editing.md
     kind: spec
     role: academic-writing-overlay
+  manuscript_evaluation_ops:
+    path: operations/research/manuscript-evaluation.md
+    kind: spec
+    role: agent-only-scientific-contribution-classification-importance-evidence-and-emphasis-contract
+  manuscript_evaluation_skill:
+    path: .codex/skills/manuscript-evaluation/SKILL.md
+    kind: skill
+    role: agent-only-manuscript-evaluation-discovery-and-capability-entry
   academic_abstract_ops:
     path: operations/research/academic-abstract.md
     kind: spec
     role: agent-only-evidence-bound-academic-abstract-discussion-drafting-and-revision-contract
+  academic_abstract_skill:
+    path: .codex/skills/academic-abstract/SKILL.md
+    kind: skill
+    role: agent-only-academic-abstract-discovery-and-write-profile-entry
   manuscript_improvement_ops:
     path: operations/research/manuscript-improvement.md
     kind: spec
     role: agent-only-full-reading-and-ordered-manuscript-improvement-contract
+  manuscript_improvement_skill:
+    path: .codex/skills/manuscript-improvement/SKILL.md
+    kind: skill
+    role: agent-only-manuscript-improvement-discovery-and-write-profile-entry
   experiences:
     path: operations/EXPERIENCES.md
     kind: spec
@@ -472,7 +544,7 @@ nodes:
   embed_helper:
     path: .scripts/embed_helper.py
     kind: implementation
-    role: shared-graph-scoped-text-embedding-cache-with-private-physical-isolation
+    role: shared-graph-scoped-text-embedding-cache-with-private-physical-isolation-and-on-demand-numeric-dependencies
   embed_init:
     path: .scripts/embed_init.py
     kind: implementation
@@ -1250,6 +1322,10 @@ nodes:
     path: .scripts/research_project.py
     kind: validator
     role: research-project-template-and-structure-validator-with-server-preferred-new-project-default
+  research_project_template:
+    path: projects/_templates/research/
+    kind: template
+    role: shared-exact-allowlisted-research-initialization-template-without-user-instances
   trash_util:
     path: .scripts/trash_util.py
     kind: implementation
@@ -1487,6 +1563,153 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - relocate_own_ip
+  - uses
+  - platform_compat
+- - relativize_internal_symlinks
+  - uses
+  - platform_compat
+- - inbox_state
+  - uses
+  - platform_compat
+- - cli_package
+  - uses
+  - platform_compat
+- - wg
+  - uses
+  - platform_compat
+- - agent_task
+  - uses
+  - platform_compat
+- - graph_lib
+  - uses
+  - platform_compat
+- - source_ingest
+  - uses
+  - platform_compat
+- - knowledge_store
+  - uses
+  - platform_compat
+- - oral_exam
+  - uses
+  - platform_compat
+- - presentation_state
+  - uses
+  - platform_compat
+- - review
+  - uses
+  - platform_compat
+- - science_exhibit
+  - uses
+  - platform_compat
+- - science_exhibit_composition
+  - uses
+  - platform_compat
+- - slide_library
+  - uses
+  - platform_compat
+- - citing_papers
+  - uses
+  - platform_compat
+- - paper_impact
+  - uses
+  - platform_compat
+- - visual_qa
+  - uses
+  - platform_compat
+- - platform_compat_ops
+  - governs
+  - platform_compat
+- - windows_compat_plan
+  - documents
+  - platform_compat
+- - platform_compat
+  - tested_by
+  - windows_compat_test
+- - visual_qa
+  - tested_by
+  - windows_compat_test
+- - agent_task
+  - tested_by
+  - windows_compat_test
+- - ingest_inbox
+  - tested_by
+  - windows_compat_test
+- - slide_reuse
+  - tested_by
+  - windows_compat_test
+- - windows_compat_ci
+  - uses
+  - windows_compat_test
+- - citing_papers_ops
+  - governs
+  - citing_papers
+- - citing_papers_plan
+  - documents
+  - citing_papers
+- - citing_papers
+  - uses
+  - external_bibliography
+- - citing_papers
+  - uses
+  - source_ingest
+- - citing_papers
+  - tested_by
+  - citing_papers_test
+- - paper_impact
+  - uses
+  - citing_papers
+- - paper_impact_discovery
+  - uses
+  - citing_papers
+- - wg
+  - uses
+  - citing_papers
+- - route
+  - uses
+  - citing_papers_ops
+- - function_registry_spec
+  - governs
+  - citing_papers
+- - guidance
+  - documents
+  - citing_papers
+- - paper_impact_ops
+  - governs
+  - paper_impact
+- - paper_impact_plan
+  - documents
+  - paper_impact
+- - paper_impact
+  - uses
+  - paper_impact_discovery
+- - paper_impact
+  - uses
+  - agent_task
+- - paper_impact
+  - uses
+  - source_locator
+- - paper_impact
+  - uses
+  - source_ingest
+- - paper_impact
+  - tested_by
+  - paper_impact_test
+- - paper_impact_discovery
+  - tested_by
+  - paper_impact_test
+- - wg
+  - uses
+  - paper_impact
+- - route
+  - uses
+  - paper_impact_ops
+- - function_registry_spec
+  - governs
+  - paper_impact
+- - guidance
+  - documents
+  - paper_impact
 - - inbox_state
   - tested_by
   - ingest_inbox_dispatch_test
@@ -1589,6 +1812,39 @@ edges:
 - - wiki_patch
   - tested_by
   - ingest_document_test
+- - manuscript_evaluation_skill
+  - uses
+  - route
+- - manuscript_evaluation_skill
+  - reads
+  - manuscript_evaluation_ops
+- - route
+  - reads
+  - manuscript_evaluation_ops
+- - function_registry_spec
+  - governs
+  - manuscript_evaluation_ops
+- - guidance
+  - documents
+  - manuscript_evaluation_ops
+- - research
+  - uses
+  - manuscript_evaluation_ops
+- - academic_abstract_ops
+  - uses
+  - manuscript_evaluation_ops
+- - manuscript_improvement_ops
+  - uses
+  - manuscript_evaluation_ops
+- - manuscript_evaluation_ops
+  - tested_by
+  - prompt_test
+- - manuscript_improvement_skill
+  - uses
+  - route
+- - manuscript_improvement_skill
+  - reads
+  - manuscript_improvement_ops
 - - manuscript_improvement_ops
   - uses
   - academic_abstract_ops
@@ -1604,6 +1860,12 @@ edges:
 - - manuscript_improvement_ops
   - tested_by
   - prompt_test
+- - academic_abstract_skill
+  - uses
+  - route
+- - academic_abstract_skill
+  - reads
+  - academic_abstract_ops
 - - write
   - uses
   - academic_abstract_ops
@@ -3431,6 +3693,12 @@ edges:
 - - gallery_ops
   - governs
   - gallery
+- - conventions
+  - governs
+  - open_source_manifest
+- - conventions
+  - governs
+  - function_registry_spec
 - - open_source_manifest
   - governs
   - gallery
@@ -3611,6 +3879,18 @@ edges:
 - - research_project
   - uses
   - workspace_state
+- - research_project
+  - reads
+  - research_project_template
+- - open_source_manifest
+  - governs
+  - research_project_template
+- - open_source_release
+  - publishes
+  - research_project_template
+- - research_project_template
+  - tested_by
+  - open_source_release_test
 - - research
   - specifies
   - frontier_spec
@@ -3726,6 +4006,53 @@ edges:
   - documents
   - dsh_function_catalog
 capabilities:
+  manuscript-evaluation:
+    entry: route
+    required:
+    - agents
+    - manuscript_evaluation_ops
+    optional:
+    - manuscript_evaluation_skill
+    - research
+    - write
+    forbidden:
+    - llm_structured
+    - graph_ingest
+    guardrails:
+    - 宿主 Agent 阅读论文并判断核心科学问题，逐条分类贡献、评定重要性与证据强度，给出可追溯依据及强调顺序；shared 路由只派发规范。
+    - 评分服务于当前稿件的贡献定位与修改决策，不是录用概率；评估不自动改稿、调用 API、委派审阅、摄入或投稿。
+  citing-papers:
+    entry: route
+    required:
+    - agents
+    - citing_papers_ops
+    - citing_papers
+    optional:
+    - wg
+    - paper_impact
+    forbidden:
+    - llm_structured
+    - graph_ingest
+    guardrails:
+    - shared 确定性引用发现能力独立于申报场景；CLI 与 Python 调用复用相同分页、去重、时间和来源契约，无模型控制循环。
+    - 仅 fetch 显式查询固定公开书目 API；保存的题录为发现线索，不自动下载全文、摄入或生成评价；下游可离线复用。
+  paper-impact:
+    entry: route
+    required:
+    - agents
+    - paper_impact_ops
+    - paper_impact
+    optional:
+    - paper_impact_discovery
+    - wg
+    - source_locator
+    - source_ingest
+    forbidden:
+    - llm_structured
+    - graph_ingest
+    guardrails:
+    - 宿主 Agent 负责贡献、人物身份和评价语义判断；shared 内核只发现、存储、排序、核对定位与提交，不隐式调用 API 模型。
+    - 检索快照和项目报告不是事实源；申报证据须绑定已摄入 Raw，第三方原话和 Agent 归纳分离；未摄入项只建议走原受管摄入。
   review:
     entry: route
     required:
@@ -4015,7 +4342,9 @@ capabilities:
     optional:
     - physics_manuscript_editing
     - academic_abstract_ops
+    - academic_abstract_skill
     - manuscript_improvement_ops
+    - manuscript_improvement_skill
     - experiences
     - experience_recall
     - illustration_ops
@@ -4229,6 +4558,37 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  platform_compat:
+  - python3 .scripts/test_windows_compat.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_agent_task.py
+  - python3 .scripts/test_visual_qa.py
+  - python3 .scripts/test_slide_reuse.py
+  - python3 .scripts/test_ingest_inbox_dispatch.py
+  - python3 .scripts/test_source_ingest.py
+  - python3 .scripts/test_knowledge_units.py
+  - python3 .scripts/test_review.py
+  - python3 .scripts/test_presentation_state.py
+  - python3 .scripts/test_science_exhibit.py
+  - python3 .scripts/test_oral_exam.py
+  - python3 .scripts/test_citing_papers.py
+  - python3 .scripts/test_paper_impact.py
+  - python3 .scripts/engineering_graph.py validate
+  citing_papers:
+  - python3 .scripts/test_citing_papers.py
+  - python3 .scripts/test_paper_impact.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_playbook_dispatch.py
+  - python3 .scripts/function_registry.py validate --runtime
+  - python3 .scripts/engineering_graph.py validate
+  paper_impact:
+  - python3 .scripts/test_paper_impact.py
+  - python3 .scripts/test_agent_task.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/function_registry.py validate --runtime
+  - python3 .scripts/engineering_graph.py validate
   review:
   - python3 .scripts/test_review.py
   - python3 .scripts/test_agent_task.py
@@ -4520,6 +4880,11 @@ verification:
   - python3 .scripts/test_long_document_plan.py
   prompt_test:
   - python3 .scripts/test_prompt_audit.py
+  manuscript_evaluation_ops:
+  - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/function_registry.py validate --runtime
+  - python3 .scripts/engineering_graph.py validate
   academic_abstract_ops:
   - python3 .scripts/test_prompt_audit.py
   - python3 .scripts/function_registry.py validate --runtime
@@ -4644,6 +5009,51 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  platform_compat:
+    preconditions:
+    - shared 平台适配无语义控制循环；受管 Python I/O 为 UTF-8 严格协议，ZIP 路径独立于宿主文件系统。
+    - Windows 文件锁保留共享/独占/非阻塞和退出释放语义，永久错误传播；不无限重试或吞解锁错误。
+    - 受保护文件打开保留符号链接、重解析点和父级路径防护；目录刷盘能力差异显式记载。
+    writes:
+    - 仅调用者已授权的锁文件/普通文件句柄；本模块不决定知识库写入或事务提交。
+    forbidden:
+    - 将 Windows 缺失常量替换为零而移除安全保证；把目录同步跳过称为等价断电持久性；用替换字符隐瞒机器 JSON 编码损坏。
+    verify:
+    - python3 .scripts/test_windows_compat.py
+    - python3 .scripts/engineering_graph.py validate
+  citing_papers:
+    preconditions:
+    - DOI 优先，题名须唯一精确匹配；继承固定主机、分页/字节预算、失败与空结果分离的发现内核。
+    - 单篇集合保留来源、查询范围、时间、批次完整性和增量；同 DOI/稳定来源 ID 去重，不同版本不靠题名合并。
+    - 导出为带原始批次来源和逐条观察时间的历史并集；不得把不同日期并集声称为当前全量引用，评价项目可离线导入。
+    writes:
+    - projects/citing-papers/<id>/state.json 和集合内 exports；既有 paper-impact 使用相同合并内核并保留旧状态格式。
+    forbidden:
+    - 自动获取/摄入全文，直接写 Raw/Wiki/Graph，自动评价引用内容，隐藏失败或未知覆盖，调用语义模型。
+    verify:
+    - python3 .scripts/test_citing_papers.py
+    - python3 .scripts/test_paper_impact.py
+    - python3 .scripts/function_registry.py validate --runtime
+    - python3 .scripts/engineering_graph.py validate
+  paper_impact:
+    preconditions:
+    - DOI/题名明确；公开书目查询有界且保存批次、范围、时间和完整性，失败与空结果区分。
+    - 作者和期刊名单是有理由的阅读偏好，身份和地位依据分别记录；阅读排序与原文取证后的证据排序分开。
+    - 全文匹配依据文献自身书目，正文参考文献不能冒充本篇身份；不同版本和同名作者疑点显式保留。
+    - Agent 产物须通过结构、精确 Raw 原文、目标引用映射及来源哈希检查；来源/贡献/配置变化后不消费过期任务。
+    - 报告开篇按施引论文聚合申报书与答辩 PPT 文案；Agent 在既有 evidence 任务中撰写，shared 内核只校验、绑定、重建，不新增 API 或语义阶段。
+    - 开篇文案只关联已完整阅读的可用证据；人物机构/荣誉和平台增强描述须单独绑定 Raw，人物关联候选稳定 ID 并注明事实日期，来源漂移后不继续展示。
+    - 人物资历复用 academic/wiki/authors 下的 people 页及其 Raw 绑定，奖项、院士、Fellow、任职与机构分别记录；配置绑定页面哈希和来源哈希，身份不匹配或漂移不作为有效资历。paper-impact 只读人物页，建页及 Raw 写入仍走既有摄入/巩固流程。
+    - 初筛由 Agent 根据人物、机构、期刊与标题填写逐篇建议及理由，shared 校验候选书目快照；初筛不按固定篇数扩大，不自动改变 selection，不将声望等同正面评价。
+    writes:
+    - projects/paper-impact 下单篇工作状态、检索批次快照及可重建报告；temp/paper-impact 下 agent-task-v1 输入输出。
+    forbidden:
+    - 直接修改 Raw/Wiki/Graph、把检索或 temp 当事实源、隐式模型调用、自动摄入或自动对外发送。
+    - 期刊刊载冒充编辑部评价、共同署名冒充个人原话、集体引用冒充单篇评价、未知独立性冒充独立认可。
+    verify:
+    - python3 .scripts/test_paper_impact.py
+    - python3 .scripts/function_registry.py validate --runtime
+    - python3 .scripts/engineering_graph.py validate
   bibliography_update:
     preconditions:
     - invalid enumeration candidates are isolated with bounded visible diagnostics; the current content-addressed plan still fails closed and is never overwritten
@@ -4713,6 +5123,7 @@ script_contracts:
     preconditions:
     - shared 纯函数复用既有 paper-wiki-patch-v1 协议；目标目录绑定 Wiki SHA-256，精确定位失败脚注或已有支持的正文错误，不读取文件或调用模型
     - 补丁只覆盖已有target ID；引用只允许提供的Raw地址，拒绝正文/frontmatter/章节越界及重叠目标；未点名区域逐字保持
+    - API 修补提示按 scope 明确分工：body 只引用已有脚注 ID，citations 才填写提供的 Raw handle；目标未授权添加定义且没有适用脚注时返回 manual_required，不要求 Worker 输出必被 validator 拒绝的正文地址
     - document adapter 仅使用 citations 目标，普通短单页文本；不改变事实正文或语义槽
     writes: []
     forbidden:
@@ -5066,6 +5477,7 @@ script_contracts:
     - python3 .scripts/test_private_reingest.py
   embed_helper:
     preconditions:
+    - shared 数值依赖在实际向量计算前按需加载；模块导入、离线上下文与配置读取不要求 NumPy。缺少 NumPy 时给出 analysis extra 安装命令，内部损坏的导入错误原样传播，不在缺包后发起 API 或写缓存。
     - shared Agent/API graph scope is context-local and restored on exit; private cache selection precedes any provider call
     - match_by_embedding 可把 caller 已确定且后续必需的 extra_texts 附加到原请求预热同一 namespace 文本缓存；匹配只使用原新/旧文本及原阈值，联合请求失败回退原匹配请求，但 provider 401/403/429 明确拒绝时直接保留原失败，不重复同服务请求；EmbeddingAPIError 保持 RuntimeError 兼容并携带最后 HTTP status，默认无附加文本行为不变
     - embedding endpoint 由 EMBED_API_BASE 与 EMBED_API_PATH（默认 /v1/embeddings）规范化拼接；默认模型为区分大小写的 provider code `GLM-Embedding-3`，HTTP 错误须保留受限长度的 provider 响应以供诊断
@@ -5300,6 +5712,7 @@ script_contracts:
     - python3 .scripts/test_open_source_release.py
   ingest_inbox:
     preconditions:
+    - shared 紧凑质量告警保留 issue/detail/mention/reason，每字段最多 240 字符、最多展示 5 项；当前和历史总数仍按完整记录计算，不因摘要裁剪隐去人物称呼与未决原因
     - shared external intake receipt failure rolls back only exclusively created PDF and bibliography copies; exact reused files and originals survive
     - duplicate PDF cleanup with unarchived bibliography returns bibliographic_review_required and preserves inputs; only fully hash-verified archived local sidecars may pass cleanup, and those originals reuse persistent retention
     - shared 统一结果适配同时透传嵌套 agent_task 与合法顶层 agent-task-v1，首次 prepared 回执保留 inputs/outputs/protocol/commands/control，不为找回已生成任务要求再次 inspect
@@ -5757,6 +6170,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   graph_ingest:
     preconditions:
+    - shared Agent/API 语义解析可恢复缺失的概念说明分区，仅限显式三元组区的完整三列前缀加连续双字段说明后缀；说明名称须逐字且唯一覆盖前文论文概念谓词已声明的全部概念，描述须有句内标点且超过合法谓词长度。额外概念、占位值、残缺或交错关系、多竖线及已有概念说明标题均不猜测；恢复只调整内存分区，原文不改，semantic_slot_diagnostics 记录规则和原行号，原校验/IR/提交继续执行
     - shared 实时摄入不因端点名称长度、标点或“基于/表示”等触发词产生 descriptive_phrase 警告或猜测 proposition；命题由明确关系角色及同批该角色的端点声明确定，审计与 writer 同步传播。保留原文字、证据、别名、引用残片/重复/歧义检查；不要求全文逐句结构化，不新增模型调用。旧形态启发式仅服务历史指标兼容，不作为实时验收依据
     - shared writer 在同批关系中统一保留由命题角色确定的端点类型；同一命题再作为关联端点时不得降为 keyword 或进入 concept_map，关系输入顺序不改变其完整 title 与 proposition 身份
     - shared 命题向量相似度只提供导航关联，不证明同一性；非逐字相同命题不得因任何相似度分数替换原文。cosine ≥ 0.9 的异文候选可建置信性质为推断的关联边，逐字相同不建自环并交原 GraphDelta 精确复用；保留作者归属、推测语气、条件、否定与数量差异
@@ -5891,6 +6305,7 @@ script_contracts:
     - python3 .scripts/test_graph_delta.py
   hub_semantics:
     preconditions:
+    - shared 模块导入和非数值读取兼容 Core 安装；向量计算按需加载 NumPy，缺包给出安装提示。既有 provider 不可用时的显式降级与写入保护不变。
     - shared read_paper_profile 的可选 text 参数复用 caller 已读取并校验范围的文本；沿用同一 Wiki section/citation 解析器，不重复访问页面、不新增缓存或改变默认文件读取契约。
     - Hub canonical 语义来自 Hub 页唯一的
     - Hub Scope 由主 Agent 基于代表性成员的 title+description/profile、必要的图结构信号及父/待合并 Hub Scope 综合定义；不得拼接全体成员文本，也不得由 API LLM 生成 canonical Scope
@@ -6261,7 +6676,7 @@ script_contracts:
     - agent workspace 返回明确 write_to；书目协议同时携带由同一运行时代码生成且自身通过 schema 的完整严格模板，避免 prose shape 与 validator 漂移；程序按 bibliography → wiki → semantics 顺序物化为独立暂存产物并逐层校验，resume 不重跑 MinerU 或已通过阶段
     - Agent 只经 paper_workspace_read/refresh/check/commit 四个类型化动作接管事务；公开 workflow_status 仅允许 awaiting_agent、ready_to_commit、completed、failed，内部细粒度 status 只作为 internal_status 返回
     - 单篇与 batch item 均经 inbox_state 输出 ingest-result-v1；completed 必须同时报告 committed=true 与可定位的 Raw/Wiki 产物，awaiting_agent 的本次产物是 agent-task-v1，不以进程退出码冒充事务完成
-    - Wiki 物化可显式复用已定义脚注，把正文中完全相同的裸 Raw 行 locator 或非链接的单中括号 Raw 行 locator 转成对应脚注；单中括号形式保留引用式链接、图片、转义和注释，不猜地址或片段；API 还可对本次已提供的精确 Raw handle 白名单确定性分配新脚注并在既有 Sources 节补定义；只改变引用表示，不推断地址、不改事实文本，不处理代码/链接/来源定义，重复 Sources 或脚注冲突不自动转换，随后仍通过原 locator 与结构 validator
+    - shared Wiki 物化可显式复用已定义脚注，把正文中完全相同的裸 Raw 行 locator、非链接的单中括号或单层尖括号 Raw 行 locator 转成对应脚注；保留引用式链接、图片、转义、嵌套标记和注释，不猜地址或片段；API 还可对本次已提供的精确 Raw handle 白名单确定性分配新脚注并在既有 Sources 节补定义；只改变引用表示，不推断地址、不改事实文本，不处理代码/链接/来源定义，重复 Sources 或脚注冲突不自动转换，随后仍通过原 locator 与结构 validator
     - batch 顶层 workflow_status、terminal、committed 与 counts 只从 items 派生；prepared/partial 等旧顶层状态只保留为兼容 status，不得覆盖 item 四态或产生独立统计口径
     - 确定性 PDF metadata、首页规则与 MinerU 解析器仍在后台注册带 provenance 的 candidate provider；API 由 candidate-id-v2 锁定，Agent 不接收候选目录且以原始证据直接提取，程序仅把候选用于 fast path、去重和字段冲突诊断
     - bibliographic-candidate-provider-v9 保留 PDF 前两页 layout block 的 self DOI、完整 venue 和 candidate_only 作者，affiliation 单列排除，日期候选绑定 published/published_online/accepted/received/revised/preprint kind；ACM self-citation 作者补充须通过上述双来源一致性检查，冲突仍交同一 candidate-id-v2 workspace 裁决

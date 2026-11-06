@@ -228,6 +228,7 @@ def normalize_raw_footnotes(text: str, *, reuse_inline: bool = False,
     addresses = "|".join(re.escape(locator) for locator in sorted(set(citations) | allowed, key=len, reverse=True))
     inline_pattern = re.compile(
         r"(?<![/`\[\]\(<\"'\\!])\[(?P<bracket>" + addresses + r")\](?![\[\](])"
+        r"|(?<![/`\[\]\(<\"'\\!])<(?P<angle>" + addresses + r")>(?![\[\]>(])"
         r"|(?<![\w/`\[\(<\"'])(?P<bare>" + addresses + r")(?![\w/#-]|\.[\w])"
     )
     # A shortcut reference with a definition is a real Markdown link, even when
@@ -242,7 +243,7 @@ def normalize_raw_footnotes(text: str, *, reuse_inline: bool = False,
     created = []
 
     def replace_inline(match):
-        locator = match.group("bracket") or match.group("bare")
+        locator = match.group("bracket") or match.group("angle") or match.group("bare")
         if (visible_lines[index][match.start():match.end()] != match.group(0)
                 or (match.group("bracket") and " ".join(locator.split()).casefold() in reference_labels)):
             return match.group(0)

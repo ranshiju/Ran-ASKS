@@ -50,6 +50,36 @@ def validate_result(value, mode, object_ids):
     if mode!='content': require(not value['supplement'].strip(),'Only content mode may transcribe source content')
     return value
 
+def content_review_signals(page, supplement):
+    """Local advisory clues only; preserve model verdict and signed receipt."""
+    objects = page.get('objects', [])
+    native = ''.join(str(o.get('text') or '') for o in objects if o.get('kind') != 'grpSp')
+    visual_objects = [o for o in objects if o.get('kind') in {'pic', 'chart', 'graphicFrame'}]
+    substantial = False
+    for obj in visual_objects:
+        box = obj.get('bbox_normalized')
+        if box and len(box) == 4:
+            area = max(0, min(1, box[2]) - max(0, box[0])) * max(0, min(1, box[3]) - max(0, box[1]))
+            substantial |= area >= 0.15
+    signals = []
+    if substantial and len(''.join(native.split())) < 40 and len(''.join(str(supplement).split())) < 40:
+        signals.append({'issue': 'pptx_sparse_content', 'detail':
+            '原生文本与视觉补充均较少，且存在较大图片或图表；建议对照页面复核内容覆盖。此提示不认定存在遗漏。'})
+    symbol_fonts = set()
+    for obj in objects:
+        for style in obj.get('styles', []):
+            fonts = style.get('fonts') or {}
+            names = fonts.values() if isinstance(fonts, dict) else fonts if isinstance(fonts, list) else [fonts]
+            for font in names:
+                candidates = font.values() if isinstance(font, dict) else [font]
+                symbol_fonts.update(str(name) for name in candidates if name and any(
+                    token in str(name).lower() for token in ('symbol', 'wingdings', 'webdings')))
+    if symbol_fonts:
+        signals.append({'issue': 'pptx_symbol_font', 'detail':
+            '含符号字体（' + ', '.join(sorted(symbol_fonts)) + '），建议对照渲染核对符号含义；此提示不是原文。'})
+    return signals
+
+
 def context_page(page):
     """Bounded by page, never silently drop source text to fit a global prompt."""
     return {'number':page['number'],'notes':page.get('notes',''),'coverage':page.get('coverage'),
@@ -92,10 +122,11 @@ def analyze_image(image, *, mode, source_sha256, page, allow_remote=False, refer
     require(not any(is_private(p) for p in [image]+([reference] if reference else [])),'Private images require a separately isolated workflow')
     env=qa.load_visual_env()
     model=env.get('VISUAL_QA_MODEL',qa.DEFAULT_MODEL); fallback=env.get('VISUAL_QA_FALLBACK_MODEL',qa.DEFAULT_FALLBACK_MODEL)
+    endpoint = qa._chat_completions_url(env['VISUAL_QA_API_BASE'], env.get('VISUAL_QA_API_PATH', '')) if env.get('VISUAL_QA_API_BASE') else ''
     params={'model':model,'fallback':fallback,'effort':env.get('VISUAL_QA_REASONING_EFFORT','low'),
             'fallback_effort':env.get('VISUAL_QA_FALLBACK_REASONING_EFFORT','default'),'max_tokens':max_tokens,
             'prompt_version':PROMPT_VERSION,'adapter_sha256':digest(__file__), 'transport_sha256':digest(qa.__file__),
-            'endpoint_sha256':hashlib.sha256(env.get('VISUAL_QA_API_BASE','').encode()).hexdigest()}
+            'endpoint_sha256':hashlib.sha256(endpoint.encode()).hexdigest()}
     base={'schema':SCHEMA,'mode':mode,'source_sha256':source_sha256,'page':page['number'],
           'image_sha256':digest(image),'reference_sha256':digest(reference) if reference else None,
           'structure_sha256':structure.stable_hash(page),'parameters':params}
@@ -124,7 +155,7 @@ def analyze_image(image, *, mode, source_sha256, page, allow_remote=False, refer
     for candidate in dict.fromkeys([model,fallback]):
         if not candidate: continue
         effort=params['effort'] if candidate==model else params['fallback_effort']
-        config=qa.RemoteConfig(env['VISUAL_QA_API_BASE'],env['VISUAL_QA_API_KEY'],90,effort,max_tokens)
+        config=qa.RemoteConfig(env['VISUAL_QA_API_BASE'],env['VISUAL_QA_API_KEY'],90,effort,max_tokens,env.get('VISUAL_QA_API_PATH', ''))
         start=time.monotonic()
         try:
             response=(call or qa.call_json_vision)(candidate,[image]+([reference] if reference else []),text,config)

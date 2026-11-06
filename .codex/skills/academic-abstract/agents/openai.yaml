@@ -1,0 +1,4 @@
+interface:
+  display_name: "学术论文摘要撰写与修改"
+  short_description: "以科学结论组织摘要，核对比较优势与实验贡献，并落实多轮修改意见"
+  default_prompt: "使用 $academic-abstract，结合论文与补充材料，为目标期刊撰写或修改摘要，先讲科学结论，再给证据支撑。"

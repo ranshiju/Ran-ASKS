@@ -110,6 +110,38 @@ class IntakeTests(unittest.TestCase):
         with self.assertRaises(doc.PPTXError):
             doc.validated(self.source, self.directory)
 
+    def test_sparse_pass_adds_advisory_without_changing_sealed_api_receipt(self):
+        with zipfile.ZipFile(self.source) as archive:
+            package = {name: archive.read(name) for name in archive.namelist()}
+        page = ET.fromstring(package['ppt/slides/slide1.xml'])
+        extent = page.find('.//p:pic/p:spPr/a:xfrm/a:ext', st.NS)
+        extent.set('cx', '800'); extent.set('cy', '400')
+        package['ppt/slides/slide1.xml'] = ET.tostring(page)
+        with zipfile.ZipFile(self.source, 'w') as archive:
+            for name, data in package.items():
+                archive.writestr(name, data)
+        self.directory = self.repo / 'temp/sparse'
+        self.manifest = doc.prepare(self.source, self.directory, render=False)
+        plan = plan_for(self.source, self.manifest, visual=True)
+        response = result(); response['supplement'] = ''
+        call = Mock(return_value={'result': response, 'usage': {}})
+        env = {'VISUAL_QA_API_BASE': 'https://test.invalid/v4', 'VISUAL_QA_API_KEY': 'TEST',
+               'VISUAL_QA_API_PATH': '/chat/completions', 'VISUAL_QA_MODEL': 'TEST', 'VISUAL_QA_FALLBACK_MODEL': ''}
+        with patch.object(lib.qa, '_prepare_source', side_effect=self.renderer), \
+             patch.object(lib.qa, 'render_page', side_effect=self.render_page), \
+             patch.object(lib.qa, 'load_visual_env', return_value=env), \
+             patch.object(lib.qa, 'call_json_vision', call):
+            intake.prepare_review(self.source, self.directory, plan, planner='agent', allow_remote=True)
+            before = (self.directory / 'pptx-review.json').read_bytes()
+            text, receipt, warnings = doc.validated(self.source, self.directory)
+            self.assertEqual((self.directory / 'pptx-review.json').read_bytes(), before)
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(call.call_args.args[-1].api_path, '/chat/completions')
+        self.assertEqual(receipt['pages'][0]['api']['result']['verdict'], 'pass')
+        self.assertEqual(receipt['review_status'], 'reviewed_with_limits')
+        self.assertIn('程序检查，非原文', text)
+        self.assertIn('pptx_sparse_content', [item['issue'] for item in warnings])
+
     def test_plan_rejects_stale_missing_and_false_visual_addresses(self):
         cases = [lambda p: p.update(source_sha256='wrong'), lambda p: p['pages'].pop(),
                  lambda p: p['pages'][0].update(mode='visual', visual_object_ids=['1']),

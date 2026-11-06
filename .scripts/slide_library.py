@@ -2,7 +2,7 @@
 """Source-preserving native slide extraction and atomic, explicitly scoped collection."""
 from __future__ import annotations
 import argparse
-import fcntl
+from platform_compat import fcntl, fsync_path
 import json
 import os
 import posixpath
@@ -237,7 +237,7 @@ def collect(prepared,name,instruction,layout_report=None):
                 r['files']={p.name:vision.digest(p) for p in pending.iterdir() if p.is_file() and p.name!='receipt.json'}
             vision.write(pending/'receipt.json',r);verify_bundle(pending)
             for file in pending.iterdir():
-                with file.open('rb') as f: os.fsync(f.fileno())
+                fsync_path(file)
             os.rename(pending,target)
             rebuild_index(root)
         except BaseException:

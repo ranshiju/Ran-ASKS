@@ -890,12 +890,21 @@ def _result_entry(file_name: str, file_type: str, parsed: dict, content: str = "
         if parsed.get("schema") == agent_task.SCHEMA_VERSION:
             entry["agent_task"] = agent_task.payload({"agent_task": parsed})
         return entry
-    reason = (
-        content.splitlines()[0][:200]
-        if content and content.splitlines() else str(parsed.get("errors") or status)
-    )
-    return {"file": file_name, "type": file_type, "ok": False,
-            "status": status, "reason": reason}
+    diagnostic = parsed.get("errors") or parsed.get("error")
+    if diagnostic:
+        first = diagnostic[0] if isinstance(diagnostic, list) else diagnostic
+        reason = (json.dumps(first, ensure_ascii=False) if isinstance(first, dict) else str(first))
+    elif parsed:
+        reason = str(parsed.get("message") or status)
+    else:
+        reason = content.splitlines()[0][:200] if content and content.splitlines() else status
+    entry = {"file": file_name, "type": file_type, "ok": False,
+             "status": status, "reason": reason}
+    for key in ("errors", "error", "transaction_id", "retryable", "next_action",
+                "resume_from", "failure_signature", "failure_disposition"):
+        if parsed.get(key) is not None:
+            entry[key] = parsed[key]
+    return entry
 
 
 def _write_json_atomic(path: Path, value: dict | list) -> None:
@@ -2009,7 +2018,7 @@ def _compact_summary(report: dict, report_path: Path) -> dict:
         compact["quality_warning_count"] = len(warnings)
         if warnings:
             compact["quality_warnings"] = [
-                {key: str(warning[key])[:240] for key in ("issue", "detail") if key in warning}
+                {key: str(warning[key])[:240] for key in ("issue", "detail", "mention", "reason") if key in warning}
                 if isinstance(warning, dict) else {"detail": str(warning)[:240]}
                 for warning in warnings[:5]
             ]

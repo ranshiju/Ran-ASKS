@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文评估"
+  short_description: "分类核心贡献并评定重要性与证据强度，推荐科学主线和摘要强调顺序"
+  default_prompt: "使用 $manuscript-evaluation，阅读这篇论文，给出核心科学问题、逐项贡献分类与重要性评分、证据依据及建议强调顺序。"

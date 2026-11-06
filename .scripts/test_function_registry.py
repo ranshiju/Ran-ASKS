@@ -25,7 +25,9 @@ def test_registry_and_runtime_have_exact_coverage():
     data = registry.load_registry()
     assert registry.validate_registry(data) == []
     assert registry.validate_runtime(data) == []
-    assert len(data["functions"]) == 32
+    assert len(data["functions"]) == 35
+    assert data["functions"]["academic.citing_papers"]["control_owners"] == ["code"]
+    assert data["functions"]["academic.paper_impact"]["backends"] == ["agent"]
     assert data["functions"]["artifact.review"]["backends"] == ["agent"]
     assert data["functions"]["artifact.review"]["allowed_callers"] == ["main_agent"]
     assert data["functions"]["artifact.science_exhibit"]["backends"] == ["agent"]
@@ -133,6 +135,24 @@ def test_fixed_pipelines_remain_code_owned():
     assert ".scripts/ingest_pipeline.py" in ingest["bindings"]["pipelines"]
     assert presentation["kind"] == "pipeline" and "code" in presentation["control_owners"]
     assert "dsh" not in presentation["bindings"]
+
+
+def test_manuscript_evaluation_resolves_to_host_without_api_or_fact_writes():
+    function_id = "academic.manuscript_evaluation"
+    result = registry.resolve(function_id, caller="main_agent", backend="agent", state="research")
+    assert result["control_owners"] == ["host_agent"]
+    assert result["bindings"] == {
+        "route_capabilities": {"manuscript-evaluation": ["general"]},
+        "executor": "host_agent",
+    }
+    assert set(result["effects"]) == {"read", "project"}
+    for caller, backend in (("main_agent", "api"), ("api_controller", "agent")):
+        try:
+            registry.resolve(function_id, caller=caller, backend=backend, state="research")
+        except registry.RegistryError:
+            pass
+        else:
+            raise AssertionError(f"evaluation unexpectedly accepted {caller}/{backend}")
 
 
 def test_library_and_visualization_are_functions_with_discoverable_entries():

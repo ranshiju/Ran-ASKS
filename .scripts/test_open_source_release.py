@@ -2,6 +2,7 @@
 """Regression checks for manifest-governed public release construction."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -176,11 +177,17 @@ def check_documentation_omissions() -> None:
             target.write_text(term, encoding="utf-8")
             errors = release.documentation_omission_errors(destination, manifest, {path})
             assert len(errors) == 1 and path in errors[0], errors
-        skill_path = ".codex/skills/manuscript-diagnosis/SKILL.md"
-        target = destination / skill_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("稿件诊断 manuscript-diagnosis", encoding="utf-8")
-        assert not release.documentation_omission_errors(destination, manifest, {skill_path})
+        for runtime_path in (
+            ".codex/skills/manuscript-diagnosis/SKILL.md",
+            ".codex/skills/academic-abstract/SKILL.md",
+            ".codex/skills/manuscript-improvement/SKILL.md",
+            ".codex/skills/manuscript-evaluation/SKILL.md",
+            "operations/research/manuscript-evaluation.md",
+        ):
+            target = destination / runtime_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("稿件诊断 manuscript-diagnosis", encoding="utf-8")
+            assert not release.documentation_omission_errors(destination, manifest, {runtime_path})
 
 
 def check_private_release_boundary() -> None:
@@ -261,6 +268,47 @@ def check_pdf_render_health() -> None:
             raise AssertionError("blank PDF accepted")
 
 
+def check_research_template_lifecycle(destination: Path) -> None:
+    """Published resources must support creation and recovery in new processes."""
+    manifest = release.load_manifest()
+    template = Path("projects/_templates/research")
+    expected = {p.relative_to(REPO).as_posix()
+                for p in (REPO / template).rglob("*") if p.is_file()}
+    published_projects = {p.relative_to(destination).as_posix()
+                          for p in (destination / "projects").rglob("*") if p.is_file()}
+    assert published_projects == expected
+    assert expected <= set(manifest["include"]), "template files must be exact-allowlisted"
+    assert not release.git_ignored_files(destination, expected)
+    for path in ("projects/local-input/manuscript.pdf",
+                 "projects/_templates/research/notes/private.md"):
+        ignored = subprocess.run(["git", "check-ignore", path], cwd=destination,
+                                 capture_output=True, text=True)
+        assert ignored.returncode == 0, ignored.stderr
+
+    project = "public-portability-probe"
+    env = os.environ.copy()
+    env.pop("WIKIGRAPH_PROJECTS_DIR", None)
+    def command(script, *args):
+        result = subprocess.run([sys.executable, "-B", f".scripts/{script}.py", *args],
+                                cwd=destination, env=env, capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result.stdout
+    try:
+        command("research_project", "init", project)
+        command("research_project", "validate", project, "--strict")
+        saved = json.loads(command("workspace_state", "memory", "add", project,
+                                   "--title", "Synthetic decision", "--kind", "decision",
+                                   "--content", "public-resume-marker"))
+        command("workspace_state", "item", "add", project, "--title", "Synthetic task",
+                "--state", "active", "--next-action", "Resume synthetic work")
+        recalled = command("workspace_state", "recall", project)
+        assert saved["id"] in recalled and "Resume synthetic work" in recalled
+        assert "public-resume-marker" in command("workspace_state", "memory", "get", project, saved["id"])
+        command("workspace_state", "doctor", project)
+    finally:
+        shutil.rmtree(destination / "projects" / project, ignore_errors=True)
+
+
 def main() -> None:
     check_private_release_boundary()
     check_documentation_omissions()
@@ -299,7 +347,12 @@ def main() -> None:
             "SKILL.md", "agents/openai.yaml", "scripts/diagnosis_preflight.py",
             "scripts/test_diagnosis_preflight.py",
         }
-        assert not (destination / "projects").exists()
+        check_research_template_lifecycle(destination)
+        for name in ("academic-abstract", "manuscript-improvement", "manuscript-evaluation"):
+            root = destination / ".codex/skills" / name
+            assert {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()} == {
+                "SKILL.md", "agents/openai.yaml",
+            }
         private_ignored = subprocess.run(
             ["git", "check-ignore", "projects/local-input/manuscript.pdf"],
             cwd=destination, text=True, capture_output=True,

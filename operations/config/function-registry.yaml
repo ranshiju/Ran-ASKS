@@ -201,6 +201,57 @@ functions:
         write: [general, academic, academic-abstract, academic-manuscript]
       executor: host_agent
 
+  academic.manuscript_evaluation:
+    title: 论文核心贡献评估
+    summary: 由宿主 Agent 阅读稿件，分类核心贡献并分别评定重要性与证据强度，给出可追溯依据、主线定位和强调顺序；评估不自动改稿。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent]
+    allowed_callers: [main_agent, sub_agent]
+    backends: [agent]
+    effects: [read, project]
+    maturity: preview
+    states: [research]
+    bindings:
+      route_capabilities:
+        manuscript-evaluation: [general]
+      executor: host_agent
+
+  academic.citing_papers:
+    title: 指定论文施引文献获取
+    summary: 独立获取并保存引用指定论文的文献题录，记录检索时间、来源、增量与覆盖范围，导出供评价和文献调研离线复用。
+    kind: function
+    audience: [user, agent]
+    control_owners: [code]
+    allowed_callers: [main_agent, sub_agent, api_controller, pipeline]
+    backends: [agent, api]
+    effects: [read, project, remote]
+    maturity: preview
+    bindings:
+      route_capabilities:
+        citing-papers: [general]
+      wg: [citing-papers]
+      cli: [.scripts/citing_papers.py]
+    protocols: [citing-papers-collection-v1, citing-papers-import-v1]
+
+  academic.paper_impact:
+    title: 单篇论文第三方评价与影响证据
+    summary: 保存施引文献检索批次，经作者与期刊双通道排序、库内全文核对和宿主取证，输出有原文定位与表述边界的申报证据。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, temp, project, remote]
+    maturity: preview
+    bindings:
+      route_capabilities:
+        paper-impact: [general]
+      wg: [paper-impact]
+      cli: [.scripts/paper_impact.py]
+      implementations: [.scripts/paper_impact_discovery.py]
+    protocols: [paper-impact-v1, paper-impact-import-v1, citing-papers-import-v1, paper-impact-analysis-v1]
+
   artifact.review:
     title: 独立建议型审阅
     summary: 对冻结的授权材料委派独立审阅视角，接收有依据的建议，不作作品准入裁决或自动改稿。

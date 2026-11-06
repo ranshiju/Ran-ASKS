@@ -56,30 +56,37 @@ path remains traceable.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.24.1
+## What changes in v0.25.0
 
-Paper intake accepts one correctly matched RIS or BibTeX record as its
-bibliographic source; it does not require both formats or an additional online
-cross-check. Without an accepted local record, bounded free metadata lookup can
-use Crossref, Semantic Scholar and arXiv publication links, preferring verified
-formal publication information and recording the year. A managed update also
-supports bibliography companions supplied with an already archived identical PDF.
+Manuscript evaluation identifies the core scientific question, classifies each
+contribution and scores its importance from 1 to 10, with a separate assessment
+of evidence strength. It recommends what to emphasize and what needs support;
+the score is not an acceptance probability. Abstract and full-manuscript work
+present this scientific framing before substantive edits and respect an explicit
+request to confirm it. See the [evaluation guide](operations/research/manuscript-evaluation.md).
 
-API ingestion lets you choose an ingestion LLM and a recovery subagent LLM.
-No specific model or provider is required: FlashX and EV are the maintainer's
-personal choices, not system requirements. The ingestion LLM generates content
-first, followed by deterministic checks. Recovery workers handle eligible failures within the
-existing revision budgets; they do not review every document in full. Missing
-configuration or unresolved errors remain visible. Agent mode keeps its own
-control loop. Long documents can be read through complete, source-addressed
-windows before deciding whether separate chapter pages help retrieval.
+[Citing-paper collections](operations/CITING_PAPERS.md) support bounded OpenAlex
+discovery, imports, deduplication and dated exports. The separate
+[paper-impact workflow](operations/PAPER_IMPACT.md) uses full-text quotations
+bound to Raw sources to assess third-party discussion. Citation metadata and
+author or journal preferences help prioritize reading; they do not establish
+scientific impact. Both workflows retain their state locally.
 
-PPTX intake uses native content where sufficient and requests visual reading for
-pages that need it. Long node labels alone no longer imply a quality defect or a
-required split; source, citation, relationship-coverage and extraction checks
-remain. Gallery keeps its 14 approved works and links to current usage guidance.
-These changes do not establish a measured corpus-wide quality or cost gain. See
-the [Changelog](CHANGELOG.md) for the release scope.
+Reusable skills and persistent-work templates ship inside the repository.
+Agents can follow the checked-in instructions and deterministic commands;
+automatic skill discovery depends on the host. Basic command discovery and
+research initialization/recovery work with Core dependencies, while numerical
+operations request the optional analysis dependencies when needed. Python
+environments, installed libraries and actual user work instances are excluded.
+WorkBuddy and zcode compatibility has not been certified.
+
+Shared file locking, path checks and Python subprocess encoding now have
+platform-specific implementations and a Windows/Linux/macOS CI matrix. This
+does not certify every workflow on Windows. Intake preserves actionable failure
+details, improves source-footnote guidance and flags PPTX content-coverage risks
+for review. Gallery adds an 11-slide Layer Edelstein Effect talk with PDF and
+editable PPTX downloads, bringing the approved collection to 15 works. See the
+[Changelog](CHANGELOG.md) for the release scope.
 
 ## Source-first ingestion and Knowledge Units (preview)
 

@@ -371,6 +371,11 @@ def _validated_api(source, directory, manifest, review):
         if limits:
             block += "\n\n### 复核限制（非原文）\n" + "\n".join("> " + l["detail"].replace("\n", " ") for l in limits)
             warnings.extend({"issue": "pptx_review_limit", "detail": f"第 {original['number']} 页：{l['detail']}"} for l in limits)
+        signals = pptx_visual.content_review_signals(shape, result["supplement"])
+        if signals:
+            block += "\n\n### 内容覆盖复核提示（程序检查，非原文）\n" + "\n".join(
+                "> " + signal["detail"] for signal in signals)
+            warnings.extend({**signal, "detail": f"第 {original['number']} 页：{signal['detail']}"} for signal in signals)
         blocks.append(block + "\n")
         archived.append({k:v for k,v in checked.items() if k != "receipt_path"})
     companion = manifest["header"] + "\n".join(blocks)

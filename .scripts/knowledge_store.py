@@ -2,6 +2,8 @@
 """Shared, academic-only Markdown KU store; indexes are disposable projections."""
 from __future__ import annotations
 
+from platform_compat import fcntl
+
 from contextlib import contextmanager
 import hashlib
 import json
@@ -38,20 +40,11 @@ def lock(repo, key):
     path = si.managed(repo, "temp/knowledge-locks/" + si.fingerprint(key) + ".lock")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as stream:
-        if os.name == "nt":
-            import msvcrt
-            stream.write(b"0"); stream.flush(); stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(stream, fcntl.LOCK_EX)
+        fcntl.flock(stream, fcntl.LOCK_EX)
         try:
             yield
         finally:
-            if os.name == "nt":
-                stream.seek(0); msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream, fcntl.LOCK_UN)
+            fcntl.flock(stream, fcntl.LOCK_UN)
 
 
 def atomic_text(path, text):

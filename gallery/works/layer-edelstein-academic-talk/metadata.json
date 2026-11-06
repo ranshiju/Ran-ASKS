@@ -1,0 +1,90 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "layer-edelstein-academic-talk",
+  "title": "层 Edelstein 效应学术报告",
+  "kind": "academic-talk",
+  "language": "en",
+  "edition": 1,
+  "selected_on": "2026-11-05",
+  "slide_count": 11,
+  "canvas_mm": [
+    338.6667,
+    190.5
+  ],
+  "capabilities": [
+    "presentation",
+    "visual-qa"
+  ],
+  "references": [
+    {
+      "doi": "10.1103/qhvs-pfkq",
+      "url": "https://doi.org/10.1103/qhvs-pfkq"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "b38a61ad403eec4dcba15e6e76b83acfcd2034cf9b02e37042ca01e04c3514a2",
+    "cover.webp": "a3756d1daaa9ec9fff746d1a5a5c88b24796bd7e91c697f451935bbf4428ef8f",
+    "preview-01.webp": "5880e23b7921909db6c7d23f8c6679e99c0b9689486490c9271764dd7979b180",
+    "preview-03.webp": "ca9fc6703289f4bf0748d6acdcaa046438d1e01acd3ac9b79cd2d4dd9700ea31",
+    "preview-05.webp": "2ab2e17885c2e9de33410a32f254387eb36b574f565fbd8aa19fb253ef414833",
+    "preview-08.webp": "158096d187077195afb394f248ba1a7344f240d1b6105a1379396d23084954a8",
+    "talk.pdf": "58357a442ffd42651cd87ff03cc615831f77a184382f277dff70b9e50d1ba2cf",
+    "talk.pptx": "a7ead0668180842f64d997c7ef2e63c1683d3e576d842a25ca2f8d5bf79206db"
+  },
+  "presentation": {
+    "name": "层 Edelstein 效应学术报告",
+    "summary": "用 11 页英文报告串联层分辨自旋响应的研究背景、最小模型、对称性分类、材料计算与器件展望。",
+    "type_label": "学术报告",
+    "format_label": "11 页 · English · 16:9 · PPTX / PDF",
+    "audience": "凝聚态物理与自旋电子学研究者",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第 1 页 · 报告封面",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-03.webp",
+        "label": "第 3 页 · 核心效应",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-05.webp",
+        "label": "第 5 页 · 对称性分类流程",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-08.webp",
+        "label": "第 8 页 · MoSSe 材料计算",
+        "document": "talk.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "talk.pdf",
+        "label": "完整报告 PDF · 11 页"
+      },
+      {
+        "file": "talk.pptx",
+        "label": "下载 PowerPoint"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "presentation",
+        "text": "使用论文到 PPT 功能制作学术报告，把背景、机制、对称性与材料结果组织成逐页叙事，保留原生文字及论文插图。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "从选定 PPTX 导出同源 PDF 与预览，核对页数、文字和尺寸，检查页面总览及代表页布局。"
+      }
+    ],
+    "prompt": "请根据这篇论文制作一份英文组会报告 PPT，面向相关专业研究者。组织研究背景、核心问题、最小模型、对称性分析和材料结果，最后给出器件展望。保留原生可编辑文字，正确引用论文插图，区分理论预测、计算证据与实验验证；导出完整 PPTX 和 PDF。",
+    "source_note": "Zhou 等，Layer Edelstein Effect，Physical Review Letters 137, 076401 (2026)。保留选定报告的内容，科学适用范围以原论文及补充材料为准；论文素材保留原有权利。",
+    "credit": "用户提供的 ASKS 协作制作作品。",
+    "boundary": "展示第 1、3、5、8 页，完整报告共 11 页。文字和部分图形可编辑，论文插图及部分公式为图片；器件部分为展望。示例指令用于制作类似作品。"
+  }
+}

@@ -402,3 +402,22 @@ is corrected from the same Markdown; its preceding 33 pages are retained.
 2026年11月5日的 `v0.24.1` 修正模型选择说明：用户指定摄入 LLM 与兜底子 agent LLM，
 FlashX/EV 仅是个人配置，不构成强制要求。示例中的生成与命题抽取继承所选摄入模型，
 阶段专用覆盖仍可选。PDF 最后一页按同一 Markdown 更正，前33页保持。
+
+The 2026-11-06 `v0.25.0` update adds contribution classification and importance
+scoring with separate evidence strength, persistent citing-paper collections,
+and Raw-bound third-party impact assessment. Repository-owned skills and
+research templates support portable initialization and recovery; installed
+runtimes and actual work instances remain excluded. Shared platform primitives
+gain a Windows/Linux/macOS CI matrix, without certifying every workflow or
+third-party Agent host. Intake diagnostics and source-footnote guidance improve,
+and Gallery adds an 11-slide physics talk, bringing the collection to 15 works.
+These compatible capabilities warrant a MINOR increment. The PDF retains the
+preceding 34 reviewed pages and appends the same update as the Markdown;
+frozen paper artifacts remain unchanged.
+
+2026年11月6日的 `v0.25.0` 新增贡献分类、重要性评分与独立证据强度评价，引用论文
+持续集合，以及绑定 Raw 的第三方影响评价。仓库内 skill 与研究模板支持可移植的
+初始化和恢复，已安装运行环境与真实工作实例仍排除。共享平台基础操作新增
+Windows、Linux、macOS CI 矩阵，不认证所有工作流或第三方智能体宿主。摄入改进
+失败详情与来源脚注指引；Gallery 新增11页物理学术报告，作品增至15件。兼容新增
+能力按 MINOR 发布；PDF 保留前34页并追加与 Markdown 相同的更新，冻结论文产物不变。

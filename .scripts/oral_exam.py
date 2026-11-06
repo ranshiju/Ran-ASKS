@@ -6,7 +6,7 @@ import argparse
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
-import fcntl
+from platform_compat import fcntl, fsync_path, safe_open
 import hashlib
 import json
 import os
@@ -130,11 +130,7 @@ def atomic_json(path, value):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        fsync_path(path.parent)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -203,7 +199,7 @@ class OralExam:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.root, 0o700)
         lock_path = self._owned(self.root / ".lock", self.root)
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        descriptor = safe_open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         with os.fdopen(descriptor, "a") as stream:
             fcntl.flock(stream, fcntl.LOCK_EX)
             self._owned(self.state_path, self.root)

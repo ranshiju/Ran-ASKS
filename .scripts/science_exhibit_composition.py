@@ -2,6 +2,8 @@
 """Bounded exhibit composition, immutable image assets and single-source text."""
 from __future__ import annotations
 
+from platform_compat import fsync_path
+
 from copy import deepcopy
 import hashlib
 import os
@@ -39,11 +41,7 @@ def import_asset(core, store, path, source_label, usage):
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, destination)
-            descriptor = os.open(folder, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+            fsync_path(folder)
         finally:
             Path(temporary).unlink(missing_ok=True)
     return {'id': 'asset-' + sha256[:16], 'path': str(destination.relative_to(core.REPO)),

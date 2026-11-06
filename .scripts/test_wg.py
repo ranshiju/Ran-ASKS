@@ -636,6 +636,37 @@ def test_single_bracket_raw_citations_reuse_only_exact_unprotected_addresses():
     assert module.wl.normalize_raw_footnotes(duplicate, reuse_inline=True) == duplicate
 
 
+def test_angle_raw_citations_preserve_evidence_and_protected_markup():
+    address = "academic/raw/references/demo/paper.md#L7"
+    supplied = "academic/raw/references/demo/paper.md#L19"
+    unknown = "academic/raw/references/demo/paper.md#L70"
+    text = (f"---\ntitle: '<{address}>'\n---\n"
+            f"## 研究方向定位\n结论。<{address}> 新证据<{supplied}>\n"
+            f"## Content\n未知<{unknown}>，未提供范围<{address}-L9>。\n"
+            f"## Sources\n[^r1]: {address}\n")
+    expected = text.replace(f"结论。<{address}>", "结论。[^r1]")
+    assert module.wl.normalize_raw_footnotes(text) == text
+    assert module.wl.normalize_raw_footnotes(text, reuse_inline=True) == expected
+    normalized = module.wl.normalize_raw_footnotes(text, reuse_inline=True, supplied_locators=(supplied,))
+    sections, definitions = module.wl.parse_wiki_text(normalized)
+    assert sections[0].raw_citations == (address, supplied)
+    assert definitions == {"r1": address, "r2": supplied}
+    assert f"未知<{unknown}>，未提供范围<{address}-L9>。" in normalized
+    assert module.wl.normalize_raw_footnotes(normalized, reuse_inline=True, supplied_locators=(supplied,)) == normalized
+    protected = (f"`<{address}>`\n[link](<{address}>)\n[<{address}>](target)\n"
+                 f"[[<{address}>]]\n<<{address}>>\n\\<{address}>\n!<{address}>\n"
+                 f'<a title="<{address}>">label</a>\n'
+                 f"    <{address}>\n\t<{address}>\n"
+                 f"<!-- <{address}> -->\n<!--\n<{address}>\n-->\n"
+                 f"~~~text\n<{address}>\n~~~\n"
+                 f"[link]: <{address}>\n")
+    body = f"## Content\n{protected}\n## Sources\n[^r1]: {address}\n"
+    assert module.wl.normalize_raw_footnotes(body, reuse_inline=True) == body
+    for invalid in (text + f"[^r1]: {unknown}\n",
+                    text.replace("## Sources\n", "## Other\n").replace(f"[^r1]: {address}\n", "")):
+        assert module.wl.normalize_raw_footnotes(invalid, reuse_inline=True, supplied_locators=(supplied,)) == invalid
+
+
 def test_raw_footnote_wrappers_preserve_evidence_and_query_locators():
     raw, wiki = setup_locator_wiki()
     try:
@@ -1097,6 +1128,66 @@ def test_read_raw_unresolvable_path():
 
 # ============ main() 分发 ============
 
+def test_core_entry_points_without_numeric_dependencies():
+    """Fresh processes must not import optional numeric packages for Core work."""
+    probe = r'''
+import importlib.abc
+import runpy
+import sys
+from unittest.mock import patch
+
+class NoNumerics(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'numpy', 'scipy'}:
+            raise ModuleNotFoundError('blocked optional dependency', name=fullname)
+
+sys.meta_path.insert(0, NoNumerics())
+sys.path.insert(0, '.scripts')
+if len(sys.argv) > 1:
+    sys.argv = sys.argv[1:]
+    runpy.run_path(sys.argv[0], run_name='__main__')
+else:
+    import embed_helper as eh
+    import hub_semantics as hs
+    import query_actions as qa
+    with eh.offline():
+        assert eh._OFFLINE.get()
+    assert not eh._OFFLINE.get()
+    with qa.query_scope('private'):
+        assert eh._OFFLINE.get()
+    with patch.object(eh.urllib.request, 'urlopen') as remote:
+        for call in (
+            lambda: eh.cosine_sim([1, 0], [[1, 0]]),
+            lambda: eh.embed_batch(['synthetic']),
+            lambda: eh.embed_cached_batch(['synthetic']),
+            lambda: hs._embed(['synthetic']),
+        ):
+            try:
+                call()
+            except ModuleNotFoundError as exc:
+                assert exc.name == 'numpy'
+                assert 'uv sync --frozen --extra analysis' in str(exc)
+            else:
+                raise AssertionError('missing numeric dependency silently accepted')
+        remote.assert_not_called()
+    broken = ModuleNotFoundError('broken internal import', name='numpy.internal_test')
+    with patch('builtins.__import__', side_effect=broken):
+        try:
+            eh.require_numpy()
+        except ModuleNotFoundError as exc:
+            assert exc is broken
+        else:
+            raise AssertionError('internal import error suppressed')
+    assert 'numpy' not in sys.modules
+'''
+    for args in (
+        (), ('.scripts/wg.py', '--help'), ('.scripts/frontier.py', '--help'),
+        ('.scripts/workspace_state.py', '--help'), ('.scripts/oral_exam.py', 'help'),
+    ):
+        result = subprocess.run([sys.executable, '-c', probe, *args], cwd=REPO,
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+
 def test_main_unknown_command_errors():
     """未知子命令 → argparse SystemExit(2)，不静默成功。"""
     try:
@@ -1132,6 +1223,7 @@ def main():
     test_wiki_locator_minimal_validation()
     test_inline_raw_citation_reuse_preserves_prose_and_protected_markup()
     test_single_bracket_raw_citations_reuse_only_exact_unprotected_addresses()
+    test_angle_raw_citations_preserve_evidence_and_protected_markup()
     test_raw_footnote_wrappers_preserve_evidence_and_query_locators()
     test_wiki_locator_rejects_raw_handle_and_truncated_footnote()
     test_wiki_graph_source_points_to_cited_section()
@@ -1156,6 +1248,7 @@ def main():
     test_read_raw_binary_without_companion_is_not_verified()
     test_read_raw_text_image_uses_companion_without_decoding_image()
     test_read_raw_unresolvable_path()
+    test_core_entry_points_without_numeric_dependencies()
     test_main_unknown_command_errors()
     print("wg regression: PASS")
 

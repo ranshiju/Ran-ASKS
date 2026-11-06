@@ -163,7 +163,9 @@ class DiagnosisIntegrationTest(unittest.TestCase):
         for name in files:
             path = (SKILL / name).relative_to(REPO).as_posix()
             self.assertIn(path, manifest["include"])
-        self.assertFalse(any(p.startswith("projects/") for p in manifest["include"]))
+        project_files = [p for p in manifest["include"] if p.startswith("projects/")]
+        self.assertTrue(all(p.startswith("projects/_templates/research/")
+                            and not any(c in p for c in "*?[") for p in project_files))
 
     def test_skill_is_not_git_ignored(self):
         # Public build directories may not yet have Git metadata.

@@ -765,6 +765,25 @@ def test_task_specific_execution_guidance_is_dispatched():
     assert "不读取脚本源码中的提示词模板" in query["prompt"]
 
 
+def test_manuscript_evaluation_dispatch_is_focused_and_discoverable():
+    listing = run("python3", ".scripts/route.py", "--list").stdout
+    assert "manuscript-evaluation: academic.manuscript_evaluation profiles=general" in listing
+    output = run("python3", ".scripts/route.py", "--capability", "manuscript-evaluation").stdout
+    path = "operations/research/manuscript-evaluation.md"
+    assert output.count(f"--- {path} (全文) ---") == 1
+    assert (REPO / path).read_text().strip() in output
+    # Evaluation dispatch must not silently start rewriting or an API review.
+    for unrelated in ("operations/WRITE.md", "operations/REVIEW.md",
+                      "operations/research/physics-manuscript-editing.md"):
+        assert f"--- {unrelated}" not in output
+    invalid = subprocess.run(
+        ["python3", ".scripts/route.py", "--capability", "manuscript-evaluation",
+         "--capability-profile", "academic-abstract"],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    assert invalid.returncode != 0
+
+
 def test_state_capability_tool_dispatch_is_explicit():
     listing = run("python3", ".scripts/route.py", "--list").stdout
     assert "持续工作:" in listing
@@ -1289,6 +1308,7 @@ if __name__ == "__main__":
     test_ingest_context_warmup_is_compact_complete_and_profiled()
     test_paper_update_dispatch_keeps_local_changes_out_of_full_compilation()
     test_task_specific_execution_guidance_is_dispatched()
+    test_manuscript_evaluation_dispatch_is_focused_and_discoverable()
     test_state_capability_tool_dispatch_is_explicit()
     test_query_stage_dispatch()
     test_engineering_graph()

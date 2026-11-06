@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from copy import deepcopy
-import fcntl
+from platform_compat import fcntl, fsync_path, safe_open
 import hashlib
 import json
 import os
@@ -114,11 +114,7 @@ def atomic_json(path, value):
             os.fsync(stream.fileno())
         os.replace(temporary, path)
         replaced = True
-        descriptor = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        fsync_path(path.parent)
     except BaseException:
         if replaced:
             if previous is None:
@@ -133,11 +129,7 @@ def atomic_json(path, value):
                     os.replace(restore_path, path)
                 finally:
                     Path(restore_path).unlink(missing_ok=True)
-            directory_descriptor = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_descriptor)
-            finally:
-                os.close(directory_descriptor)
+            fsync_path(path.parent)
         raise
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -147,7 +139,7 @@ def atomic_json(path, value):
 def locked(store):
     store = store_path(store)
     require(store.is_dir(), 'Exhibit store does not exist')
-    descriptor = os.open(store / '.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    descriptor = safe_open(store / '.lock', os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         yield store
@@ -545,23 +537,11 @@ def build(store, expected_revision):
                 manifest['content_sha256'] = digest(state['content'])
             atomic_json(candidate / 'manifest.json', manifest)
             for path in candidate.iterdir():
-                descriptor = os.open(path, os.O_RDONLY)
-                try:
-                    os.fsync(descriptor)
-                finally:
-                    os.close(descriptor)
-            descriptor = os.open(candidate, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+                fsync_path(path)
+            fsync_path(candidate)
             os.rename(candidate, destination)
             published = True
-            descriptor = os.open(outputs, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+            fsync_path(outputs)
             if state['schema'] == 'science-exhibit-v2':
                 state = deepcopy(state)
                 state['workflow']['preview'] = {

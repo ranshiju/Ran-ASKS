@@ -12,12 +12,26 @@ import json, sys, urllib.error, urllib.request, time
 from pathlib import Path
 from contextlib import contextmanager
 from contextvars import ContextVar
-import numpy as np
 
 import env_config
 
 EMBED_DB = None  # embeddings 独立 db 路径(由 embed_init 设置)
 _OFFLINE = ContextVar("embedding_offline", default=False)
+
+
+def require_numpy():
+    """Load numeric support only when needed, before provider/cache effects."""
+    try:
+        import numpy
+    except ModuleNotFoundError as exc:
+        if exc.name != "numpy":
+            raise
+        raise ModuleNotFoundError(
+            "此操作需要 NumPy；请在仓库目录运行 uv sync --frozen --extra analysis "
+            "（或 python -m pip install '.[analysis]'）。",
+            name="numpy",
+        ) from exc
+    return numpy
 
 
 class EmbeddingAPIError(RuntimeError):
@@ -152,6 +166,7 @@ def embed(text, timeout=30):
 def embed_batch(texts, batch_size=64, timeout=60):
     """批量文本 → np.array(shape=[N, 2048])。API 失败重试一次，仍失败则抛 RuntimeError。"""
     _require_online()
+    np = require_numpy()
     all_embs = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i+batch_size]
@@ -190,6 +205,7 @@ def embed_cached_batch(texts, cache_type="keyword"):
     返回 np.array(shape=[N, 2048]),顺序与 texts 一致。
     """
     import sqlite3
+    np = require_numpy()
     if not texts:
         return np.array([])
     _require_online()
@@ -277,6 +293,7 @@ def enforce_size_cap(max_mb=DEFAULT_CAP_MB):
     NULL last_used 视为最旧(从未被读取)。node_texts 映射不受影响。
     """
     import sqlite3
+    np = require_numpy()
     db = sqlite3.connect(_get_embed_db())
     _ensure_cache_schema(db)
     max_bytes = max_mb * 1024 * 1024
@@ -325,6 +342,7 @@ def enforce_size_cap(max_mb=DEFAULT_CAP_MB):
 
 def cosine_sim(query_vec, node_vecs):
     """query vs N 节点 → 相似度数组(shape=[N])"""
+    np = require_numpy()
     q = np.array(query_vec)
     nv = np.array(node_vecs)
     if nv.ndim == 1: nv = nv[None, :]
@@ -345,6 +363,7 @@ def softmax_sample(sims, T=0.5, top_k=None, cutoff=None):
       top_k: 最终采样个数(None=只返回概率不采样)
     返回 (probs_array_full 或截断后, picked_indices_or_None, cutoff_indices)
     """
+    np = require_numpy()
     sims = np.array(sims)
     n = len(sims)
     k_cutoff = min(cutoff or 50, n)
@@ -395,6 +414,7 @@ def match_by_embedding(new_texts, existing_texts, threshold=0.9, *, extra_texts=
     """
     if not new_texts or not existing_texts:
         return {}
+    np = require_numpy()
     new_texts = list(dict.fromkeys(new_texts))
     existing_texts = list(dict.fromkeys(existing_texts))
     all_texts = new_texts + existing_texts

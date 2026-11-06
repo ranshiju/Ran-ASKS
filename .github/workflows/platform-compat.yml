@@ -1,0 +1,59 @@
+name: Platform compatibility
+on:
+  pull_request:
+    paths: ['.scripts/**', 'ran_asks/**', 'pyproject.toml', '.github/workflows/platform-compat.yml']
+  push:
+    branches: [main, master]
+    paths: ['.scripts/**', 'ran_asks/**', 'pyproject.toml', '.github/workflows/platform-compat.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portability:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, python: '3.12'}
+          - {os: windows-latest, python: '3.14'}
+          - {os: ubuntu-latest, python: '3.12'}
+          - {os: macos-latest, python: '3.12'}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8:strict
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[visual,office,pdf]"
+      - name: Install LibreOffice on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install libreoffice-fresh --no-progress -y
+      - name: Install LibreOffice on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libreoffice-impress fonts-noto-cjk
+      - name: Install LibreOffice on macOS
+        if: runner.os == 'macOS'
+        run: brew install --cask libreoffice
+      - name: Native locks, paths, CP936 child environment, and actual PPTX rendering
+        run: python .scripts/test_windows_compat.py --render
+      - name: Explicit portable regression set
+        shell: python
+        run: |
+          import subprocess, sys
+          names = [
+              'test_agent_task', 'test_visual_qa', 'test_slide_reuse',
+              'test_pptx_document', 'test_pptx_academic', 'test_pptx_intake', 'test_source_ingest',
+              'test_knowledge_units', 'test_citing_papers', 'test_paper_impact',
+          ]
+          failures = []
+          for name in names:
+              result = subprocess.run([sys.executable, f'.scripts/{name}.py'])
+              if result.returncode:
+                  failures.append(name)
+          if failures:
+              raise SystemExit('Failed: ' + ', '.join(failures))

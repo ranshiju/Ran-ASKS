@@ -46,6 +46,31 @@ cross-domain/embeddings.db-shm
 # Knowledge content and local runtime artifacts
 # This public template keeps only explicit synthetic examples.
 projects/**
+# Exact public research template; user instances and extra template files stay ignored.
+!projects/_templates/
+!projects/_templates/research/
+!projects/_templates/research/AGENTS.md
+!projects/_templates/research/README.md
+!projects/_templates/research/schema.yaml
+!projects/_templates/research/notes/
+!projects/_templates/research/notes/status.md
+!projects/_templates/research/codes/
+!projects/_templates/research/codes/README.md
+!projects/_templates/research/codes/docs/
+!projects/_templates/research/codes/docs/README.md
+!projects/_templates/research/codes/docs/PHYSICS.md
+!projects/_templates/research/codes/experiments/
+!projects/_templates/research/codes/experiments/README.md
+!projects/_templates/research/codes/analysis/
+!projects/_templates/research/codes/analysis/README.md
+!projects/_templates/research/codes/tests/
+!projects/_templates/research/codes/tests/README.md
+!projects/_templates/research/codes/formulas/
+!projects/_templates/research/codes/formulas/.gitkeep
+!projects/_templates/research/manu/
+!projects/_templates/research/manu/.gitkeep
+!projects/_templates/research/outputs/
+!projects/_templates/research/outputs/.gitkeep
 **/raw/**
 !**/raw/.gitkeep
 **/wiki/**

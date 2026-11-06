@@ -7,6 +7,29 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-06
+
+### Version decision / 版本判断
+
+- MINOR: Add compatible contribution evaluation, persistent citation and impact workflows, and portable work templates with platform hardening
+- MINOR（中文）：新增兼容的论文贡献评估、持续引用与影响评价工作、可移植工作模板，并加强平台基础操作
+
+### Highlights
+
+- Added manuscript contribution classification and 1–10 importance scoring, separate evidence assessment and recommendations for scientific framing before substantive abstract or manuscript edits.
+- Added persistent citing-paper discovery/import/export and a separate Raw-bound third-party impact workflow. Metadata and reading preferences are not treated as verified scientific impact.
+- Shipped repository-owned writing skills and exact research initialization/recovery templates; fixed Core command discovery so numerical dependencies load only when needed. Installed environments and real user work remain excluded.
+- Added shared platform locking, path and subprocess-encoding support with Windows/Linux/macOS CI. Improved intake failure details, bounded semantic-format recovery, source-footnote guidance and PPTX review signals; broad cross-platform certification is not claimed.
+- Added the approved 11-slide Layer Edelstein Effect talk and synchronized bilingual guidance and the Chinese introduction PDF. Frozen paper artifacts are unchanged.
+
+### 主要更新
+
+- 新增论文贡献分类、1–10分重要性评分、独立证据强度评价，以及摘要或全文实质修改前的科学定位建议。
+- 新增可持续的引用论文检索、导入与导出，及独立的 Raw 证据绑定第三方影响评价；元数据与阅读偏好不直接视为已核实的科学影响。
+- 随仓库交付写作 skill 与精确批准的研究初始化、恢复模板；修复 Core 命令发现对数值依赖的提前加载，环境和真实工作实例仍排除。
+- 新增共享文件锁、路径与子进程编码适配及三平台 CI；改进摄入失败详情、有界语义格式恢复、来源脚注指引和 PPTX 复核提示，不宣称全面跨平台认证。
+- 新增已批准的11页 Layer Edelstein Effect 学术报告，同步中英文说明和中文介绍 PDF，冻结论文产物不变。
+
 ## [0.24.1] - 2026-11-05
 
 ### Version decision / 版本判断
@@ -765,5 +788,7 @@ manifests and checksums.
 
 [0.24.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.24.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.24.1...HEAD
 [0.24.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.24.1
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.0

@@ -194,6 +194,7 @@ python3 .scripts/long_document_plan.py <仓库内 Markdown/TXT 路径>
    - **people 页两种深度**（定位见 `academic/SCHEMA.md`「people 页定位」）：
      - **纪要 people 页**（深挖）：如该人物在纪要中使用了昵称/英文 ID（如 qiaotete），填入 `nickname` 字段支持昵称反查；识别 `师生`、`合作者` 关系（谁指导谁、谁与谁合作），填入 `role`/`collaboration`/`advisor` 字段
      - **论文 people 页**（极简指针）：与张明远共同署名过至少一篇论文的作者全部建页；信息从论文作者行直接提取（name/institution/papers），不深挖师生/职称/同名核实，末尾标注"检索辅助定位，未做独立核实"
+     - **重点人物资历页**：用户明确要求或 paper-impact 初筛需要时，在同一 `academic/wiki/authors/` 人物页补充经受管 Raw 支撑的奖项、院成员、学会 Fellow、任职和机构。稳定身份、事实日期与历史任期须核实，不能沿用普通导航页的宽松同名合并规则；`impact_profile` 复用协议见 `operations/PAPER_IMPACT.md`。创建前核对已有实体，暂存页先走 `graph_ingest --plan-only --validate-page`，发布后受管建图并通过 `ingest_check --graph`。
 6. 更新 `wiki/index.md`，添加新条目（确保描述行包含核心关键词，信息密度足够搜索命中）
 7. **（已移除，2026-07-25）**：原关键词索引维护步骤已删除——`keywords` 字段已去(功能被图邻接节点覆盖),`tags` 字段已去(功能被 hub↔page 边覆盖)。检索入口改走图 search(title/aliases),主题归属改走步骤 9 hub↔page 边。原 `keyword-index*.md` 已删除（融进 graph.db）。
 8. **建边（graph.db 主数据化，2026-07-25 v4）**：边只在 graph.db（不再写 md `## Core Triples` 段）。LLM 产临时结构化片段 → 程序入库
@@ -580,6 +581,8 @@ LLM 产出的 concept 端点须是**裸名带语义**（可独立指代的实体
 **结构化范围**：图只记录有独立导航或检索价值且证据明确的关系；其余结论与细节完整保留在 Wiki/Raw，不逐句建节点、不为凑结构拆分术语。概念名称可长、可含标点或“基于”等修饰词；它们不能替代对原文证据与明确关系角色的判断。历史 `is_descriptive_phrase` 仅保留作旧指标/实验兼容，不用于新摄入告警、节点定型或质量验收；旧报告和存量图不自动改写。来源、引用、非法谓词、重复和身份歧义仍按各自规则检查。
 
 **Paper semantic contract（`paper-semantic-v3`，pipeline v13）**：API 的独立 slots prompt 与 Agent 的 combined prompt 都由 `build_paper_semantic_contract()` 注入同一份规则；Agent task v4 另以结构化字段直接暴露同一作用域边界，不再仅给出无主语区分的全量已登记谓词。`研究基础/核心方法/对比方法` 指向可复用 concept；`核心创新点/局限性/未来展望` 指向完整 proposition；概念间关系两端均为独立 concept，且关系链至少有一个端点经论文级概念谓词锚定。`主要研究/涉及/应用于/探索/属于/研究关键词` 等由 Graph 编译退役的论文级方向或标签谓词在语义校验期阻断，避免 Worker 产出通过校验后又被静默丢弃。`概念说明` 以每行第一个 `|` 分隔概念名与说明，说明正文中的 LaTeX 数学竖线保持原样。旧式“叙述节点 + 两条拆分边 + 一条自由边”不再由 prompt 生成；proposition 到既有概念的稀疏包含边继续由程序确定性编译。
+
+**漏标题的有限格式恢复（shared，2026-11-06）**：标准输出仍包含独立成行的 `三元组:`、`概念说明:`。若仅有一个显式三元组区，其中完整三列关系之后连续出现双字段说明，且说明名称逐字、无重复地覆盖此前由“本论文”的概念谓词声明的全部概念，解析器可在内存恢复概念说明分区。每条描述须超过12个非空白字符并包含句内标点，以排除短关系词；这只是保守格式判据，不认证语义。存在额外/缺失概念、占位值、交错关系、多竖线、重复分区或已有概念说明标题时，不执行此恢复，继续原校验。缺标题且含数学竖线的说明无法可靠分字段，须显式补标题；有标题时仍按第一个竖线分割并保留数学正文。恢复不改暂存原文、不生成关系或调用模型；`semantic_slot_diagnostics.format_repairs` 记录规则、原行号、数量和 `source_modified=false`，后续解析、IR、预检与提交共享同一结果，仍检查证据及内容合法性。Agent/API 路径使用同一实现。
 
 **局部修补 Worker（`semantic-patch-v1`，2026-09-02）**：`bare_abbreviation`/`descriptive_phrase` 非阻断，不调用 LLM；`duplicate_line` 由程序删除重复行并保留首条。只有仍存在其他非机械阻断 warning 时，程序才把整批问题编号为稳定 issue catalog，调用一次 `ingest_semantic_fill`（`retries=0`）。Worker 只能逐个 issue ID 返回最多 4 条完整三元组或 abstain，不能输出完整 Wiki/语义槽、source locator、路径、作者或 venue。程序按 `field` 局部应用并全量复验；同一协议版本、语义文本和 issue catalog 计算 `input_hash`，schema 合格的决策缓存到 `temp/inbox-state/<txn>-semantic-patch-decision.json`，resume 不重复调用。失败直接转 agent 修事务草稿，不走第二模型链。
 

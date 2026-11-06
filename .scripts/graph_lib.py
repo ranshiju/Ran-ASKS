@@ -264,7 +264,7 @@ def _ensure_aliases_many_to_many(conn):
 @contextmanager
 def graph_writer_lock(db_path=None):
     """Serialize live graph simulations and commits across Agent processes."""
-    import fcntl
+    from platform_compat import fcntl
 
     target = Path(db_path or GRAPH_DB).resolve()
     digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:16]

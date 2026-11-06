@@ -64,6 +64,7 @@ import graph_lib as gl
 import query_actions as qa
 import function_registry as fr
 import agent_task
+from platform_compat import configure_stdio, run_python
 import inbox_state
 
 RAW_PREVIEW_CHARS = 6000
@@ -89,10 +90,7 @@ def envelope(action, result, sources=None, status="ok", error="", ok=None):
 
 
 def run_script(args: list[str], **kw) -> tuple[int, str, str]:
-    binary_input = isinstance(kw.get("input"), bytes)
-    p = subprocess.run(args, capture_output=True, text=not binary_input, **kw)
-    if binary_input:
-        return p.returncode, p.stdout.decode("utf-8", errors="replace"), p.stderr.decode("utf-8", errors="replace")
+    p = run_python(args, capture_output=True, **kw)
     return p.returncode, p.stdout, p.stderr
 
 
@@ -727,6 +725,28 @@ def cmd_science_exhibit(args):
                     error=result.get("error", error.strip())[:500] if failed else "")
 
 
+def cmd_citing_papers(args):
+    code, output, error = run_script([sys.executable, str(SCRIPTS / "citing_papers.py"), *args.citing_args])
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        return envelope("citing-papers", None, status="error", error=(error or output).strip()[:500])
+    failed = code != 0 or not result.get("ok", False)
+    return envelope("citing-papers", result, status="error" if failed else "ok", ok=not failed,
+                    error=result.get("error", error.strip())[:500] if failed else "")
+
+
+def cmd_paper_impact(args):
+    code, output, error = run_script([sys.executable, str(SCRIPTS / "paper_impact.py"), *args.impact_args])
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        return envelope("paper-impact", None, status="error", error=(error or output).strip()[:500])
+    failed = code != 0 or not result.get("ok", False)
+    return envelope("paper-impact", result, status="error" if failed else "ok", ok=not failed,
+                    error=result.get("error", error.strip())[:500] if failed else "")
+
+
 def cmd_review(args):
     code, output, error = run_script([sys.executable, str(SCRIPTS / "review.py"), *args.review_args])
     try:
@@ -919,6 +939,12 @@ def build_parser():
     p = sub.add_parser("science-exhibit", help="论文到公众科普展板：源绑定创作、局部修订与本地草稿导出")
     p.add_argument("exhibit_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_science_exhibit)
+    p = sub.add_parser("citing-papers", help="独立获取、保存、更新和导出指定论文的施引文献题录")
+    p.add_argument("citing_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_citing_papers)
+    p = sub.add_parser("paper-impact", help="单篇论文施引文献、人物/期刊优选、摄入建议与第三方评价证据")
+    p.add_argument("impact_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_paper_impact)
     p = sub.add_parser("review", help="独立建议型审阅：准备任务、接收反馈和报告，不改稿或作内容门禁")
     p.add_argument("review_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_review)
@@ -987,4 +1013,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    configure_stdio()
     sys.exit(main())

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
+from platform_compat import fcntl, fsync_path, safe_open
 import os
 import re
 import secrets
@@ -61,7 +61,7 @@ def relative(path):
 
 def read_bytes(path, maximum=MAX_BYTES):
     path = path_in_repo(path)
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    descriptor = safe_open(path)
     with os.fdopen(descriptor, "rb") as stream:
         require(stat.S_ISREG(os.fstat(stream.fileno()).st_mode), "Expected a regular file")
         data = stream.read(maximum + 1)
@@ -84,11 +84,7 @@ def write_bytes(path, data):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        fsync_path(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -121,7 +117,7 @@ def run_path(value):
 def locked(run):
     run = run_path(run)
     lock = path_in_repo(run / ".lock")
-    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    descriptor = safe_open(lock, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         yield run

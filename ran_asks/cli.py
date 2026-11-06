@@ -76,8 +76,11 @@ def main(argv: list[str] | None = None) -> int:
     command = args[0]
     script_name = FOUNDATION_COMMANDS.get(command, "wg.py")
     forwarded = args[1:] if command in FOUNDATION_COMMANDS else args
+    # Workspace owns the protocol implementation; the installed shim locates it.
+    sys.path.insert(0, str(workspace / ".scripts"))
+    from platform_compat import python_env
     completed = subprocess.run(
         [sys.executable, str(workspace / ".scripts" / script_name), *forwarded],
-        cwd=workspace,
+        cwd=workspace, env=python_env(),
     )
     return completed.returncode

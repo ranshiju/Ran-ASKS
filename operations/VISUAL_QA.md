@@ -14,6 +14,7 @@
 ```bash
 VISUAL_QA_API_BASE=...
 VISUAL_QA_API_KEY=...
+VISUAL_QA_API_PATH=  # 可选；自定义网关可填 /chat/completions
 VISUAL_QA_MODEL=GLM-5.3-FlashX
 VISUAL_QA_FALLBACK_MODEL=GLM-4.6V
 VISUAL_QA_REASONING_EFFORT=low
@@ -118,3 +119,11 @@ prompt-v2 仅将有可见证据且影响阅读、解释或可访问性的缺陷�
 ### 本地 PPT 字体与重做核验
 
 打包 macOS LibreOffice 渲染时，shared 入口显式加载随附的 fontconfig 配置以发现系统中文字体；调用方已有 `FONTCONFIG_FILE` / `FONTCONFIG_PATH` 时保留其选择，不安装或改写宿主字体。字体替代仍可能改变换行，须逐页核对。旧渲染缓存不覆盖；摄入核验发现坏渲染时，新建同源事务生成证据，成功后用 `inbox_state.py --supersede <旧事务> --by <完成事务>` 关闭未提交旧事务，保留审计。
+
+## 平台与接口兼容
+
+`VISUAL_QA_API_PATH`（CLI 为 `--api-path`）按 `env_config.join_api_url` 与 base 拼接，重叠路径不重复；留空时识别 `/v1`、`/v4` 等版本后缀或完整 `/chat/completions`，否则默认 `/v1/chat/completions`。PPT 视觉识读与科学展板读者检查继承此设置；缓存包含最终 endpoint 的摘要，切换网关不会复用旧调用回执。
+
+LibreOffice 按显式路径、`SOFFICE_BIN`、PATH、Windows Program Files 与 macOS 安装位置查找。原生程序输出仅用于诊断，按字节接收；它不适用受管 Python 的 UTF-8 JSON 协议。
+
+PPT 摄入（选择页 v3 与旧全页 v2）会额外提示“原生文本与补充均少且存在较大图像”和 Symbol/Wingdings 等符号字体。提示是非阻断的程序复核线索，明确标为非原文；不推断遗漏的内容、不改变模型回执、不额外调用模型。

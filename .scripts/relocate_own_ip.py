@@ -2,6 +2,8 @@
 """Hash-bound managed relocation of misfiled, user-confirmed intellectual property."""
 from __future__ import annotations
 
+from platform_compat import fsync_path
+
 import argparse
 import hashlib
 import json
@@ -65,11 +67,7 @@ def atomic_write(path, content):
         if path.exists():
             shutil.copymode(path, temporary)
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        fsync_path(path.parent)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -304,8 +302,7 @@ def relocate(root, manifest=None, apply=False, resume=None):
                     staged = directory / f"raw-{number}.bin"
                     shutil.copy2(source, staged)
                     require_hash(staged, item["sha256"])
-                    with staged.open("rb") as handle:
-                        os.fsync(handle.fileno())
+                    fsync_path(staged)
                     os.link(staged, target)
                     staged.unlink()
                     require_hash(target, item["sha256"])

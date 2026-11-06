@@ -8,12 +8,16 @@
 
 The public release is an engineering template, never a copy of the personal knowledge base. The authoritative allowlist is `open-source-manifest.yaml`; a file not named there is private by default.
 
+All reusable functions, skills, and persistent-work types follow the repository-owned portability requirements in [shared conventions](../shared-conventions.md). Publish their generic entry points, implementation, schemas, and initialization/resume templates together; exclude actual user instances and installed runtimes. Validate the affected workflows from the generated tree, including initialization and cross-process recovery for persistent work, rather than treating source-workspace success as release completeness.
+
 - **Public**: generic specifications, scripts, tests, schemas, agents, DSH loops and guards, templates, architecture documentation, explicitly approved frozen paper artifacts, and exact-file-approved Gallery exhibition assets.
 - **Selectively published skills**: publish only the exact functional files approved by the manifest. Local manuscripts, reports, style profiles, and samples remain private; published tests must run without them or host-specific paths.
 - **Reader-facing scope**: `documentation_omissions` in the manifest keeps selected implementation details out of public Markdown descriptions, including README, introductions, changelog, and their source assets. Explicitly exempted runtime skill instructions remain available. Documentation synchronization and version checks still apply; describe other affected public contracts without advertising omitted features.
-- **Template only**: content directories represented by `.gitkeep` files.
+- **Template only**: content directories represented by `.gitkeep` files. Research initialization files under `projects/_templates/research/` are exact-file allowlisted and unignored in the public Git rules; live project instances and additional template files remain excluded. Public graph projection retains only delivered template nodes from this subtree, never active project nodes.
 - **Private**: all raw sources, personal or production compiled Wiki pages, graph databases, caches, outputs, inbox items, local memory, active project materials, personal state, and personal Codex skills declared private by the manifest. A sanitized paper-specific Wiki/Graph export is public only when it is versioned under `paper-artifacts/`, explicitly allowlisted, independently licensed, and verified.
 - **Review required**: a document that mixes public engineering rules with personal data must be split before publication. Put stable rules in public engineering documents and private context in `*.private.md` or a private project/status file.
+
+Core installations (`uv sync --frozen`) support basic command discovery and persistent-work initialization/recovery without importing numeric extras. Hub/vector operations load NumPy on demand and report the `analysis` installation command when it is missing, before remote calls or cache writes. Release regression creates a synthetic research project from the generated tree, saves state, recovers it in another process, and checks that only approved templates are Git-trackable. Runtime routing exemptions in `documentation_omissions` are exact paths; reader-facing omissions remain enforced.
 
 ### Curated Gallery
 

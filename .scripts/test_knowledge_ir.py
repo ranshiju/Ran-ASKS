@@ -40,6 +40,85 @@ def test_profiles_share_one_envelope():
         assert not kir.validate_knowledge_ir(ir)
 
 
+def test_missing_gloss_header_preserves_relations_glosses_and_audit():
+    prefix = (
+        "三元组:\n本论文 | 核心方法 | 主成分分析\n"
+        "本论文 | 对比方法 | 流形投影\n"
+        "本论文 | 核心创新点 | 本文结合表示分析与分类结果，诊断泛化质量。\n"
+    )
+    suffix = (
+        "主成分分析 | 本文用它分析网络隐表示，检查输入数据之间的联系。\n"
+        "流形投影 | A nonlinear map, used to compare data representations.\n"
+    )
+    missing = prefix + "\n" + suffix + "<<<END>>>\n"
+    explicit = prefix + "概念说明:\n" + suffix
+    sections, diagnostics = graph_ingest.parse_semantic_sections(missing)
+    assert not diagnostics["malformed_triple_lines"]
+    assert diagnostics["semantic_triple_count"] == 3
+    assert diagnostics["concept_gloss_count"] == 2
+    assert diagnostics["format_repairs"] == [{
+        "kind": "missing_concept_gloss_header",
+        "rule": "complete_anchored_gloss_suffix_v1",
+        "line_numbers": [6, 7], "recovered_count": 2, "source_modified": False,
+    }]
+    page = "academic/wiki/papers/gloss-recovery"
+    actual = graph_ingest.parse_semantic_text(missing, page, {})
+    assert actual == graph_ingest.parse_semantic_text(explicit, page, {})
+    glosses = graph_ingest.parse_concept_glosses(missing)
+    assert glosses == graph_ingest.parse_concept_glosses(explicit)
+    assert sections["概念说明"] == suffix.splitlines()
+    ir = kir.build_knowledge_ir(page, {"type": "paper-summary"}, actual[0],
+                                concept_glosses=glosses)
+    assert not kir.validate_knowledge_ir(ir)
+    assert graph_ingest.parse_semantic_sections(missing)[1] == diagnostics
+    assert graph_ingest.parse_semantic_sections(explicit)[1]["format_repairs"] == []
+
+
+def test_gloss_recovery_rejects_ambiguous_or_mixed_suffix_as_a_whole():
+    prefix = "三元组:\n本论文 | 核心方法 | 方法甲\n"
+    good = "方法甲 | 本文用它构造低维表示，并保持数据的相似性。\n"
+    cases = [
+        prefix + "方法甲 | 基于\n",                    # missing object
+        prefix + "方法甲 | 基于 |\n",                 # explicit empty field
+        prefix + "方法甲 | 本论文\n",                  # short ambiguous pair
+        prefix + good + "方法甲 | 改进 | 方法乙\n",      # interleaved relations
+        prefix + good + "未知方法 | 本文讨论这种方法，用于比较。\n",
+        prefix + good + good,                          # duplicate mention
+        prefix + "方法甲 | 待补充，需要阅读原文后确定。\n",
+        prefix + "方法甲 | 本文定义距离为 $|x-y|$，用于低维投影。\n",
+        prefix + "方法甲 | 基于 | 方法乙 | 多余字段\n",
+        prefix + "本论文 | 对比方法 | 方法乙\n" + good, # incomplete concept coverage
+        prefix + good + "概念说明:\n",                # explicit header wins
+        prefix + "三元组:\n本论文 | 核心方法 | 方法甲\n" + good,
+        prefix.replace("本论文", "本文档") + good,     # not the paper contract
+        prefix.replace("核心方法", "核心创新点") + good, # proposition is not concept
+        good,                                         # no triple section
+    ]
+    for text in cases:
+        sections, diagnostics = graph_ingest.parse_semantic_sections(text)
+        assert diagnostics["format_repairs"] == [], text
+        assert not sections.get("概念说明"), text
+        if text.startswith("三元组:"):
+            assert diagnostics["malformed_triple_lines"], text
+            try:
+                graph_ingest.parse_semantic_text(text, "academic/wiki/papers/example", {})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("ambiguous rows must still fail: " + text)
+
+
+def test_explicit_gloss_header_preserves_math_and_unanchored_descriptions():
+    text = ("三元组:\n本论文 | 核心方法 | 距离\n概念说明:\n"
+            "距离 | 使用 $|x-y|$ 定义距离。\n"
+            "额外说明 | 本文讨论的背景概念。\n")
+    sections, diagnostics = graph_ingest.parse_semantic_sections(text)
+    assert not diagnostics["format_repairs"]
+    assert not diagnostics["malformed_gloss_lines"]
+    assert graph_ingest.parse_concept_glosses(text)[0]["description"] == "使用 $|x-y|$ 定义距离。"
+    assert len(sections["概念说明"]) == 2
+
+
 def test_wrapped_document_rows_stay_anchored_across_domains():
     pages = [
         "admin/wiki/policies/organizational-reform",

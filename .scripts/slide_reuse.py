@@ -10,7 +10,7 @@ import re
 import shutil
 import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from xml.dom import minidom
 
 import pptx_structure as structure
@@ -158,7 +158,7 @@ def transform(source, output, profile, values=None):
                     ids = elements(shape, 'p', 'cNvPr')
                     if ids:
                         shapes[ids[0].getAttribute('id')] = shape
-            relpart = str(Path(page['part']).parent / '_rels' / (Path(page['part']).name + '.rels'))
+            relpart = str(PurePosixPath(page['part']).parent / '_rels' / (PurePosixPath(page['part']).name + '.rels'))
             rels = minidom.parseString(package[relpart]) if relpart in package else None
             for slot in profile['slots']:
                 if slot['page'] != page['number']:

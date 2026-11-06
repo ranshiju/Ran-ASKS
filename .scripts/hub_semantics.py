@@ -21,9 +21,9 @@ import uuid
 from pathlib import Path
 from typing import Iterable
 
-import numpy as np
 import yaml
 
+from embed_helper import require_numpy
 import graph_lib as gl
 import wiki_locator as wl
 
@@ -336,6 +336,7 @@ def list_hubs(conn, include_legacy: bool = True, subtype: str = "") -> list[HubD
 
 
 def _embed(texts: list[str], *, strict: bool = False):
+    np = require_numpy()
     try:
         from embed_helper import embed_cached_batch
         values = embed_cached_batch(texts, cache_type="hub-scope")
@@ -350,6 +351,7 @@ def _embed(texts: list[str], *, strict: bool = False):
 
 
 def _unit(vectors):
+    np = require_numpy()
     return vectors / (np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-9)
 
 
@@ -1119,6 +1121,7 @@ def plan_memberships(conn, node_ids: Iterable[str] | None = None) -> dict:
         else:
             vectors = None
             if vectors_by_text is not None:
+                np = require_numpy()
                 vectors = np.asarray([vectors_by_text[text] for text in context.texts])
             ranked, reason = _score_membership_candidates(
                 conn, profile, context, vectors, neighbor_cache,
@@ -1416,6 +1419,7 @@ def analyze_splits(conn, hub_paths: Iterable[str]) -> list[dict]:
     ))
     vectors_by_text = {}
     if texts:
+        np = require_numpy()
         try:
             vectors = _embed(texts, strict=True)
             if vectors is None or len(vectors) != len(texts):
@@ -1439,6 +1443,7 @@ def _analyze_split_profiles(conn, hub_path: str, profiles, vectors) -> dict:
         return {"decision": "no_split", "reason": "insufficient_profiles", "count": len(profiles)}
     if vectors is None:
         return {"decision": "no_split", "reason": "embedding_unavailable", "count": len(profiles)}
+    np = require_numpy()
     units = _unit(vectors)
     similarities = units @ units.T
     first = 0
@@ -1497,6 +1502,7 @@ def analyze_new_hubs(conn, node_ids: Iterable[str] | None = None) -> dict:
     vectors = _embed([item.text for item in profiles])
     if vectors is None or len(vectors) != len(profiles):
         return {"decision": "no_candidate", "reason": "embedding_unavailable", "count": len(profiles)}
+    np = require_numpy()
     units = _unit(vectors)
     parent = list(range(len(profiles)))
 
@@ -2077,7 +2083,7 @@ def plan_redistribution(conn, parent: str) -> dict:
     unique_texts = list(dict.fromkeys(
         text for context in contexts if context is not None for text in context.texts
     ))
-    embedded = _embed(unique_texts) if unique_texts else np.empty((0, 0))
+    embedded = _embed(unique_texts) if unique_texts else None
     if unique_texts and (embedded is None or len(embedded) != len(unique_texts)):
         return {
             "decision": "degraded",
@@ -2093,6 +2099,7 @@ def plan_redistribution(conn, parent: str) -> dict:
     neighbor_cache: dict[str, set[str]] = {}
     family_paths = {parent, *children}
     for profile, context in zip(profiles, contexts):
+        np = require_numpy()
         vectors = np.asarray([vectors_by_text[text] for text in context.texts])
         ranked, reason = _score_membership_candidates(
             conn, profile, context, vectors, neighbor_cache,
@@ -2273,6 +2280,7 @@ def _suggest_parent(conn, candidate: dict) -> dict:
     rep_vectors = _embed(texts)
     if rep_vectors is None:
         return {"path": "", "title": "", "score": 0.0}
+    np = require_numpy()
     centroid = rep_vectors.mean(axis=0)
     centroid = centroid / (np.linalg.norm(centroid) + 1e-9)
     scores = hub_units @ centroid

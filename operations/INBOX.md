@@ -61,7 +61,7 @@
 执行后端遵循进程环境 → 项目 `.env` → 默认 `agent`；入口在实际摄入前向 stderr 输出 backend，紧凑回执也保留该值。API 模式由程序驱动 worker/sub-agent，恢复耗尽后交当前宿主 Agent 兜底；这不是 Agent 模式回落 API，也不因宿主是 Agent 就覆盖显式 API 配置。
 事务分别持久化 `semantic_backend` 与实际 `ocr_backend`；resume 校验 semantic backend 不变，OCR adapter 的选择不改变语义控制循环。
 
-紧凑回执保留质量告警总数和最多 5 条 issue/detail 摘要（每字段最多 240 字符）；先据此定位降级原因，只有摘要不足时再按报告字段定向读取完整诊断。
+紧凑回执保留质量告警总数和最多 5 条 issue/detail/mention/reason 摘要（每字段最多 240 字符），人物告警直接保留原称呼和未决原因；先据此定位降级原因，只有摘要不足时再按报告字段定向读取完整诊断。
 
 维护摘要保留人物 `pending_total`、`auto_built` 的创建/跳过冲突/剩余计数，以及 Hub 的 `backlog_count`、`split_backlog_count`；`pending_total` 是本轮自动建页前的候选数，当前剩余以 `auto_built.remaining` 为准。`maintenance.status=completed` 只表示维护执行完成，不表示待审积压清零；交付时分别报告文件终态、维护终态与非零待审项，完整候选仍按报告/回执地址定向读取，不因积压覆盖文件成功状态。
 
@@ -123,6 +123,8 @@ python3 .scripts/wg.py task status <transaction-id> | jq '.result | {workflow_st
 **论文语义故障处理**：Agent backend 的结构性语义错误写回原 `agent-task-v1.issues`，当前宿主修正同一暂存产物后继续原 validator/commit；API backend 可因校验失败直接交接，也可在有界修订耗尽后保留兼容 `agent_required`，再沿原事务恢复。该状态只表示等待宿主复核或修正，不证明发生过重试或预算耗尽；单项与 batch 摘要优先保留具体校验错误。弱 API 模型的 Wiki 撰写接收由摘要、定理和结论确定性组成的关键证据包，定理/等式/性能结论必须保留对象、条件和比较基准。语义槽少于 4 条时只定向重抽一次 slots，不重写已通过校验的 Wiki，并保留两次中覆盖更高的一版；仍稀疏才以 `graph_semantic_coverage_sparse` 降级提交。完整命题不再交专用 LLM 原子化；程序只链接本页已确认概念或主图唯一精确 title/alias，无匹配/歧义静默保留裸 proposition，不算 degraded。语义边不得从“关联/构造/表示”自行推导“基于”等方向关系；只有作者明示的限制或近似代价可标为“局限性”。合法 proposition object 不触发描述性短语误报；真正的描述性对象与裸缩写 warning 不阻断提交，但正常校验和 resume 都必须把它们持久化为质量告警。未登记但格式合格的新谓词会记录为候选并自动治理，不自动成为正式契约。
 
 **书目协议与宿主接管**：API 的 `candidate-id-v2`（及旧 Agent 兼容产物）先按原文核验作者及次序；逐人候选能完整覆盖时优先选择有序 ID，错误、重复或多人合并候选不使已核验的完整候选组失效。只有候选确实缺失时才使用完整 `proposed` 列表，每项严格为 `{"value": "作者原文姓名", "evidence": "paper.md#L3"}`；错误键保持阻断，不静默转写。validator 返回具体字段路径、缺少/多余键与类型错误。论文返回兼容 handoff 后，先用 `ingest_paper.py --agent-workspace <txn>` 取得原事务的结构化任务，只提取 `status/issues/inputs/outputs/commands`，再按问题读取证据、填写指定输出并执行原 check/commit；修改命令成功后才运行校验。运行中按 runtime 回执用长等待，达到 `next_check_after_seconds` 再检查，不连续短轮询；交付分别报告文件提交、维护实际动作与待办，检查完成不等于创建了人物页或完成了 Hub 归属。
+
+**论文引用表示**：研究方向定位与事实正文统一使用 `[^rN]`，Raw 地址只放在 Sources 定义。shared 物化可将已定义或 API 本次已提供的精确单层尖括号地址转成脚注；未知地址、代码、链接、嵌套标记与注释仍交原 validator。只改变引用表示，不改事实或语义槽，不增加模型调用。API 局部修补的 body 只引用脚注，citations 才填写地址；没有可用脚注且目标未授权新增定义时交接。
 
 **格式复用边界**：按已验证的模板族复用，不按期刊名推断正确性。ACM 首页 self-citation 作者补充须满足 PDF/Markdown DOI 与完整有序名单一致，仅增加缺失姓名候选；证据缺失或 OCR 分歧退回原工作区复核。API 候选表示只压缩重复协议元数据，事实字段与排除机构证据不裁剪，Agent 直接取证、原 validator 和事务不变；不新增模型调用，不把输入字符减少等同于实测 token、账单或重试减少。
 

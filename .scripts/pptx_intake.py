@@ -180,6 +180,11 @@ def validated(source, directory, manifest, review):
                 block += '\n\n### 识读限制（非原文）\n' + '\n'.join('> ' + x['detail'].replace('\n', ' ') for x in limits)
                 warnings.extend({'issue': 'pptx_review_limit', 'detail': f"第 {original['number']} 页：{x['detail']}"} for x in limits)
             entry.update(visual_status='reviewed', api={k: v for k, v in checked.items() if k != 'receipt_path'})
+        supplement = by_page[original['number']]['result']['supplement'] if decision['mode'] == 'visual' else ''
+        signals = vision.content_review_signals(shape, supplement)
+        if signals:
+            block += '\n\n### 内容覆盖复核提示（程序检查，非原文）\n' + '\n'.join('> ' + x['detail'] for x in signals)
+            warnings.extend({**x, 'detail': f"第 {original['number']} 页：{x['detail']}"} for x in signals)
         archived.append(entry); blocks.append(block + '\n')
     companion = manifest['header'] + '\n'.join(blocks)
     receipt = {'schema': 'pptx-source-v3', 'source_sha256': manifest['source_sha256'],

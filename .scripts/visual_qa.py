@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from platform_compat import configure_stdio
 import env_config
 
 try:
@@ -75,7 +76,7 @@ def load_visual_env(env_file: Path | None = None) -> dict[str, str]:
     source = env_file or (REPO / ".env")
     known = {
         "LLM_API_BASE", "LLM_API_KEY",
-        "VISUAL_QA_API_BASE", "VISUAL_QA_API_KEY",
+        "VISUAL_QA_API_BASE", "VISUAL_QA_API_KEY", "VISUAL_QA_API_PATH",
         "VISUAL_QA_MODEL", "VISUAL_QA_FALLBACK_MODEL",
         "VISUAL_QA_REASONING_EFFORT", "VISUAL_QA_FALLBACK_REASONING_EFFORT",
         "VISUAL_QA_MAX_TOKENS",
@@ -90,6 +91,7 @@ class RemoteConfig:
     timeout: int = 90
     reasoning_effort: str = "default"
     max_tokens: int = 1800
+    api_path: str = ""
 
     def __post_init__(self) -> None:
         if self.reasoning_effort not in REASONING_EFFORTS:
@@ -220,6 +222,9 @@ def _find_soffice(explicit: str | None = None) -> Path:
     found = shutil.which("soffice") or shutil.which("libreoffice")
     if found:
         candidates.append(Path(found))
+    for variable in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+        if os.environ.get(variable):
+            candidates.append(Path(os.environ[variable]) / "LibreOffice" / "program" / "soffice.exe")
     candidates.append(Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"))
     runtime_root = Path.home() / ".cache" / "codex-runtimes"
     if runtime_root.exists():
@@ -260,11 +265,17 @@ def convert_slides_to_pdf(path: Path, target_pdf: Path,
             str(soffice), "--headless", "--convert-to", "pdf",
             "--outdir", str(out_dir), str(path),
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+        proc = subprocess.run(cmd, capture_output=True, timeout=180,
                               env=_soffice_env(soffice))
         converted = out_dir / f"{path.stem}.pdf"
         if proc.returncode != 0 or not converted.is_file():
             detail = (proc.stderr or proc.stdout or "conversion produced no PDF").strip()
+            if isinstance(detail, bytes):
+                try:
+                    detail = detail.decode("utf-8")
+                except UnicodeDecodeError:
+                    import locale
+                    detail = detail.decode(locale.getencoding(), errors="replace")
             raise VisualQAError(f"slide conversion failed: {detail[:500]}")
         tmp_target = target_pdf.with_name(f".{target_pdf.name}.{os.getpid()}.tmp")
         shutil.copyfile(converted, tmp_target)
@@ -753,13 +764,14 @@ def _normalize_vision_result(obj: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _chat_completions_url(api_base: str) -> str:
-    base = api_base.rstrip("/")
+def _chat_completions_url(api_base: str, api_path: str = "") -> str:
+    base = api_base.strip().rstrip("/")
+    if api_path:
+        return env_config.join_api_url(base, api_path)
     if base.endswith("/chat/completions"):
-        return base
-    if base.endswith("/v1"):
-        return base + "/chat/completions"
-    return base + "/v1/chat/completions"
+        return env_config.join_api_url(base, "/chat/completions")
+    suffix = "/chat/completions" if re.search(r"/v[0-9]+$", base) else "/v1/chat/completions"
+    return env_config.join_api_url(base, suffix)
 
 
 def call_json_vision(model: str, image_paths: list[Path], prompt: str,
@@ -782,7 +794,7 @@ def call_json_vision(model: str, image_paths: list[Path], prompt: str,
     if config.reasoning_effort != "default":
         payload["reasoning_effort"] = config.reasoning_effort
     request = urllib.request.Request(
-        _chat_completions_url(config.api_base),
+        _chat_completions_url(config.api_base, config.api_path),
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {config.api_key}",
@@ -915,6 +927,7 @@ def run_visual_qa(
     max_tokens: int | None = None,
     api_base: str | None = None,
     api_key: str | None = None,
+    api_path: str | None = None,
     timeout: int = 90,
     dpi: int = 170,
     soffice_bin: str | None = None,
@@ -942,6 +955,7 @@ def run_visual_qa(
     )
     base = api_base if api_base is not None else env.get("VISUAL_QA_API_BASE", "")
     key = api_key if api_key is not None else env.get("VISUAL_QA_API_KEY", "")
+    chosen_path = api_path if api_path is not None else env.get("VISUAL_QA_API_PATH", "")
     chosen_effort = reasoning_effort if reasoning_effort is not None else env.get("VISUAL_QA_REASONING_EFFORT", "low")
     fallback_effort = (fallback_reasoning_effort if fallback_reasoning_effort is not None
                        else env.get("VISUAL_QA_FALLBACK_REASONING_EFFORT", "default"))
@@ -949,8 +963,8 @@ def run_visual_qa(
         chosen_budget = max_tokens if max_tokens is not None else int(env.get("VISUAL_QA_MAX_TOKENS", "1800"))
     except ValueError:
         raise VisualQAError("VISUAL_QA_MAX_TOKENS must be an integer") from None
-    primary_config = RemoteConfig(base, key, int(timeout), chosen_effort, chosen_budget)
-    fallback_config = RemoteConfig(base, key, int(timeout), fallback_effort, chosen_budget)
+    primary_config = RemoteConfig(base, key, int(timeout), chosen_effort, chosen_budget, chosen_path)
+    fallback_config = RemoteConfig(base, key, int(timeout), fallback_effort, chosen_budget, chosen_path)
     render_config = {"version": RENDER_VERSION, "dpi": int(dpi), "format": "png"}
     check_key_data = {
         "prompt_version": PROMPT_VERSION,
@@ -961,6 +975,7 @@ def run_visual_qa(
         "reasoning_effort": chosen_effort,
         "fallback_reasoning_effort": fallback_effort,
         "max_tokens": chosen_budget,
+        "endpoint_sha256": _stable_hash(_chat_completions_url(base, chosen_path)) if base else "",
         "render": render_config,
         "context_sha256": context_sha,
         "deterministic_only": bool(deterministic_only),
@@ -1167,6 +1182,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int)
     parser.add_argument("--api-base", default=None)
     parser.add_argument("--api-key", default=None)
+    parser.add_argument("--api-path", default=None, help="explicit API path, e.g. /chat/completions for a custom base")
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument("--dpi", type=int, default=170)
     parser.add_argument("--soffice-bin", default=None)
@@ -1175,6 +1191,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_stdio()
     args = build_parser().parse_args(argv)
     try:
         if args.prepare_views:
@@ -1201,6 +1218,7 @@ def main(argv: list[str] | None = None) -> int:
             max_tokens=args.max_tokens,
             api_base=args.api_base,
             api_key=args.api_key,
+            api_path=args.api_path,
             timeout=args.timeout,
             dpi=args.dpi,
             soffice_bin=args.soffice_bin,

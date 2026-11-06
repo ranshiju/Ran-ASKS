@@ -1162,6 +1162,22 @@ def test_compact_summary_excludes_graph_diagnostics_and_returns_report_path():
     assert len(warning_summary["quality_warnings"][0]["detail"]) == 240
     assert "candidates" not in warning_summary["quality_warnings"][0]
     assert warning_summary["quality_warning_history_count"] == 9
+    for backend in ("agent", "api"):
+        meeting_warning = {"issue": "meeting_entity_unresolved", "mention": "某老师",
+                           "reason": "原文仅泛称，无身份证据" * 30,
+                           "candidates": ["must not leak the full candidate catalog"]}
+        meeting = {**report, "backend": backend, "files": [{
+            **report["files"][0], "file": "meeting.txt",
+            "quality_status": "degraded", "quality_warnings": [meeting_warning],
+        }]}
+        before = json.dumps(meeting, ensure_ascii=False)
+        summary = module._compact_summary(meeting, report_path)
+        warning = summary["files"][0]["quality_warnings"][0]
+        assert warning == {"issue": "meeting_entity_unresolved", "mention": "某老师",
+                           "reason": meeting_warning["reason"][:240]}
+        assert summary["items"][0]["quality_warnings"] == [warning]
+        assert summary["status"] == "completed" and summary["degraded"] == 1
+        assert json.dumps(meeting, ensure_ascii=False) == before
     blocked = {**report, "completed": 0, "failed": 0, "awaiting_agent": 1,
                "pending": 1,
                "files": [{"file": "b.pdf", "status": "agent_required", "reason": "agent 接管"}]}

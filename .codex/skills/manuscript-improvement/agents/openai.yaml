@@ -1,0 +1,4 @@
+interface:
+  display_name: "学术论文系统改进"
+  short_description: "由 Agent 通读全文，依次改进摘要、标题、引言和全文，并核对贡献与证据"
+  default_prompt: "使用 $manuscript-improvement，先通读论文与补充材料，再按摘要、标题、引言、全文的顺序改进，并回查核心贡献与证据的一致性。"

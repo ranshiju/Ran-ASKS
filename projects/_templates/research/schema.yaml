@@ -1,0 +1,47 @@
+project:
+  id: "{{PROJECT_ID}}"
+  name: "{{PROJECT_NAME}}"
+  type: research
+  root: projects/{{PROJECT_ID}}
+  stage: ideation
+  topic: "{{TOPIC}}"
+  memory_dir: projects/{{PROJECT_ID}}/.workspace/memories
+  workspace_config: projects/{{PROJECT_ID}}/workspace.yaml
+
+structure:
+  project_readme: projects/{{PROJECT_ID}}/README.md
+  notes: projects/{{PROJECT_ID}}/notes
+  manuscript: projects/{{PROJECT_ID}}/manu
+  codes:
+    root: projects/{{PROJECT_ID}}/codes
+    engineering_doc: projects/{{PROJECT_ID}}/codes/README.md
+    physics_doc: projects/{{PROJECT_ID}}/codes/docs/PHYSICS.md
+    formulas: projects/{{PROJECT_ID}}/codes/formulas
+    experiments: projects/{{PROJECT_ID}}/codes/experiments
+    analysis: projects/{{PROJECT_ID}}/codes/analysis
+    tests: projects/{{PROJECT_ID}}/codes/tests
+  outputs: projects/{{PROJECT_ID}}/outputs
+
+artifact_policy:
+  all_products_inside_project: true
+  rule: "研究产物全部放置在 projects/{{PROJECT_ID}}/ 的子文件夹内部。"
+  source_only_codes: true
+  generated_to_outputs: true
+
+compute:
+  policy: server_preferred
+  description: 数值实验、训练与长任务优先登记的 SSH 服务器；轻量验证可明确选择本地，服务器阻塞不静默回退长任务。
+  backend: ssh
+  env_keys: [SSH_HOST, SSH_PORT, SSH_USER, SSH_PASS]
+  runner: null
+  gpu_preferred_conditions: []
+  local_cpu_allowed_conditions:
+    - "轻量测试、lint、构建、解析或只支持 local 的固定诊断；明确记录本地例外"
+
+code_management:
+  source_root: projects/{{PROJECT_ID}}/codes
+  core_modules: []
+  generated_output_root: projects/{{PROJECT_ID}}/outputs
+  engineering_doc: projects/{{PROJECT_ID}}/codes/README.md
+  physics_doc: projects/{{PROJECT_ID}}/codes/docs/PHYSICS.md
+  required_checks: []

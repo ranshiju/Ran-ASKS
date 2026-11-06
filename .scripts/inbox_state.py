@@ -2,6 +2,8 @@
 """Persist resumable state for one inbox intake transaction."""
 from __future__ import annotations
 
+from platform_compat import fsync_path
+
 import hashlib
 import json
 import os
@@ -733,11 +735,7 @@ def save(transaction_id: str, state: dict) -> Path:
             os.fsync(handle.fileno())
         os.replace(temp_name, path)
         try:
-            directory_fd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            fsync_path(path.parent)
         except OSError:
             pass
     finally:

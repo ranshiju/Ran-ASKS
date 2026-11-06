@@ -246,6 +246,9 @@ ROUTES = {
 # 能力是持续工作内按需加载的规范包；它不创建或切换持续工作。
 # 顶层 --task write 继续作为 general profile 的兼容入口。
 CAPABILITY_ROUTES = {
+    "manuscript-evaluation": {"general": [("operations/research/manuscript-evaluation.md", None)]},
+    "citing-papers": {"general": [("operations/CITING_PAPERS.md", None)]},
+    "paper-impact": {"general": [("operations/PAPER_IMPACT.md", None)]},
     "review": {"general": [("operations/REVIEW.md", None)]},
     "illustration": {"general": [("operations/ILLUSTRATION.md", None)]},
     "science-exhibit": {

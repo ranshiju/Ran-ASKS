@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | [MPE 科普展板](works/mpe-science-poster/README.md) | A0 科普海报 | 科普展板 · 插图与图示 · 理解试读 · 版式与导出 |
 | [MPE 学术报告](works/mpe-academic-talk/README.md) | 12 页学术报告 · PPTX / PDF | 演示文稿制作 · 版式与导出 |
+| [层 Edelstein 效应学术报告](works/layer-edelstein-academic-talk/README.md) | 11 页英文学术报告 · PPTX / PDF | 演示文稿制作 · 版式与导出 |
 | [中英文学术长简历](works/bilingual-academic-cv/README.md) | 中文 / English · 完整长简历 PDF | 简历制作与维护 |
 
 ## ASKS 科普文章
@@ -36,7 +37,7 @@
 
 当前摄入支持一份匹配的 RIS/BibTeX 书目、长文分窗阅读及按失败触发的 API 恢复；使用方法见[摄入规范](../operations/INGEST.md)。
 
-本次同步保留现有14件作品的成品与下载。作品原稿、制作过程和本地来源记录不进入公开包。
+现有 15 件精选作品，提供完整成品与下载。作品原稿、制作过程和本地来源记录不进入公开包。
 
 ## 本地预览
 

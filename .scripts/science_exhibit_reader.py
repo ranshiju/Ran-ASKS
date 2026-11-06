@@ -154,7 +154,8 @@ def review_poster(image, *, allow_remote=False, model=None, timeout=90, max_toke
     require(isinstance(chosen_model, str) and 0 < len(chosen_model) <= 160, 'Invalid model name')
     require(type(timeout) is int and 1 <= timeout <= 300, 'Timeout must be 1..300 seconds')
     config = RemoteConfig(settings.get('VISUAL_QA_API_BASE', ''), settings.get('VISUAL_QA_API_KEY', ''),
-                          timeout, settings.get('VISUAL_QA_REASONING_EFFORT', 'low'), max_tokens)
+                          timeout, settings.get('VISUAL_QA_REASONING_EFFORT', 'low'), max_tokens,
+                          settings.get('VISUAL_QA_API_PATH', ''))
     require(bool(config.api_base and config.api_key), 'Visual API credentials are not configured')
     root = local_path('temp/science-exhibit/reader-reviews')
     root.mkdir(parents=True, exist_ok=True)

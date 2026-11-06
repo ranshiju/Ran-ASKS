@@ -12,6 +12,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 import env_config
+from platform_compat import relative_protocol_path, run_python
 
 
 SCHEMA_VERSION = "agent-task-v1"
@@ -55,13 +56,13 @@ def research_backend() -> str:
 def resolve_temp_artifact(repo: Path, value: str | Path, namespace: str, *,
                           must_exist: bool = True) -> Path:
     """Resolve an Agent artifact inside one owned temp namespace."""
-    namespace_path = PurePosixPath(str(namespace or ""))
+    namespace_path = PurePosixPath(relative_protocol_path(namespace))
     if (not namespace or namespace_path.is_absolute() or ".." in namespace_path.parts):
         raise ValueError(f"非法 Agent temp namespace: {namespace!r}")
     repo = repo.resolve()
     base = (repo / "temp" / namespace_path).resolve()
     candidate = Path(value)
-    resolved = candidate.resolve() if candidate.is_absolute() else (repo / candidate).resolve()
+    resolved = candidate.resolve() if candidate.is_absolute() else (repo / relative_protocol_path(value)).resolve()
     try:
         resolved.relative_to(base)
     except ValueError as exc:
@@ -72,10 +73,7 @@ def resolve_temp_artifact(repo: Path, value: str | Path, namespace: str, *,
 
 
 def _relative_path(value: str) -> str:
-    path = PurePosixPath(str(value or ""))
-    if not value or path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"agent task path 必须是仓库内相对路径: {value!r}")
-    return path.as_posix()
+    return relative_protocol_path(value)
 
 
 def _artifacts(values: list[dict], *, output: bool) -> list[dict]:
@@ -310,7 +308,7 @@ def run_action(state: dict, action: str, repo: Path = REPO) -> dict:
     argv, overrides = _managed_command(commands[action], repo)
     env = os.environ.copy()
     env.update(overrides)
-    result = subprocess.run(
+    result = run_python(
         argv, cwd=repo, env=env, text=True, capture_output=True,
     )
     return {
