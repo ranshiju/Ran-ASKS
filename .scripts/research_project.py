@@ -74,10 +74,15 @@ def ensure_project_absent(target: Path) -> None:
 
 def init_project(args: argparse.Namespace) -> int:
     project = args.project
-    if not re.fullmatch(r"[^/\\]+", project):
-        raise SystemExit("ERROR: 项目名不能包含路径分隔符")
+    if (not project or Path(project).is_absolute() or "\\" in project
+            or any(part.startswith(".") for part in Path(project).parts)):
+        raise SystemExit("ERROR: 项目必须是 projects/ 下的相对路径，不能包含隐藏目录或路径穿越")
 
-    target = PROJECTS_DIR / project
+    from project_paths import project_path
+    target = project_path(PROJECTS_DIR.resolve(), project)
+    project = target.relative_to(PROJECTS_DIR.resolve()).as_posix()
+    if target.resolve() != target.absolute():
+        raise SystemExit("ERROR: 研究项目路径不能经过符号链接")
     ensure_project_absent(target)
 
     if not TEMPLATE_DIR.is_dir():
@@ -133,7 +138,9 @@ def init_project(args: argparse.Namespace) -> int:
 
 def validate_project(args: argparse.Namespace) -> int:
     project = args.project
-    target = PROJECTS_DIR / project
+    from project_paths import project_path
+    target = project_path(PROJECTS_DIR.resolve(), project)
+    project = target.relative_to(PROJECTS_DIR.resolve()).as_posix()
     if not target.is_dir():
         raise SystemExit(f"ERROR: 研究项目不存在: {target}")
 

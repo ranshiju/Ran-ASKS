@@ -41,22 +41,27 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 是一个面向持续科研工作的持久化、来源可追溯知识系统。Ran-ASKS 是它的
 源代码可用工程实现。
 
-**大语言模型负责解释，嵌入负责组织，图结构由此涌现。** 每份科学资料都被
-完整保留，同时 ASKS 将其编译为可读知识和持续演化的图，使研究者与智能体
-能够在后续工作中检查、导航、修订和继承这些知识。导航结构允许近似，但证据
-路径始终可以追溯。
+**理解知识，组织以供使用，推理以解决问题。** 来源完整保留，可读知识与导航
+按实际用途编译，让研究者与智能体能够检查、修订和接续已有工作。导航允许近似，
+事实答案仍须回到绑定具体版本的原始证据。
 
 ![ASKS 中的科学知识编译](docs/assets/scientific-knowledge-compilation.png)
 
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
 
-## v0.25.2 的主要改进
+## v0.26.0 的主要改进
 
-主仓库的发布校验与运行时 CI 现仅在 macOS 执行，与实际维护版本一致。
-Windows 和 Linux 不属于本仓库的支持与发布验收范围。skill 与持续工作仍按仓库内
-协议交付给具备相应能力的智能体；这种可移植性不等于其他操作系统兼容承诺。
-已经落地的共享可靠性修复保留。
+本版增加可选的选择性知识编译、原文章节/表图目录，并改进按用途检索、任务接续
+与确定性恢复。Agent 与 API 分别持有控制循环，共享校验和受管提交。
+默认摄入仍为 `legacy`，选择性编译须显式启用；稳定语义质量与整体净收益仍在验证。
+
+Gallery 接入免费的 Cloudflare Web Analytics，并支持首页显示近7天/30天汇总、
+热门作品和更新时间；每日由 Actions 刷新。缺失数据明确标为不可用，不填假零。
+网站同时增加分享预览、规范地址及部署版本，详见[配置说明](operations/GALLERY.md)。
+
+论文题名、核心科学问题、背景动机和引言能力随仓库交付，项目路径与持续工作接续
+统一使用受管入口。主仓库仍仅维护和验收 macOS。
 
 论文评估先提炼核心科学问题，再逐条分类贡献、给出 1–10 分重要性评分，并单独评价
 证据强度，建议强调顺序与补证事项。评分不是录用概率。摘要和全文改进在实质改稿前
@@ -109,6 +114,23 @@ KU 保存完整表述、必要条件、不确定性和绑定具体版本的来�
 自动材料包补齐完整方法名识别，并用来源确认的 focus 名称约束无关跨来源上下文，
 保留同源与主题短语匹配。它仍是有界词汇导航，背景或跨语言目标可能漏召；
 离线材料包缩小不代表 API 已提速或最终语义质量已得到同等保证。
+
+### 只整理当前需要的知识
+
+`--strategy selective` 使用精简的原文首包与已有知识候选，可直接给出必要增量、
+零新增，或按预算补读原文及维护旧知识所需的完整依据。已读材料与已提交操作支持接续。
+
+```bash
+python3 .scripts/wg.py ingest /absolute/paper.md --profile source-first --knowledge agent --strategy selective --focus '为实现该方法整理必要条件'
+# 使用摄入返回的Source ID，再读取目录返回的Raw地址。
+python3 .scripts/wg.py source-outline S-ID --query 'Table'
+python3 .scripts/wg.py read-raw 'academic/raw/sources/.../paper.md#L10-L30'
+```
+
+将示例ID和地址换成前一步的实际返回值。宿主按 `agent-task-v1` 完成暂存产物，
+再使用原有check/apply提交；API执行须显式选择已配置API后端及 `--knowledge api`。
+候选发现增加任务表述的有界词汇查询，任务词只帮助导航，不作为事实或同一性证据。
+篇内目录提供章节和题注位置，不保证完整表体已读；实际使用仍须核对必要Raw上下文。
 
 详见 [Source-first](operations/engineering/source-first-ingestion.md)、
 [KU](operations/engineering/knowledge-units.md)、[产物用途](operations/engineering/artifact-use-contracts.md)
@@ -257,6 +279,29 @@ PATCH／MINOR／MAJOR，不按文件数或行数排号；脚本记录依据、�
 （`IMAGE_OCR_ALLOW_REMOTE` 默认 false），不改变语义 backend，也不冒充人工复核。
 
 ## 已注册的产物工作流
+
+论文撰写与优化是 research 工作区中的持续工作：用 manuscript 事项保存原稿、当前版本、
+认可定位与下一步，question 事项记录文献需求，受管摄入后可接续原写作位置。
+[工作规范](operations/research/manuscript-improvement.md)包含初始化、恢复和交付方法；
+落笔使用 `python3 .scripts/route.py --capability write --capability-profile academic-manuscript`。
+规范与必要模板随源码发布，实际稿件和工作实例保持私有。
+
+完整引言使用 `python3 .scripts/route.py --capability manuscript-introduction`，基于或参考已有稿件，
+复用核心科学问题、贡献与背景动机，交付带引用的完整引言及简短说明。
+[引言规范](operations/research/manuscript-introduction.md)也可由其他智能体直接读取；全文改进复用同一能力。
+
+背景与动机使用 `python3 .scripts/route.py --capability manuscript-motivation`，综合稿件、
+已有引用及相关知识库与公开来源，返回摘要用一至两句话和引言用两至三段。
+[功能规范](operations/research/manuscript-motivation.md)要求两版主线一致，并核验文献判断。
+
+论文取标题使用 `python3 .scripts/route.py --capability manuscript-title`，综合核心科学问题、
+贡献排序与全文证据，给出候选、首选及推荐理由。其他智能体可直接读取仓库内
+[标题规范](operations/research/manuscript-title.md)；提出候选不自动替换稿件标题。
+
+核心科学问题可独立凝练：`python3 .scripts/route.py --capability manuscript-question`。
+宿主 Agent 核对稿件，区分一般科学问题、本文切入点与证据范围，兼顾科学性、概念清晰和
+语言精炼。其他智能体也可直接读取仓库内[功能规范](operations/research/manuscript-question.md)。
+贡献评分通过 `manuscript-evaluation` 复用已认可的问题；单独凝练不自动改稿。
 
 规范运行时功能注册表统一任务路由、CLI 暴露、backend 归属和机械校验。注册表明确
 区分研究、前沿等持续工作与创建或更新受管产物的用户功能，因此不需要把每项

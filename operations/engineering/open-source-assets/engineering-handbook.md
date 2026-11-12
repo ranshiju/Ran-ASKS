@@ -23,6 +23,12 @@ WikiRan 是一个**文件型、跨域、可回溯的知识库**。其主链路�
 
 不要把这个流程理解成“把 Markdown 做成向量库”。当前系统以可读 Markdown 页面保存节点属性、以 SQLite 图保存关系和别名；embedding 只用于局部匹配、关键词聚类或候选采样，不是当前的全文检索主路径。
 
+另有显式Source-first路径：原件/解析/全文索引先独立可用，随后可选知识编译。知识任务的
+`selective`策略以精简原文和只读候选开始，依据当前用途直接生成、零新增或有界补读，
+复用已读材料并沿原KU校验/事务提交。Agent自行控制，API程序最多两次补读；不要求先写完整
+Wiki或建图。默认仍为legacy，Source-first默认skip、知识供料默认survey；具体入口和范围见
+[代码指南§2.0a](code-guidance.md#20a-有界知识编译与-kun2)与[知识编译契约](knowledge-units.md)。
+
 最重要的事实边界：
 
 - `raw/` 是事实锚点，**绝不修改**；
@@ -52,7 +58,7 @@ PPT 新创作采用 `presentation/create` 按需能力，保持当前项目状�
 2. 根目录 `AGENTS.md` 的红线与任务识别；
 3. `.scripts/route.py --task ...` 为当前任务输出的规范片段；
 4. `operations/*.md`、各子项目 `SCHEMA.md` 和正在执行的脚本；
-5. `.project/META.md`、`projects/kr-wiki-paper/notes/status.md` 的架构状态；
+5. `.project/META.md`、`projects/知识系统研究与建设/kr-wiki-paper/notes/status.md` 的架构状态；
 6. 项目讨论、论文、归档和历史说明。
 
 最后一层经常保留已废弃方案，不能覆盖当前规范和脚本。
@@ -203,8 +209,8 @@ Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群
 | 图片/PDF 转可编辑 PPT | `operations/VISUAL_TO_EDITABLE_PPT.md`、`.scripts/visual_to_editable_ppt.py` |
 | 健康/同步 | `operations/LINT.md`、`operations/SYNC.md`、`graph_metrics.py` |
 | 当前架构/规模 | `.project/META.md` |
-| 论文研究进度 | `projects/kr-wiki-paper/notes/status.md` |
-| 设计理念 | `projects/知识结构涌现/idea-deltas.md` |
+| 论文研究进度 | `projects/知识系统研究与建设/kr-wiki-paper/notes/status.md` |
+| 设计理念 | `projects/科研与论文/知识结构涌现/idea-deltas.md` |
 | 脚本何时、如何安全调用 | `operations/engineering/code-guidance.md`（按任务定向读取） |
 | 工程影响面、当前入口与任务卡 | `operations/engineering/graph.yaml`、`.scripts/engineering_graph.py` |
 | 工程元图与金样的分工决策 | `operations/engineering/adr/001-engineering-meta-graph-and-golden-pipeline.md` |

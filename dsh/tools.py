@@ -47,6 +47,8 @@ def _qa_call(action: str, input_: dict) -> str:
     with qa.query_scope("public"):
         result = qa.execute(action, input_)
     if not result.get("ok"):
+        if action == "read_raw" and result.get("text", "").startswith("[ERROR"):
+            return result["text"]  # Includes bounded read_size guidance; still a failed read.
         return result.get("error", "[ERROR unknown]") or "[ERROR empty]"
     import artifact_usage
     return artifact_usage.render(action, result.get("text", ""))
@@ -182,6 +184,16 @@ def build_tools() -> list[ToolDefinition]:
                 "query": args.get("query", ""), "domain": args.get("domain", ""), "topk": args.get("topk", "5")}),
         ),
         ToolDefinition(
+            name="source_outline",
+            description="定位已知public Source的章节和表图题注；query按原文标签字面筛选(如Table 10)，空串列目录；返回导航地址仍须read_raw核验",
+            input_schema={"type": "object", "properties": {
+                "source_id": {"type": "string", "pattern": "^S-[0-9a-f]{24}$"},
+                "query": {"type": "string", "default": ""},
+                "start_line": {"type": "integer", "minimum": 1, "default": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 80, "default": 40}}, "required": ["source_id"]},
+            execute_fn=lambda args: _qa_call("source_outline", args),
+        ),
+        ToolDefinition(
             name="knowledge_search", description="检索 academic KU Statement 与原生 Frontier Question，候选仍须读取并回溯 Raw",
             input_schema={"type": "object", "properties": {"query": {"type": "string"},
                 "domain": {"type": "string", "default": "academic"}, "topk": {"type": "string", "default": "5"}}, "required": ["query"]},
@@ -224,6 +236,8 @@ def build_tools() -> list[ToolDefinition]:
             description="联合发现 Source、Statement、Question 与 Wiki/Graph；按候选 read_action/read_input 读取，事实仍须 read_raw；查询只读",
             input_schema={"type": "object", "properties": {
                 "query": {"type": "string"},
+                "subjects": {"type": "array", "maxItems": 3,
+                             "items": {"type": "string", "minLength": 1, "maxLength": 160}},
                 "intent": {"type": "string", "enum": ["fact", "relation", "explanation", "exploration", "lineage"], "default": "exploration"},
                 "domain": {"type": "string", "default": ""},
                 "topk": {"type": "string", "default": "8"},

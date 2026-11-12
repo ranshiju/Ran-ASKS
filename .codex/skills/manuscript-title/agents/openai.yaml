@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文标题拟定"
+  short_description: "综合核心科学问题、科学贡献与全文证据拟定标题，比较候选并推荐首选"
+  default_prompt: "使用 $manuscript-title 综合这篇论文的核心科学问题、科学贡献及全文内容，拟定标题并说明首选理由。"

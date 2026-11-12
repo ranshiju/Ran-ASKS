@@ -35,17 +35,18 @@ PROFILE_STAGES = frozenset({
 
 def project_root(project: str) -> Path:
     """Resolve a legacy research project, including nested project paths."""
+    from project_paths import project_path
     base = PROJECTS_DIR.resolve()
     raw = Path(project)
     if raw.is_absolute():
-        candidate = raw.resolve()
+        candidate = (project_path(base, raw.relative_to(base)) if raw.is_relative_to(base) else raw).resolve()
     else:
         parts = PurePosixPath(project).parts
         if parts and parts[0] == "projects":
             parts = parts[1:]
         if not parts or ".." in parts:
             raise SystemExit(f"ERROR: 非法研究项目路径: {project}")
-        candidate = base.joinpath(*parts).resolve()
+        candidate = project_path(base, Path(*parts)).resolve()
     try:
         candidate.relative_to(base)
     except ValueError as exc:

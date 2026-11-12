@@ -59,8 +59,14 @@ def _result(kind: str, status: str = "ok", **values: Any) -> dict[str, Any]:
 
 
 def resolve_workspace(value: str) -> Path:
+    from project_paths import project_path
     requested = Path(value)
     candidate = requested if requested.is_absolute() else PROJECTS / requested
+    if candidate.is_relative_to(PROJECTS):
+        try:
+            candidate = project_path(PROJECTS, candidate.relative_to(PROJECTS))
+        except ValueError as exc:
+            raise CvError(str(exc)) from exc
     resolved = candidate.resolve()
     projects = PROJECTS.resolve()
     try:

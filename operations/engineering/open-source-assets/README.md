@@ -44,11 +44,10 @@ general readers who want to understand what ASKS does and how to approach it.
 source-traceable knowledge system for sustained scientific work. Ran-ASKS is
 its source-available engineering implementation.
 
-**LLMs interpret. Embeddings organize. Graphs emerge.** Each scientific source
-remains preserved while ASKS compiles it into readable knowledge and an
-evolving graph that researchers and agents can inspect, navigate, revise, and
-inherit across later work. The navigation map may be approximate; the evidence
-path remains traceable.
+**Interpret knowledge. Organize for use. Reason to solve.** Sources remain
+preserved, while readable knowledge and navigation are compiled for actual uses.
+Researchers and agents can inspect, revise and inherit this work. Navigation may
+be approximate; factual answers return to version-bound source evidence.
 
 ![Scientific knowledge compilation in ASKS](docs/assets/scientific-knowledge-compilation.png)
 
@@ -56,13 +55,24 @@ path remains traceable.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.25.2
+## What changes in v0.26.0
 
-The main repository's release and runtime CI now run only on macOS, matching
-its maintained edition. Windows and Linux are outside this repository's support
-and release gates. Repository-owned skills and persistent-work recovery remain
-available to capable Agent hosts; that portability does not imply support for
-another operating system. Existing shared reliability fixes are retained.
+This release adds opt-in selective knowledge compilation, bounded source
+outlines, and more reliable purpose-based discovery and task recovery. Agent
+and API control loops remain separate and share deterministic validation and
+publication. The default intake profile stays `legacy`; selective compilation is
+an explicit preview, with overall semantic quality and net efficiency still
+under evaluation.
+
+Gallery now supports free Cloudflare Web Analytics, public seven/thirty-day
+aggregate statistics, sharing metadata and a visible deployment version. A
+daily Actions refresh reads only aggregate metrics; unavailable data is labelled
+instead of displayed as invented zeros. See [Gallery setup](operations/GALLERY.md).
+
+Manuscript title, scientific-question, motivation and introduction workflows now
+ship as repository-owned capabilities. Project paths and persistent-work
+recovery use the same managed interfaces across supported Agent hosts. The main
+repository continues to maintain and validate macOS only.
 
 Manuscript evaluation identifies the core scientific question, classifies each
 contribution and scores its importance from 1 to 10, with a separate assessment
@@ -139,6 +149,28 @@ names to limit unrelated cross-source context. Same-source and topic-phrase
 matches remain available. This is bounded lexical navigation: background or
 cross-language targets can still be missed, and smaller offline packets do not
 establish faster API completion or unchanged final semantic quality.
+
+### Select only the knowledge needed now
+
+`--strategy selective` starts with a smaller source packet and existing knowledge
+candidates. It can finish with a useful delta or no new knowledge, or request
+bounded source passages and complete old evidence before maintaining a KU.
+Already-read evidence and completed operations survive task resumption.
+
+```bash
+python3 .scripts/wg.py ingest /absolute/paper.md --profile source-first --knowledge agent --strategy selective --focus 'Explain the method for implementation'
+# Use the Source ID returned by intake; read the returned Raw locators.
+python3 .scripts/wg.py source-outline S-ID --query 'Table'
+python3 .scripts/wg.py read-raw 'academic/raw/sources/.../paper.md#L10-L30'
+```
+
+Replace `S-ID` and the sample locator with values from the preceding results.
+The host follows the returned `agent-task-v1` inputs and outputs, then uses the
+existing check/apply path. For API execution, explicitly select `--knowledge api`
+under the configured API backend. Candidate discovery also uses the task wording
+as a bounded lexical query; it supplies navigation, not evidence or a semantic
+identity decision. A source outline locates headings and captions, not necessarily
+the complete table body. Read the necessary Raw context before using facts.
 
 See [Source-first](operations/engineering/source-first-ingestion.md),
 [Knowledge Units](operations/engineering/knowledge-units.md),
@@ -296,6 +328,38 @@ explicit upload permission (`IMAGE_OCR_ALLOW_REMOTE=false` by default); choosing
 that adapter does not switch the semantic backend or imply human review.
 
 ## Registered artifact workflows
+
+Manuscript drafting and revision continue inside a research workspace. A manuscript
+item tracks baseline and current files, accepted decisions and the next action;
+question items track literature needs and the writing location to resume after managed ingestion.
+The [workflow](operations/research/manuscript-improvement.md) provides initialization and recovery instructions.
+For drafting, use `python3 .scripts/route.py --capability write --capability-profile academic-manuscript`.
+Reusable instructions and templates ship with the repository; manuscripts and work instances remain private.
+
+For a complete introduction, run `python3 .scripts/route.py --capability manuscript-introduction`.
+Use the existing manuscript as the basis or reference, and reuse the scientific question,
+contribution assessment and motivation to draft a cited introduction. Other Agent hosts
+can read the [guide](operations/research/manuscript-introduction.md) directly; the full-manuscript workflow reuses it.
+
+For background and motivation, run `python3 .scripts/route.py --capability manuscript-motivation`.
+The host Agent uses the manuscript, existing citations and relevant knowledge-base
+and public sources to draft one or two sentences for the abstract and two or three
+paragraphs for the introduction. The [guide](operations/research/manuscript-motivation.md)
+keeps both versions aligned and requires verifiable support for literature claims.
+
+For manuscript titles, run `python3 .scripts/route.py --capability manuscript-title`.
+The host Agent combines the scientific question, ranked contributions and full-text
+evidence to propose candidates and recommend one. The repository-owned
+[title guide](operations/research/manuscript-title.md) is also readable by other
+Agent hosts; proposing titles does not automatically replace the manuscript title.
+
+Core scientific questions can be refined independently with
+`python3 .scripts/route.py --capability manuscript-question`. The host Agent
+checks the manuscript and distinguishes the general question, the study's
+specific approach and the scope of its evidence. The repository-owned
+[guide](operations/research/manuscript-question.md) also supports hosts that
+read file instructions directly. Contribution scoring reuses the result through
+`manuscript-evaluation`; question refinement does not automatically edit the manuscript.
 
 The canonical runtime function registry keeps task routing, CLI exposure,
 backend ownership, and validation aligned. It distinguishes ongoing work,

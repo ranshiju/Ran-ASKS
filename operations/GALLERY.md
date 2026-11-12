@@ -9,6 +9,8 @@ Gallery 是成果展示与功能发现入口。首页展示精选成品；详情
 - `gallery/README.md`：仓库内阅读入口与本地预览说明。仓库主 README 仅在开头给出 Gallery 入口，不嵌入作品预览。
 - `gallery/catalog.json`：展示顺序、首页推荐作品与功能分类；一件作品可以关联多个功能。
 - `gallery/site/`：无第三方前端运行依赖的样式与渐进增强脚本。
+- `gallery/site/analytics.js`：可选Cloudflare采集加载器，只在配置的生产地址运行，统计失败不影响阅读。
+- `.scripts/gallery_metrics.py`：使用只读Cloudflare Analytics API生成公开汇总，不输出管理密钥、访客记录或非公开路径。
 - `.scripts/gallery_site.py`：shared 确定性静态站点构建器，输出完整 HTML、CSS、JS 与必要成品文件。
 - `gallery/works/<slug>/`：选定成品、预览、功能介绍和可公开的 `metadata.json`。
 - `gallery/local/<slug>/`：仅本地保存的源文件快照、项目与 Raw locator、来源哈希、选择依据及授权记录。不得加入公开白名单。
@@ -77,9 +79,40 @@ python3 .scripts/test_gallery_site.py
 
 ### GitHub Pages 发布准备
 
-`.github/workflows/gallery-pages.yml` 仅支持 `workflow_dispatch`，在公开仓库构建并只上传生成的站点目录；不会因普通 push 自动部署。站点预计位于 `https://ranshiju.github.io/Ran-ASKS/`，公开 README 顶部链接已按此地址准备。
+`.github/workflows/gallery-pages.yml` 支持手动`workflow_dispatch`及每日20:23 UTC（北京时间次日04:23）的统计刷新，在公开仓库构建并只上传生成站点；普通push不直接触发部署。每日任务使用当前公开main，同时刷新其公开汇总。站点位于 `https://ranshiju.github.io/Ran-ASKS/`，页脚及`site-info.json`显示实际构建的VERSION，发布后应核对它与预期版本一致。
 
 发布时先完成现有受管公开发布的版本与读者文档/PDF同步，再将 GitHub Pages 来源设置为 GitHub Actions，手动运行 Gallery Pages 并确认返回的实际站点地址。预期地址为 https://ranshiju.github.io/Ran-ASKS/ ，实际上线状态以成功部署及页面核验为准。不得把本地预览完成描述为线上部署成功。
+
+### 免费访问统计与公开汇总
+
+`catalog.json`的可选`site_url`指定规范HTTPS地址及项目子路径；构建生成canonical、Open Graph、sitemap和robots文件。修改为自己的地址即可部署到另一站点。版本读取源根VERSION，不从页面文本推断。
+
+使用Cloudflare免费Web Analytics，网页收集PV/Visits、来源、设备及页面性能；Visits遵循服务的入口定义，不称精确独立人数。当前不支持下载/复制等自定义事件，直接打开PDF也不经过网页统计。只对公开Gallery启用，不接入知识库或Agent/API运行记录。
+
+GitHub仓库Actions配置如下：
+
+| 类型 | 名称 | 内容 |
+| --- | --- | --- |
+| Variable | `GALLERY_CLOUDFLARE_TOKEN` | Web Analytics脚本中的公开32位站点token |
+| Variable | `CLOUDFLARE_ACCOUNT_ID` | 所属账户ID |
+| Variable | `CLOUDFLARE_SITE_TAG` | 统计详情页网址中的siteTag；与采集token不是同一值 |
+| Secret | `CLOUDFLARE_ANALYTICS_API_TOKEN` | 限定对应账户的Account Analytics / Read凭据，仅供构建中的汇总步骤使用 |
+
+无采集token或本地预览不加载远程统计脚本；浏览器只在规范地址的origin和项目路径匹配时加载Cloudflare固定地址。设置`spa:false`避免搜索/筛选的history变更成为额外页面浏览。统计说明页允许使用`?analytics=off`在当前浏览器持久停用；存储不可用时至少停用当前页。恢复用`?analytics=on`。采集代码无管理密钥；服务脚本拦截不影响页面功能。
+
+统计采集与公开汇总是两个权限边界。定时任务从GraphQL读取近30个UTC自然日（含当日），只保留已发布首页/说明/作品路径，生成近7日/30日PV、Visits与前五件作品的浏览量。首页静态显示汇总和更新时间，`metrics.json`只包含经过筛选的汇总，不含账户凭据、访客IP、原始搜索或来源路径。Cloudflare采样及拦截可能使结果不完整，不能当审计计数或实际使用人数。
+
+汇总读取失败或凭据缺失时，尽量保留此前已发布的有效快照并标为stale；无旧数据则标unavailable并显示横线，不伪造零。只有成功API响应确实无访问时才显示零。日常刷新不回写源仓库、不修改版本或创建统计提交；若每日workflow长期未运行，页面时间仍能反映快照年龄。定时运行时间以GitHub调度为准。
+
+本地构建示例（凭据由环境提供，勿写进公开文件）：
+
+```bash
+python3 .scripts/gallery_metrics.py --output temp/gallery-metrics.json
+python3 .scripts/gallery_site.py --metrics temp/gallery-metrics.json
+python3 .scripts/test_gallery_metrics.py
+```
+
+构建器本身不联网；汇总读取是独立的确定性工具。网页可在JavaScript关闭时阅读汇总、作品与下载。启用统计后的真实请求/后台数值须分别检查，不把安装了脚本等同已观测到访问。
 
 ## 长简历公开展示版
 

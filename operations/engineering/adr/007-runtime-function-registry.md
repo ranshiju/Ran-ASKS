@@ -196,7 +196,7 @@ python3 .scripts/function_registry.py validate --runtime
 - **远程计算归为研究辅助工具**：按用户2026-09-29明确意见，`computing/ssh_run.py`保留为研究过程中按需使用的SSH执行与传输工具，不纳入系统功能目录，也不计为漏登功能。本项修正此前将其列为独立功能遗漏的判断。
 - 教学、行政、系会汇报、简历维护及本次PRL报告已有工作区承载，profile均已定义。`presentation`未登记为独立类型，但其跨页创作记录由工作区与PPT状态协议承接；这是专门持续工作类型的可选设计，不是运行中的上下文丢失。
 - 学生指导、项目申请、受限领域诊断等目录可具有持续工作上下文，已有研究记忆或项目记录按各自约定维护。目录名或业务主题不会自动产生新的顶层持续工作类型。
-- `projects/asks-ai-agent/AGENTS.md`中的文章pipeline属于该研究项目内的专门创作流程；文章状态目前由项目记录承载。若以后提升为全系统复用入口，再决定其功能登记和工作区profile。
+- `projects/科普与报告/asks-ai-agent/AGENTS.md`中的文章pipeline属于该研究项目内的专门创作流程；文章状态目前由项目记录承载。若以后提升为全系统复用入口，再决定其功能登记和工作区profile。
 - 摄入事务、PPT页内批准、实验checkpoint和发布回执是相应操作或产物的状态；不能仅因保存JSON就升级为顶层state。
 - `dsh/semantic_recovery_agent.py`中的`inspect_issue_context`是已登记`worker.semantic_recovery`的任务局部受限工具，不是漏掉的第七组生产DSH provider。
 - `baseline_*`、E1评测、一次性迁移/修复以及`scripts/`中的专用采集工具，按工程/研究内部工具处理。外部安装的个人skill、宿主插件和应用能力不纳入本仓库功能总数。

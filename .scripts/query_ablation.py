@@ -581,12 +581,12 @@ def _trace_pages_tokens(trace_path: str) -> tuple[set, int]:
     return pages, tok
 
 def validate(queries: list[dict]) -> None:
-    res = json.loads((_REPO / "projects/kr-wiki-paper/testbed/ablation-results.json").read_text(encoding="utf-8"))["per_query"]
+    res = json.loads((_REPO / "projects/知识系统研究与建设/kr-wiki-paper/testbed/ablation-results.json").read_text(encoding="utf-8"))["per_query"]
     rows = []
     jaccs, tok_ratios, stop_match = [], [], []
     for spec in queries:
         qid = spec["id"]
-        trace_p = f"projects/kr-wiki-paper/testbed/traces/{qid}.jsonl"
+        trace_p = f"projects/知识系统研究与建设/kr-wiki-paper/testbed/traces/{qid}.jsonl"
         real_pages, real_tok = _trace_pages_tokens(trace_p)
         if not real_pages:
             continue
@@ -620,14 +620,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--validate", action="store_true")
-    ap.add_argument("--queries", default="projects/kr-wiki-paper/testbed/ablation-queries.json")
+    ap.add_argument("--queries", default="projects/知识系统研究与建设/kr-wiki-paper/testbed/ablation-queries.json")
     args = ap.parse_args()
     queries = json.loads((_REPO / args.queries).read_text(encoding="utf-8"))
     if args.run:
         results = run(queries)
         agg = aggregate(results)
         out = {"per_query": results, "aggregate": agg}
-        (_REPO / "projects/kr-wiki-paper/testbed/ablation-results.json").write_text(
+        (_REPO / "projects/知识系统研究与建设/kr-wiki-paper/testbed/ablation-results.json").write_text(
             json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
         # 打印汇总表
         print("档  | coverage | correct | honest | version | conflict | traceab | avg_tok | med_tok")

@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文引言撰写与修改"
+  short_description: "基于已有稿件整合科学问题、贡献和背景动机，撰写有文献支撑的完整引言"
+  default_prompt: "使用 $manuscript-introduction，以已有稿件为基础或参考，围绕最新标题、核心科学问题与贡献撰写完整引言，核验引用并说明主要改动。"

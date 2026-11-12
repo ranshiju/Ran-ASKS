@@ -19,6 +19,23 @@ import wg
 
 
 class PrivateQueryTests(unittest.TestCase):
+    def test_oversized_private_read_hints_stay_inside_selected_scope(self):
+        locator = 'private/raw/example.md#L2-L5'
+        (self.root / 'private/raw/example.md').write_text('# Source\n' + '\n'.join(['private-text'] * 4))
+        with patch.object(qa, 'RAW_PREVIEW_CHARS', 20):
+            with patch.object(sl, 'read_size_guidance', wraps=sl.read_size_guidance) as guidance:
+                refused = qa.execute('read_raw', {'locator': locator}, subproject='public')
+                self.assertFalse(refused['ok'])
+                guidance.assert_not_called()
+            allowed = qa.execute('read_raw', {'locator': locator}, subproject='private')
+            self.assertFalse(allowed['ok'])  # Scope valid, excerpt still oversized.
+            hint = json.loads(allowed['text'].split('\n', 1)[1])['read_size']
+            self.assertTrue(hint['suggested_reads'])
+            for entry in hint['suggested_reads']:
+                self.assertTrue(entry['locator'].startswith('private/raw/'))
+                read = qa.execute('read_raw', {'locator': entry['locator']}, subproject='private')
+                self.assertTrue(read['ok'], read)
+
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
@@ -79,6 +96,24 @@ class PrivateQueryTests(unittest.TestCase):
         with patch.object(qa.subprocess, 'run', side_effect=fake_run):
             self.action('graph_search', {'term': 'Shared subject'})
         self.assertEqual(captured[0][-2:], ['--db', str(self.priv)])
+
+    def test_subject_lanes_preserve_private_scope_and_lifecycle(self):
+        import knowledge_store as ks
+        import source_ingest as si
+        with patch('urllib.request.urlopen', side_effect=AssertionError('network forbidden')), \
+             patch.object(ks, 'search', side_effect=AssertionError('public KU accessed')), \
+             patch.object(si, 'search', side_effect=AssertionError('public source accessed')):
+            inputs = {'query': 'Shared subject conditions and observations', 'subjects': ['Shared subject']}
+            text = self.action('hybrid_recall', inputs)
+            self.assertIn('PRIVATE_ONLY', text)
+            self.assertNotIn('PUBLIC_ONLY', text)
+            self.assertEqual(json.loads(text)['channels']['source']['status'], 'not_applicable')
+            self.assertEqual(json.loads(text)['subjects'], ['Shared subject'])
+            conn = gl.connect(self.priv)
+            conn.execute("UPDATE nodes SET status='deprecated' WHERE path LIKE 'private/wiki/%'")
+            conn.commit(); conn.close()
+            self.assertEqual(json.loads(self.action('hybrid_recall', inputs))['candidates'], [])
+            self.assertIn('PRIVATE_ONLY', self.action('hybrid_recall', {**inputs, 'include_deprecated': True}))
 
     def test_raw_wiki_context_and_identity_share_private_scope(self):
         page = 'private/wiki/records/example.md'

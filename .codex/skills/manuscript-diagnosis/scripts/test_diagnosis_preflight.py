@@ -24,7 +24,7 @@ class DiagnosisPreflightTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
-        self.root = self.base / "projects" / "稿件诊断"
+        self.root = self.base / "projects" / "学术服务与个人事务" / "稿件诊断"
         self.target = self.root / "0912 PRL"
         self.target.mkdir(parents=True)
         (self.target / "manuscript.pdf").write_bytes(b"local manuscript fixture")
@@ -78,14 +78,14 @@ class DiagnosisPreflightTest(unittest.TestCase):
     def test_outside_workspace_is_rejected(self):
         outside = self.base / "outside"
         outside.mkdir()
-        with self.assertRaisesRegex(ValueError, "projects/稿件诊断"):
+        with self.assertRaisesRegex(ValueError, "projects/学术服务与个人事务/稿件诊断"):
             diagnosis.preflight(str(outside))
 
     def test_symlink_cannot_escape_workspace(self):
         outside = self.base / "outside"
         outside.mkdir()
         (self.root / "escape").symlink_to(outside, target_is_directory=True)
-        with self.assertRaisesRegex(ValueError, "projects/稿件诊断"):
+        with self.assertRaisesRegex(ValueError, "projects/学术服务与个人事务/稿件诊断"):
             diagnosis.preflight(str(self.root / "escape"))
 
     def test_missing_target_is_rejected_without_creation(self):
@@ -139,7 +139,7 @@ class DiagnosisIntegrationTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertNotIn(retired_label, path.as_posix())
                 self.assertNotIn(retired_label, path.read_text())
-        project = REPO / "projects" / "稿件诊断"
+        project = REPO / "projects" / "学术服务与个人事务" / "稿件诊断"
         for path in [project / "STYLE.md", project / "style-library/稿件诊断写作风格指南.md"]:
             if not path.exists():
                 continue  # Local profiles are deliberately absent from public releases.

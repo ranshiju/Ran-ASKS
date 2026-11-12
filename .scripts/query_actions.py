@@ -373,8 +373,48 @@ def wiki_recall(query: str = "", domain: str = "", topk: str = "8",
     return text, _tok(text)
 
 
+def _interleave_candidates(lanes, limit, key, prefer=None):
+    """Bounded union: each explicit discovery lane gets a turn before cutoff."""
+    if prefer is not None:
+        preferred = {}
+        for lane in lanes:
+            for item in lane:
+                identity, priority = key(item), prefer(item)
+                if identity not in preferred or priority < preferred[identity][0]:
+                    preferred[identity] = (priority, item)
+        # Different queries may expose different previews of one bound object.
+        lanes = [[preferred[key(item)][1] for item in lane] for lane in lanes]
+    out, seen = [], set()
+    for rank in range(max((len(lane) for lane in lanes), default=0)):
+        for lane in lanes:
+            if rank < len(lane) and key(lane[rank]) not in seen:
+                item = lane[rank]
+                seen.add(key(item))
+                out.append(item)
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+def _subject_features(subjects, item):
+    import lexical_relevance as lr
+    labels = [item.get("title", ""), item.get("filename", ""), *item.get("aliases", [])]
+    body = "\n".join(item.get(k, "") for k in ("excerpt", "navigation", "capsule"))
+    return lr.subject_match(subjects, labels, body)
+
+
+def _subject_key(features):
+    return -len(features["matched"]), -len(features["labels"])
+
+
+def _question_match(query, item):
+    import lexical_relevance as lr
+    body = "\n".join(item.get(k, "") for k in ("excerpt", "navigation", "capsule"))
+    return lr.match(query, item.get("title", ""), lr.excerpt(query, body)["excerpt"])
+
+
 def _wiki_recall_data(conn, query: str, domain: str, limit: int,
-                      include_deprecated: bool) -> tuple[dict, dict]:
+                      include_deprecated: bool, subjects=()) -> tuple[dict, dict]:
     terms = _wiki_query_terms(query)
     roots = [domain] if domain else sorted(DOMAIN_DIRS)
     pages = {}
@@ -439,6 +479,15 @@ def _wiki_recall_data(conn, query: str, domain: str, limit: int,
     ranked.sort(key=lambda matched: matched[0])
     mode = "direct"
     out = [matched[1] for matched in ranked[:limit]]
+    if subjects:
+        lanes = []
+        for subject in subjects:
+            subject_terms = _wiki_query_terms(subject)
+            matches = [matched for item in pages.values() if _wiki_admitted(item, include_deprecated)
+                       and (matched := _wiki_match(item, subject, subject_terms)) is not None]
+            matches.sort(key=lambda matched: matched[0])
+            lanes.append([matched[1] for matched in matches[:limit]])
+        out = _interleave_candidates([*lanes, out], limit, lambda item: item["path"])
     if not out and conn is not None:
         mode = "graph_fallback"
         graph_paths = set()
@@ -564,12 +613,13 @@ def _query_entity_terms(query: str) -> list[str]:
     return list(dict.fromkeys(terms))[:8]
 
 
-def _navigation_recall_data(query, intent, domain, limit, include_deprecated):
+def _navigation_recall_data(query, intent, domain, limit, include_deprecated, subjects=()):
     """Existing Wiki/Graph ranking; usable Wiki files survive a missing graph projection."""
     wiki_weight, graph_weight = _INTENT_WEIGHTS[intent]
     scores: dict[str, float] = {}
     signals: dict[str, list[dict]] = {}
     seen_signals = set()
+    channel_scores: dict[tuple[str, str], float] = {}
 
     def add(path: str, channel: str, rank: int, weight: float, via: str = ""):
         if not path or "/wiki/" not in path:
@@ -582,7 +632,13 @@ def _navigation_recall_data(query, intent, domain, limit, include_deprecated):
         if signal_key in seen_signals:
             return
         seen_signals.add(signal_key)
-        scores[path] = scores.get(path, 0.0) + weight / (60.0 + rank)
+        # Different graph routes are explanations of one channel's hit, not votes.
+        key = (path, channel)
+        contribution = weight / (60.0 + rank)
+        previous = channel_scores.get(key, 0.0)
+        if contribution > previous:
+            scores[path] = scores.get(path, 0.0) + contribution - previous
+            channel_scores[key] = contribution
         signals.setdefault(path, []).append({"channel": channel, "rank": rank, "via": via})
 
     issues = []
@@ -594,18 +650,21 @@ def _navigation_recall_data(query, intent, domain, limit, include_deprecated):
     try:
         try:
             wiki_result, wiki_pages = _wiki_recall_data(
-                conn, query, domain, min(max(limit * 2, 8), 20), include_deprecated)
+                conn, query, domain, min(max(limit * 2, 8), 20), include_deprecated,
+                **({"subjects": subjects} if subjects else {}))
         except sqlite3.Error as exc:
             if conn is not None:
                 conn.close()
             conn = None
             issues.append({"channel": "graph", "error": str(exc), "next": "restore graph via managed maintenance"})
-            wiki_result, wiki_pages = _wiki_recall_data(None, query, domain, limit, include_deprecated)
+            wiki_result, wiki_pages = _wiki_recall_data(None, query, domain, limit, include_deprecated,
+                                                      **({"subjects": subjects} if subjects else {}))
         wiki_items = wiki_result["candidates"]
         for rank, item in enumerate(wiki_items, start=1):
             add(item.get("path", ""), "wiki", rank, wiki_weight)
         exact_rank = 0
-        for term in _query_entity_terms(query) if conn is not None else []:
+        entity_terms = list(dict.fromkeys([*subjects, *_query_entity_terms(query)]))[:8]
+        for term in entity_terms if conn is not None else []:
             for item in qg.search_nodes(conn, term, include_deprecated=True).get("nodes", [])[:8]:
                 exact_rank += 1
                 node = item.get("path", "")
@@ -635,11 +694,14 @@ def _navigation_recall_data(query, intent, domain, limit, include_deprecated):
     for path, capsule in capsules.items():
         if capsule.get("raw_citations"):
             scores[path] += 0.15 / 60.0
-    ranked = sorted(scores, key=lambda path: (-scores[path], path))[:limit]
+    subject_features = {path: _subject_features(subjects, {**wiki_pages.get(path, {}), **capsules[path]})
+                        for path in scores} if subjects else {}
+    ranked = sorted(scores, key=lambda path: (
+        *(_subject_key(subject_features[path]) if subjects else ()), -scores[path], path))[:limit]
     candidates = []
     for path in ranked:
         capsule = capsules[path]
-        item = wiki_by_path.get(path, {})
+        item = wiki_by_path.get(path) or wiki_pages.get(path, {})
         if not capsule.get("semantic_address"):
             text = wiki_pages.get(path, {}).get("_scan_text")
             if text is not None:
@@ -652,9 +714,11 @@ def _navigation_recall_data(query, intent, domain, limit, include_deprecated):
             "signals": signals[path],
             "navigation": item.get("navigation", ""),
             "source_links": wiki_pages.get(path, {}).get("source_links", []),
+            **({"subject_match": subject_features[path]} if subjects else {}),
             **capsule,
         })
-    candidates.sort(key=lambda item: (-item["score"], item["path"]))
+    candidates.sort(key=lambda item: (*(_subject_key(item["subject_match"]) if subjects else ()),
+                                      -item["score"], item["path"]))
     result = {
         "query": query,
         "intent": intent,
@@ -673,10 +737,15 @@ def _navigation_recall_data(query, intent, domain, limit, include_deprecated):
 
 @scoped_query
 def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = "",
-                  topk: str = "8", include_deprecated: bool = False) -> tuple[str, int]:
+                  topk: str = "8", include_deprecated: bool = False,
+                  subjects: Optional[list[str]] = None) -> tuple[str, int]:
     """Discover typed Source/KU/Question/Wiki candidates without promoting them to evidence."""
     if not query.strip():
         return "[ERROR 缺 query]", 0
+    if subjects is not None and (not isinstance(subjects, list) or len(subjects) > 3 or
+            any(not isinstance(s, str) or not s.strip() or len(s) > 160 for s in subjects)):
+        return "[ERROR subjects 需为至多3个非空名称，每个不超过160字符]", 0
+    subjects = list(dict.fromkeys(" ".join(s.split()) for s in (subjects or [])))
     intent = intent.strip().lower() or "exploration"
     if intent not in _INTENT_WEIGHTS:
         return f"[ERROR 不支持 intent: {intent}]", 0
@@ -689,7 +758,8 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
     pool_limit = min(max(limit * 2, 8), 20)
     include_deprecated = _history_enabled(include_deprecated)
     try:
-        navigation = _navigation_recall_data(query, intent, domain, pool_limit, include_deprecated)
+        navigation = _navigation_recall_data(query, intent, domain, pool_limit, include_deprecated,
+                                            **({"subjects": subjects} if subjects else {}))
     except (OSError, sqlite3.Error) as exc:
         navigation = {"candidates": [], "issues": [{"channel": "navigation", "error": str(exc)}],
                       "fusion": "weighted_rrf", "weights": dict(zip(("wiki", "graph"), _INTENT_WEIGHTS[intent]))}
@@ -707,16 +777,36 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
     if domain in {"", "academic"}:
         import knowledge_store as ks
         import source_ingest as si
+        import lexical_relevance as lr
         for name, search in (("knowledge", ks.search), ("source", si.search)):
-            try:
-                found = search(query, repo=_REPO, topk=20)
-            except (OSError, sqlite3.Error, ValueError, KeyError, yaml.YAMLError) as exc:
-                channels[name] = {"status": "unavailable", "count": 0, "issues": [str(exc)]}
+            queries = list(dict.fromkeys([*subjects, query]))
+            lanes, issues, last_found = [], [], {}
+            succeeded = 0
+            for discovery_query in queries:
+                try:
+                    found = search(discovery_query, repo=_REPO, topk=20)
+                except (OSError, sqlite3.Error, ValueError, KeyError, yaml.YAMLError) as exc:
+                    issues.append({"query": discovery_query, "error": str(exc)} if subjects else str(exc))
+                    continue
+                succeeded += 1
+                last_found = found
+                issues.extend(found.get("issues", []))
+                lanes.append(found["candidates"])
+            if not succeeded:
+                channels[name] = {"status": "unavailable", "count": 0, "issues": issues}
+                if subjects:
+                    channels[name].update(queries=queries, search_count=len(queries))
                 continue
-            issues = found.get("issues", [])
+            found = {**last_found, "candidates": _interleave_candidates(lanes, 20,
+                (lambda item: (item["source_id"], item["parse_id"], item["locator"])) if name == "source"
+                else (lambda item: item["id"]),
+                prefer=lambda item: (*_subject_key(_subject_features(subjects, item)),
+                                     *lr.rank_key(_question_match(query, item))))} if subjects else last_found
             channels[name] = {"status": "partial" if issues else "ok",
                               "count": len(found["candidates"]), "issues": issues,
                               "candidate_window": 20, "window_full": len(found["candidates"]) >= 20}
+            if subjects:
+                channels[name].update(queries=queries, search_count=len(queries))
             if name == "knowledge":
                 for candidate in found["candidates"]:
                     groups[name].append({**candidate, "read_action": "knowledge_read",
@@ -726,6 +816,13 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
                     channels[name].update(status="unavailable", issues=["source index absent; use source resume to rebuild registered sources"])
                 # Several passages of one immutable source are alternative reading locations, not votes.
                 sources = {}
+                if subjects:
+                    # Sort whole passage objects, so the selected read address, excerpt
+                    # and source metadata can never come from different fragments.
+                    found["candidates"].sort(key=lambda item: (
+                        item.get("section_role") == "references" if found.get("passage_preference") != "literal" else False,
+                        *_subject_key(_subject_features(subjects, item)),
+                        *lr.rank_key(_question_match(query, item))))
                 for candidate in found["candidates"]:
                     identity = (candidate["source_id"], candidate["parse_id"])
                     if identity not in sources:
@@ -749,9 +846,13 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
         for rank, item in enumerate(items, 1):
             features = item.get("lexical_match") or lr.match(query, item.get("title", ""),
                 item.get("excerpt", "") + "\n" + item.get("navigation", "") + "\n" + item.get("capsule", ""))
+            if subjects:
+                features = _question_match(query, item)
+                item = {**item, "subject_match": item.get("subject_match") or _subject_features(subjects, item)}
             candidates.append({**item, "score": round(1.0/(60+rank), 8), "lexical_match": features,
                 "retrieval_channel": name, "channel_rank": rank, "evidence_read": False})
-    candidates.sort(key=lambda item: (*lr.rank_key(item["lexical_match"]), -item["score"], item["retrieval_channel"], item["id"]))
+    candidates.sort(key=lambda item: (*(_subject_key(item["subject_match"]) if subjects else ()),
+        *lr.rank_key(item["lexical_match"]), -item["score"], item["retrieval_channel"], item["id"]))
     result = {"schema": "unified-recall-v1", "query": query, "intent": intent, "domain": domain or "all",
         "fusion": "literal_coverage_then_rank", "navigation_fusion": navigation["fusion"],
         "navigation_weights": navigation["weights"], "channels": channels,
@@ -759,6 +860,9 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
         "candidates": candidates[:limit], "truncated": len(candidates)>limit,
         "identity_claim": False, "fact_claim": False,
         "next": "follow each candidate's read_action/read_input; Wiki source_links are document navigation, not section evidence; verify facts with read_raw"}
+    if subjects:
+        result.update(subjects=subjects, fusion="subject_then_local_coverage_then_rank",
+                      ranking_text="title_and_at_most_700_chars_of_existing_candidate_preview")
     text = json.dumps(result, ensure_ascii=False, indent=2)
     return text, _tok(text)
 
@@ -806,7 +910,7 @@ def wiki_context(page: str = "", section: str = "", profile: str = "explanation"
     text = json.dumps(result, ensure_ascii=False, indent=2)
     return text, _tok(text)
 
-RAW_PREVIEW_CHARS = 8000
+RAW_PREVIEW_CHARS = 12000
 
 
 @scoped_query
@@ -839,7 +943,11 @@ def read_raw(locator: str = "") -> tuple[str, int]:
     if seg is None:
         return f"[ERROR locator '{loc}' 已验证但无法精确截取；未返回全文]", 0
     if len(seg) > RAW_PREVIEW_CHARS:
-        return f"[ERROR locator '{loc}' 命中 {len(seg)} 字符，范围过大；请细化 locator，未返回半截内容]", 0
+        guidance = sl.read_size_guidance(f"{read_rel}#{loc}", seg, RAW_PREVIEW_CHARS)
+        return (f"[ERROR locator '{loc}' 命中 {len(seg)} 字符，上限 {RAW_PREVIEW_CHARS}；"
+                "范围过大，请细化 locator。可选择read_size.suggested_reads再读取；"
+                "候选未读，未返回半截内容]\n" +
+                json.dumps({"read_size": guidance}, ensure_ascii=False)), 0
     header = f"[raw source={source_rel}; evidence={read_rel}#{loc}]\n"
     return header + seg, _tok(header + seg)
 
@@ -867,6 +975,16 @@ def source_search(query: str, domain: str = "", topk: str = "5") -> tuple[str, i
 
 
 @scoped_query
+def source_outline(source_id: str, query: str = "", start_line: str = "1", limit: str = "40") -> tuple[str, int]:
+    """Locate explicit headings/captions within one known public source."""
+    if scope_for() == "private":
+        raise ValueError("Source-first outline is academic-only; private sources remain isolated")
+    from source_ingest import outline
+    text = json.dumps(outline(source_id, repo=_REPO, query=query, start_line=int(start_line), limit=int(limit)), ensure_ascii=False)
+    return text, _tok(text)
+
+
+@scoped_query
 def knowledge_search(query: str, domain: str = "", topk: str = "5") -> tuple[str, int]:
     if scope_for() == "private" or domain not in {"", "academic", "public"}:
         raise ValueError("KU search currently supports academic public sources only")
@@ -890,6 +1008,7 @@ def knowledge_read(unit_id: str) -> tuple[str, int]:
 
 
 DISPATCH = {
+    "source_outline": lambda inp: source_outline(inp.get("source_id", ""), inp.get("query", ""), inp.get("start_line", "1"), inp.get("limit", "40")),
     "knowledge_search": lambda inp: knowledge_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5")),
     "knowledge_read": lambda inp: knowledge_read(inp.get("unit_id", "")),
     "source_search": lambda inp: source_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5")),
@@ -917,7 +1036,7 @@ DISPATCH = {
     "wiki_recall": lambda inp: wiki_recall(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "8"), inp.get("include_deprecated", False)),
     "hybrid_recall": lambda inp: hybrid_recall(
         inp.get("query", ""), inp.get("intent", "exploration"),
-        inp.get("domain", ""), inp.get("topk", "8"), inp.get("include_deprecated", False)
+        inp.get("domain", ""), inp.get("topk", "8"), inp.get("include_deprecated", False), inp.get("subjects")
     ),
     "wiki_context": lambda inp: wiki_context(
         inp.get("page", ""), inp.get("section", ""),

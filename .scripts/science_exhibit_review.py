@@ -73,8 +73,9 @@ def record_review(core, store, state, args):
     core.require(result['execution']['kind'] == 'host-agent', 'Offline fixtures cannot be recorded as actual exhibit review')
     preview = work.validate_preview(core, store, state)
     artifact = request.get('artifact_manifest', {})
-    core.require(artifact.get('sha256') == preview['manifest_sha256'] and
-                 artifact.get('source') == str((core.REPO / preview['output_dir'] / 'manifest.json').relative_to(core.REPO)),
+    core.require(artifact.get('sha256') == preview['manifest_sha256'] and artifact.get('source') and
+                 core.managed_path(artifact['source'], 'projects') ==
+                 core.managed_path(core.REPO / preview['output_dir'] / 'manifest.json', 'projects'),
                  'Review belongs to a different preview; do not apply it silently to the current version')
     core.require(review.applicability(request) == 'current', 'Review input or brief changed')
     core.require(packet['material'].get('kind') == 'image' and not result['diagnostics'], 'A completed image review is required')

@@ -20,7 +20,7 @@ LLM 判断指令类型后,调本脚本截取对应规范 section,拼成 prompt�
   route.py --task frontier # 研究前沿:输出 FRONTIER 规范
   route.py --capability write --capability-profile academic # research 工作上下文内按需加载论文落笔能力
   route.py --capability write --capability-profile academic-abstract # 学术论文摘要撰写与修改
-  route.py --capability write --capability-profile academic-manuscript # 通读全文后的论文系统改进
+  route.py --capability write --capability-profile academic-manuscript # 研究持续工作中的论文撰写与优化
   route.py --capability cv --capability-profile general # workspace 工作上下文内加载简历制作与维护契约
   route.py --capability presentation --capability-profile create # PPT 创作契约与当前可执行入口
   route.py --list           # 分类列出持续工作、路由任务与按需能力
@@ -246,6 +246,19 @@ ROUTES = {
 # 能力是持续工作内按需加载的规范包；它不创建或切换持续工作。
 # 顶层 --task write 继续作为 general profile 的兼容入口。
 CAPABILITY_ROUTES = {
+    "manuscript-introduction": {"general": [
+        ("operations/WRITE.md", ["总体原则", "共享落笔约定", "事实与主张控制"]),
+        ("operations/research/manuscript-introduction.md", None),
+    ]},
+    "manuscript-motivation": {"general": [
+        ("operations/WRITE.md", ["总体原则", "共享落笔约定", "事实与主张控制"]),
+        ("operations/research/manuscript-motivation.md", None),
+    ]},
+    "manuscript-title": {"general": [
+        ("operations/WRITE.md", ["总体原则", "共享落笔约定", "事实与主张控制"]),
+        ("operations/research/manuscript-title.md", None),
+    ]},
+    "manuscript-question": {"general": [("operations/research/manuscript-question.md", None)]},
     "manuscript-evaluation": {"general": [("operations/research/manuscript-evaluation.md", None)]},
     "citing-papers": {"general": [("operations/CITING_PAPERS.md", None)]},
     "paper-impact": {"general": [("operations/PAPER_IMPACT.md", None)]},

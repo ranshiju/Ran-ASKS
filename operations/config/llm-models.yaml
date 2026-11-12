@@ -37,7 +37,7 @@ presentation_artwork:
   activation: explicit_user_instruction_2026_09_26
   probe_status: bounded_vector_generation_succeeded_after_revision
   reasoning_effort: high
-  evidence: projects/2026-PRL-MPE报告/drafts/封面-API主创-20260926/artwork-source/receipt.json
+  evidence: projects/科普与报告/2026-PRL-MPE报告/drafts/封面-API主创-20260926/artwork-source/receipt.json
   notes:
     - API 自主构图并生成图元；shared 校验、转义与渲染；不执行模型代码。
     - 本次 low 档曾出现科学误述与协议错误，反馈修订后 high 档产出合法候选；单页试验不代表通用质量保证。
@@ -79,7 +79,7 @@ agent_profiles:
     runtime_operation: ingest_content_repair
     api_profile: SEMANTIC_RECOVERY
     scope: existing_paper_and_ordinary_document_wiki_or_semantic_revision_budget
-    evaluation_report: projects/ASKS/outputs/ev-content-recovery-validation-2026-11-05.md
+    evaluation_report: projects/知识系统研究与建设/ASKS/outputs/ev-content-recovery-validation-2026-11-05.md
     notes: 仅有实际校验错误的已有修订改用EV，一次选中profile调用；论文语义重放通过但旧Wiki仍不合格，普通文档两次独立试验均有残余错误。不开启全文复核，不增加预算，不宣称全文自动恢复。
   meeting_repair_worker:
     status: limited_pilot
@@ -87,7 +87,7 @@ agent_profiles:
     runtime_operation: ingest_meeting_repair
     api_profile: SEMANTIC_RECOVERY
     scope: existing_second_compiler_revision_with_bound_output_and_validator_diagnostics
-    evaluation_report: projects/ASKS/outputs/meeting-api-recovery-validation-2026-11-05.md
+    evaluation_report: projects/知识系统研究与建设/ASKS/outputs/meeting-api-recovery-validation-2026-11-05.md
     notes: 复用已配置恢复模型与原两次预算；失败不隐藏回退。三份自然会议的局部修订均通过程序校验，仍有内容条件与议题关系问题，未证明整体语义正确或EV普遍优于FlashX。
   long_document_repair_worker:
     status: limited_pilot
@@ -95,7 +95,7 @@ agent_profiles:
     runtime_operation: ingest_long_document_repair
     api_profile: SEMANTIC_RECOVERY
     scope: second_bounded_unit_revision_with_original_candidate_and_complete_validator_issues
-    evaluation_report: projects/ASKS/outputs/natural-recovery-validation-2026-11-04.md
+    evaluation_report: projects/知识系统研究与建设/ASKS/outputs/natural-recovery-validation-2026-11-04.md
     notes: 复用已选恢复模型，不复用语义槽补丁协议；单元内原两次预算不变。自然失败首单元修复成功，下一单元仍失败，未证明全文自动通过或EV普遍优于FlashX。
   wiki_recovery_worker:
     status: evaluated_not_promoted
@@ -104,7 +104,7 @@ agent_profiles:
     candidate_model: GLM-5.3-EV
     active_model_policy: inherit_ingest_generation_until_natural_failure_evidence
     scope: existing_wiki_revision_budget_and_validator_bounded_patch
-    evaluation_report: projects/ASKS/outputs/wiki-recovery-validation-2026-11-04.md
+    evaluation_report: projects/知识系统研究与建设/ASKS/outputs/wiki-recovery-validation-2026-11-04.md
     notes: 两例存量来源故障注入中 FlashX 与 EV 均成功，EV 延迟更高；专用路由就绪但本地未启用，不扩展全局 Sub-Agent 策略。
   meeting_compiler_agent:
     status: active
@@ -120,7 +120,7 @@ agent_profiles:
     required_capabilities: [structured_json, multi_turn_tool_use, evidence_bounded_repair]
     activation: explicit_user_request_2026_11_04_after_paired_probe_and_validator_replay
     scope: existing_unique_semantic_issue_patch_only
-    evaluation_report: projects/ASKS/outputs/api-fallback-validation-2026-11-04.md
+    evaluation_report: projects/知识系统研究与建设/ASKS/outputs/api-fallback-validation-2026-11-04.md
     requested_candidate:
       model: GLM-5.3-EV
       requested_at: '2026-11-04'

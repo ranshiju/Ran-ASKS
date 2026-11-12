@@ -60,6 +60,7 @@ def _log_event(operation: str, result: dict, prompt: str, output_text: str = "",
             "usage": result.get("usage", {}),
             "reasoning_tokens": result.get("reasoning_tokens", 0),
             "reasoning_exhausted": result.get("reasoning_exhausted", False),
+            "local_json_recovery": result.get("local_json_recovery", ""),
             "recovery_policy_version": result.get("recovery_policy_version", rp.POLICY_VERSION),
             "recovery_class": result.get("recovery_class", ""),
             "recovery_scheduled": result.get("recovery_scheduled", False),
@@ -342,12 +343,33 @@ def strip_json_fence(text: str) -> str:
     cleaned = re.sub(r"\s*```$", "", cleaned)
     return cleaned.strip()
 
-def parse_json(text: str):
+def decode_json_response(text: str):
+    """Decode model JSON; preserve literal string whitespace without guessing content."""
     cleaned = strip_json_fence(text)
     try:
-        return json.loads(cleaned), None
+        return json.loads(cleaned), None, ""
     except json.JSONDecodeError as exc:
-        return None, f"JSON 解析失败: {exc.msg} (位置 {exc.pos})"
+        if exc.msg == "Extra data":
+            # A complete value already exists. Only redundant matching root
+            # closers carry no additional data; never discard another value.
+            obj, end = json.JSONDecoder().raw_decode(cleaned)
+            closer = "}" if isinstance(obj, dict) else "]" if isinstance(obj, list) else None
+            remainder = cleaned[end:]
+            if closer and remainder.strip(" \t\r\n") and all(
+                    char in closer + " \t\r\n" for char in remainder):
+                return obj, None, "redundant_top_level_closer"
+        if (exc.msg.startswith("Invalid control character")
+                and all(ord(char) >= 32 or char in "\n\r\t" for char in cleaned)):
+            try:
+                return json.loads(cleaned, strict=False), None, "literal_string_whitespace"
+            except json.JSONDecodeError:
+                pass
+        return None, f"JSON 解析失败: {exc.msg} (位置 {exc.pos})", ""
+
+
+def parse_json(text: str):
+    obj, error, _ = decode_json_response(text)
+    return obj, error
 
 def _classify_http_error(exc: Exception) -> tuple[bool, str]:
     """Classify request failures without retrying permanent 4xx or code errors.
@@ -400,7 +422,7 @@ def _retry_available(category: str, used: dict[str, int], limits: dict[str, int]
     return attempt < legacy_retries
 
 
-def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束的知识库组件，只输出要求的 JSON。", max_tokens: int = 800, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", timeout_sec: float = 90, allow_profile_fallback: bool = True) -> dict:
+def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束的知识库组件，只输出要求的 JSON。", max_tokens: int = 800, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", timeout_sec: float = 90, allow_profile_fallback: bool = True, tools: list[dict] | None = None, response_decoder=None) -> dict:
     config = load_env()
     is_ingest = operation == "ingest" or operation.startswith("ingest_")
     if operation == "oral_exam":
@@ -441,7 +463,9 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
         reasoning_strikes = 0
         for attempt in range(max_attempts):
             used_max_tokens = attempt_max_tokens
-            user_prompt = prompt if attempt == 0 else f"{prompt}\n\n上次输出未通过校验：{last.get('error', 'schema failed')}。只输出修正后的 JSON，不要解释。"
+            correction = ("按原工具/正文协议输出完整结果。" if response_decoder
+                          else "只输出修正后的 JSON，不要解释。")
+            user_prompt = prompt if attempt == 0 else f"{prompt}\n\n上次输出未通过校验：{last.get('error', 'schema failed')}。{correction}"
             if messages:
                 conv = list(messages)
                 if attempt > 0:
@@ -455,6 +479,12 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
                 "temperature": 0,
                 "max_tokens": attempt_max_tokens,
             }
+            if tools:
+                payload_data["tools"] = tools
+                payload_data["tool_choice"] = "auto"
+            if response_decoder:
+                request_audit_prompt = json.dumps({"messages": conv, "tools": tools or []},
+                                                 ensure_ascii=False, sort_keys=True)
             payload_data.update(attempt_reasoning)
             payload = json.dumps(payload_data).encode()
             request = urllib.request.Request(_chat_endpoint(config, profile["base"]), data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
@@ -468,8 +498,13 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
                 finish_reason = choice.get("finish_reason")
                 usage = data.get("usage", {})
                 reasoning_tokens = _reasoning_token_count(usage)
+                if response_decoder:
+                    obj, parse_error, local_json_recovery = response_decoder(choice)
+                    if (choice.get("message") or {}).get("tool_calls"):
+                        text = json.dumps(choice["message"], ensure_ascii=False)
+                else:
+                    obj, parse_error, local_json_recovery = decode_json_response(text)
                 reasoning_exhausted = _reasoning_exhausted(text, finish_reason, usage)
-                obj, parse_error = parse_json(text)
                 error = parse_error or (None if schema_check(obj) else "schema 校验失败")
                 if error and not text.strip() and finish_reason == "length":
                     retry_same_profile = _retry_available(
@@ -491,7 +526,15 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
                         error = ("空输出(输出预算不足，下一尝试扩容)"
                                  if retry_same_profile or has_later_profile
                                  else "空输出(输出预算耗尽，已无后续尝试)")
+                elif parse_error and text.strip() and finish_reason == "length":
+                    # Partial JSON needs output room, not a change in reasoning effort.
+                    if _retry_available("output_transport", recovery_used, client_limits,
+                                        attempt, effective_retries, typed_recovery):
+                        attempt_max_tokens = max(
+                            attempt_max_tokens, min(attempt_max_tokens * 2, 65536),
+                        )
                 last = {"ok": error is None, "status": "ok" if error is None else "validation_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": used_max_tokens, "next_max_tokens": attempt_max_tokens if error and _retry_available("output_transport", recovery_used, client_limits, attempt, effective_retries, typed_recovery) else None, "attempt": attempt + 1, "text": text, "parsed": obj, "error": error, "latency_sec": round(time.time() - started, 2), "finish_reason": finish_reason, "usage": usage, "reasoning_tokens": reasoning_tokens, "reasoning_exhausted": reasoning_exhausted}
+                last["local_json_recovery"] = local_json_recovery
                 recovery_class = "output_transport" if error else ""
                 failure_retryable = bool(error)
             except Exception as exc:
@@ -515,7 +558,7 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
                 "recovery_scheduled": retry_same_profile,
                 "retryable": failure_retryable,
             })
-            history.append({key: last.get(key) for key in ("model", "profile", "reasoning_profile", "reasoning_reason", "reasoning_error_class", "provider_reasoning_effort", "max_tokens", "status", "attempt", "latency_sec", "usage", "recovery_class", "recovery_scheduled", "retryable")})
+            history.append({key: last.get(key) for key in ("model", "profile", "reasoning_profile", "reasoning_reason", "reasoning_error_class", "provider_reasoning_effort", "max_tokens", "status", "attempt", "latency_sec", "usage", "recovery_class", "recovery_scheduled", "retryable", "local_json_recovery")})
             _log_event(operation, last, request_audit_prompt, last.get("text", ""), transaction_id)
             if last["ok"]:
                 last["history"] = history

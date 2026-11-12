@@ -136,7 +136,30 @@ def test_missing_status_row_rolls_back_before_record_write():
         temporary.cleanup()
 
 
+def test_explicit_move_preserves_prepared_candidate_resume():
+    temporary, repo = _repo()
+    try:
+        state = _state()
+        projection.prepare_candidate_catalog(state, repo)
+        target = repo / "projects/category/学生指导"
+        target.parent.mkdir()
+        (repo / "projects/学生指导").rename(target)
+        (repo / "projects/.path-migrations.json").write_text(json.dumps({
+            "schema": "project-path-migrations-v1",
+            "moves": {"学生指导": "category/学生指导"}}))
+        catalog = projection.discover_student_records(repo)
+        assert len(catalog["students"]) == 2
+        ok, error = projection.apply_projection(state, repo)
+        assert ok, error
+        assert "进展：已跑通最小实验" in (target / "students/测试生.md").read_text()
+        assert "| 已跑通最小实验 | 扩展到更长序列 |" in (target / "notes/status.md").read_text()
+        assert not (repo / "projects/学生指导").exists()
+    finally:
+        temporary.cleanup()
+
+
 def main():
+    test_explicit_move_preserves_prepared_candidate_resume()
     test_candidate_catalog_uses_people_page_or_stable_record_key()
     test_projection_updates_record_and_status_idempotently()
     test_unmatched_student_is_rejected_before_writes()

@@ -16,6 +16,7 @@ import sys
 import tempfile
 from functools import wraps
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / ".scripts" / "llm_structured.py"
@@ -268,6 +269,197 @@ def test_malformed_provider_envelope_uses_output_transport_budget():
     }
     assert [event["mode"] for event in events] == ["api", "api"]
     assert [event["recovery_class"] for event in events] == ["output_transport", ""]
+
+
+def _json_transport_probe(responses, **kwargs):
+    """Offline provider: exercise request budgets and the real JSON/schema boundary."""
+    config = {
+        "QUERY_BACKEND": "api", "LLM_API_BASE": "https://example.invalid",
+        "LLM_API_KEY": "key", "LLM_MODEL": "test-model",
+        "LLM_REASONING_FIELD": "reasoning_effort",
+        "LLM_REASONING_EFFORT_DEEP": "high", "LLM_REASONING_EFFORT_FAST": "low",
+    }
+    replies = iter(responses)
+    captured = []
+
+    class Response:
+        def __init__(self, content, finish_reason):
+            self.payload = {"choices": [{"message": content if isinstance(content, dict) else {"content": content},
+                                         "finish_reason": finish_reason}],
+                            "usage": {"total_tokens": 3}}
+
+        def read(self):
+            return json.dumps(self.payload).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def urlopen(request, **_kwargs):
+        captured.append(json.loads(request.data))
+        return Response(*next(replies))
+
+    options = {"max_tokens": 2000, "retries": 1, "reasoning": "deep",
+               "operation": "query_api_loop", "allow_profile_fallback": False}
+    options.update(kwargs)
+    schema_check = options.pop("schema_check", lambda obj: obj == {"answer": "complete"})
+    with tempfile.TemporaryDirectory() as directory, \
+            patch.object(module, "load_env", return_value=config), \
+            patch.object(module.urllib.request, "urlopen", side_effect=urlopen), \
+            patch.object(module, "EVENTS_DIR", Path(directory)):
+        result = module.call_json("bounded query", schema_check,
+                                  **options)
+        events = _read_today_events(directory)
+    return result, captured, events
+
+
+def test_literal_json_whitespace_is_lossless_without_model_retry():
+    value = 'line one\nline two\rthird\tcell \\LaTeX "quote" 中文'
+    text = json.dumps({"answer": value}, ensure_ascii=False)
+    broken = text.replace(r'\n', '\n').replace(r'\r', '\r').replace(r'\t', '\t')
+    result, requests, events = _json_transport_probe(
+        [(broken, "stop")], schema_check=lambda obj: obj == {"answer": value})
+    assert result["ok"] and result["parsed"]["answer"] == value
+    assert len(requests) == len(events) == len(result["history"]) == 1
+    assert result["local_json_recovery"] == "literal_string_whitespace"
+    assert events[0]["local_json_recovery"] == result["history"][0]["local_json_recovery"]
+    assert not events[0]["recovery_scheduled"] and "line one" not in json.dumps(events)
+    assert module.decode_json_response(text) == ({"answer": value}, None, "")
+    assert module.parse_json(broken) == ({"answer": value}, None)
+
+
+def test_redundant_root_closer_recovers_complete_values_without_retry():
+    value={"answer":'complete } ] 中文 \\path "quote"',"items":[{"number":2}]}
+    text=json.dumps(value,ensure_ascii=False)
+    result,requests,events=_json_transport_probe([(text+'\n}\t}',"stop")],
+        schema_check=lambda obj:obj==value)
+    assert result["ok"] and result["parsed"]==value
+    assert len(requests)==len(events)==len(result["history"])==1
+    assert result["local_json_recovery"]=="redundant_top_level_closer"
+    assert events[0]["local_json_recovery"]==result["history"][0]["local_json_recovery"]
+    assert not events[0]["recovery_scheduled"]
+    assert module.decode_json_response('[1,{"x":2}]\n]')==([1,{"x":2}],None,"redundant_top_level_closer")
+    assert module.decode_json_response(text)==(value,None,"")
+
+
+def test_redundant_root_closer_rejects_ambiguous_or_incomplete_structure():
+    for text in ['{"answer":"complete"}]','[1]}','{"answer":"complete"} {}',
+                 '{"answer":"complete"} trailing','{"answer":"complete"},"extra":1}',
+                 '{"answer":"complete"','{"items":[1,]}','"scalar"}',
+                 '{"answer":"a\nb"}}','{"answer":"complete"}\x0b}']:
+        value,error,recovery=module.decode_json_response(text)
+        assert value is None and error and not recovery,text
+    result,requests,events=_json_transport_probe([('{"answer":"wrong"}}',"stop")],retries=0)
+    assert not result["ok"] and result["error"]=="schema 校验失败"
+    assert result["parsed"]=={"answer":"wrong"} and len(requests)==1
+    assert events[0]["local_json_recovery"]=="redundant_top_level_closer"
+
+
+def test_local_json_recovery_does_not_guess_or_bypass_schema():
+    for broken in ['{"answer":"a\x01b"}', '{"answer":"a\nb\x00"}',
+                   '{"answer":"unfinished\n', r'{"answer":"bad\q"}',
+                   '{"answer":"a\nb"} trailing']:
+        result, requests, _ = _json_transport_probe([(broken, "stop")], retries=0)
+        assert not result["ok"] and result["parsed"] is None and len(requests) == 1
+    result, requests, events = _json_transport_probe([('{"answer":"wrong\nvalue"}', "stop")], retries=0)
+    assert not result["ok"] and result["error"] == "schema 校验失败"
+    assert result["parsed"] == {"answer": "wrong\nvalue"}
+    assert events[0]["local_json_recovery"] == "literal_string_whitespace"
+    assert len(requests) == 1
+
+
+def test_native_decoder_uses_same_transport_events_and_retry_budget():
+    import query_orchestrate as qo
+    tools = qo._native_query_tools()
+    plan = {"decision": "read", "plan": [{"action": "read_raw", "input": {"locator": "academic/raw/x.md#L1"}}]}
+    message = {"content": None, "tool_calls": [{"type": "function", "function": {
+        "name": "query_plan", "arguments": json.dumps(plan)}}]}
+    result, requests, events = _json_transport_probe([(message, "tool_calls")],
+        tools=tools, response_decoder=qo._decode_native_query_response, schema_check=qo._api_decision_schema)
+    assert result["ok"] and result["parsed"] == plan
+    assert requests[0]["tools"] == tools and requests[0]["tool_choice"] == "auto"
+    assert len(events) == len(result["history"]) == 1
+    assert "query_plan" in result["text"] and events[0]["output_len"] == len(result["text"])
+    result, requests, events = _json_transport_probe([(message, "length"), (message, "tool_calls")],
+        tools=tools, response_decoder=qo._decode_native_query_response, schema_check=qo._api_decision_schema)
+    assert result["ok"] and [r["max_tokens"] for r in requests] == [2000, 4000]
+    assert [r["reasoning_effort"] for r in requests] == ["high", "high"]
+    assert [e["status"] for e in events] == ["validation_error", "ok"]
+    result, requests, events = _json_transport_probe([("partial markdown", "length"), ("complete markdown", "stop")],
+        tools=tools, response_decoder=qo._decode_native_query_response, schema_check=qo._api_decision_schema)
+    assert result["ok"] and result["parsed"]["answer"] == "complete markdown"
+    assert [r["max_tokens"] for r in requests] == [2000, 4000]
+    assert [r["reasoning_effort"] for r in requests] == ["high", "high"]
+    assert all(r["tools"] == tools for r in requests)
+    assert "只输出修正后的 JSON" not in requests[1]["messages"][-1]["content"]
+    assert [e["status"] for e in events] == ["validation_error", "ok"]
+    result, requests, events = _json_transport_probe([("partial markdown", "length")], retries=0,
+        response_decoder=qo._decode_native_query_response, schema_check=qo._api_decision_schema)
+    assert not result["ok"] and len(requests) == len(events) == 1
+
+
+def test_nonempty_truncated_json_expands_existing_retry_and_keeps_reasoning():
+    for options in ({"retries": 1}, {"retries": 0, "recovery_limits": {
+            "infrastructure": 0, "output_transport": 1}}):
+        result, requests, events = _json_transport_probe([
+            ('{"answer":"unfinished', "length"), ('{"answer":"complete"}', "stop"),
+        ], **options)
+        assert result["ok"] and result["parsed"] == {"answer": "complete"}
+        assert [r["max_tokens"] for r in requests] == [2000, 4000]
+        assert [r["reasoning_effort"] for r in requests] == ["high", "high"]
+        assert [e["status"] for e in events] == ["validation_error", "ok"]
+        assert [e["recovery_scheduled"] for e in events] == [True, False]
+        assert len({e["call_id"] for e in events}) == 1
+        assert [h["max_tokens"] for h in result["history"]] == [2000, 4000]
+        if "recovery_limits" in options:
+            assert result["recovery_attempts"] == {"infrastructure": 0, "output_transport": 1}
+
+
+def test_truncated_json_without_output_retry_fails_without_budget_promise():
+    for options in ({"retries": 0}, {"retries": 5, "recovery_limits": {
+            "infrastructure": 2, "output_transport": 0}}):
+        result, requests, events = _json_transport_probe([
+            ('{"answer":"unfinished', "length"),
+        ], **options)
+        assert not result["ok"] and result["parsed"] is None
+        assert len(requests) == len(events) == 1
+        assert result["next_max_tokens"] is None and not result["recovery_scheduled"]
+
+
+def test_json_retry_expansion_requires_length_and_parse_error():
+    for content, finish_reason in [
+            ('{"answer":"unfinished', "stop"),
+            ('{"answer":"unfinished', None),
+            ('{"answer":"wrong"}', "length")]:
+        result, requests, _ = _json_transport_probe([
+            (content, finish_reason), ('{"answer":"complete"}', "stop"),
+        ])
+        assert result["ok"]
+        assert [r["max_tokens"] for r in requests] == [2000, 2000]
+    result, requests, _ = _json_transport_probe([('{"answer":"complete"}', "length")])
+    assert result["ok"] and len(requests) == 1
+
+
+def test_json_truncation_growth_is_capped_without_lowering_caller_limit():
+    for initial, expected in [(40000, 65536), (65536, 65536), (70000, 70000)]:
+        result, requests, _ = _json_transport_probe([
+            ('{"answer":"unfinished', "length"), ('{"answer":"complete"}', "stop"),
+        ], max_tokens=initial)
+        assert result["ok"]
+        assert [r["max_tokens"] for r in requests] == [initial, expected]
+
+
+def test_json_repeated_truncation_exhausts_original_attempt_count():
+    result, requests, events = _json_transport_probe([
+        ('{"answer":"first unfinished', "length"),
+        ('{"answer":"second unfinished', "length"),
+    ])
+    assert not result["ok"] and result["parsed"] is None
+    assert [r["max_tokens"] for r in requests] == [2000, 4000]
+    assert len(events) == 2 and result["next_max_tokens"] is None
+    assert not result["recovery_scheduled"]
 
 
 def test_http_classifier_retries_only_transient_failures():

@@ -82,7 +82,8 @@ def safe_path(root, relative, *, exists=False):
     rel = PurePosixPath(relative)
     require(not rel.is_absolute() and '..' not in rel.parts and '\\' not in relative,
             'Path must remain inside its owner')
-    path = root.joinpath(*rel.parts)
+    from project_paths import repo_path
+    path = repo_path(root, relative) if rel.parts[0] == 'projects' else root.joinpath(*rel.parts)
     require(path.resolve() == path, 'Symlink paths are not allowed')
     if exists:
         require(path.is_file(), f'Missing file: {relative}')
@@ -275,15 +276,17 @@ class Store:
         self.repo = Path(repo).resolve()
         raw = Path(path)
         self.root = raw if raw.is_absolute() else self.repo / raw
+        from project_paths import repo_path
+        self.root = repo_path(self.repo, self.root.relative_to(self.repo))
         require(self.root.resolve() == self.root, 'Store path/parents must not be symlinks')
         try:
             parts = self.root.relative_to(self.repo).parts
         except ValueError as exc:
             raise StateError('Store must be in this repository') from exc
-        require(len(parts) == 4 and parts[0] == 'projects' and parts[2] == 'presentations',
+        require(len(parts) >= 4 and parts[0] == 'projects' and parts[-2] == 'presentations',
                 'Store must be projects/<workspace>/presentations/<id>')
-        identifier(parts[3])
-        require((self.repo / 'projects' / parts[1]).is_dir(), 'Owning project must already exist')
+        identifier(parts[-1])
+        require(self.root.parent.parent.is_dir(), 'Owning project must already exist')
 
     @contextmanager
     def locked(self):
@@ -665,7 +668,7 @@ def main(argv=None):
             project = Path(args.project)
             if project.is_absolute():
                 project = project.relative_to(REPO)
-            require(len(project.parts) == 2 and project.parts[0] == 'projects', 'Expected projects/<workspace>')
+            require(len(project.parts) >= 2 and project.parts[0] == 'projects' and '..' not in project.parts, 'Expected projects/<workspace>')
             store = Store(REPO / project / 'presentations' / uuid.uuid4().hex)
             result = store.initialize(load_json(args.plan))
         else:

@@ -71,17 +71,36 @@ API发现指导按任务选择初始Source/KU/hybrid入口，观察结果后按�
 经过本域路径检查。这只是文档来源导航，不补造 raw_citations，不声称支持当前章节。
 新读取协议的调用方必须按 kind/动作处理混合结果，不能假设每个结果都是 Wiki 页面。
 
+## 显式主体与长问题
+
+调用方知道关注对象时，将完整问题保留在 `query`，另传 `subjects` 名称数组；最多3项，每项非空且不超过160字符，内部压缩空白并去重。比较题可分别列出两个主体。名称由当前宿主或API规划主体判断，程序不猜测主体、翻译名称或认证实体身份；未知时省略，空数组与未提供均保持旧行为。
+
+```bash
+python3 .scripts/wg.py hybrid-recall 'TDVP TEBD time evolution truncation energy conservation' --subject TDVP --subject TEBD --domain academic --intent explanation
+```
+
+Agent、API意图计划、API工具及DSH共用此可选参数。Wiki在同一次范围扫描上分别计算主体与完整问题的排名，轮流合并后截断；图精确词项优先纳入主体，总词项/邻接预算不扩张，语义检索仍只查询一次完整问题。Source/KU按各主体和完整问题分路检索，再轮流去重合并，每通道仍最多20候选。相同对象/地址的不同摘录按下述优先级选择整份候选，不把先到的主体预览固定为最终预览；摘录、偏移、版本和读取地址始终一起保留。
+
+显式模式先按字面命中的主体数量、标签命中数量排序，再比较标题加既有预览中至多700字符窗口的完整问题覆盖，最后使用通道名次；`subject_match`解释名称命中，`lexical_match`反映局部问题覆盖。回执公开`subjects`、`fusion=subject_then_local_coverage_then_rank`及`ranking_text`。Source同版本仍只占一个位置，普通问题优先其非参考文献片段，备用地址继续可读。
+
+成本：同次Wiki扫描复用，新增内存排名；每个Source/KU通道最多执行4次已有有界搜索，而不是保持单次索引/绑定读取成本。`channels.queries/search_count`披露所尝试分路；分路失败保留其他可用结果并报告问题。没有新增语义API或embedding请求、持久索引和控制循环。是否减少实际取证成本需完整任务验证。
+
+主体分路保留发现机会，不保证最终小topk包含每个主体；比较题若缺一侧，由调用方定向补查。标题包含主体不保证问题相关，完整题名可能也是另一标题的字面子串；局部预览可能遗漏跨片段条件，未命中不证明资料缺失。仍需读取Raw核验身份、条件与支持范围。
+
 ## 排名、预算与失败边界
 
 先复用原有按 intent 加权的 Wiki/Graph RRF 排名形成 navigation 路。
-共享 `lexical_relevance.py` 对标题和候选文字计算：完整中文查询短语/英文整词的覆盖、
+其中每页在 `wiki`、`graph_exact`、`graph` 各通道只贡献一次最佳名次；同通道经不同词项或节点
+重复到达不累计加分，全部不同 `via` 仍保留在 `signals` 供路径解释。它们不是独立通道或独立证据。
+原 intent 权重、候选/遍历预算及有 Raw 引用章节的微量加分保持，不按连接数奖励页面。
+未给主体时，共享 `lexical_relevance.py` 对标题和候选文字计算：完整中文查询短语/英文整词的覆盖、
 不同查询词项覆盖、标题词项覆盖，依此优先排序，再以通道名次分 `1/(60+rank)` 打破平局。
-Source/KU 在已校验的完整片段/表述上计算排序特征，不因展示截断漏掉后半段匹配。
+此兼容模式下，Source/KU 在已校验的完整片段/表述上计算排序特征，不因展示截断漏掉后半段匹配。
 随后用共享函数选择至多700字符的连续命中窗口，以不同短语/词项覆盖及前后上下文决定展示；
 没有正文命中则沿用前缀。`excerpt_span` 是相对完整片段/表述的零起点、右端不包含的字符范围，
 摘录必须是原文精确切片，`excerpt_truncated` 标明任一侧省略；不修改排序、身份或read_input。
 摘录仅供选择阅读入口，不保证条件完整；Source及KU候选依据可直接read_raw，完整KU按需knowledge_read。
-Wiki 使用当前标题、导航和 capsule。重复提及不加分，英文词不按子串匹配。
+Wiki 使用当前标题、导航和 capsule。经图关系找到但未进入 Wiki 前置候选窗口的页，复用同次范围校验扫描中的规范标题与 Navigation，不退化为文件名/空导航；不新增扫描或返回完整页面正文。重复提及不加分，英文词不按子串匹配。
 结果公开 `lexical_match` 和 `fusion=literal_coverage_then_rank`；score 仍是名次分，
 不能单独用 score 重新排序。弱匹配保留作后备；不混加 FTS、embedding 与图的原始分数。
 这是字面优先级，不处理自动翻译、同义词或科学支持判断，也不保证每个长名称提及都相关。
@@ -94,7 +113,7 @@ Source 搜索对普通查询先在同源命中内优先非参考文献片段；�
 其 `read_input`、`excerpt` 和字面特征属于实际所选片段，不沿用被替换参考片段的分数。
 `section_role` 只标记可机械确认的参考文献章节；明确查文献时保持原排序，
 其他片段及参考文献仍可通过 `matched_locators` 或来源搜索读取。
-Source 先在原有最多 `5*topk` 个 FTS 候选中校验并重排，KU 使用原有最多 `3*topk`
+每次Source搜索先在原有最多 `5*topk` 个 FTS 候选中校验并重排，每次KU搜索使用原有最多 `3*topk`
 个 Statement FTS 候选及原生 Question 候选；不为排序读取候选之外的 Raw 或调用模型。
 Statement/Question 各自保持 ID；同一论文的不同 KU、Wiki 与原件不自动做语义合并。
 

@@ -26,6 +26,8 @@ spec.loader.exec_module(module)
 FACT_ID = "fact-alice-advises-bob-20260905"
 FACT_LINE = f"- [2026-09-05] **Alice advises Bob.** {{: #{FACT_ID}}}"
 GRAPH_SCRIPT_FILES = {
+    "env_config.py",
+    "platform_compat.py",
     "direction_matcher.py",
     "embed_helper.py",
     "graph_delta.py",

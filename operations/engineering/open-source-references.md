@@ -34,15 +34,15 @@
 | Backlog.md | `architecture` | 架构借鉴 | `.scripts/workspace_state.py`, `operations/WORKSPACE.md` | 借鉴 Markdown 事项、明确完成结果和里程碑式组织 | 2026-09-07 | <https://github.com/MrLesk/Backlog.md> | MIT；未复制代码，不作为运行时依赖 |
 | Graphiti | `architecture` | 架构借鉴 | `.scripts/workspace_state.py`, `operations/WORKSPACE.md` | 借鉴记忆的时间有效区间、失效和替代链 | 2026-09-07 | <https://github.com/getzep/graphiti> | Apache-2.0；未复制代码，不作为运行时依赖 |
 | Basic Memory | `architecture` | 架构借鉴 | `.scripts/workspace_state.py`, `operations/WORKSPACE.md` | 借鉴 Markdown 与派生索引的一致性检查和 doctor 机制 | 2026-09-07 | <https://github.com/basicmachines-co/basic-memory> | AGPL-3.0；仅借鉴架构思想，未复制代码且不作为运行时依赖 |
-| python-pptx | `tool` | 直接依赖 | `.scripts/visual_to_editable_ppt.py`, `projects/ASKS/manu/v9/figures/update_fig3_pptx.py` 及后续稿件版本 | 写入原生文本框、线段、自选图形、自由曲线和 Open XML PowerPoint 对象 | 2026-08-29 | <https://github.com/scanny/python-pptx> | MIT；复杂区域仍按工具契约允许可追踪位图 fallback |
-| PPTAgent | `tool` | 直接依赖（隔离试验） | `temp/pptagent-cover-trial/`、`projects/2026-PRL-MPE报告/drafts/封面-PPTAgent试验-20260925/` | 用户授权的单页封面效果试验：宿主编写 HTML，上游 skill 渲染与转换可编辑 PPTX，外部视觉 API 审阅当前页；未接入正式 presentation renderer 或批准事务 | 2026-09-25 | <https://github.com/icip-cas/PPTAgent> | MIT；skill commit `833cda553b343be0e486a93b0b57cac962cdd566`，转换包固定 `pptagent==1.1.37`；依赖隔离在 temp，不注册全局 skill；效果和兼容性以试验回执为准 |
+| python-pptx | `tool` | 直接依赖 | `.scripts/visual_to_editable_ppt.py`, `projects/知识系统研究与建设/ASKS/manu/v9/figures/update_fig3_pptx.py` 及后续稿件版本 | 写入原生文本框、线段、自选图形、自由曲线和 Open XML PowerPoint 对象 | 2026-08-29 | <https://github.com/scanny/python-pptx> | MIT；复杂区域仍按工具契约允许可追踪位图 fallback |
+| PPTAgent | `tool` | 直接依赖（隔离试验） | `temp/pptagent-cover-trial/`、`projects/科普与报告/2026-PRL-MPE报告/drafts/封面-PPTAgent试验-20260925/` | 用户授权的单页封面效果试验：宿主编写 HTML，上游 skill 渲染与转换可编辑 PPTX，外部视觉 API 审阅当前页；未接入正式 presentation renderer 或批准事务 | 2026-09-25 | <https://github.com/icip-cas/PPTAgent> | MIT；skill commit `833cda553b343be0e486a93b0b57cac962cdd566`，转换包固定 `pptagent==1.1.37`；依赖隔离在 temp，不注册全局 skill；效果和兼容性以试验回执为准 |
 
 ## 待定 / 远期参考
 
 | 项目名 | 参考方式 | 说明 | 来源 URL | 状态 |
 |--------|----------|------|----------|------|
 | Open Code Review | 工具候选 | 只评估 WikiGraph 自身工程代码的 delegation review；其确定性范围能力与工程元图重合，且默认排除测试文件，当前不形成第二个审查范围真理源 | <https://github.com/alibaba/open-code-review> | v1.12.7 已评估，暂不引入；仅在固定样本证明增量收益后试点 |
-| Leiden | 理念参考 | 图社区检测（community detection），用于知识结构涌现分析 | <https://github.com/vtraag/leidenalg> | 远期，`projects/知识结构涌现/notes.md` |
+| Leiden | 理念参考 | 图社区检测（community detection），用于知识结构涌现分析 | <https://github.com/vtraag/leidenalg> | 远期，`projects/科研与论文/知识结构涌现/notes.md` |
 | Cordis | 理念参考 | DSH 原版 TypeScript 运行时 | <https://github.com/cordiverse/cordis> | 已决策不接入（ADR-004），Python 适配层覆盖核心概念 |
 
 ---

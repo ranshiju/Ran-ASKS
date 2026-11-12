@@ -163,17 +163,17 @@ def test_new_research_project_uses_shared_workspace_kernel():
         try:
             research_project.PROJECTS_DIR = projects
             research_project.TEMPLATE_DIR = template
-            args = SimpleNamespace(project="demo", name="Demo", topic="共享内核验证",
+            args = SimpleNamespace(project="research/demo", name="Demo", topic="共享内核验证",
                                    stage="experiment")
             assert research_project.init_project(args) == 0
-            project = projects / "demo"
+            project = projects / "research/demo"
             config = state.load_workspace_config(project)
             assert config["profile"] == "research"
             assert state.load_profile(project)["topic"] == "共享内核验证"
             items = state.load_items(project)
             assert len(items) == 1 and items[0][0]["state"] == "active"
             assert research_project.validate_project(SimpleNamespace(
-                project="demo", strict=False,
+                project="research/demo", strict=False,
             )) == 0
         finally:
             research_project.PROJECTS_DIR, research_project.TEMPLATE_DIR = originals[:2]

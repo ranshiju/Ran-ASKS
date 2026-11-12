@@ -565,7 +565,7 @@ def main() -> None:
         assert "e1_experiment_workspace:" not in graph_text
         assert "e1_experiment_plan:" not in graph_text
         assert "e1_analysis:" not in graph_text
-        assert "path: projects/ASKS" not in graph_text
+        assert "path: projects/知识系统研究与建设/ASKS" not in graph_text
         assert "path: projects/ForBetterScience" not in graph_text
         graph_check = subprocess.run(
             [sys.executable, ".scripts/engineering_graph.py", "validate"],

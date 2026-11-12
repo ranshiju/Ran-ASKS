@@ -1,6 +1,6 @@
 ---
 name: manuscript-diagnosis
-description: Diagnose confidential manuscripts stored under a WikiGraph projects/稿件诊断 subfolder. Use when the user requests 稿件诊断, manuscript assessment, identification of manuscript problems, or evidence-backed improvement recommendations for a manuscript whose target folder names the journal. Discover prior report samples, verify indispensable core literature in WikiGraph, pause for ingestion when required evidence is missing, and draft a diagnosis in the user's established style.
+description: Diagnose confidential manuscripts stored under a WikiGraph projects/学术服务与个人事务/稿件诊断 subfolder. Use when the user requests 稿件诊断, manuscript assessment, identification of manuscript problems, or evidence-backed improvement recommendations for a manuscript whose target folder names the journal. Discover prior report samples, verify indispensable core literature in WikiGraph, pause for ingestion when required evidence is missing, and draft a diagnosis in the user's established style.
 ---
 
 # 稿件诊断
@@ -17,7 +17,7 @@ content. Never write diagnosis material to `raw/`, `wiki/`, or any graph databas
 ## Start
 
 1. Follow the repository playbook and task router before reading project content.
-2. Resolve the requested folder under `projects/稿件诊断/` and run:
+2. Resolve the requested folder under `projects/学术服务与个人事务/稿件诊断/` and run:
 
    ```bash
    python3 .codex/skills/manuscript-diagnosis/scripts/diagnosis_preflight.py "<target-folder>"
@@ -27,7 +27,7 @@ content. Never write diagnosis material to `raw/`, `wiki/`, or any graph databas
    Ask only if it is absent or genuinely ambiguous; do not infer a different
    journal from manuscript branding.
 4. If the project uses research memory, recall the target project before diagnosis.
-5. Fail closed when the target is outside `projects/稿件诊断/`, no manuscript is found,
+5. Fail closed when the target is outside `projects/学术服务与个人事务/稿件诊断/`, no manuscript is found,
    or multiple candidate manuscripts cannot be distinguished safely.
 
 ## Prepare Evidence
@@ -75,7 +75,7 @@ silently replace ingestion with an external download.
 ## Learn The User's Style
 
 Use `base_style_guide` and `style_profile` returned by preflight to locate optional
-local style files under `projects/稿件诊断/`. Read existing files only when drafting
+local style files under `projects/学术服务与个人事务/稿件诊断/`. Read existing files only when drafting
 the final report, applying the baseline guide first and the user-confirmed profile
 second. These private files and historical samples are not bundled with the skill.
 If either file is absent, continue without it; if no usable style evidence exists,
@@ -99,7 +99,7 @@ Infer and preserve:
 Copy style, not manuscript-specific sentences. If no usable sample exists, say so
 and use a restrained professional diagnostic style.
 
-Update `projects/稿件诊断/STYLE.md` only after the user approves a final report or edits
+Update `projects/学术服务与个人事务/稿件诊断/STYLE.md` only after the user approves a final report or edits
 a draft in a way that establishes a reusable preference. Record the supporting
 sample path and keep tentative one-off choices out of the stable profile.
 

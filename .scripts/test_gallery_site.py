@@ -3,6 +3,8 @@
 import copy
 import hashlib
 import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from html.parser import HTMLParser
@@ -34,7 +36,7 @@ class GalleryTests(unittest.TestCase):
                                       {'id':'figure','label':'图示','description':'Figure capability','doc':'operations/FIGURE.md'}]}
         for name in ('POSTER','FIGURE'):self.write('operations/'+name+'.md','Documentation')
         self.write('gallery/RIGHTS.md','# Rights\n\nSynthetic fixture only.',True)
-        for name in ('style.css','app.js'):self.write('gallery/site/'+name, '/* fixture */',True)
+        for name in ('style.css','app.js','analytics.js'):self.write('gallery/site/'+name, '/* fixture */',True)
         for slug,caps in [('poster-one',['poster','figure']),('figure-two',['figure'])]:
             base='gallery/works/'+slug
             files={'cover.webp':b'fixture image','poster.png':b'fixture image','poster.pdf':b'fixture pdf'}
@@ -89,6 +91,94 @@ class GalleryTests(unittest.TestCase):
         self.write('gallery/works/poster-one/poster.pdf','tampered')
         with self.assertRaisesRegex(ValueError,'hash mismatch'):site.build(self.root,self.out)
         self.assertEqual((self.out/'index.html').read_bytes(),old)
+
+    def test_canonical_social_metadata_sitemap_and_version_use_project_path(self):
+        self.catalog['site_url']='https://example.org/gallery/'
+        self.write('gallery/catalog.json',json.dumps(self.catalog))
+        self.write('VERSION','0.26.0\n')
+        site.build(self.root,self.out)
+        page=(self.out/'works/poster-one/index.html').read_text()
+        self.assertIn('href="https://example.org/gallery/works/poster-one/index.html"',page)
+        self.assertIn('content="https://example.org/gallery/assets/works/poster-one/cover.webp"',page)
+        self.assertIn('v0.26.0',page)
+        self.assertNotIn('gallery-cloudflare-token',page)
+        self.assertIn('https://example.org/gallery/sitemap.xml',(self.out/'robots.txt').read_text())
+        self.assertIn('https://example.org/gallery/works/poster-one/index.html',(self.out/'sitemap.xml').read_text())
+        info=json.loads((self.out/'site-info.json').read_text())
+        self.assertEqual(info['version'],'0.26.0')
+        self.assertFalse(info['analytics_configured'])
+
+    def test_public_statistics_are_static_and_unavailable_is_not_zero(self):
+        site.build(self.root,self.out)
+        page=(self.out/'index.html').read_text()
+        self.assertIn('统计尚未就绪',page)
+        self.assertIn('<strong>—</strong>',page)
+        snapshot={'schema':'gallery-metrics-v1','status':'stale','generated_at':'2026-11-12T08:00:00Z',
+                  'windows':{'7':{'page_views':12,'visits':8},'30':{'page_views':30,'visits':20}},
+                  'popular':[{'id':'poster-one','page_views':11}], 'credential':'PRIVATE_SENTINEL'}
+        site.build(self.root,self.out,metrics=snapshot)
+        page=(self.out/'index.html').read_text()
+        self.assertIn('<strong>12</strong>',page)
+        self.assertIn('最新刷新暂不可用',page)
+        self.assertIn('11 次浏览',page)
+        self.assertNotIn('PRIVATE_SENTINEL',(self.out/'metrics.json').read_text())
+
+    def test_analytics_configuration_is_explicit_and_validated_before_replacement(self):
+        self.catalog['site_url']='https://example.org/gallery/'
+        self.write('gallery/catalog.json',json.dumps(self.catalog))
+        token='a'*32
+        site.build(self.root,self.out,cloudflare_token=token)
+        self.assertIn('content="'+token+'"',(self.out/'index.html').read_text())
+        self.assertIn('本站已配置 Cloudflare',(self.out/'privacy.html').read_text())
+        old=(self.out/'index.html').read_bytes()
+        for url,bad in [('http://example.org/',token),('https://example.org/?q=private',token),
+                        ('https://example.org/a/%2e%2e/',token),('https://user:pass@example.org/',token),
+                        ('https://example.org/gallery/','<script>'),('',token)]:
+            with self.subTest(url=url,token=bad):
+                self.catalog['site_url']=url
+                self.write('gallery/catalog.json',json.dumps(self.catalog))
+                with self.assertRaises(ValueError):site.build(self.root,self.out,cloudflare_token=bad)
+                self.assertEqual((self.out/'index.html').read_bytes(),old)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed for the offline browser-loader check')
+    def test_browser_loader_production_scope_opt_out_and_failure_isolation(self):
+        source=(Path(site.__file__).resolve().parent.parent/'gallery/site/analytics.js').read_text()
+        script=r'''
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const source = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+function run(url, options = {}) {
+  const nodes = []; const storage = new Map(options.excluded ? [['asks-gallery-analytics:/gallery/', 'off']] : []);
+  const metadata = {'gallery-site-url': 'https://example.org/gallery/', 'gallery-cloudflare-token': 'a'.repeat(32), ...options.meta};
+  const context = {URL, URLSearchParams, location: new URL(url), localStorage: {
+    getItem: key => {if(options.blockStorage) throw Error('blocked'); return storage.get(key);},
+    setItem: (key,value) => {if(options.blockStorage) throw Error('blocked'); storage.set(key,value);},
+    removeItem: key => storage.delete(key)}, document: {
+    querySelector: selector => ({content: metadata[selector.match(/name="([^"]+)/)?.[1]] || ''}),
+    getElementById: id => nodes.find(node => node.id === id),
+    createElement: () => ({setAttribute(key,value) {this[key]=value;}}),
+    head: {appendChild(node) {if(options.blockScript) throw Error('blocked'); nodes.push(node);}}
+  }};
+  vm.runInNewContext(source,context); vm.runInNewContext(source,context);
+  return {nodes,storage};
+}
+const good=run('https://example.org/gallery/works/poster-one/index.html?q=private#detail');
+assert.equal(good.nodes.length,1);
+assert.equal(good.nodes[0].src,'https://static.cloudflareinsights.com/beacon.min.js');
+assert.equal(good.nodes[0].type,'module');
+assert.deepEqual(JSON.parse(good.nodes[0]['data-cf-beacon']),{token:'a'.repeat(32),spa:false});
+for (const url of ['http://localhost/gallery/', 'file:///gallery/index.html', 'https://fork.example/gallery/',
+  'https://example.org/gallery-other/', 'https://example.org/other/']) assert.equal(run(url).nodes.length,0,url);
+assert.equal(run('https://example.org/gallery/',{meta:{'gallery-cloudflare-token':''}}).nodes.length,0);
+assert.equal(run('https://example.org/gallery/',{meta:{'gallery-site-url':''}}).nodes.length,0);
+assert.equal(run('https://example.org/gallery/',{excluded:true}).nodes.length,0);
+assert.equal(run('https://example.org/gallery/?analytics=off',{blockStorage:true}).nodes.length,0);
+assert.equal(run('https://example.org/gallery/?analytics=on',{excluded:true}).nodes.length,1);
+assert.equal(run('https://example.org/gallery/',{blockScript:true}).nodes.length,0);
+console.log('Gallery loader: production scope, single load, opt-out and blocked dependencies PASS');
+'''
+        result=subprocess.run([shutil.which('node'),'-e',script],input=json.dumps(source),text=True,capture_output=True)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
     def test_related_works_use_catalog_titles_and_relative_links(self):
         self.change_metadata(lambda m:m.update({'related_works':['figure-two']}))

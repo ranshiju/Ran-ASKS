@@ -78,6 +78,8 @@ def managed_path(value, prefix):
         path = REPO / path
     relative = path.relative_to(REPO)
     require('..' not in relative.parts, 'Path traversal rejected')
+    from project_paths import repo_path
+    path = repo_path(REPO, relative)
     path.relative_to(REPO / prefix)
     for parent in (path, *path.parents):
         require(not parent.is_symlink(), 'Symbolic links are not allowed')
@@ -90,8 +92,8 @@ def managed_path(value, prefix):
 def store_path(value):
     path = managed_path(value, 'projects')
     parts = path.relative_to(REPO / 'projects').parts
-    require(len(parts) == 3 and parts[1] == 'exhibits' and IDENTIFIER.fullmatch(parts[2]), 'Store must be projects/<workspace>/exhibits/<id>')
-    require((REPO / 'projects' / parts[0]).is_dir(), 'Create or select the project workspace first')
+    require(len(parts) >= 3 and parts[-2] == 'exhibits' and IDENTIFIER.fullmatch(parts[-1]), 'Store must be projects/<workspace>/exhibits/<id>')
+    require(path.parent.parent.is_dir(), 'Create or select the project workspace first')
     return path
 
 

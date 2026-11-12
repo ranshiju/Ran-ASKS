@@ -109,4 +109,4 @@
 
 风险/验证：附件数量、像素、字节和 JSON 有上限；局部内容是来源数据而非新指令，盲读包不传本机路径、作者答案或旧意见。PNG 局部不增加源信息，PDF 局部也不能消除宿主缩放或证明真实理解。运行 review、visual-QA、展板 workflow、Agent task、WG、功能注册与工程图定向回归；需要时使用实际 render。保留所有已有手改原件、成品及历史记录，不修复无关 prompt-audit 失败。
 
-实施结果：共享公开转换、本地材料 CLI/API、可选 PDF 局部、多附件冻结/交接/逐图可读性及 receipt/report 已接通，功能目录与工程图保持原组件归属。review 41/41、workflow 33/33（含真实 render）、visual-QA、science-exhibit（含 render）、Agent task、功能目录、WG、旧 API reader mock 与公开树回归通过。已知 query-start prompt-audit 仍失败，未放宽阈值。MPE 同内容重导出后整图字节不变，实际准备四图并抽检局部，最终 run 为 prepared、无执行或新意见；旧两次真实单图记录仍可读取。具体证据与接续见 `projects/MPE科普展板/outputs/image-handoff-20261023/README.md`、`validation.json`。未增加模型/API 调用，不把工程完成冒充逐图真实模型验证或真人效果验证。
+实施结果：共享公开转换、本地材料 CLI/API、可选 PDF 局部、多附件冻结/交接/逐图可读性及 receipt/report 已接通，功能目录与工程图保持原组件归属。review 41/41、workflow 33/33（含真实 render）、visual-QA、science-exhibit（含 render）、Agent task、功能目录、WG、旧 API reader mock 与公开树回归通过。已知 query-start prompt-audit 仍失败，未放宽阈值。MPE 同内容重导出后整图字节不变，实际准备四图并抽检局部，最终 run 为 prepared、无执行或新意见；旧两次真实单图记录仍可读取。具体证据与接续见 `projects/科普与报告/MPE科普展板/outputs/image-handoff-20261023/README.md`、`validation.json`。未增加模型/API 调用，不把工程完成冒充逐图真实模型验证或真人效果验证。

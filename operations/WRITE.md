@@ -6,9 +6,15 @@
 
 ## 触发与任务判定
 
-论文核心问题与贡献评估使用独立的 `manuscript-evaluation` capability，见[论文评估规范](research/manuscript-evaluation.md)。它逐条分类贡献、评定重要性与证据强度并推荐强调顺序；评估不自动改稿。摘要与全文实质修改前复用该判断，先向用户展示科学问题和推荐主线，并按规范处理定位确认。
+论文核心科学问题凝练使用 `manuscript-question` capability，见[核心问题规范](research/manuscript-question.md)；贡献分类、重要性与证据强度评分使用 `manuscript-evaluation`，见[论文评估规范](research/manuscript-evaluation.md)。两者复用已认可的定位，讨论不自动改稿。摘要与全文实质修改前先向用户展示科学问题和推荐主线，并按评估规范处理定位确认。
 
-整篇学术论文改进使用 `write/academic-manuscript`，流程见 [论文改进规范](research/manuscript-improvement.md)。宿主 Agent 先通读主文、图表与补充材料，再依次改进摘要、标题、引言和全文，最后回查一致性；保持 `research` 上下文，摘要阶段复用现有摘要规范。
+论文取标题使用 `manuscript-title` capability，见[标题拟定规范](research/manuscript-title.md)。它综合核心科学问题、贡献排序与全文证据给出候选和首选，已组合本文件共享落笔约定，无需重复加载通用 academic profile；候选讨论不自动替换稿件文件。
+
+论文背景与动机使用 `manuscript-motivation` capability，见[背景与动机规范](research/manuscript-motivation.md)。默认返回摘要用一至两句话和引言用两至三段，核验稿件、既有引用及相关知识库和网络证据；入口已组合共享落笔约定。
+
+完整引言使用 `manuscript-introduction` capability，见[引言规范](research/manuscript-introduction.md)。有稿件时基于或参考原稿，复用科学问题、贡献和背景动机，交付带引用的完整引言及简短说明；全文改进中的引言阶段复用同一规范。
+
+整篇论文撰写与优化作为 research 持续工作推进，落笔使用 `write/academic-manuscript`，见[专项规范](research/manuscript-improvement.md)。基于已有稿件或研究材料保存版本、定位、进度和文献需求，按证据安排写作顺序，最后与原稿对比；各部分复用现有专项能力。
 
 用户要求撰写、准备、起草、生成、改写、压缩或排版以下材料时，路由为 `write`：
 
@@ -184,6 +190,10 @@
 | `*/wiki/`、对应 `raw/` | 可回溯事实来源 |
 | `.scripts/check_wikilinks.py` | Markdown 内链确定性校验 |
 | `operations/research/physics-manuscript-editing.md` | 物理论文 academic write overlay |
+| `operations/research/manuscript-question.md` | 核心科学问题、本文切入点与证据范围的凝练规范 |
+| `operations/research/manuscript-title.md` | 综合核心问题、贡献与全文证据拟定标题及比较候选 |
+| `operations/research/manuscript-motivation.md` | 同源证据支持的摘要版与引言版背景动机 |
+| `operations/research/manuscript-introduction.md` | 基于原稿与科学定位组织完整引言、文献定位与贡献论证 |
 | `operations/research/academic-abstract.md` | 学术摘要科学主线、证据比较、实验贡献及多轮修改规范 |
-| `operations/research/manuscript-improvement.md` | Agent 通读全文后按摘要、标题、引言、全文顺序改进并回查一致性 |
+| `operations/research/manuscript-improvement.md` | 论文持续起草与优化、版本和文献需求接续、原稿对比与全文一致性 |
 | 工作区文档运行时 | `.docx`/PDF 生成、解析与渲染验证 |

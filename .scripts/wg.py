@@ -213,7 +213,8 @@ def cmd_read_section(args):
 
 def cmd_hybrid_recall(args):
     text, _tokens = qa.hybrid_recall(args.query, args.intent, args.domain, str(args.topk),
-                                    include_deprecated=args.include_deprecated)
+                                    include_deprecated=args.include_deprecated,
+                                    subjects=getattr(args, "subjects", None))
     if text.startswith("[ERROR"):
         return envelope("hybrid-recall", None, status="error", error=text)
     return envelope("hybrid-recall", json.loads(text), status="ok")
@@ -259,8 +260,11 @@ def cmd_read_raw(args):
         return envelope("read-raw", result, sources=[source_rel], status="empty", ok=False,
                         error=f"locator '{loc}' 已验证但无法精确截取；未返回全文")
     if len(seg) > RAW_PREVIEW_CHARS:
+        result["read_size"] = sl.read_size_guidance(f"{read_rel}#{loc}", seg, RAW_PREVIEW_CHARS)
         return envelope("read-raw", result, sources=[source_rel], status="error", ok=False,
-                        error=f"locator '{loc}' 命中 {len(seg)} 字符，范围过大；请细化 locator，未返回半截内容")
+                        error=f"locator '{loc}' 命中 {len(seg)} 字符，上限 {RAW_PREVIEW_CHARS}；"
+                              "范围过大，请细化 locator。可选择read_size.suggested_reads再读取；"
+                              "候选未读，未返回半截内容")
     result["text"] = seg
     return envelope("read-raw", result, sources=[source_rel], status="ok")
 
@@ -282,6 +286,13 @@ def cmd_source_search(args):
     return envelope("source-search", json.loads(result["text"]), status="ok")
 
 
+def cmd_source_outline(args):
+    result = qa.execute("source_outline", {"source_id": args.source_id, "query": args.query,
+                       "start_line": str(args.start_line), "limit": str(args.limit)})
+    return envelope("source-outline", json.loads(result["text"]) if result["ok"] else None,
+                    status="ok" if result["ok"] else "error", error=result.get("error", ""))
+
+
 def cmd_ingest(args):
     pasted = getattr(args, "stdin", False)
     keep_source = getattr(args, "keep_source", False)
@@ -299,8 +310,16 @@ def cmd_ingest(args):
                             error="source-first 只支持 academic PDF/MD/TXT 文件或 S-ID 恢复；不支持旧分类、改名或 OCR 参数")
         command.extend(["--profile", profile])
         command.extend(["--knowledge", getattr(args, "knowledge", "skip")])
-    elif any(getattr(args, k, False) for k in ("reuse_parse", "refresh_parse", "allow_paddleocr")) or getattr(args, "knowledge", "skip") != "skip":
-        return envelope("ingest", None, status="error", error="解析复用/刷新参数需要 --profile source-first")
+        if getattr(args, "strategy", "survey") != "survey":
+            if args.knowledge not in {"agent", "api"}:
+                return envelope("ingest", None, status="error", error="--strategy selective 需要 --knowledge agent|api")
+            command.extend(["--strategy", args.strategy])
+        if getattr(args, "focus", ""):
+            if args.knowledge not in {"agent", "api"}:
+                return envelope("ingest", None, status="error", error="--focus 需要 --knowledge agent|api")
+            command.extend(["--focus", args.focus])
+    elif any(getattr(args, k, False) for k in ("reuse_parse", "refresh_parse", "allow_paddleocr", "focus")) or getattr(args, "knowledge", "skip") != "skip" or getattr(args, "strategy", "survey") != "survey":
+        return envelope("ingest", None, status="error", error="来源解析/知识整理参数需要 --profile source-first")
     if getattr(args, "reuse_parse", None):
         command.extend(["--reuse-parse", args.reuse_parse])
     for flag in ("refresh_parse", "allow_paddleocr"):
@@ -354,11 +373,13 @@ def cmd_ingest(args):
         if result.get(key) and result[key] not in sources:
             sources.append(result[key])
     failed = result.get("status") in {"failed", "validation_error", "backend_mismatch"}
-    if profile == "source-first" and (rc != 0 or result.get("error")):
+    knowledge_error = result.get("knowledge_error") if profile == "source-first" else None
+    if profile == "source-first" and (rc != 0 or result.get("error") or knowledge_error):
         failed = True
-    if rc != 0 and failed:
+    if failed and (rc != 0 or knowledge_error):
         return envelope("ingest", result, sources=sources, status="error",
-                        error=str(result.get("errors") or result.get("error") or "摄入失败")[:500])
+                        error=(f"知识整理失败（来源状态见 result）：{knowledge_error}" if knowledge_error else
+                               str(result.get("errors") or result.get("error") or "摄入失败"))[:500])
     return envelope("ingest", result, sources=sources, status="ok")
 
 
@@ -373,15 +394,17 @@ def cmd_knowledge_query(args):
 def cmd_knowledge(args):
     import knowledge_compile as kc
     try:
-        if (args.target or args.source_locators) and args.knowledge_action not in {"prepare", "run"}:
-            raise ValueError("--target/--source-locator are only valid for prepare or run")
+        if (args.target or args.source_locators or args.comparison_ids) and args.knowledge_action not in {"prepare", "run"}:
+            raise ValueError("--target/--source-locator/--compare-with are only valid for prepare or run")
         if args.knowledge_action == "prepare":
             result = kc.prepare(args.identifier, repo=REPO, focus=args.focus, refresh=args.refresh,
-                                target=args.target, source_locators=args.source_locators)
+                                target=args.target, source_locators=args.source_locators, comparison_ids=args.comparison_ids,
+                                strategy=getattr(args, "strategy", "survey"))
         elif args.knowledge_action == "run":
             from knowledge_compile_api import run
             result = run(args.identifier, repo=REPO, focus=args.focus, refresh=args.refresh, retry=args.retry,
-                         target=args.target, source_locators=args.source_locators)
+                         target=args.target, source_locators=args.source_locators, comparison_ids=args.comparison_ids,
+                         strategy=getattr(args, "strategy", "survey"))
         elif args.knowledge_action == "show":
             state, packet = kc.load_job(REPO, args.identifier)
             result = {"state": state, "packet": packet}
@@ -413,17 +436,53 @@ def _run_task_action(state: dict, action: str) -> dict:
     return _task_execution_payload(agent_task.run_action(state, action, REPO))
 
 
+def _load_host_task(transaction_id: str) -> dict | None:
+    if transaction_id.startswith("KJ-"):
+        import knowledge_compile
+        return knowledge_compile.host_state(transaction_id, repo=REPO)
+    return inbox_state.load(transaction_id)
+
+
+def _host_task_view(state: dict) -> dict:
+    view = agent_task.control_view(state, REPO)
+    if state.get("schema") == "knowledge-job-v1":
+        view.update(source_id=state["source_id"], executor=state["executor"],
+                    results=state.get("results", {}), unresolved=state.get("unresolved", []))
+        if state["status"] == "partial":
+            # Pending scope is not an instruction to reapply already committed work.
+            view["next_action"] = "review_partial"
+    return view
+
+
 def cmd_task(args):
     """Expose one content-agnostic host loop for persisted Agent tasks."""
-    state = inbox_state.load(args.transaction_id)
+    try:
+        if args.transaction_id.startswith("KJ-") and args.task_action in {"status", "next"}:
+            import knowledge_compile
+            job, _ = knowledge_compile.load_job(REPO, args.transaction_id)
+            if job["executor"] != "agent":
+                result = {key: job.get(key) for key in
+                          ("schema", "job_id", "source_id", "executor", "status", "results", "unresolved", "error")}
+                result["next_action"] = "none" if job["status"] == "completed" else "inspect_api_job"
+                result["read_command"] = f"python3 .scripts/wg.py knowledge show {job['job_id']}"
+                return envelope(f"task.{args.task_action}", result)
+        state = _load_host_task(args.transaction_id)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        return envelope(f"task.{args.task_action}", None, status="error", error=str(exc))
     if not state:
         return envelope(
             f"task.{args.task_action}", None, status="error",
             error=f"事务不存在: {args.transaction_id}",
         )
+    knowledge_job = state.get("schema") == "knowledge-job-v1"
+    if knowledge_job and args.task_action in {"status", "next"}:
+        return envelope(f"task.{args.task_action}", _host_task_view(state))
     if args.task_action == "status":
         return envelope("task.status", inbox_state.operation_view(state, REPO))
     if args.task_action == "verify":
+        if knowledge_job:
+            return envelope("task.verify", None, status="error",
+                            error="KJ 任务不使用摄入最终回执校验；用 knowledge check 检查 Delta，并按知识读取结果核验依据")
         receipt = inbox_state.verify_receipt(state, REPO)
         if receipt["status"] == "PASS":
             return envelope("task.verify", receipt)
@@ -453,7 +512,7 @@ def cmd_task(args):
             result["missing_outputs"] = control["missing_outputs"]
         return envelope("task.next", result)
     try:
-        view = agent_task.control_view(state, REPO)
+        view = _host_task_view(state)
     except ValueError as exc:
         return envelope(f"task.{args.task_action}", None, status="error", error=str(exc))
     if args.task_action == "inspect":
@@ -506,15 +565,30 @@ def cmd_task(args):
             "control": view, "executions": executions,
         }, status="error", error=str(exc))
 
-    refreshed = inbox_state.load(args.transaction_id) or state
-    refreshed_view = agent_task.control_view(refreshed, REPO)
+    try:
+        refreshed = _load_host_task(args.transaction_id) or state
+        refreshed_view = _host_task_view(refreshed)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        return envelope(f"task.{args.task_action}", {"executions": executions},
+                        status="error", error=str(exc))
     last = executions[-1] if executions else {}
     failed = last.get("returncode", 0) != 0 or bool(last.get("error"))
+    last_result = last.get("result") or {}
+    if (state.get("job_id", "").startswith("KJ-") and last.get("returncode") == 1
+            and last_result.get("status") == "partial" and not last.get("error")
+            and not last_result.get("error")
+            and all(op.get("status") in {"saved", "deferred"}
+                    for op in last_result.get("results", {}).values())):
+        # knowledge CLI uses 1 for incomplete scope too; the job remains
+        # resumable and the original process outcome stays in executions.
+        failed = False
+    failure_error = last.get("error") or last_result.get("error") or (
+        "受管操作未完成；具体状态和失败原因见 executions.result" if failed else "")
     return envelope(
         f"task.{args.task_action}",
         {"control": refreshed_view, "executions": executions},
         status="error" if failed else "ok",
-        error=last.get("error", "") if failed else "",
+        error=failure_error if failed else "",
     )
 
 
@@ -806,6 +880,7 @@ def build_parser():
 
     p = sub.add_parser("hybrid-recall", help="联合发现 Source、KU、Question 与 Wiki/Graph，返回分类型读取入口")
     p.add_argument("query")
+    p.add_argument("--subject", dest="subjects", action="append", help="显式关注主体，可重复至多3次；完整问题保留在query")
     p.add_argument("--intent", default="exploration",
                    choices=("fact", "relation", "explanation", "exploration", "lineage"))
     p.add_argument("--domain", default="", choices=("", "academic", "admin", "teaching", "business", "private"))
@@ -822,16 +897,26 @@ def build_parser():
     p.add_argument("--topk", type=int, default=5)
     p.set_defaults(func=cmd_source_search)
 
+    p = sub.add_parser("source-outline", help="定位已知Source的原文章节与表图题注；目录仍需read-raw核验")
+    p.add_argument("source_id"); p.add_argument("--query", default="", help="原文标签的字面子串，留空列目录")
+    p.add_argument("--start-line", type=int, default=1); p.add_argument("--limit", type=int, default=40)
+    p.set_defaults(func=cmd_source_outline)
+
     p = sub.add_parser("ku-search", help="检索 Statement KU 和原生 Frontier Question")
     p.add_argument("query"); p.add_argument("--domain", default="academic")
     p.add_argument("--topk", type=int, default=5); p.set_defaults(func=cmd_knowledge_query)
     p = sub.add_parser("ku-read", help="读取 KU 当前表述与来源依据")
     p.add_argument("unit_id"); p.add_argument("--domain", default="academic"); p.set_defaults(func=cmd_knowledge_query)
     p = sub.add_parser("knowledge", help="Source-first 知识任务：prepare 为宿主 Agent，run 为显式 API")
-    p.add_argument("knowledge_action", choices=("prepare", "run", "show", "check", "apply", "rebuild-index"))
+    p.add_argument("knowledge_action", choices=("prepare", "run", "show", "check", "apply", "expand", "rebuild-index"))
     p.add_argument("identifier", nargs="?", default="")
     p.add_argument("--focus", default=""); p.add_argument("--refresh", action="store_true")
-    p.add_argument("--target"); p.add_argument("--source-locator", action="append", dest="source_locators")
+    p.add_argument("--strategy", choices=("survey", "selective"), default="survey")
+    p.add_argument("--target", help="维护已定位的 Statement KU；须同时指定 source-locator")
+    p.add_argument("--source-locator", action="append", dest="source_locators",
+                   help="完整装入当前 Source 所选解析的明确行范围，最多五段；不带 target 时由调用方先比对旧知识")
+    p.add_argument("--compare-with", action="append", dest="comparison_ids",
+                   help="显式选片时只读比较已定位的 KU/Q，最多五个；不授权修改旧知识")
     p.add_argument("--retry", action="store_true"); p.set_defaults(func=cmd_knowledge)
 
     p = sub.add_parser("recall", help="研究记忆恢复")
@@ -842,6 +927,9 @@ def build_parser():
     p.add_argument("--profile", choices=("legacy", "source-first"), default="legacy")
     p.add_argument("--knowledge", choices=("skip", "none", "agent", "api"), default="skip",
                    help="skip 暂缓整理；none 仅保存来源；agent/api 提取可复用知识")
+    p.add_argument("--focus", default="", help="source-first agent/api: 本次知识整理用途")
+    p.add_argument("--strategy", choices=("survey", "selective"), default="survey",
+                   help="source-first agent/api: survey 现有供料；selective 精简首包及有界补读")
     p.add_argument("--reuse-parse", default="", help="source-first: 复用含同字节 paper.pdf/paper.md 的受管解析目录")
     p.add_argument("--refresh-parse", action="store_true", help="source-first: 按当前配置选择解析版本；默认固定复用已选版本")
     p.add_argument("--allow-paddleocr", action="store_true", help="source-first: 允许已启用的 PaddleOCR 在 MinerU 失败时接续")
@@ -859,7 +947,7 @@ def build_parser():
                    help="显式授权单张图片上传 GLM OCR API")
     p.set_defaults(func=cmd_ingest)
 
-    p = sub.add_parser("task", help="摄入事务只读状态/校验与跨 Agent 受管推进入口")
+    p = sub.add_parser("task", help="摄入事务及 KJ 知识任务的跨 Agent 状态与受管推进入口")
     p.add_argument(
         "task_action",
         choices=("inspect", "status", "next", "verify", "advance", "run"),

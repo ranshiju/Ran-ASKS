@@ -304,7 +304,9 @@ def validate_preview(core, store, state, *, check_runtime=False):
     preview = state['workflow']['preview']
     core.require(preview is not None, 'Record an actual rendered preview first')
     actual = artifact(core, store, state, preview['output_dir'], check_runtime=check_runtime)
-    core.require(actual == preview, 'Recorded preview or manifest changed')
+    expected = dict(preview)
+    expected['output_dir'] = str(core.managed_path(preview['output_dir'], 'projects').relative_to(core.REPO))
+    core.require(actual == expected, 'Recorded preview or manifest changed')
     return preview
 
 

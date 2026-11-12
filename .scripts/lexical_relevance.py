@@ -43,6 +43,21 @@ def rank_key(features):
     return tuple(-features.get(k, 0) for k in ("phrase_coverage", "term_coverage", "title_coverage"))
 
 
+def subject_match(subjects, labels, body):
+    """Literal caller-supplied names, not inferred entities or semantic identity."""
+    label_text = "\n".join(labels).casefold()
+    text = label_text + "\n" + body.casefold()
+    matched, label_matches = [], []
+    for subject in subjects:
+        pattern = re.escape(subject.casefold()).replace(r"\ ", r"\s+")
+        pattern = r"(?<![a-z0-9_])" + pattern + r"(?![a-z0-9_])"
+        if re.search(pattern, text):
+            matched.append(subject)
+        if re.search(pattern, label_text):
+            label_matches.append(subject)
+    return {"matched": matched, "labels": label_matches}
+
+
 def excerpt(query, body, limit=700):
     """Select one literal body slice; offsets never refer to normalized text.
 

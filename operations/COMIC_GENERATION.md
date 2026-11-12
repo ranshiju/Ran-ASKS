@@ -114,7 +114,7 @@ assets:
 ```bash
 python3 .scripts/comic_generation.py batch \
   --project asks-ai-agent \
-  --storyboard projects/asks-ai-agent/notes/storyboard-example.yaml \
+  --storyboard projects/科普与报告/asks-ai-agent/notes/storyboard-example.yaml \
   --model Doubao-Seedream-4.5 \
   --dry-run
 ```

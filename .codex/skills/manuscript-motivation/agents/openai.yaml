@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文背景与动机"
+  short_description: "综合稿件与文献证据，生成摘要用一至两句话及引言用两至三段背景动机"
+  default_prompt: "使用 $manuscript-motivation 围绕最新标题、核心科学问题与贡献撰写简练有力的摘要版和引言版背景动机，核验相关顶刊及近邻文献，保留原稿有效内容。"

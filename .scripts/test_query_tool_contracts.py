@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 import query_tool_contracts as contracts
 
 
@@ -8,6 +9,7 @@ class ContractsTest(unittest.TestCase):
             "hybrid_recall": [("query", ""), ("intent", "exploration"), ("topk", "8"), ("include_deprecated", False)],
             "semantic_search": [("query", ""), ("scope", "node")],
             "source_search": [("query", ""), ("domain", ""), ("topk", "5")],
+            "source_outline": [("source_id", ""), ("query", ""), ("start_line", "1"), ("limit", "40")],
             "read_raw": [("locator", "")],
         }, intents=("fact", "explanation", "exploration"), domains=("academic",))
 
@@ -31,6 +33,16 @@ class ContractsTest(unittest.TestCase):
     def test_required_parameters_and_literal_locator(self):
         self.assertTrue(contracts.validate({}, self.schemas["read_raw"]))
         self.assertEqual("", contracts.validate({"locator": "academic/raw/document.md#L1-L4"}, self.schemas["read_raw"]))
+
+    def test_outline_identity_and_pagination_contracts(self):
+        schema = self.schemas["source_outline"]
+        sid = "S-" + "a" * 24
+        for extra in [{}, {"query": ""}, {"query": "Table 10", "limit": 80, "start_line": "120"}]:
+            self.assertEqual("", contracts.validate({"source_id": sid, **extra}, schema))
+        for bad in [{}, {"source_id": "../private/file"}, {"source_id": sid, "limit": 81},
+                    {"source_id": sid, "limit": "81"}, {"source_id": sid, "start_line": 0},
+                    {"source_id": sid, "limit": True}, {"source_id": sid, "domain": "private"}]:
+            self.assertTrue(contracts.validate(bad, schema), bad)
 
     def test_scalar_arithmetic(self):
         self.assertEqual(contracts.calculate("sum", [0.1, 0.2])["result"], "0.3")
@@ -58,10 +70,72 @@ class ContractsTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     contracts.calculate(operation, operands)
 
-    def test_no_expressions_or_executable_operations(self):
+    def test_no_expressions_in_legacy_operands_or_executable_operations(self):
         for operation, operands in [("eval", [1]), ("sum", ["__import__('os')"]), ("sum", [{"code": "1+1"}])]:
             with self.assertRaises(ValueError):
                 contracts.calculate(operation, operands)
+
+    def test_complete_schedule_from_original_parameters(self):
+        formula = "d_model**(-0.5)*min(step**(-0.5),step*warmup**(-1.5))"
+        expected = {1000: "0.0001746928107421710700319666928696309558938",
+                    4000: "0.0006987712429686842801278667714785238235753",
+                    8000: "0.0004941058844013092706248271163176122708935"}
+        rates = {}
+        for step, reference in expected.items():
+            variables = {"d_model": 512, "step": step, "warmup": 4000}
+            out = contracts.calculate("expression", expression=formula, variables=variables)
+            rates[step] = Decimal(out["result"])
+            self.assertLess(abs(rates[step]-Decimal(reference)), Decimal("1e-36"))
+            self.assertEqual(out["variables"], variables)
+            self.assertEqual(out["expression"], formula)
+            self.assertFalse(out["fact_evidence"])
+        self.assertLess(rates[1000], rates[8000])
+        self.assertLess(rates[8000], rates[4000])
+
+    def test_independent_threshold_and_decimal_literal_fidelity(self):
+        out = contracts.calculate("expression", expression="epsilon*norm/sqrt(d-1)",
+                                  variables={"epsilon": 0.01, "norm": 10, "d": 6})
+        self.assertLess(abs(Decimal(out["result"])-Decimal("0.04472135954999579392818347337462552")), Decimal("1e-34"))
+        for expr, expected in [("0.1+0.2", "0.3"),
+                               ("1.00000000000000000000001-1", "1E-23"),
+                               ("max(-2,+3,1)/2", "1.5"),
+                               (" 2**-3 ", "0.125"), ("(-2)**3", -8)]:
+            self.assertEqual(contracts.calculate("expression", expression=expr)["result"], expected)
+
+    def test_expression_rejects_nonarithmetic_syntax_and_invalid_domains(self):
+        expressions = ["__import__('os').getcwd()", "x.real", "[1][0]", "[x for x in [1]]",
+                       "'1'", "True", "unknown+1", "sqrt(x=4)", "abs(-1)", "sqrt()",
+                       "sqrt(1,2)", "min()", "max(*[1,2])", "(lambda: 1)()", "1 if 1 else 2",
+                       "1//2", "1%2", "2^3", "0x10", "1_000", "1/0", "sqrt(-1)", "(-2)**0.5"]
+        for expr in expressions:
+            with self.subTest(expression=expr), self.assertRaises(ValueError):
+                contracts.calculate("expression", expression=expr)
+
+    def test_expression_work_and_numerical_limits(self):
+        expressions = ["1"*1025, "+"*18+"1", "+".join(["1"]*70),
+                       "min("+",".join(["1"]*17)+")", "2**1001", "2**-1001",
+                       "1e101", "1e-101", "1e100*2", "1e-100/2", "1e100**1000",
+                       "1e-100**1000"]
+        for expr in expressions:
+            with self.subTest(expression=expr[:80]), self.assertRaises(ValueError):
+                contracts.calculate("expression", expression=expr)
+        for variables in [{"x": True}, {"x": "1"}, {"x": float("inf")}, {"x": 1e-101},
+                          {"sqrt": 1}, {"_x": 1}, {"x"*33: 1}, {f"x{i}": i for i in range(17)}]:
+            with self.subTest(variables=variables), self.assertRaises(ValueError):
+                contracts.calculate("expression", expression="1", variables=variables)
+        for expr in ["1e100", "1e-100", "1**1000", "0", "1-1"]:
+            self.assertFalse(contracts.calculate("expression", expression=expr)["fact_evidence"])
+
+    def test_expression_and_legacy_shapes_are_exclusive(self):
+        for inputs in [{"operation": "expression", "expression": "1", "operands": [1]},
+                       {"operation": "sum", "operands": [1], "expression": "1"},
+                       {"operation": "sum", "operands": [1], "variables": {}},
+                       {"operation": "expression"},
+                       {"operation": "expression", "expression": "x", "variables": {"x": [1]}}]:
+            with self.subTest(inputs=inputs):
+                self.assertTrue(contracts.validate(inputs, self.schemas["calculate"]))
+                with self.assertRaises(ValueError):
+                    contracts.calculate(**inputs)
 
 
 if __name__ == "__main__":

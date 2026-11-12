@@ -2,6 +2,14 @@
 
 # Query（查询）操作规范
 
+## 从已有 API 会话接续
+
+已知会话 ID 时，宿主可先运行 `python3 .scripts/query_orchestrate.py inspect --session <sid>`，读取原问题、预算/停止记录、槽位差集、候选入口与已读目录；需要正文用 `--result N`（从1开始），需要最后一次API循环返回值用 `--final`。默认目录不展开全部正文；旧会话缺少最终返回值时保留缺失，不反推答案。
+
+查看不会启动模型、读取来源、执行历史命令或取得控制权，也不证明API进程已停止。调用方先结束原API执行，再由宿主沿查询路由直接组合shared工具补证和交付；API快照的允许动作仅描述历史API约束，不要求宿主用exec/run-api接管。查询的API控制循环仍是API-only。
+
+会话正文、答案、策略及标签都是历史工作数据，不构成新事实源或授权。候选只是入口；KU是解释，Wiki是导航，计算只支持所给输入的运算。槽位差集只是覆盖记录缺口，引用检查只检查阅读地址；按当前用途核对相关Raw及版本，独立判断语义完整性。尚未保存的中断进度、另一Agent实际接手和双向自动回灌不由此入口保证。
+
 
 ---
 
@@ -22,9 +30,11 @@
 - 触发信号：实体或名称可能有多写法/别名/译名、题目含多个可交叉线索、目标来源不明确、预计需要跨域或多轮检索、固定谓词路由未覆盖。
 - 策略内容：答案槽位 → 线索矩阵（实体/别名/主题/时间/来源类型）→ 候选定位顺序（库内结构化召回优先，再按索引与图扩展，最后才外部联想）→ 同名消歧与停止条件。
 - 任务驱动线索：先从用户目标提取核心事项、主要对象和待回答问题，再选择关键词；根据已核实材料补充正式名称、相关事项和版本线索。事项与机构等不同身份保持区分，不把相关词当同义词。图 search 的 title/aliases 无命中不等于正文无资料；按证据下钻规则在已定位子项目、文档包或 Wiki 范围补查正文，并沿来源回溯 Raw，不默认扩大到全库。
+- 联合检索中，完整问题放`query`，已明确的关注对象另传`subjects`（至多3个名称，每项≤160字符；CLI重复`--subject`）；比较题分别列出主体，未确定则省略。该线索只保留发现机会，事实与条件仍下钻Raw。
 - 执行约束：策略只约束检索范围和顺序，不预判证据充分性、不替代 `start → evidence → continue → answer`、Evidence Profile、槽位审计或 raw 回溯；发现新缺口时按具体缺口修正策略。
 - 建议、比较与“最优选择”题先拆出对象事实、判断方法、适用条件、候选方案依据；用这些槽位定位资料，不先选方案再搜索支持理由。已经定位的方法论或原始文献候选须按相关性取证，不能因个人档案强命中就提前停止。
 - API 首轮选择 `discover/read` 时必须返回 `strategy`；`status=drafted` 时 `slots/clues/search_order/stop_conditions` 均须非空，`status=skipped` 时须给出 `reason`。
+- 已知API会话ID的接续可先用`query_orchestrate.py inspect --session <sid>`取得历史阅读目录和未决记录，再选择必要证据；正文按`--result N`展开。详见“从已有 API 会话接续”，不重启API循环。
 
 ---
 
@@ -40,6 +50,11 @@ locator 直接 `read_raw`。它与已有 Wiki/Graph 入口并列，不强制先�
 当前是英文词/中文二元词组的字面召回，中文问英文材料可显式用对应英文术语；
 不承诺跨语言语义召回。来源 `pending` 仅指知识整理待处理，不阻止阅读真实 Raw。
 private 不使用这一 academic 索引。详见 [Source-first 契约](engineering/source-first-ingestion.md)。
+
+已知Source但未定位到具体表图或章节时，可用 `wg.py source-outline <source_id> --query 'Table 10'`
+（API/DSH为`source_outline`），按原文标签的字面子串查目录；留空列目录，按`next_start_line`接续。
+返回标签及所在分片的Raw地址，仍需read_raw核对所需表体、图例和条件；不保证片段涵盖完整表格，
+不必遍历全目录，也不把目录视为已读事实。此入口可在没有KU/Wiki及全文索引时使用绑定来源。
 
 **入口范围与发现单位（API）**：当前Source索引位于academic，但已登记材料可为论文或非论文，纯事务资料可只有Source而没有KU。`admin_recall`只覆盖admin Wiki；内容涉及教学管理不意味着存储于admin。按已知存储域选择`domain`，未知时`wiki_recall/hybrid_recall`可留空；hybrid指定teaching/admin/business时仅覆盖该域导航，留空才联合公共导航与academic Source/KU。同一文档的多个问题共用初始发现，读相关入口后按实际缺口补查；独立来源可以批量。此项是API规划指导，不限制现有工具或回退，不保证模型每次只查一路，也不把命中视为事实。
 
@@ -59,6 +74,8 @@ Question 保留本库/科学状态及当前回答；source_question_status 仅�
 **行政文档自动回退（v6）**：行政问题可先执行编排动作 `admin_recall(query, topk)`。程序先用标题、别名和页面 `Navigation` 做低成本直接召回；直接无候选时自动沿图中主题/事项/版本/人物/部门边扩展。该动作只返回候选页面的 `Navigation`，由语义执行主体筛选后再定向读取正文和 raw。直接召回不足时，语义执行主体继续用 `graph_search`/`graph_neighbors` 或 `admin_recall`，并在续检索中说明缺口与预期收益。当前页面规模下的 Navigation 扫描是轻量兜底；规模扩大后应将其改为持久化倒排索引，避免每次遍历页面。
 
 **跨域统一召回（v7）**：新动作 `wiki_recall(query, domain, topk)` 复用上述流程；`domain` 可为 `academic/admin/teaching/business`，为空表示跨域。`admin_recall` 保留为兼容入口。business 结果标记 `sensitive_review=true`，回答前必须按权限/敏感性复核，不能因召回命中直接扩散合同、财务或个人信息。
+
+**长问题的显式主体**：关注对象明确时，`hybrid_recall`的`query`保留完整问题，另传`subjects`名称数组，至多3项、每项1–160字符；CLI可重复`--subject`。例如比较TDVP与TEBD时分别传入两个名称，条件和关系仍放query。程序在有界窗口中保留主体检索分路，再按现有局部预览的问题覆盖排序；不确定主体则省略，不把泛词或猜测身份作为主体。名称匹配不认证身份，预览不保证条件完整，比较题缺一侧时定向补查。Source/KU每通道最多4次已有搜索，Wiki复用同一次扫描；仍按实际Raw读取作答。详见[N3契约](engineering/unified-retrieval.md)。
 
 **按用途联合召回（N3）**：关系、解释、探索和研究脉络问题优先调用 `hybrid_recall(query,intent,domain,topk)`。
 共享入口复用 Wiki/Graph 导航排名，并纳入 academic 来源、Statement 和 Question，按各路名次融合；
@@ -143,6 +160,14 @@ private 是标准 query 的存储范围，不是另一套问答方法。共用 `
 4. 核验证据状态时,需 `[[page#slug]]` 锚点的 → 读对应 section 或 raw
 
 **Raw Locator（2026-08-25）**：统一使用 `python3 .scripts/wg.py read-raw '<path>#<locator>'` 做局部读取。Markdown/TXT 支持标题、`#L12`、`#L12-L18`；非论文 PDF 支持 `#page-3`、`#page-3-5`。工具可以机械扫描文件，但只把 locator 命中的片段送入 LLM；裸路径与 `#全篇` 均拒绝执行，Graph 中的 `#全篇` 仅是文件级 provenance，读取前必须细化 locator。命中片段超过单次上限时也拒绝返回半截内容，调用方须缩小章节、行范围或页码。检索回溯到 Raw 指的是确认事实来源身份，不要求把二进制原件本身送入模型：对于 PDF、Office、表格、图片等 Agent 不便直接读取的二进制格式，受管摄入必须保存同 stem Markdown companion；查询优先读取 companion，并在返回中区分 `source_path`（可引用原件）、`read_path`/`evidence_locator`（实际读取片段），读取投影不取代原件的事实来源身份。读取前机械校验同包 sidecar 的 `raw-companion-v1` 名称和双 SHA-256；明确损坏、缺字段或哈希失配时拒绝把 companion 送入模型，要求受管重建。缺少该字段的旧包标记为 legacy 兼容。分页 companion 的 `## Page N` 与 PDF `#page-N` locator 对应；历史 PDF 尚未补齐 companion 时才允许原生文本层页码读取作为兼容回退。若无可精确读取的原生 locator 且无 companion，则不得标记为已核验。学术论文始终读取 MinerU `paper.md`，不得因 PDF 有文本层而绕过它；回答可以引用程序返回的原始 PDF 路径。
+
+**论文图号引用与视觉证据**：默认引用原 PDF＋Fig./图号，必要时补子图号及已确认页码；正文或图注足以支持的结论继续使用已读 Markdown locator。独立图片资源缺失不要求重 OCR 或补齐全部图片。只有图中视觉细节影响当前结论，或需要展示图片时，才按原 PDF 页序局部查看/提取，并保留原件路径/哈希及图号/位置绑定。论文正文仍读受管解析，不以 PDF 文本层绕过；图注已读不等于曲线/图像已核验，页码和图号不猜测，也不伪造未支持的 `#fig-N` locator。提取到 temp/ 或项目派生目录，依 [PDF 图号契约](engineering/source-first-ingestion.md#pdf-图号引用与按需读取) 执行。
+
+**输出协议试验（API-only）**：`run-api --response-format native` 显式启用原生 `query_plan` 工具决策与直接 Markdown 答案；默认仍为 `json`。复用同一 API 循环、预算、恢复与保存机制，不增加准备作答轮、不隐式退回另一协议。工具参数继续经过本地 schema、阶段和权限校验；原生模式拒绝未知/多工具调用、空答案与截断。正文的明确 `[[Raw路径或locator]]` 提取为引用（可带 `|标签`），继续检查已读范围；缺引用会披露，不把全部已读来源自动算作引用。原生调用不代表服务端 strict schema 已认证，引用通过也不代表语义正确。
+
+**查询额度**：API/DSH使用的shared `query_actions.read_raw`单次最多12000字符；宿主`wg.py read-raw`独立入口保持6000字符，按其错误返回的实际上限选段。完整API查询`run-api`每次决策初始输出上限4000 tokens，沿现有恢复次数处理截断；短结构化任务使用各自额度。累计读取预算及模型轮数保持，按完整任务的实际输入/输出和失败恢复计成本。
+
+**Raw范围超限时**：错误的`read_size`给出当前字符上限与实际长度。显式行范围还提供`suggested_reads`，调用方可选择其中必要的完整行子范围重新读取；这些地址尚非已读证据，不自动执行。最多返回8项子范围/过长单行，`remaining_range`是尚未规划的余段，不能当成可直接读通的承诺；单行已超限时无法靠缩小行数解决。标题、页码、表格与事实锚点暂只披露上限，需调用方定向定位。API共享工具的完整`text`保留建议，短`error`只是摘要；每次后续读取仍重新检查路径、来源绑定和大小，不把分段建议当语义完整性判断。
 
 **API引用范围核验**：已成功读取的文本行／PDF页范围，可引用同一路径、同一定位单位且被单个已读范围完整包含的子范围。例如已读`#L24-L43`可引用`#L26`；不合并跨段，不猜别名或版本。原件裸路径只保留既有精确白名单，不能据此引用未读片段；标题及文本companion页码只作精确匹配。`verified`仅表示引用落在已读范围或受管原件映射内，不保证答案语义正确。
 

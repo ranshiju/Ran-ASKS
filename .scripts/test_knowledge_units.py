@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from contextlib import ExitStack, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -51,6 +52,130 @@ class KnowledgeTests(unittest.TestCase):
         task,packet=self.prepare(); self.stage(task,[self.op(packet)])
         result=kc.apply(task["job_id"],repo=self.root)
         return result["results"]["item-1"]["id"],task
+
+    def host_call(self, task, action="inspect", command="read"):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            wg.cmd_task(SimpleNamespace(transaction_id=task["job_id"],
+                                        task_action=action, task_command=command))
+        return json.loads(output.getvalue())
+
+    def host_executor(self, calls):
+        def execute(state, action):
+            calls.append(action)
+            result = {"check": kc.check, "commit": kc.apply}[action](state["job_id"], repo=self.root)
+            return {"action": action, "returncode": int(result.get("ready") is False or result.get("status") == "partial"),
+                    "command": [], "environment_overrides": [], "result": result, "error": ""}
+        return execute
+
+    def test_host_task_discovers_knowledge_without_duplicate_inbox_state(self):
+        task, _ = self.prepare()
+        inspected = self.host_call(task)
+        self.assertTrue(inspected["ok"], inspected)
+        self.assertEqual(inspected["result"]["kind"], "knowledge_delta")
+        self.assertEqual(inspected["result"]["next_action"], "write_outputs")
+        self.assertEqual(self.host_call(task, "next")["result"]["next_action"], "write_outputs")
+        with patch.object(wg, "_run_task_action", side_effect=AssertionError("missing output must not execute")):
+            self.assertFalse(self.host_call(task, "advance")["ok"])
+        self.assertFalse((self.root / "temp/inbox-state").exists())
+
+    def test_host_task_checks_commits_and_reopens_completed_job_without_output(self):
+        task, packet = self.prepare()
+        self.stage(task, [self.op(packet)])
+        calls = []
+        with patch.object(wg, "_run_task_action", side_effect=self.host_executor(calls)):
+            advanced = self.host_call(task, "advance")
+        self.assertTrue(advanced["ok"], advanced)
+        self.assertEqual(calls, ["check", "commit"])
+        control = advanced["result"]["control"]
+        self.assertEqual(control["workflow_status"], "completed")
+        self.assertEqual(control["next_action"], "none")
+        uid = control["results"]["item-1"]["id"]
+        self.assertEqual(ks.read(uid, repo=self.root)["statement"], self.op(packet)["statement"])
+        (kc.job_dir(self.root, task["job_id"])/"delta.json").unlink()
+        with patch.object(wg, "_run_task_action", side_effect=AssertionError("completed work must not rerun")):
+            self.assertTrue(self.host_call(task, "advance")["ok"])
+            self.assertEqual(self.host_call(task, "status")["result"]["next_action"], "none")
+
+    def test_host_task_rejected_evidence_never_commits(self):
+        task, packet = self.prepare()
+        self.stage(task, [self.op(packet, evidence=[{"block_id": "B-invalid", "relation": "supports"}])])
+        calls = []
+        with patch.object(wg, "_run_task_action", side_effect=self.host_executor(calls)):
+            result = self.host_call(task, "advance")
+        self.assertEqual(calls, ["check"])
+        self.assertEqual(result["result"]["next_action"], "repair_outputs")
+        checked = result["result"]["executions"][0]["result"]
+        self.assertFalse(checked["ready"])
+        self.assertNotEqual(checked["workflow_status"], "ready_to_commit")
+        self.assertFalse(list((self.root / "academic/knowledge/units").glob("*.md")))
+
+    def test_host_task_partial_preserves_saved_work_and_unresolved_scope(self):
+        task, packet = self.prepare()
+        self.stage(task, [self.op(packet)], unresolved=["Remaining source not read"])
+        calls = []
+        with patch.object(wg, "_run_task_action", side_effect=self.host_executor(calls)):
+            result = self.host_call(task, "advance")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"]["executions"][-1]["returncode"], 1)
+        control = result["result"]["control"]
+        self.assertEqual(control["internal_status"], "partial")
+        self.assertEqual(control["next_action"], "review_partial")
+        self.assertEqual(control["unresolved"], ["Remaining source not read"])
+        self.assertEqual(control["results"]["item-1"]["status"], "saved")
+        self.assertEqual(si.inspect_source(self.source["source_id"], repo=self.root)["status"], "source_ready")
+
+    def test_host_partial_with_failed_commit_remains_error(self):
+        task, packet = self.prepare()
+        self.stage(task, [self.op(packet)])
+        with patch.object(wg, "_run_task_action", side_effect=self.host_executor([])), \
+             patch.object(ks, "commit", side_effect=ValueError("publication failed")):
+            result = self.host_call(task, "advance")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["error"])
+        control = result["result"]["control"]
+        self.assertEqual(control["internal_status"], "partial")
+        self.assertEqual(control["results"]["item-1"]["status"], "failed")
+
+    def test_host_partial_does_not_hide_other_process_failure(self):
+        task, packet = self.prepare()
+        self.stage(task, [], unresolved=["Unread scope"])
+        execute = self.host_executor([])
+        def action(state, name):
+            result = execute(state, name)
+            if name == "commit":
+                result["returncode"] = 2
+            return result
+        with patch.object(wg, "_run_task_action", side_effect=action):
+            result = self.host_call(task, "advance")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["error"])
+
+    def test_host_task_rejects_api_ownership_and_tampered_packet(self):
+        task, _ = self.prepare(executor="api:configured-model")
+        with patch.object(ka, "run", side_effect=AssertionError("no implicit API call")):
+            for action in ("status", "next"):
+                result = self.host_call(task, action)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["result"]["executor"], "api:configured-model")
+                self.assertEqual(result["result"]["next_action"], "inspect_api_job")
+            for action in ("inspect", "advance", "run"):
+                result = self.host_call(task, action)
+                self.assertFalse(result["ok"])
+                self.assertIn("API-owned", result["error"])
+        host, _ = self.prepare()
+        packet_path = kc.job_dir(self.root, host["job_id"])/"packet.json"
+        packet = json.loads(packet_path.read_text()); packet["focus"] = "tampered"
+        si.atomic_json(packet_path, packet)
+        result = self.host_call(host)
+        self.assertFalse(result["ok"])
+        self.assertIn("hash mismatch", result["error"])
+
+    def test_host_knowledge_verify_does_not_claim_ingest_receipt_validation(self):
+        task, _ = self.prepare()
+        result = self.host_call(task, "verify")
+        self.assertFalse(result["ok"])
+        self.assertIn("knowledge check", result["error"])
 
     def test_minimal_output_omits_optional_labels_without_losing_conditions(self):
         task, packet = self.prepare()
@@ -184,7 +309,7 @@ class KnowledgeTests(unittest.TestCase):
         uid, source, locator = self.directed_fixture()
         wrong_source = ks.read(uid, repo=self.root)["evidence"][0]["locator"]
         for options in (
-            {"target": uid}, {"source_locators": [locator]},
+            {"target": uid},
             {"target": "Q-native", "source_locators": [locator]},
             {"target": uid, "source_locators": locator},
             {"target": uid, "source_locators": [locator] * 6},
@@ -218,16 +343,17 @@ class KnowledgeTests(unittest.TestCase):
             evidence=[{"block_id": b["id"], "relation": "related"} for b in packet["blocks"]])])
         kc.apply(task["job_id"], repo=self.root)
         old = ks.read(uid, repo=self.root)
+        locators = [locator.replace("L2-L3", "L1"), locator]
         task, packet = self.prepare(source, target=uid,
-            source_locators=[locator.replace("L2-L3", "L1"), locator], refresh=True)
+            source_locators=locators, refresh=True)
         self.assertEqual(len(packet["candidates"][0]["old_evidence_blocks"]), 2)
         self.assertEqual(len(packet["blocks"]), 3)
         self.assertTrue(all(r["locator"] in {b["ref"]["locator"] for b in packet["blocks"]} for r in old["evidence"]))
         self.assertEqual(packet["coverage"]["provided_ranges"], [[1, 3]])
-        # Packet metadata, full target and both instruction sets count toward the bound.
+        # Measure and reject the same requested spans; a smaller packet may fit.
         budget = kc.token_count(packet) + kc.token_count(kc.instructions(packet)) - 2001
         with self.assertRaisesRegex(ValueError, "budget"):
-            self.prepare(source, target=uid, source_locators=[locator], max_tokens=budget)
+            self.prepare(source, target=uid, source_locators=locators, max_tokens=budget)
 
     def test_directed_blocks_create_other_targets_and_multiple_writes(self):
         uid, source, locator = self.directed_fixture()
@@ -272,6 +398,279 @@ class KnowledgeTests(unittest.TestCase):
         changed, _ = self.prepare(source, target=uid, source_locators=[locator.replace("L2-L3", "L2")])
         self.assertEqual(task["job_id"], replay["job_id"])
         self.assertEqual(len({auto["job_id"], task["job_id"], changed["job_id"]}), 3)
+        directed_key = [source["source_id"], source["parse_id"], kc.PROTOCOL, kc.PACKET_POLICY,
+                        si.fingerprint(kc.RULES), "", "agent", 14000,
+                        ["directed-maintenance-v1", kc.directed_request(si.load_receipt(self.root, source["source_id"]), uid, [locator]),
+                         si.fingerprint(kc.DIRECTED_RULES)]]
+        self.assertEqual(task["job_id"], "KJ-" + si.fingerprint(directed_key)[:24])
+
+    def test_explicit_source_selection_keeps_whole_span_across_chunks_without_discovery(self):
+        lines = ["# Long source"] + [f"Condition {i}: only under the specified assumptions." for i in range(1, 100)]
+        source = self.receive("long-selected.md", "\n".join(lines) + "\n")
+        locator = source["parse_path"] + "#L30-L70"
+        with patch.object(ks, "search", side_effect=AssertionError("caller owns discovery")), \
+             patch.object(kc, "focused_chunks", side_effect=AssertionError("no automatic survey")):
+            _, packet = self.prepare(source, source_locators=[locator], focus="chosen condition")
+        self.assertEqual(packet["source_selection"]["source_locators"], [locator])
+        self.assertNotIn("maintenance", packet)
+        self.assertNotIn("candidate_retrieval", packet)
+        self.assertEqual(packet["candidates"], [])
+        self.assertEqual(len(packet["blocks"]), 1)
+        self.assertEqual(packet["blocks"][0]["text"].rstrip("\n"), "\n".join(lines[29:70]))
+        self.assertEqual(packet["coverage"]["provided_ranges"], [[30, 70]])
+        self.assertIn(kc.SELECTED_SOURCE_RULES, kc.instructions(packet))
+
+    def test_comparison_context_preserves_selected_raw_and_complete_read_only_knowledge(self):
+        uid, _ = self.create()
+        source = self.receive("comparison-new.md", "# New source\nDifferent condition B.\n")
+        locator = source["parse_path"] + "#L2"
+        with patch.object(ks, "search", side_effect=AssertionError("caller owns discovery")), \
+             patch.object(ks, "resolve_evidence", side_effect=AssertionError("comparison loads no old Raw")):
+            task, packet = self.prepare(source, source_locators=[locator], comparison_ids=[uid, uid])
+        old = ks.read(uid, repo=self.root)
+        self.assertEqual(packet["source_selection"]["comparison_ids"], [uid])
+        self.assertEqual(len(packet["blocks"]), 1)
+        self.assertEqual(packet["blocks"][0]["ref"]["source_id"], source["source_id"])
+        self.assertEqual(packet["blocks"][0]["text"].strip(), "Different condition B.")
+        candidate = packet["candidates"][0]
+        for field in ("id", "title", "statement", "unresolved", "snapshot_sha256"):
+            self.assertEqual(candidate[field], old[field])
+        self.assertFalse(candidate["can_update"])
+        self.assertEqual(candidate["old_evidence_blocks"], [])
+        self.assertIn(kc.COMPARISON_RULES, task["agent_task"]["protocol"]["instructions"])
+        for action in ("attach", "revise"):
+            self.stage(task, [self.op(packet, action=action, target=uid)])
+            rejected = kc.check(task["job_id"], repo=self.root)
+            self.assertFalse(rejected["ready"])
+            self.assertIn("read-only", rejected["operations"][0]["error"])
+        self.stage(task, [self.op(packet, statement="Different condition B.")])
+        self.assertTrue(kc.check(task["job_id"], repo=self.root)["ready"])
+        result = kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(ks.read(uid, repo=self.root)["snapshot_sha256"], old["snapshot_sha256"])
+
+    def test_comparison_rejects_invalid_options_before_job_or_api(self):
+        uid, _ = self.create()
+        locator = self.source["parse_path"] + "#L2"
+        call = self.mock_api()
+        before = set((self.root/"temp/knowledge-compile").glob("*/state.json"))
+        receipt = si.digest(si.receipt_path(self.root, self.source["source_id"]))
+        invalid = [uid, [None], [17], ["../private/a"], [uid]*6]
+        for ids in invalid:
+            with self.subTest(ids=ids), self.assertRaises(ValueError):
+                ka.run(self.source["source_id"], repo=self.root, source_locators=[locator], comparison_ids=ids)
+        for opts in ({}, {"target": uid, "source_locators": [locator]}):
+            with self.assertRaisesRegex(ValueError, "without target"):
+                self.prepare(comparison_ids=[uid], **opts)
+        with self.assertRaises(FileNotFoundError):
+            self.prepare(source_locators=[locator], comparison_ids=["KU-"+"0"*24])
+        self.assertEqual(call.call_count, 0)
+        self.assertEqual(set((self.root/"temp/knowledge-compile").glob("*/state.json")), before)
+        self.assertEqual(si.digest(si.receipt_path(self.root, self.source["source_id"])), receipt)
+
+    def test_comparison_zero_output_checks_snapshot_before_any_state_write(self):
+        uid, _ = self.create()
+        opts = {"source_locators": [self.source["parse_path"]+"#L2"], "comparison_ids": [uid]}
+        task, _ = self.prepare(**opts)
+        self.stage(task, [])
+        folder = kc.job_dir(self.root, task["job_id"])
+        state_hash = si.digest(folder/"state.json")
+        path = ks.unit_path(self.root, uid)
+        initial = path.read_text()
+        path.write_text(initial+"\nChanged knowledge scope.\n")
+        for fn in (kc.check, kc.apply):
+            with self.assertRaisesRegex(ValueError, "comparison knowledge changed"):
+                fn(task["job_id"], repo=self.root)
+        self.assertEqual(si.digest(folder/"state.json"), state_hash)
+        new, _ = self.prepare(**opts)
+        self.assertNotEqual(new["job_id"], task["job_id"])
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, "comparison knowledge unavailable"):
+            kc.apply(task["job_id"], repo=self.root)
+        path.write_text(initial)
+        self.assertEqual(kc.apply(task["job_id"], repo=self.root)["status"], "completed")
+        path.write_text(initial+"\nLater change.\n")
+        self.assertEqual(kc.apply(task["job_id"], repo=self.root)["status"], "completed")
+
+    def test_comparison_preserves_legacy_identity_and_binds_scoped_rules(self):
+        uid, _ = self.create()
+        locator = self.source["parse_path"]+"#L2"
+        plain, packet = self.prepare(source_locators=[locator])
+        empty, _ = self.prepare(source_locators=[locator], comparison_ids=[])
+        self.assertEqual(plain["job_id"], empty["job_id"])
+        self.assertNotIn(kc.COMPARISON_RULES, kc.instructions(packet))
+        task, _ = self.prepare(source_locators=[locator], comparison_ids=[uid])
+        replay, _ = self.prepare(source_locators=[locator], comparison_ids=[uid, uid])
+        self.assertEqual(task["job_id"], replay["job_id"])
+        with patch.object(kc, "COMPARISON_RULES", kc.COMPARISON_RULES+"Extra scope guidance."):
+            changed, _ = self.prepare(source_locators=[locator], comparison_ids=[uid])
+            same, _ = self.prepare(source_locators=[locator])
+        self.assertNotEqual(task["job_id"], changed["job_id"])
+        self.assertEqual(plain["job_id"], same["job_id"])
+
+    def test_comparison_api_rejects_snapshot_changed_after_prepare_without_call(self):
+        uid, _ = self.create()
+        opts = {"source_locators": [self.source["parse_path"]+"#L2"], "comparison_ids": [uid]}
+        task, _ = self.prepare(executor="api:mock", **opts)
+        path = ks.unit_path(self.root, uid)
+        path.write_text(path.read_text()+"\nConcurrent change.\n")
+        call = self.mock_api()
+        with patch.object(kc, "prepare", return_value=task), self.assertRaisesRegex(ValueError, "comparison knowledge changed"):
+            ka.run(self.source["source_id"], repo=self.root, **opts)
+        self.assertEqual(call.call_count, 0)
+        self.assertEqual(kc.load_job(self.root, task["job_id"])[0]["status"], "prepared")
+
+    def test_comparison_preparation_detects_race_without_persisting_packet(self):
+        uid, _ = self.create()
+        old = ks.read(uid, repo=self.root)
+        before = set((self.root/"temp/knowledge-compile").glob("*/state.json"))
+        with patch.object(ks, "read", side_effect=[old, {**old, "snapshot_sha256": "f"*64}]), \
+             self.assertRaisesRegex(ValueError, "changed during preparation"):
+            self.prepare(source_locators=[self.source["parse_path"]+"#L2"], comparison_ids=[uid])
+        self.assertEqual(set((self.root/"temp/knowledge-compile").glob("*/state.json")), before)
+
+    def test_comparison_native_question_is_read_only(self):
+        question, packet = self.prepare()
+        self.stage(question, [self.op(packet, kind="question", statement="Does condition A generalize?")])
+        qid = kc.apply(question["job_id"], repo=self.root)["results"]["item-1"]["id"]
+        task, packet = self.prepare(source_locators=[self.source["parse_path"]+"#L2"], comparison_ids=[qid])
+        self.assertEqual(packet["candidates"][0]["kind"], "question")
+        self.assertFalse(packet["candidates"][0]["can_update"])
+        self.stage(task, [])
+        self.assertEqual(kc.apply(task["job_id"], repo=self.root)["status"], "completed")
+
+    def test_comparison_budget_rejects_whole_input_before_model(self):
+        uid, _ = self.create()
+        call = self.mock_api()
+        before = set((self.root/"temp/knowledge-compile").glob("*/state.json"))
+        with patch.object(kc, "token_count", return_value=20000), self.assertRaisesRegex(ValueError, "budget"):
+            ka.run(self.source["source_id"], repo=self.root, source_locators=[self.source["parse_path"]+"#L2"], comparison_ids=[uid])
+        self.assertEqual(call.call_count, 0)
+        self.assertEqual(set((self.root/"temp/knowledge-compile").glob("*/state.json")), before)
+
+    def test_comparison_api_and_cli_share_context_and_replay(self):
+        uid, _ = self.create()
+        locator = self.source["parse_path"]+"#L2"
+        def response(packet):
+            self.assertEqual(packet["source_selection"]["comparison_ids"], [uid])
+            return {"ok": True, "parsed": {"schema": kc.PROTOCOL, "operations": []}, "history": [{"status": "ok"}]}
+        call = self.mock_api(response)
+        opts = {"source_locators": [locator], "comparison_ids": [uid]}
+        result = ka.run(self.source["source_id"], repo=self.root, **opts)
+        replay = ka.run(self.source["source_id"], repo=self.root, **opts)
+        self.assertEqual((result["status"], replay["new_model_calls"], call.call_count), ("completed", 0, 1))
+        for action, module, fn in (("prepare", kc, "prepare"), ("run", ka, "run")):
+            with patch.object(module, fn, return_value={"status": "prepared"}) as invoked, redirect_stdout(io.StringIO()):
+                args = wg.build_parser().parse_args(["knowledge", action, self.source["source_id"],
+                    "--source-locator", locator, "--compare-with", uid])
+                args.func(args)
+                self.assertEqual(invoked.call_args.kwargs["comparison_ids"], [uid])
+        with patch.object(kc, "prepare", return_value={"status": "prepared"}) as invoked, redirect_stdout(io.StringIO()):
+            kc.main(["prepare", self.source["source_id"], "--source-locator", locator, "--compare-with", uid])
+            self.assertEqual(invoked.call_args.kwargs["comparison_ids"], [uid])
+        with redirect_stdout(io.StringIO()) as output:
+            wg.main(["knowledge", "apply", result["job_id"], "--compare-with", uid])
+        self.assertFalse(json.loads(output.getvalue())["ok"])
+
+    def test_explicit_selection_rejects_invalid_ranges_before_job_or_model(self):
+        call = self.mock_api()
+        source = self.source
+        locator = source["parse_path"] + "#L2"
+        before = si.digest(self.root/"academic/sources"/(source["source_id"]+".json"))
+        invalid = [locator, [None], [123], [locator]*6,
+                   [source["parse_path"]], [source["parse_path"]+"#L2-L99"],
+                   [source["parse_path"]+"#L0-L1"], ["private/raw/a.md#L1"],
+                   ["../outside.md#L1"], ["/tmp/a.md#L1"],
+                   ["academic/raw/sources/S-other/parses/P-old/paper.md#L1"]]
+        for locators in invalid:
+            with self.subTest(locators=locators), self.assertRaises(ValueError):
+                ka.run(source["source_id"], repo=self.root, source_locators=locators)
+        self.assertEqual(call.call_count, 0)
+        self.assertEqual(si.digest(self.root/"academic/sources"/(source["source_id"]+".json")), before)
+        self.assertFalse(list((self.root/"temp/knowledge-compile").glob("*/packet.json")))
+        self.assertFalse(list((self.root/"temp/knowledge-compile").glob("*/state.json")))
+
+    def test_explicit_selection_is_all_or_error_under_actual_budget(self):
+        source = self.receive("budget-selected.md", "# Topic\nA necessary premise.\n" + ("detail "*1100 + "\n")*4)
+        locators = [source["parse_path"]+f"#L{line}" for line in range(2, 7)]
+        before = si.digest(self.root/"academic/sources"/(source["source_id"]+".json"))
+        with self.assertRaisesRegex(ValueError, "budget"):
+            self.prepare(source, source_locators=locators, max_tokens=4000)
+        self.assertFalse(list((self.root/"temp/knowledge-compile").glob("*/packet.json")))
+        self.assertEqual(si.digest(self.root/"academic/sources"/(source["source_id"]+".json")), before)
+
+    def test_explicit_selection_metadata_and_instructions_are_budgeted(self):
+        locator = self.source["parse_path"] + "#L2"
+        _, packet = self.prepare(source_locators=[locator])
+        budget = kc.token_count(packet) + kc.token_count(kc.instructions(packet)) - 2001
+        before = set((self.root/"temp/knowledge-compile").glob("*/packet.json"))
+        with self.assertRaisesRegex(ValueError, "budget"):
+            self.prepare(source_locators=[locator], max_tokens=budget)
+        self.assertEqual(set((self.root/"temp/knowledge-compile").glob("*/packet.json")), before)
+
+    def test_explicit_selection_identity_and_completed_zero_output_replay(self):
+        locator = self.source["parse_path"] + "#L2"
+        task, packet = self.prepare(source_locators=[locator, locator])
+        replay, _ = self.prepare(source_locators=[locator+"-L2"])
+        other, _ = self.prepare(source_locators=[self.source["parse_path"]+"#L1-L2"])
+        automatic, _ = self.prepare()
+        self.assertEqual(task["job_id"], replay["job_id"])
+        self.assertEqual(len({task["job_id"], other["job_id"], automatic["job_id"]}), 3)
+        self.stage(task, [])
+        self.assertEqual(kc.apply(task["job_id"], repo=self.root)["status"], "completed")
+        replay, _ = self.prepare(source_locators=[locator])
+        self.assertEqual(replay["status"], "completed")
+        self.assertEqual(replay["results"], {})
+        self.assertFalse(list((self.root/"academic/knowledge/units").glob("*.md")))
+
+    def test_explicit_selection_creates_only_from_bound_blocks(self):
+        locator = self.source["parse_path"] + "#L2"
+        task, packet = self.prepare(source_locators=[locator])
+        self.stage(task, [self.op(packet, evidence=[{"block_id": "B-not-selected", "relation": "supports"}])])
+        self.assertFalse(kc.check(task["job_id"], repo=self.root)["ready"])
+        self.stage(task, [self.op(packet, action="revise", target="KU-"+"0"*24)])
+        self.assertFalse(kc.check(task["job_id"], repo=self.root)["ready"])
+        self.stage(task, [self.op(packet)])
+        self.assertTrue(kc.check(task["job_id"], repo=self.root)["ready"])
+        saved = kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(saved["status"], "completed")
+        current = ks.read(saved["results"]["item-1"]["id"], repo=self.root)
+        self.assertEqual(current["evidence"][0]["locator"], locator+"-L2")
+        fresh, packet = self.prepare(source_locators=[locator], refresh=True)
+        self.stage(fresh, [self.op(packet)])
+        source_path = self.root/self.source["parse_path"]
+        source_path.write_text(source_path.read_text()+"Changed.\n")
+        self.assertFalse(kc.check(fresh["job_id"], repo=self.root)["ready"])
+
+    def test_explicit_selection_api_uses_shared_packet_and_zero_call_replay(self):
+        call = self.mock_api()
+        locator = self.source["parse_path"] + "#L2"
+        result = ka.run(self.source["source_id"], repo=self.root, source_locators=[locator])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn(kc.SELECTED_SOURCE_RULES, call.call_args.args[0])
+        state, packet = kc.load_job(self.root, result["job_id"])
+        self.assertTrue(state["executor"].startswith("api:"))
+        self.assertEqual(packet["blocks"][0]["ref"]["locator"], locator+"-L2")
+        self.assertEqual(packet["candidates"], [])
+        replay = ka.run(self.source["source_id"], repo=self.root, source_locators=[locator])
+        self.assertEqual((call.call_count, replay["new_model_calls"]), (1, 0))
+        self.assertEqual(result["results"], replay["results"])
+
+    def test_explicit_selection_cli_accepts_no_target_and_rejects_apply_options(self):
+        locator = self.source["parse_path"]+"#L2"
+        for action, module, name in (("prepare", kc, "prepare"), ("run", ka, "run")):
+            with patch.object(module, name, return_value={"status": "prepared"}) as call, redirect_stdout(io.StringIO()):
+                args = wg.build_parser().parse_args(["knowledge", action, self.source["source_id"], "--source-locator", locator])
+                args.func(args)
+                self.assertIsNone(call.call_args.kwargs["target"])
+                self.assertEqual(call.call_args.kwargs["source_locators"], [locator])
+        with redirect_stdout(io.StringIO()) as output:
+            wg.main(["knowledge", "apply", "KJ-unused", "--source-locator", locator])
+        self.assertFalse(json.loads(output.getvalue())["ok"])
+        with patch.object(kc, "prepare", return_value={"status": "prepared"}) as call, redirect_stdout(io.StringIO()):
+            kc.main(["prepare", self.source["source_id"], "--source-locator", locator])
+        self.assertIsNone(call.call_args.kwargs["target"])
+        self.assertEqual(call.call_args.kwargs["source_locators"], [locator])
 
     def test_directed_api_uses_shared_instructions_and_replays_without_call(self):
         uid, source, locator = self.directed_fixture()
@@ -515,7 +914,7 @@ class KnowledgeTests(unittest.TestCase):
                 self.assertIn(definitions['source_id'], {b['ref']['source_id'] for b in context['blocks']})
                 for block in context['blocks']:
                     self.assertEqual(ks.resolve_evidence(self.root, block['ref']), block['text'])
-                self.assertLessEqual(search.call_count, 2)
+                self.assertLessEqual(search.call_count, 3)
 
     def test_focus_name_admission_preserves_source_topic_and_unconfirmed_fallback(self):
         _, old_packet = self.prepare()
@@ -540,7 +939,10 @@ class KnowledgeTests(unittest.TestCase):
                 self.assertTrue(all(c['can_update'] for c in context['candidates']))
                 info = context['candidate_retrieval']
                 self.assertEqual(info['admission_names'], ['RAGTruth'] if focus == 'RAGTruth' else info['passage_names'])
-                self.assertNotIn('UnknownMethod', ' '.join(call.args[0] for call in search.call_args_list))
+                self.assertNotIn('UnknownMethod', info['passage_names'])
+                if focus:
+                    self.assertIn(focus, [call.args[0] for call in search.call_args_list])
+                    self.assertEqual(info['purpose_query'], focus)
 
     def test_focused_compound_target_survives_bounded_generic_name_competition(self):
         uid, _ = self.create()
@@ -550,14 +952,14 @@ class KnowledgeTests(unittest.TestCase):
         records[uid] = {**template, 'title': 'Stop-RAG 停止机制'}
         source = self.receive('competition.md', '# Retrieval controller\nRAG and LLM support Stop-RAG.\n')
         responses = [{'candidates': [{'id': key} for key in list(records)[:20]]},
-                     {'candidates': [{'id': uid}]}]
+                     {'candidates': [{'id': uid}]}, {'candidates': []}]
         with patch.object(ks, 'search', side_effect=responses), \
              patch.object(ks, 'read', side_effect=lambda key, **_: records[key]):
             _, context = self.prepare(source, focus='只整理stop-rag')
         self.assertEqual([c['id'] for c in context['candidates']], [uid])
         self.assertTrue(context['candidates'][0]['can_update'])
         self.assertEqual(context['candidate_retrieval']['pool_size'], 20)
-        self.assertEqual(len(context['candidate_retrieval']['searches']), 2)
+        self.assertEqual(len(context['candidate_retrieval']['searches']), 3)
 
     def test_incidental_body_acronym_does_not_admit_unrelated_knowledge(self):
         task,packet=self.prepare()
@@ -992,6 +1394,66 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(unconfirmed['candidates'][0]['id'],background)
         self.assertEqual(unconfirmed['candidate_retrieval']['priority_names'],[])
 
+    def test_purpose_relevant_existing_unit_survives_incidental_name_competition(self):
+        source = self.receive('purpose.md', '# MethodSet\nMethodSet uses ALPHA BETA GAMMA and defines token roles and values.\n')
+        ref, _ = ks.evidence_ref(self.root, source['source_id'], source['parse_id'], 1, 2)
+        background = [ks.commit(repo=self.root, operation_id=f'purpose-background-{i}',
+            title='MethodSet ALPHA BETA GAMMA training', statement=f'Training detail {i}.',
+            evidence=[ref], reason='Candidate competition fixture')['id'] for i in range(5)]
+        target = ks.commit(repo=self.root, operation_id='purpose-target', title='MethodSet token roles and values',
+            statement='A token decides retrieval, another marks support.', evidence=[ref], reason='Existing direct coverage')['id']
+        with patch.object(ks, 'search', return_value={'candidates':[{'id':x} for x in background+[target]]}) as search:
+            for strategy in ('survey', 'selective'):
+                before = search.call_count
+                _, packet = self.prepare(source, strategy=strategy, focus='MethodSet token roles and values')
+                self.assertEqual(packet['candidates'][0]['id'], target)
+                self.assertLessEqual(len(packet['candidates']), 5)
+                self.assertLessEqual(search.call_count-before, 3)
+            ordered, _ = kc.retrieve_candidates(self.root, source['source_id'], 'methodset', ['MethodSet','ALPHA','BETA','GAMMA'])
+            self.assertEqual(ordered[0]['id'], background[0])
+
+    def test_task_language_recalls_same_source_unit_without_source_word_overlap(self):
+        source = self.receive('oscillation.md', '# Oscillation encoding\nA phase represents a periodic coordinate.\n')
+        ref, _ = ks.evidence_ref(self.root, source['source_id'], source['parse_id'], 1, 2)
+        uid = ks.commit(repo=self.root, operation_id='translated-periodic', title='周期相位编码的定义',
+            statement='采用周期函数表示序列坐标，维度与输入一致。', evidence=[ref], reason='Translated source knowledge')['id']
+        _, unfocused = self.prepare(source)
+        self.assertNotIn(uid, [c['id'] for c in unfocused['candidates']])
+        for strategy in ('survey', 'selective'):
+            with self.subTest(strategy=strategy), patch.object(ks, 'search', wraps=ks.search) as search:
+                _, packet = self.prepare(source, focus='补充周期相位编码的定义与适用条件', strategy=strategy)
+                self.assertEqual(packet['candidates'][0]['id'], uid)
+                self.assertLessEqual(search.call_count, 3)
+                self.assertEqual(packet['candidates'][0]['can_update'], strategy == 'survey')
+                self.assertLessEqual(len(packet['candidates']), 5)
+                self.assertLessEqual(packet['candidate_retrieval']['pool_size'], 20)
+
+    def test_focus_discovery_does_not_admit_unrelated_instruction_word_matches(self):
+        uid, _ = self.create()
+        old = ks.read(uid, repo=self.root)
+        noise = ks.commit(repo=self.root, operation_id='instruction-noise', title='整理摘要维护已有条目',
+            statement='整理摘要维护已有条目时如何归类。', evidence=old['evidence'], reason='Unrelated existing topic')['id']
+        source = self.receive('periodic.md', '# Oscillation encoding\nA phase represents a periodic coordinate.\n')
+        focus = '整理摘要维护已有条目'
+        self.assertIn(noise, [c['id'] for c in ks.search(focus, repo=self.root)['candidates']])
+        _, packet = self.prepare(source, focus=focus, strategy='selective')
+        self.assertNotIn(noise, [c['id'] for c in packet['candidates']])
+        self.assertGreater(packet['candidate_retrieval']['rejected_weak_matches'], 0)
+        self.assertTrue(all(b['ref']['source_id'] == source['source_id'] for b in packet['blocks']))
+
+    def test_purpose_packet_policy_versions_only_affected_jobs_and_retains_old_tasks(self):
+        locator = self.source['parse_path']+'#L1-L2'
+        with patch.object(kc, 'CANDIDATE_POLICY', 'previous-candidate-policy'):
+            old, _ = self.prepare(focus='conditional algorithm')
+            unfocused, _ = self.prepare()
+            explicit, _ = self.prepare(focus='conditional algorithm', source_locators=[locator])
+        current, _ = self.prepare(focus='conditional algorithm')
+        self.assertNotEqual(current['job_id'], old['job_id'])
+        self.assertEqual(self.prepare()[0]['job_id'], unfocused['job_id'])
+        self.assertEqual(self.prepare(focus='conditional algorithm', source_locators=[locator])[0]['job_id'], explicit['job_id'])
+        self.stage(old, [])
+        self.assertEqual(kc.apply(old['job_id'], repo=self.root)['status'], 'completed')
+
     def test_incomplete_old_evidence_releases_only_new_blocks_for_later_candidate(self):
         old=self.receive('large.md','# LargeFlow\n'+'old evidence '*450+'\n'+'second evidence '*450+'\n')
         refs=[ks.evidence_ref(self.root,old['source_id'],old['parse_id'],i,i)[0] for i in [2,3]]
@@ -1249,6 +1711,234 @@ class KnowledgeTests(unittest.TestCase):
         self.assertNotIn('INDEPENDENT_DRAWS','\n'.join(b['text'] for b in packet['blocks']))
         self.assertLessEqual(kc.token_count(packet)+kc.token_count(kc.RULES),8500)
 
+    def selective_source(self):
+        return self.receive("selective.md", "# Conditional algorithm\n" + "\n".join(
+            f"Section evidence line {i}: method X has condition A and numbered case {i}." for i in range(2, 180)))
+
+    def read_request(self, packet, start=110, end=112, **kw):
+        return {"schema": kc.READ_PROTOCOL, "source_locators": [packet["reading"]["source_path"]+f"#L{start}-L{end}"],
+                "reason": "Need the condition in this source passage", **kw}
+
+    def test_selective_packet_limits_initial_reading_and_defers_old_evidence(self):
+        uid, _ = self.create()
+        source = self.selective_source()
+        ordinary, survey = self.prepare(source)
+        task, packet = self.prepare(source, strategy="selective")
+        self.assertNotEqual(task["job_id"], ordinary["job_id"])
+        self.assertLess(kc.token_count(packet), kc.token_count(survey))
+        self.assertLess(packet["coverage"]["provided_segments"], packet["coverage"]["total_segments"])
+        candidate = next(c for c in packet["candidates"] if c["id"] == uid)
+        self.assertFalse(candidate["can_update"])
+        self.assertEqual(candidate["old_evidence_blocks"], [])
+        self.assertEqual(candidate["source_relation"], "other_source")
+        self.assertIn("refresh", task["agent_task"]["commands"])
+
+    def test_selective_host_expansion_preserves_old_packet_and_commits_deep_evidence(self):
+        source = self.selective_source()
+        task, packet = self.prepare(source, strategy="selective")
+        folder = kc.job_dir(self.root, task["job_id"])
+        original = (folder/"packet.json").read_bytes()
+        si.atomic_json(folder/"read-request.json", self.read_request(packet))
+        with patch.object(ka, "run", side_effect=AssertionError("no API fallback")):
+            expanded = kc.expand(task["job_id"], repo=self.root)
+        state, current = kc.load_job(self.root, task["job_id"])
+        self.assertEqual((folder/"packet.json").read_bytes(), original)
+        self.assertEqual(current["blocks"][:len(packet["blocks"])], packet["blocks"])
+        self.assertIn("packet-1.json", expanded["agent_task"]["inputs"][0]["path"])
+        self.stage(task, [self.op(current, evidence=[{"block_id":current["blocks"][-1]["id"],"relation":"supports"}])])
+        result = kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(result["status"], "completed", result)
+        self.assertEqual(kc.apply(task["job_id"], repo=self.root)["results"], result["results"])
+        self.assertEqual(len(state["reading_history"]), 1)
+
+    def test_selective_candidate_evidence_is_loaded_only_on_request(self):
+        uid, _ = self.create()
+        task, packet = self.prepare(strategy="selective")
+        candidate = next(c for c in packet["candidates"] if c["id"] == uid)
+        self.assertEqual(candidate["source_relation"], "same_source")
+        with self.assertRaisesRegex(ValueError, "old evidence incomplete"):
+            kc.validate_operation(self.root, packet, self.op(packet, action="attach", target=uid))
+        folder = kc.job_dir(self.root, task["job_id"])
+        si.atomic_json(folder/"read-request.json", self.read_request(packet, source_locators=[], candidate_ids=[uid]))
+        kc.expand(task["job_id"], repo=self.root)
+        _, expanded = kc.load_job(self.root, task["job_id"])
+        candidate = next(c for c in expanded["candidates"] if c["id"] == uid)
+        self.assertTrue(candidate["can_update"])
+        self.assertTrue(candidate["old_evidence_blocks"])
+        self.assertEqual(kc.validate_operation(self.root, expanded, self.op(expanded, action="attach", target=uid))["action"], "attach")
+
+    def test_selective_invalid_or_redundant_reads_do_not_mutate_packet(self):
+        source = self.selective_source()
+        task, packet = self.prepare(source, strategy="selective")
+        folder = kc.job_dir(self.root, task["job_id"])
+        before = (folder/"state.json").read_bytes()
+        requests = [self.read_request(packet, source_locators=["private/raw/secret.md#L1-L3"]),
+                    self.read_request(packet, start=2000, end=2010),
+                    self.read_request(packet, start=1, end=2),
+                    self.read_request(packet, source_locators=[], candidate_ids=["KU-"+"0"*24]),
+                    self.read_request(packet, operations=[])]
+        for request in requests:
+            si.atomic_json(folder/"read-request.json", request)
+            with self.assertRaises(ValueError):
+                kc.expand(task["job_id"], repo=self.root)
+            self.assertEqual((folder/"state.json").read_bytes(), before)
+        self.assertFalse((folder/"packet-1.json").exists())
+
+    def test_selective_stale_candidate_blocks_zero_operation_completion(self):
+        uid, _ = self.create()
+        task, packet = self.prepare(strategy="selective")
+        path = self.root/"academic/knowledge/units"/(uid+".md")
+        path.write_text(path.read_text()+"\nChanged conditions.\n")
+        self.stage(task, [])
+        with self.assertRaisesRegex(ValueError, "comparison knowledge changed"):
+            kc.apply(task["job_id"], repo=self.root)
+
+    def test_selective_updated_candidate_recovers_lost_receipt_without_second_revision(self):
+        uid, _ = self.create()
+        task, packet = self.prepare(strategy="selective")
+        folder = kc.job_dir(self.root, task["job_id"])
+        si.atomic_json(folder/"read-request.json", self.read_request(packet, source_locators=[], candidate_ids=[uid]))
+        kc.expand(task["job_id"], repo=self.root)
+        _, packet = kc.load_job(self.root, task["job_id"])
+        op = self.op(packet, action="revise", target=uid, statement="Method X requires condition A; its generality is unknown.")
+        self.stage(task, [op])
+        real_save = kc.save_state
+        def interrupted(repo, state):
+            if state["results"]:
+                raise OSError("receipt interrupted")
+            real_save(repo, state)
+        with patch.object(kc, "save_state", side_effect=interrupted):
+            with self.assertRaisesRegex(OSError, "receipt interrupted"):
+                kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 2)
+        self.stage(task, [{**op, "statement":"Changed after the actual commit"}])
+        with self.assertRaisesRegex(ValueError, "comparison knowledge changed"):
+            kc.apply(task["job_id"], repo=self.root)
+        self.stage(task, [op])
+        self.assertTrue(kc.check(task["job_id"], repo=self.root)["ready"])
+        result = kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(result["results"]["item-1"]["reused"])
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 2)
+
+    def test_selective_lost_receipt_does_not_hide_a_later_concurrent_revision(self):
+        uid, _ = self.create()
+        task, packet = self.prepare(strategy="selective")
+        folder = kc.job_dir(self.root, task["job_id"])
+        si.atomic_json(folder/"read-request.json", self.read_request(packet, source_locators=[], candidate_ids=[uid]))
+        kc.expand(task["job_id"], repo=self.root)
+        _, packet = kc.load_job(self.root, task["job_id"])
+        self.stage(task, [self.op(packet, action="revise", target=uid, statement="A bounded revised result.")])
+        real_save = kc.save_state
+        def interrupted(repo, state):
+            if state["results"]:
+                raise OSError("receipt interrupted")
+            real_save(repo, state)
+        with patch.object(kc, "save_state", side_effect=interrupted):
+            with self.assertRaises(OSError): kc.apply(task["job_id"], repo=self.root)
+        current = ks.read(uid, repo=self.root)
+        ks.commit(repo=self.root, operation_id="later-concurrent-update", unit_id=uid,
+                  expected_revision=current["revision"], expected_sha256=current["snapshot_sha256"],
+                  title=current["title"], statement="A later, different result.", evidence=current["evidence"], reason="Concurrent update")
+        with self.assertRaisesRegex(ValueError, "comparison knowledge changed"):
+            kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 3)
+
+    def test_selective_api_direct_zero_delta_and_resume_use_one_call(self):
+        call = self.mock_api(lambda p: {"ok":True,"parsed":{"schema":kc.PROTOCOL,"operations":[]},
+                                      "usage":{"total_tokens":12},"history":[{"status":"ok"}]})
+        first = ka.run(self.source["source_id"], repo=self.root, strategy="selective")
+        self.assertEqual(first["status"], "completed", first)
+        self.assertEqual(first["results"], {})
+        second = ka.run(self.source["source_id"], repo=self.root, strategy="selective")
+        self.assertEqual(second["new_model_calls"], 0)
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(second["api_usage"]["usage"]["total_tokens"], 12)
+
+    def test_selective_api_reads_then_generates_and_recovers_saved_read_response(self):
+        source = self.selective_source()
+        def response(p):
+            value = self.read_request(p) if p["reading"]["round"] == 0 else {"schema":kc.PROTOCOL,"operations":[self.op(p)]}
+            return {"ok":True,"parsed":value,"usage":{"total_tokens":13},"history":[{"status":"ok"}]}
+        call = self.mock_api(response)
+        write = si.atomic_json
+        def interrupt(path, value):
+            if path.name == "packet-1.json":
+                raise OSError("interrupted after response before expansion")
+            write(path, value)
+        with patch.object(si, "atomic_json", side_effect=interrupt):
+            failed = ka.run(source["source_id"], repo=self.root, strategy="selective")
+        self.assertEqual(failed["status"], "failed", failed)
+        recovered = ka.run(source["source_id"], repo=self.root, strategy="selective")
+        self.assertEqual(recovered["status"], "completed", recovered)
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(recovered["api_usage"]["usage"]["total_tokens"], 26)
+        state, packet = kc.load_job(self.root, recovered["job_id"])
+        self.assertEqual(packet["reading"]["round"], 1)
+        with self.assertRaisesRegex(ValueError, "API-owned"):
+            kc.expand(recovered["job_id"], repo=self.root)
+
+    def test_selective_api_read_limit_retains_partial_and_stops_replay(self):
+        source = self.selective_source()
+        call = self.mock_api(lambda p: {"ok":True,"parsed":self.read_request(p, start=100+p["reading"]["round"]*10,
+                        end=102+p["reading"]["round"]*10),"history":[{"status":"ok"}]})
+        result = ka.run(source["source_id"], repo=self.root, strategy="selective")
+        self.assertEqual(result["status"], "partial", result)
+        self.assertTrue(result["unresolved"])
+        self.assertEqual(call.call_count, 3)
+        self.assertEqual(ka.run(source["source_id"], repo=self.root, strategy="selective")["new_model_calls"], 0)
+        self.assertEqual(si.inspect_source(source["source_id"],repo=self.root)["status"], "source_ready")
+
+    def test_selective_api_failed_attempt_is_retained_and_requires_explicit_retry(self):
+        call = self.mock_api(lambda p: {"ok":False,"error":"offline provider","usage":{"total_tokens":9},"history":[{"status":"api_error"}]})
+        failed = ka.run(self.source["source_id"], repo=self.root, strategy="selective")
+        self.assertEqual(failed["status"], "failed")
+        blocked = ka.run(self.source["source_id"], repo=self.root, strategy="selective")
+        self.assertEqual(blocked["new_model_calls"], 0)
+        call.side_effect = lambda *a,**k: {"ok":True,"parsed":{"schema":kc.PROTOCOL,"operations":[]},
+                                        "usage":{"total_tokens":7},"history":[{"status":"ok"}]}
+        result = ka.run(self.source["source_id"], repo=self.root, strategy="selective", retry=True)
+        self.assertEqual(result["status"], "completed", result)
+        self.assertEqual(result["api_usage"]["usage"]["total_tokens"], 16)
+        self.assertEqual(len(list(kc.job_dir(self.root,result["job_id"]).glob("round-0-response-*.json"))), 2)
+
+    def test_selective_expansion_budget_failure_is_atomic(self):
+        source = self.receive("large.md", "# Detailed conditions\n"+"\n".join(
+            f"Condition {i}: "+"alpha beta gamma delta "*45 for i in range(150)))
+        task, packet = self.prepare(source, strategy="selective", max_tokens=6000)
+        folder = kc.job_dir(self.root,task["job_id"])
+        original = (folder/"state.json").read_bytes()
+        locators=[packet["reading"]["source_path"]+f"#L{i}-L{i+6}" for i in (50,60,70,80,90)]
+        si.atomic_json(folder/"read-request.json", self.read_request(packet, source_locators=locators))
+        with self.assertRaisesRegex(ValueError, "budget"):
+            kc.expand(task["job_id"],repo=self.root)
+        self.assertEqual((folder/"state.json").read_bytes(),original)
+        self.assertFalse((folder/"packet-1.json").exists())
+
+    def test_selective_response_binding_blocks_replay_and_delta_failure_reuses_response(self):
+        call = self.mock_api()
+        write = si.atomic_json
+        def interrupt(path,value):
+            if path.name == "delta.json":
+                raise OSError("interrupted after final response")
+            write(path,value)
+        with patch.object(si,"atomic_json",side_effect=interrupt):
+            failed=ka.run(self.source["source_id"],repo=self.root,strategy="selective")
+        folder=kc.job_dir(self.root,failed["job_id"])
+        state,_=kc.load_job(self.root,failed["job_id"])
+        path=folder/state["response_file"]
+        original=json.loads(path.read_text())
+        damaged={**original,"request_binding":{**original["request_binding"],"packet_sha256":"0"*64}}
+        write(path,damaged)
+        blocked=ka.run(self.source["source_id"],repo=self.root,strategy="selective")
+        self.assertEqual(blocked["status"],"failed")
+        self.assertIn("binding mismatch",blocked["error"])
+        self.assertEqual(call.call_count,1)
+        write(path,original)
+        result=ka.run(self.source["source_id"],repo=self.root,strategy="selective")
+        self.assertEqual(result["status"],"completed",result)
+        self.assertEqual(call.call_count,1)
+
     def mock_api(self, response_fn=None):
         import llm_structured as llm
         self.stack.enter_context(patch.object(ka.agent_task,"ingest_backend",return_value="api"))
@@ -1276,6 +1966,78 @@ class KnowledgeTests(unittest.TestCase):
         ka.run(self.source["source_id"],repo=self.root,retry=True)
         self.assertEqual(call.call_count,2)
         self.assertEqual(si.inspect_source(self.source["source_id"],repo=self.root)["status"],"source_ready")
+
+    def test_api_request_binds_identity_without_changing_model_semantics(self):
+        for reported in (None, "KJ-foreign-request", 42):
+            with self.subTest(reported=reported):
+                def response(packet):
+                    value={"schema":kc.PROTOCOL,"operations":[self.op(packet)],"unresolved":[]}
+                    if reported is not None:
+                        value["job_id"]=reported
+                    return {"ok":True,"parsed":value,"text":json.dumps(value),"history":[{"status":"ok"}]}
+                call=self.mock_api(response)
+                result=ka.run(self.source["source_id"],repo=self.root,refresh=True)
+                self.assertEqual(result["status"],"completed",result)
+                state,packet=kc.load_job(self.root,result["job_id"])
+                folder=kc.job_dir(self.root,result["job_id"])
+                saved=json.loads((folder/"model-response.json").read_text())
+                delta=json.loads((folder/"delta.json").read_text())
+                self.assertEqual(saved["parsed"].get("job_id"),reported)
+                self.assertEqual(delta["job_id"],state["job_id"])
+                self.assertEqual(delta["operations"],saved["parsed"]["operations"])
+                self.assertEqual(saved["request_binding"],ka.request_binding(state))
+                checker=call.call_args.args[1]
+                self.assertTrue(checker(saved["parsed"]))
+                self.assertFalse(checker({"schema":kc.PROTOCOL,"operations":"not an array"}))
+
+    def test_api_request_identity_does_not_authorize_unknown_evidence(self):
+        def response(packet):
+            return {"ok":True,"parsed":{"schema":kc.PROTOCOL,"operations":[self.op(packet,
+                evidence=[{"block_id":"B-not-provided","relation":"supports"}])]},"history":[{"status":"ok"}]}
+        self.mock_api(response)
+        result=ka.run(self.source["source_id"],repo=self.root)
+        self.assertEqual(result["status"],"partial",result)
+        self.assertEqual(result["results"]["item-1"]["status"],"failed")
+        self.assertEqual(list((self.root/"academic/knowledge/units").glob("KU-*.md")),[])
+
+    def test_saved_api_response_binding_blocks_cross_job_or_packet_reuse(self):
+        self.mock_api(lambda p:{"ok":True,"parsed":{"schema":kc.PROTOCOL,"operations":[]},"history":[{"status":"ok"}]})
+        real_write=si.atomic_json
+        def fail_delta(path,value):
+            if path.name=="delta.json":
+                raise OSError("interrupted before delta publication")
+            return real_write(path,value)
+        with patch.object(si,"atomic_json",side_effect=fail_delta):
+            result=ka.run(self.source["source_id"],repo=self.root)
+        state,packet=kc.load_job(self.root,result["job_id"])
+        folder=kc.job_dir(self.root,result["job_id"])
+        original=json.loads((folder/"model-response.json").read_text())
+        import llm_structured as llm
+        for field in ("job_id","packet_sha256","policy"):
+            damaged=json.loads(json.dumps(original));damaged["request_binding"][field]="different"
+            si.atomic_json(folder/"model-response.json",damaged)
+            with patch.object(llm,"call_json",side_effect=AssertionError("must not call model")):
+                rejected=ka.run(self.source["source_id"],repo=self.root,retry=True)
+            self.assertEqual(rejected["status"],"failed")
+            self.assertIn("binding mismatch",rejected["error"])
+            self.assertFalse((folder/"delta.json").exists())
+        si.atomic_json(folder/"model-response.json",original)
+        with patch.object(llm,"call_json",side_effect=AssertionError("must reuse bound response")):
+            recovered=ka.run(self.source["source_id"],repo=self.root)
+        self.assertEqual(recovered["status"],"completed",recovered)
+        self.assertEqual(recovered["new_model_calls"],0)
+
+    def test_api_binding_keeps_legacy_identity_and_shared_schema_strict(self):
+        state={"job_id":"KJ-"+"a"*24,"packet_sha256":"b"*64}
+        legacy={"parsed":{"schema":kc.PROTOCOL,"job_id":state["job_id"],"operations":[]}}
+        self.assertEqual(ka.response_delta(legacy,state),legacy["parsed"])
+        legacy["parsed"]["job_id"]="KJ-"+"c"*24
+        with self.assertRaisesRegex(ValueError,"job identity"):
+            ka.response_delta(legacy,state)
+        malformed={"parsed":{"schema":kc.PROTOCOL,"operations":"invalid"},"request_binding":ka.request_binding(state)}
+        with self.assertRaisesRegex(ValueError,"schema"):
+            ka.response_delta(malformed,state)
+        self.assertFalse(kc.delta_schema({"schema":kc.PROTOCOL,"operations":[]}))
 
     def test_saved_model_response_recovers_without_another_model_call(self):
         call=self.mock_api(); real_write=si.atomic_json

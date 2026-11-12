@@ -47,6 +47,8 @@ def path_in_repo(value):
     root = REPO.resolve()
     candidate = candidate if candidate.is_absolute() else root / candidate
     require(candidate.is_relative_to(root), "Path must be inside this repository")
+    from project_paths import repo_path
+    candidate = repo_path(root, candidate.relative_to(root))
     require(not any(part.is_symlink() for part in (candidate, *candidate.parents)),
             "Symbolic links are not permitted")
     relative = candidate.relative_to(root)

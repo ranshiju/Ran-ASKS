@@ -1,8 +1,10 @@
 name: Gallery Pages
 
-# Prepared locally; publishing requires an explicit manual run on the public repo.
+# Manual publication and one daily refresh of public aggregate statistics.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '23 20 * * *'
 
 permissions:
   contents: read
@@ -27,9 +29,19 @@ jobs:
       - name: Install locked environment
         run: uv sync --frozen
       - name: Validate Gallery boundaries
-        run: uv run python .scripts/test_gallery_site.py
+        run: |
+          uv run python .scripts/test_gallery_site.py
+          uv run python .scripts/test_gallery_metrics.py
+      - name: Read aggregate Gallery statistics
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_SITE_TAG: ${{ vars.CLOUDFLARE_SITE_TAG }}
+          CLOUDFLARE_ANALYTICS_API_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_API_TOKEN }}
+        run: uv run python .scripts/gallery_metrics.py --reuse-published --output "$RUNNER_TEMP/gallery-metrics.json"
       - name: Build standalone Gallery
-        run: uv run python .scripts/gallery_site.py --output "$RUNNER_TEMP/gallery-site"
+        env:
+          GALLERY_CLOUDFLARE_TOKEN: ${{ vars.GALLERY_CLOUDFLARE_TOKEN }}
+        run: uv run python .scripts/gallery_site.py --metrics "$RUNNER_TEMP/gallery-metrics.json" --output "$RUNNER_TEMP/gallery-site"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ runner.temp }}/gallery-site

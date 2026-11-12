@@ -443,3 +443,15 @@ and immutable version tags are retained.
 此前 Windows/Linux 调查保留为历史记录，不再是活动发布门槛；仓库内 skill 与持续
 工作仍支持具备所需能力的智能体调用和接续。PDF 最后一页补入相同范围说明，
 保留此前页面和不可变版本标签。
+
+The 2026-11-12 `v0.26.0` update adds opt-in selective knowledge compilation,
+source outlines, purpose-based candidate discovery, persistent-task recovery,
+and repository-owned manuscript writing capabilities. Gallery adds free
+Cloudflare analytics, public aggregate snapshots, social metadata and deployment
+version visibility. The default intake profile remains legacy; stable semantic
+quality and overall net efficiency are not certified. The PDF appends the same
+reviewed addendum and preserves earlier pages and frozen paper artifacts.
+
+2026年11月12日的 `v0.26.0` 补充选择性知识整理、篇内导航、用途检索、任务接续及
+论文写作能力；Gallery新增免费统计、公开汇总与分享/版本信息。默认摄入不变，
+不宣称稳定语义质量或整体净提效已通过。PDF追加同源补充页，保留此前页面与冻结产物。

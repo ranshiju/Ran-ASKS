@@ -83,6 +83,42 @@ def page_range(locator):
         return None
     return start, end
 
+
+def read_size_guidance(locator: str, text: str, max_chars: int) -> dict:
+    """Bounded navigation from a validated excerpt; never return partial evidence.
+
+    Line fragments are the exact newline-joined output of read_locator_text.
+    Other locator schemes retain their cap without inventing line offsets.
+    """
+    guidance = {"max_chars": max_chars, "requested_chars": len(text),
+                "suggested_reads": [], "oversized_lines": [], "remaining_range": None}
+    path, fragment = split_locator(locator)
+    requested = line_range(fragment)
+    if not requested or max_chars < 1:
+        return guidance
+    start, end = requested
+    lines = text.split("\n")
+    if len(lines) != end - start + 1:
+        return guidance
+    offset = 0
+    # Bound the total metadata, including indivisible lines, to eight entries.
+    while offset < len(lines) and len(guidance["suggested_reads"]) + len(guidance["oversized_lines"]) < 8:
+        first = offset
+        size = len(lines[offset])
+        offset += 1
+        if size > max_chars:
+            guidance["oversized_lines"].append({"locator": f"{path}#L{start + first}", "chars": size})
+            continue
+        while offset < len(lines) and size + 1 + len(lines[offset]) <= max_chars:
+            size += 1 + len(lines[offset])
+            offset += 1
+        guidance["suggested_reads"].append({
+            "locator": f"{path}#L{start + first}-L{start + offset - 1}", "chars": size})
+    if offset < len(lines):
+        guidance["remaining_range"] = f"{path}#L{start + offset}-L{end}"
+    return guidance
+
+
 def is_locator_compatible(path):
     """Whether the raw file can be deterministically sliced as text."""
     return Path(str(path)).suffix.lower() in TEXT_LOCATOR_SUFFIXES

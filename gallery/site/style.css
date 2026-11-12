@@ -14,3 +14,15 @@
 @media(max-width:700px){.multi-preview{gap:12px}.multi-preview .full-poster{padding:5px}.multi-preview .artifact-preview>figcaption{font-size:11px}.multi-preview .image-caption{font-size:10px}}
 
 .related-section{margin-top:42px;padding-top:30px;border-top:1px solid var(--line)}.related-section h2{font-size:23px;font-weight:550;margin-bottom:18px}.related-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}.related-work{display:block;background:var(--mint);padding:24px 28px}.related-work h3{font-size:21px;margin:8px 0}.related-work p{color:var(--muted);font-size:13px}.related-work:hover{background:#dce8dc}
+
+/* Public aggregate statistics use the same quiet exhibition palette. */
+.statistics{padding-top:1rem;padding-bottom:3rem;border-bottom:1px solid var(--line,#d9dfd7)}
+.stats-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem}
+.stat-card{padding:1.3rem;background:#eef2eb;border:1px solid #dce3d9;border-radius:4px}
+.stat-card span{display:block;font-size:.85rem;color:#51635c}
+.stat-card strong{display:block;margin-top:.5rem;font:500 2rem Georgia,serif;color:#203c3a}
+.stats-note{font-size:.8rem;color:#67756d;line-height:1.7;margin-top:1rem}
+.popular-works{margin-top:1.4rem}.popular-works h3{font-size:1rem}
+.popular-works ol{padding-left:1.3rem}.popular-works li{padding:.4rem 0}
+.popular-works li span{margin-left:1rem;font-size:.8rem;color:#67756d}
+@media(max-width:640px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-card{padding:1rem}}

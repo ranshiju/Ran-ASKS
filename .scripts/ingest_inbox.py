@@ -2065,10 +2065,16 @@ def run_source_profile(args):
         raise ValueError("source-first requires exactly one --file/--import-file/--resume; legacy semantic options are unsupported")
     if args.resume and args.keep_source:
         raise ValueError("--keep-source applies to file reception, not resume")
+    knowledge = getattr(args, "knowledge", "skip")
+    focus = getattr(args, "focus", "")
+    strategy = getattr(args, "strategy", "survey")
+    if focus and knowledge not in {"agent", "api"}:
+        raise ValueError("--focus requires --knowledge agent|api")
+    if strategy != "survey" and knowledge not in {"agent", "api"}:
+        raise ValueError("--strategy selective requires --knowledge agent|api")
     if not args.run:
         return {"profile": "source-first", "status": "dry_run", "input": args.file or args.import_file or args.resume,
                 "writes": False, "next": "repeat with --run"}
-    knowledge = getattr(args, "knowledge", "skip")
     options = {"repo": REPO, "reuse_parse": args.reuse_parse, "refresh_parse": args.refresh_parse,
                "allow_paddleocr": args.allow_paddleocr,
                "knowledge_required": False if knowledge == "none" else (True if knowledge in {"agent", "api"} else None)}
@@ -2085,17 +2091,29 @@ def run_source_profile(args):
             try:
                 if knowledge == "agent":
                     from knowledge_compile import prepare
-                    compiled = prepare(item["source_id"], repo=REPO)
+                    compiled = prepare(item["source_id"], repo=REPO, focus=focus, strategy=strategy)
                 else:
                     from knowledge_compile_api import run
-                    compiled = run(item["source_id"], repo=REPO)
+                    compiled = run(item["source_id"], repo=REPO, focus=focus, strategy=strategy)
                 item["knowledge"] = compiled
                 item["knowledge_status"] = compiled["status"]
                 item["knowledge_run"] = compiled["job_id"]
                 item["semantic_llm_calls"] = compiled.get("new_model_calls", 0)
+                if compiled["status"] == "failed":
+                    item["knowledge_error"] = compiled.get("error") or "knowledge compilation failed"
+                elif any(op.get("status") == "failed" for op in compiled.get("results", {}).values()):
+                    item["knowledge_error"] = "部分知识操作失败；已保存结果及具体错误见 knowledge.results"
             except Exception as exc:
                 item["knowledge"] = {"status": "failed", "error": str(exc)[:700]}
                 item["knowledge_status"] = "failed"
+                # The source receipt may refer to an older successful job. It
+                # must not become the identity of this failed invocation.
+                item["knowledge_run"] = None
+                item["knowledge_error"] = str(exc)[:700] or type(exc).__name__
+    if "files" in result and len(items) == 1:
+        for key in ("knowledge_status", "knowledge_run", "knowledge_error"):
+            if key in items[0]:
+                result[key] = items[0][key]
     return result
 
 
@@ -2111,6 +2129,8 @@ def main():
     ap.add_argument("--profile", choices=("legacy", "source-first"), default="legacy")
     ap.add_argument("--knowledge", choices=("skip", "none", "agent", "api"), default="skip",
                     help="source-first: skip 暂缓；none 纯事务仅存来源；agent/api 整理可复用知识")
+    ap.add_argument("--focus", default="", help="source-first agent/api: 本次知识整理用途，原样传给知识任务")
+    ap.add_argument("--strategy", choices=("survey", "selective"), default="survey")
     ap.add_argument("--reuse-parse", type=Path, help="source-first: 同原件 PDF+Markdown 解析目录")
     ap.add_argument("--refresh-parse", action="store_true")
     ap.add_argument("--allow-paddleocr", action="store_true")
@@ -2136,10 +2156,11 @@ def main():
         except Exception as exc:
             result = {"profile": "source-first", "status": "failed", "error": str(exc)[:700]}
         print(json.dumps(result, ensure_ascii=False))
-        if result.get("status") not in {"source_ready", "dry_run"} or result.get("error"):
+        if (result.get("status") not in {"source_ready", "dry_run"}
+                or result.get("error") or result.get("knowledge_error")):
             raise SystemExit(1)
         return
-    if args.reuse_parse or args.refresh_parse or args.allow_paddleocr or args.knowledge != "skip":
+    if args.reuse_parse or args.refresh_parse or args.allow_paddleocr or args.knowledge != "skip" or args.focus or args.strategy != "survey":
         ap.error("source parser options require --profile source-first")
     backend = agent_task.ingest_backend()
     if args.resume:

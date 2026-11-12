@@ -7,6 +7,29 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-12
+
+### Version decision / 版本判断
+
+- MINOR: Add opt-in selective knowledge compilation, source navigation, manuscript workflows and free Gallery analytics with public aggregate snapshots
+- MINOR（中文）：兼容新增选择性知识编译、来源导航、论文写作能力与免费的Gallery公开汇总统计
+
+### Highlights
+
+- Added opt-in selective knowledge compilation with bounded evidence expansion, zero-delta reuse and resumable host/API tasks. Legacy intake remains the default; overall semantic quality and efficiency remain under evaluation.
+- Improved purpose-based candidate discovery and long-query navigation, added source heading/table outlines, and hardened deterministic output recovery and versioned knowledge maintenance.
+- Shipped repository-owned title, scientific-question, motivation and introduction workflows, with consistent project-path handling and persistent-work recovery.
+- Added free Cloudflare Gallery analytics, public seven/thirty-day aggregate snapshots and daily refresh, social metadata, sitemap and visible deployment version. Public statistics contain no management credentials; missing data is labelled.
+- Synchronized bilingual reader guidance and the Chinese introduction/PDF. macOS remains the maintained edition; frozen paper artifacts and existing tags are preserved.
+
+### 主要更新
+
+- 新增可选的选择性知识编译、有界补读、零新增复用及宿主/API任务接续；默认摄入仍为legacy，稳定语义质量与整体效率继续验证。
+- 改进用途候选发现与长查询导航，新增原文章节/表图目录，完善确定性输出恢复及知识版本维护。
+- 论文题名、核心科学问题、背景动机和引言能力随仓库交付，统一项目路径与持续工作恢复。
+- Gallery接入免费Cloudflare统计，支持近7天/30天公开汇总、每日刷新、分享预览、站点目录及部署版本；管理凭据不进入网页，缺失数据明确标注。
+- 同步双语读者说明和中文介绍/PDF；继续维护macOS版本，保留冻结论文产物及既有标签。
+
 ## [0.25.2] - 2026-11-06
 
 ### Version decision / 版本判断
@@ -832,5 +855,7 @@ manifests and checksums.
 
 [0.25.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.1
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.25.2...HEAD
 [0.25.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.2
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.26.0

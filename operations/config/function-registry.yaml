@@ -33,7 +33,7 @@ states:
     route_tasks: []
   research:
     title: 研究工作
-    summary: 研究项目中的持续判断、实验、笔记和论文推进上下文。
+    summary: 研究项目中的持续判断、实验、笔记与论文撰写优化上下文，保存稿件版本、定位、进度及文献需求以供接续。
     authority: projects/<path>/workspace.yaml + research profile
     route_tasks: [research]
   frontier:
@@ -108,7 +108,7 @@ functions:
     maturity: stable
     bindings:
       route_tasks: [query]
-      wg: [lookup, neighbors, relations, hub-of, abbr, read-section, hybrid-recall, source-search, ku-search, ku-read, read-raw]
+      wg: [lookup, neighbors, relations, hub-of, abbr, read-section, hybrid-recall, source-search, source-outline, ku-search, ku-read, read-raw]
       dsh:
         - graph_search
         - graph_neighbors
@@ -119,6 +119,7 @@ functions:
         - read_section
         - read_raw
         - source_search
+        - source_outline
         - knowledge_search
         - knowledge_read
         - hybrid_recall
@@ -185,7 +186,7 @@ functions:
 
   artifact.write:
     title: 文稿写作与修改
-    summary: 基于可回溯材料生成或修改 Markdown、Word、PDF 和专业文稿，含学术摘要与论文系统改进；由 Agent 通读全文后依次改进摘要、标题、引言和全文。
+    summary: 基于可回溯材料生成或修改 Markdown、Word、PDF 和专业文稿，含学术摘要与 research 持续工作中的论文起草优化；由宿主基于原稿与证据按需组织全文。
     kind: function
     audience: [user, agent]
     control_owners: [host_agent]
@@ -199,6 +200,70 @@ functions:
         write: write/general
       route_capabilities:
         write: [general, academic, academic-abstract, academic-manuscript]
+      executor: host_agent
+
+  academic.manuscript_introduction:
+    title: 论文引言撰写与修改
+    summary: 宿主 Agent 基于已有稿件或研究材料，复用科学问题、贡献与背景动机，撰写有引用支撑的完整引言及简短说明；授权范围内修改源稿。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent]
+    allowed_callers: [main_agent, sub_agent]
+    backends: [agent]
+    effects: [read, project, remote]
+    maturity: preview
+    states: [research]
+    bindings:
+      route_capabilities:
+        manuscript-introduction: [general]
+      executor: host_agent
+
+  academic.manuscript_motivation:
+    title: 论文背景与动机构建
+    summary: 宿主 Agent 综合稿件和可核验文献来源，围绕科学问题生成摘要用一至两句话及引言用两至三段背景动机，附必要引用与证据范围。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent]
+    allowed_callers: [main_agent, sub_agent]
+    backends: [agent]
+    effects: [read, project, remote]
+    maturity: preview
+    states: [research]
+    bindings:
+      route_capabilities:
+        manuscript-motivation: [general]
+      executor: host_agent
+
+  academic.manuscript_title:
+    title: 论文标题拟定
+    summary: 由宿主 Agent 综合核心科学问题、贡献排序与全文证据拟定或优化标题，给出候选、首选理由和必要范围说明；仅在授权时替换稿件标题。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent]
+    allowed_callers: [main_agent, sub_agent]
+    backends: [agent]
+    effects: [read, project]
+    maturity: preview
+    states: [research]
+    bindings:
+      route_capabilities:
+        manuscript-title: [general]
+      executor: host_agent
+
+  academic.manuscript_question:
+    title: 论文核心科学问题凝练
+    summary: 由宿主 Agent 核对稿件，凝练科学未知，兼顾科学性、概念清晰与语言精炼，区分一般问题、本文切入点与已验证范围；不自动改稿。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent]
+    allowed_callers: [main_agent, sub_agent]
+    backends: [agent]
+    effects: [read, project]
+    maturity: preview
+    states: [research]
+    bindings:
+      route_capabilities:
+        manuscript-question: [general]
       executor: host_agent
 
   academic.manuscript_evaluation:

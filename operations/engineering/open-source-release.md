@@ -40,9 +40,13 @@ Selection for exhibition does not rewrite historical creative acceptance states.
 The shared `gallery_site.py` builder renders `gallery/catalog.json` and each
 work's public presentation metadata into a standalone static site. It copies
 only verified, exact-approved previews and downloads, never the source tree or
-`gallery/local/`. Relative URLs support a project subpath. The manual-only
-`gallery-pages.yml` workflow uploads just the generated site; regular source
-publishing does not trigger a Pages deployment. See `operations/GALLERY.md`.
+`gallery/local/`. Relative URLs support a project subpath. Optional production
+analytics and public aggregate snapshots are configured through Actions variables
+and a read-only secret; no management credential enters the website.
+`gallery-pages.yml` supports manual publication and a daily aggregate refresh,
+uploading only the generated site. Regular source publishing does not directly
+trigger deployment. Verify the visible site version after publication. See
+`operations/GALLERY.md`.
 
 A local website build does not allocate a public version or authorize deployment.
 Before a future public release, synchronize reader documentation and its PDF,

@@ -109,6 +109,30 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.candidate('content', content(self.source, self.root))
 
+    def test_project_move_preserves_bound_preview_and_still_detects_tampering(self):
+        self.authorize()
+        self.commit_content()
+        result = self.export()
+        old_project = self.store.parent.parent
+        frozen = {p.relative_to(old_project): p.read_bytes()
+                  for p in old_project.rglob('*') if p.is_file()}
+        new_project = self.root / 'projects/category/fixture'
+        new_project.parent.mkdir()
+        old_project.rename(new_project)
+        (self.root / 'projects/.path-migrations.json').write_text(json.dumps({
+            'schema': 'project-path-migrations-v1', 'moves': {'fixture': 'category/fixture'}}))
+        self.store = new_project / 'exhibits/collaboration'
+        state = self.state()
+        preview = work.validate_preview(core, self.store, state)
+        self.assertEqual(preview['output_dir'], result['output_dir'])
+        self.assertEqual(work.describe(core, self.store, state)['phase'], 'reviewing')
+        self.assertEqual(frozen, {p.relative_to(new_project): p.read_bytes()
+                                 for p in new_project.rglob('*') if p.is_file()})
+        output = core.managed_path(preview['output_dir'], 'projects')
+        (output / 'preview.png').write_bytes(b'TAMPERED')
+        with self.assertRaises(ValueError):
+            work.validate_preview(core, self.store, state)
+
     def test_review_brief_adapts_to_nonphysics_audiences_without_story_answers(self):
         import review
         import science_exhibit_review as integration

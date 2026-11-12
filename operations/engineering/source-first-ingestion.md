@@ -20,6 +20,11 @@ PDF 仍使用现有远端解析服务，零语义 LLM 调用不等于零解析�
 显式 N2 消费器可独立处理，不把来源可检索当作整篇知识编译完成。没有后台整理保证。
 回执是流程和恢复记录，不是事实源、科学质量认证或可替代 Raw 的证据。
 
+显式`--knowledge agent|api --strategy selective`可选择精简首包及有界局部补读，直接生成或零新增
+仍走原知识提交；`survey`保持默认。该选项由统一入口在来源发布后传给共享知识任务，
+legacy/none/skip组合在写入前拒绝。实现与限制见[按需供料](knowledge-units.md#可选按需供料与局部补读2026-11-11)，
+不改变来源事务、解析或全文索引，不自动创建Wiki/Graph，也不新增后台消费者。
+
 ## 使用入口
 
 首批仅支持 **academic 的 PDF、Markdown、UTF-8 TXT**。传入文件保留，
@@ -29,6 +34,7 @@ PDF 仍使用现有远端解析服务，零语义 LLM 调用不等于零解析�
 ```bash
 python3 .scripts/wg.py ingest /absolute/input.pdf --profile source-first
 python3 .scripts/wg.py ingest /absolute/input.pdf --profile source-first --knowledge api
+python3 .scripts/wg.py ingest /absolute/input.pdf --profile source-first --knowledge agent --focus '本次需要理解或复用的问题；相关章节名'
 python3 .scripts/wg.py ingest /absolute/notice.md --profile source-first --knowledge none
 python3 .scripts/wg.py ingest --profile source-first --resume S-<24hex>
 python3 .scripts/source_ingest.py show S-<24hex>
@@ -43,6 +49,19 @@ python3 .scripts/wg.py read-raw 'academic/raw/sources/S-.../parses/P-.../paper.m
 `agent` 在来源发布后返回宿主任务，`api` 同步运行有界语义整理，
 要求显式 API backend。知识任务状态及 `knowledge_run` 单列；知识失败不会改变已发布来源。
 也可稍后调用 `wg.py knowledge prepare|run S-ID`，详见 [N2 契约](knowledge-units.md)。
+统一入口的 `--focus` 原样传入既有知识任务，适用于 `agent|api` 和 S-ID 恢复；
+legacy、none、skip 带非空 focus 在写入前拒绝。相同来源版本、用途、执行主体与协议沿用
+原 KJ 身份及已有结果，不因重提而强制重新生成；不要用改写用途来隐式重试失败 API。
+focus 是用途和选片线索，不保证所需章节完整入包；检查 coverage，已知 Raw 可直接读取，
+保存 KU 仍只能引用该任务包内已绑定的依据，不能把包外补读冒作包内证据。
+
+来源回执的 `status/source_status` 仍只描述来源，文件包装的顶层同时透出
+`knowledge_status/knowledge_run`。本次知识调用失败或有失败操作时增加 `knowledge_error`，
+ingest_inbox 返回非零、wg 返回 `ok=false`，保留已发布来源及已提交知识；
+准备阶段尚无新任务就失败时，本次 `knowledge_run=null`，不借用来源的旧任务 ID。
+prepared 表示等待 Agent；partial 表示尚有未决范围或对象，详见 `knowledge.unresolved/results`；
+只有未读/延期的 partial 不作为执行失败。completed 仅指该用途的知识任务，不能替代用户任务完成或全文质量核验。
+API 失败继续用原 knowledge show/run 与显式 retry；Agent 用 KJ task inspect/advance，均不重做来源保存。
 显式 `agent|api` 或独立 prepare/run 可重新开启整理。`none` 不删除已有 KU，
 也不抹掉已经执行的知识任务及状态；只将未执行待办标为 not_required。
 直接 `source_ingest.py ingest|resume --knowledge none` 使用相同意图机制。
@@ -110,10 +129,24 @@ provider 的远端模型实际更新未必可检测，保留配置指纹和生�
 `--reuse-parse` 的 P-ID 包含实际载体/资源哈希，载体变化时新增解析版本。
 N2 KU 依据绑定具体解析版本与片段哈希；新解析不会悄悄替换旧 KU 的行号。
 
-复用包校验原件匹配、路径及已有产物哈希，缺失图片在 `missing_assets` 和限制中披露；
-缺图不阻断可用文字，但路径越界/软链接仍拒绝。这不能证明文字是对 PDF 的准确转写。
+复用包校验原件匹配、路径及已有产物哈希，未随包保存的独立图片资源在 `missing_assets` 和限制中披露；
+该数量是 Markdown 图片资源引用数，不等于论文编号图数量，也不表示原 PDF 缺图。
+新回执和旧回执的实时展示都明确资源可按需提取；旧回执仅转换原固定提示语，不回写历史或改变解析身份。
+独立图资源不作为正文可检索或本次知识整理完成的必备产物；已有资源继续保存复用并校验完整性，路径越界/软链接仍拒绝。这不能证明文字是对 PDF 的准确转写。
 公式、图表、页覆盖和阅读顺序没有全面语义核验，限制随回执和搜索结果返回。
 远程图片链接仅保留在 Markdown 中，摄入/查询不会因文本链接主动下载。
+
+### PDF 图号引用与按需读取
+
+默认以保留的原 PDF 为来源，引用 Fig./图号；需要时补子图号和已确认页码。引用文字结论使用正文/图注的
+已验证 Markdown locator，同时可注明 PDF 图号。图号是面向读者的文献定位，不把它拼成当前 reader 未支持的
+`#fig-N` 或猜测页码；现有 Raw 绑定和引用校验继续执行。PDF文件页序与印刷页码不同时明确区分。
+
+当任务依赖曲线、数值、颜色、几何/空间关系，或需要在产物中展示原图时，才查看原 PDF 对应页或提取局部图像。
+使用本地只读 PDF 工具输出到任务 temp/ 或项目派生目录，随产物记录原 PDF 路径/哈希、实际页序及图号/裁剪范围；
+不向既有 Raw 解析目录直接补写文件，也不把裁剪图当作新来源或完整图像核验凭证。
+不需要全篇重 OCR；只有现有文本解析本身有影响当前任务的缺陷时，才另走原受管重解析/新版本流程。
+正文和图注足以回答时止于文字证据，不自动请求视觉模型。既有图像资源可复用，远程传输仍按原授权边界。
 
 ## 查询与实际范围
 
@@ -137,6 +170,18 @@ bibliography、citation、DOI 或“参考文献/引用文献”等线索时保�
 不额外调用模型。无标题的参考文献不推测分类，优先摘要也不等于已经定位完整答案。
 `source_locator` 为新来源保持“引用原件、读取版本化文字载体”的映射；历史解析仍可读。
 API 提示接收工具的实际有界输出，200 字符 preview 仅用于日志摘要，不能替代证据。
+
+已知来源但缺少章节或表图位置时，使用 `wg.py source-outline <source_id> --query 'Table 10'`
+或共享 `source_outline(source_id, query="", start_line=1, limit=40)`。
+它只扫描当前 `source_ready` 的哈希绑定文字载体，不依赖KU、Wiki、图或全文索引，
+按原文顺序列出明确的Markdown标题和带编号的Table/Figure/Fig./表/图题注，忽略代码围栏。
+query是忽略大小写并合并空白后的原文标签子串；空串列目录，不翻译或推断缺失题注。
+每次最多80项，`next_start_line`非空时可继续；超过文件末尾返回空候选。
+每项保留标签所在行、至多200字符的标题及截断标记，locator指向现有分片算法中包含该行的片段；
+超长单行无分片时只给该行。地址不保证完整表体、图例或章节，跨片段所需内容仍按任务补读。
+目录是navigation，不登记已读证据；事实仍经原read_raw绑定、大小和引用检查。
+Agent、API、DSH共用内核，API可选择目录后沿原阅读编号执行，不增加固定轮或自动补读。
+目录不执行来源指令、不写Raw/回执/索引、不调用模型或联网，private与无效来源绑定明确拒绝。
 
 SQLite FTS5 存储片段及词汇索引，不存图关系；公共关系唯一权威仍为 `cross-domain/graph.db`。
 英文词及中文二元词组支持字面检索；不会自动翻译、embedding 召回或语义扩展。

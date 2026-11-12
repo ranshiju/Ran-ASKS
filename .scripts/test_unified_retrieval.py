@@ -24,6 +24,42 @@ import wg
 import lexical_relevance as lr
 
 
+class ReadSizeGuidanceTests(unittest.TestCase):
+    def test_suggestions_partition_only_requested_whole_lines(self):
+        lines = ["一二三", "", "alpha", "ββ", "last", ""]
+        text = "\n".join(lines)
+        hint = sl.read_size_guidance("academic/raw/样本.md#L10-L15", text, 9)
+        recovered, ranges = [], []
+        for item in hint['suggested_reads']:
+            start, end = sl.line_range(sl.split_locator(item['locator'])[1])
+            ranges.extend(range(start, end + 1))
+            chunk = "\n".join(lines[start - 10:end - 9])
+            self.assertEqual(len(chunk), item['chars'])
+            self.assertLessEqual(len(chunk), 9)
+            recovered.append(chunk)
+        self.assertEqual(ranges, list(range(10, 16)))
+        self.assertEqual("\n".join(recovered), text)
+        self.assertIsNone(hint['remaining_range'])
+        self.assertNotIn('alpha', json.dumps(hint))
+
+    def test_metadata_bound_and_indivisible_lines_are_explicit(self):
+        lines = ['oversized-line'] + ['four'] * 12
+        hint = sl.read_size_guidance('academic/raw/a.md#L2-L14', '\n'.join(lines), 4)
+        self.assertEqual(hint['oversized_lines'], [{'locator': 'academic/raw/a.md#L2', 'chars': 14}])
+        self.assertEqual(len(hint['suggested_reads']), 7)
+        self.assertEqual(hint['remaining_range'], 'academic/raw/a.md#L10-L14')
+        self.assertTrue(all(x['chars'] <= 4 for x in hint['suggested_reads']))
+
+    def test_other_locators_and_inconsistent_slices_do_not_invent_offsets(self):
+        for locator in ['Heading', 'page-2-3', 'fact-key', 'table:sheet:A:R2-R3', 'L5-L7']:
+            hint = sl.read_size_guidance('academic/raw/a.md#' + locator, 'one\ntwo', 4)
+            self.assertEqual(hint['max_chars'], 4)
+            self.assertEqual(hint['requested_chars'], 7)
+            self.assertEqual(hint['suggested_reads'], [])
+            self.assertEqual(hint['oversized_lines'], [])
+            self.assertIsNone(hint['remaining_range'])
+
+
 class UnifiedRetrievalTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
@@ -49,6 +85,58 @@ class UnifiedRetrievalTests(unittest.TestCase):
             content_role="scientific_finding",
             unresolved=["Generality remains unknown"],evidence=[self.ref],reason="Capture conditional claim")["id"]
 
+    def test_oversized_raw_errors_offer_checked_navigation_in_both_entries(self):
+        path = self.root / 'academic/raw/range-test.md'
+        lines = ['OUTSIDE_BEFORE'] + [f'line{i} ' + '内容' * 45 for i in range(12)] + ['OUTSIDE_AFTER']
+        path.write_text('\n'.join(lines))
+        locator = 'academic/raw/range-test.md#L2-L13'
+        with patch.object(qa, 'RAW_PREVIEW_CHARS', 300), patch.object(wg, 'RAW_PREVIEW_CHARS', 200):
+            session = qo.QuerySession(query='bounded reading', stage='evidence')
+            out = qo.execute_plan(session, [{'action': 'read_raw', 'input': {'locator': locator}}])
+            failed = out['results'][0]
+            self.assertFalse(failed['ok'])
+            self.assertEqual(session.read_sources, [])
+            self.assertEqual(session.retained_results, [])
+            self.assertEqual(session.read_options, {})
+            hint = json.loads(failed['text'].split('\n', 1)[1])['read_size']
+            self.assertEqual(hint['max_chars'], 300)
+            prompt = qo._build_api_prompt(session, out['results'], 2)
+            self.assertIn(hint['suggested_reads'][-1]['locator'], prompt)
+            from dsh.tools import _qa_call
+            self.assertEqual(_qa_call('read_raw', {'locator': locator}), failed['text'])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                wg.cmd_read_raw(type('Args', (), {'locator': locator})())
+            host = json.loads(buf.getvalue())
+            self.assertFalse(host['ok'])
+            self.assertNotIn('text', host['result'])
+            host_hint = host['result']['read_size']
+            self.assertEqual(host_hint['max_chars'], 200)
+            self.assertNotIn('内容', json.dumps(hint, ensure_ascii=False))
+            self.assertNotIn('内容', json.dumps(host_hint, ensure_ascii=False))
+            for entry, cap in [(hint, 300), (host_hint, 200)]:
+                collected = []
+                for item in entry['suggested_reads']:
+                    start, end = sl.line_range(sl.split_locator(item['locator'])[1])
+                    collected.extend(range(start, end + 1))
+                    self.assertGreaterEqual(start, 2)
+                    self.assertLessEqual(end, 13)
+                    self.assertLessEqual(item['chars'], cap)
+                    read = qa.execute('read_raw', {'locator': item['locator']})
+                    self.assertTrue(read['ok'], read)
+                    self.assertEqual(read['text'].split('\n', 1)[1], '\n'.join(lines[start - 1:end]))
+                self.assertEqual(collected, list(range(2, 14)))
+                self.assertIsNone(entry['remaining_range'])
+
+    def test_invalid_source_binding_never_generates_read_suggestions(self):
+        target = sl.resolve_path(sl.split_locator(self.ref['locator'])[0])
+        target.write_text('tampered text\n' * 100)
+        with patch.object(sl, 'read_size_guidance') as guidance:
+            result = qa.execute('read_raw', {'locator': self.ref['locator']})
+            self.assertFalse(result['ok'])
+            self.assertIn('绑定失效', result['error'])
+            guidance.assert_not_called()
+
     def question(self):
         return ks.capture_question(repo=self.root,operation_id="first-question",title="Conditional method X generality",
             question="Does conditional method X generalize?",claim_mode="conjecture",
@@ -70,8 +158,8 @@ class UnifiedRetrievalTests(unittest.TestCase):
             conn.commit();conn.close()
         return page
 
-    def recall(self,query="conditional method X",domain="academic",topk=8):
-        result=qa.execute("hybrid_recall",{"query":query,"domain":domain,"topk":str(topk)},subproject=domain or "public")
+    def recall(self,query="conditional method X",domain="academic",topk=8,**options):
+        result=qa.execute("hybrid_recall",{"query":query,"domain":domain,"topk":str(topk),**options},subproject=domain or "public")
         self.assertTrue(result["ok"],result)
         return json.loads(result["text"])
 
@@ -91,6 +179,58 @@ class UnifiedRetrievalTests(unittest.TestCase):
         self.assertIn(self.ref['locator'],session.read_sources)
         self.assertEqual(session.plan_count,1)
         self.assertFalse(result['fact_claim'])
+
+    def test_graph_discovery_preserves_scanned_metadata_outside_wiki_result_window(self):
+        page = self.wiki()
+        original = qa._wiki_recall_data
+
+        def outside_window(*args, **kwargs):
+            result, pages = original(*args, **kwargs)
+            # A graph path survives even when other lexical hits fill the Wiki window.
+            return {**result, "candidates": []}, pages
+
+        with patch.object(qa, "_wiki_recall_data", side_effect=outside_window):
+            result = self.recall(query="Method X")
+        candidate = next(c for c in result["candidates"] if c["id"] == page)
+        self.assertEqual(candidate["title"], "Conditional result")
+        self.assertEqual(candidate["navigation"], "Conditional method X.")
+        self.assertNotIn("_scan_text", candidate)
+        self.assertEqual(candidate["read_action"], "read_section")
+        self.assertFalse(candidate["evidence_read"])
+
+    def test_repeated_graph_routes_do_not_displace_direct_wiki_hit(self):
+        target = self.wiki()
+        neighbor = "academic/wiki/papers/other"
+        (self.root / (neighbor + ".md")).write_text("# Other topic\n\n## Navigation\nOther topic.\n")
+        nodes = ["target-route", "route-one", "route-two", "route-three", "route-four"]
+        conn = gl.connect(self.public)
+        gl.ensure_node(conn, neighbor, "Other topic", "page")
+        for index, node in enumerate(nodes):
+            gl.ensure_node(conn, node, node, "entity")
+            conn.execute("INSERT INTO edges(subject,predicate,object) VALUES(?,?,?)",
+                         (target if index == 0 else neighbor, "相关", node))
+        conn.commit()
+        conn.close()
+
+        for channel in ("graph", "graph_exact"):
+            with self.subTest(channel=channel):
+                results = []
+                for routes in (nodes[:2], nodes):
+                    def search(_conn, term, **kwargs):
+                        return {"nodes": [{"path": term}]} if channel == "graph_exact" and term in routes else {"nodes": []}
+
+                    semantic = {"candidates": [{"node_id": n} for n in routes]} if channel == "graph" else {"candidates": []}
+                    with patch.object(qa, "_query_entity_terms", return_value=routes), \
+                         patch.object(qa.qg, "search_nodes", side_effect=search), \
+                         patch.object(qa.ns, "semantic_search", return_value=semantic):
+                        result = qa._navigation_recall_data("Conditional", "explanation", "academic", 8, False)
+                        top = qa._navigation_recall_data("Conditional", "explanation", "academic", 1, False)
+                    self.assertEqual(top["candidates"][0]["path"], target)
+                    results.append({c["path"]: c for c in result["candidates"]})
+                self.assertEqual(results[0][neighbor]["score"], results[1][neighbor]["score"])
+                self.assertEqual(len(results[0][neighbor]["signals"]), 1)
+                self.assertEqual(len(results[1][neighbor]["signals"]), 4)
+                self.assertEqual({s["channel"] for s in results[1][target]["signals"]}, {"wiki", channel})
 
     def test_full_name_source_outranks_generic_knowledge_channel_hit(self):
         self.statement()
@@ -308,8 +448,142 @@ class UnifiedRetrievalTests(unittest.TestCase):
     def test_dsh_has_the_same_unified_discovery_entry(self):
         from dsh.tools import build_tools
         tool=next(t for t in build_tools() if t.name=="hybrid_recall")
-        text=tool.execute_fn({"query":"conditional","domain":"academic"})
+        self.assertEqual(tool.input_schema["properties"]["subjects"],
+                         qo._TOOL_SCHEMAS["hybrid_recall"]["properties"]["subjects"])
+        text=tool.execute_fn({"query":"conditional","domain":"academic","subjects":["method X"]})
         self.assertIn("unified-recall-v1",text)
+        self.assertEqual(json.loads(text)["subjects"], ["method X"])
+
+    def test_long_question_retains_subjects_before_window_without_rescanning(self):
+        self.wiki()
+        folder = self.root / "academic/wiki/papers"
+        query = "AsterFlow BerylFlow optimization cost convergence stability error conditions"
+        conn = gl.connect(self.public)
+        for name in ["AsterFlow", "BerylFlow", *[f"generic-{i}" for i in range(30)]]:
+            path = f"academic/wiki/papers/{name}"
+            navigation = f"{name} method." if name.endswith("Flow") else "optimization cost convergence stability error conditions"
+            (folder / (name + ".md")).write_text(f"# {name}\n\n## Navigation\n{navigation}\n")
+            gl.ensure_node(conn, path, name, "page")
+        conn.commit(); conn.close()
+        # Eliminate graph shortcuts: the subject must survive the lexical window.
+        with patch.object(qa.qg, "search_nodes", return_value={"nodes": []}):
+            old = self.recall(query=query, topk=2)
+            with patch.object(qa, "_wiki_recall_data", wraps=qa._wiki_recall_data) as scan, \
+                 patch.object(qa.ns, "semantic_search", return_value={"candidates": []}) as semantic:
+                new = self.recall(query=query, topk=2, subjects=["AsterFlow", "BerylFlow"])
+        self.assertFalse(any(c["title"].endswith("Flow") for c in old["candidates"]))
+        self.assertEqual({c["title"] for c in new["candidates"]}, {"AsterFlow", "BerylFlow"})
+        scan.assert_called_once(); semantic.assert_called_once()
+        self.assertFalse(new["identity_claim"])
+        self.assertFalse(new["fact_claim"])
+
+    def test_subject_local_coverage_does_not_reuse_full_source_coverage(self):
+        query = "AsterFlow stability error conditions"
+        path = self.root / "dispersed.md"
+        path.write_text("# AsterFlow\n" + ("background " * 110).join(["stability ", "error ", "conditions"]))
+        source = si.ingest(path, repo=self.root)
+        folder = self.root / "academic/wiki/papers"; folder.mkdir(parents=True)
+        (folder / "AsterFlow.md").write_text("# AsterFlow\n\n## Navigation\nAsterFlow stability error conditions.\n")
+        result = self.recall(query=query, subjects=["AsterFlow"])
+        self.assertEqual(result["candidates"][0]["kind"], "wiki")
+        item = next(c for c in result["candidates"] if c.get("source_id") == source["source_id"])
+        original = next(c for c in si.search(query, repo=self.root)["candidates"] if c["source_id"] == source["source_id"])
+        self.assertGreater(original["lexical_match"]["term_coverage"], item["lexical_match"]["term_coverage"])
+        self.assertEqual(item["read_input"], {"locator": item["locator"]})
+
+    def test_subject_source_selection_keeps_passage_and_read_binding_together(self):
+        path = self.root / "passages.md"
+        path.write_text('\n'.join(['# AsterFlow', 'Under finite input, AsterFlow stability requires a bounded queue.'] +
+                                  [''] * 30 + ['## References', 'AsterFlow. Stability, error and conditions. DOI: example.']))
+        source = si.ingest(path, repo=self.root)
+        for query, role in [("AsterFlow stability error conditions", "unspecified"),
+                            ("AsterFlow stability DOI", "references")]:
+            with self.subTest(query=query):
+                result = self.recall(query=query, subjects=["AsterFlow"])
+                item = next(c for c in result["candidates"] if c.get("source_id") == source["source_id"])
+                self.assertEqual(item["section_role"], role)
+                self.assertEqual(item["parse_id"], source["parse_id"])
+                self.assertEqual(item["read_input"], {"locator": item["locator"]})
+                carrier, fragment = item["locator"].split("#")
+                start, end = map(int, fragment.replace("L", "").split("-"))
+                body = '\n'.join((self.root / carrier).read_text().splitlines()[start-1:end])
+                span = item["excerpt_span"]
+                self.assertEqual(item["excerpt"], body[span["start"]:span["end"]])
+                self.assertEqual(len(item["matched_locators"]), len(set(item["matched_locators"])))
+                self.assertLessEqual(len(item["matched_locators"]), 3)
+                self.assertTrue(qa.execute(item["read_action"], item["read_input"])["ok"])
+
+    def test_subject_lane_duplicate_keeps_question_relevant_preview(self):
+        path = self.root / "late-condition.md"
+        clause = "Stability requires finite input and a bounded queue."
+        path.write_text("# AsterFlow\n" + "Background context. " * 90 + clause)
+        source = si.ingest(path, repo=self.root)
+        query = "AsterFlow stability finite input bounded queue"
+        result = self.recall(query=query, subjects=["AsterFlow"])
+        item = next(c for c in result["candidates"] if c.get("source_id") == source["source_id"])
+        self.assertIn(clause, item["excerpt"])
+
+    def test_subject_literal_boundaries_and_aliases(self):
+        match = lr.subject_match(["TDVP", "Self-RAG", "A+B"], ["TDVPX", "Self-RAG critic", "A+B"], "TDVP conditions")
+        self.assertEqual(match, {"matched": ["TDVP", "Self-RAG", "A+B"], "labels": ["Self-RAG", "A+B"]})
+        page = self.wiki()
+        conn = gl.connect(self.public)
+        conn.execute("INSERT INTO aliases(alias,node_path) VALUES (?,?)", ("AsterFlow", page))
+        conn.commit(); conn.close()
+        result = self.recall(query="AsterFlow stability conditions", subjects=["AsterFlow"])
+        self.assertEqual(result["candidates"][0]["id"], page)
+        self.assertEqual(result["candidates"][0]["subject_match"]["labels"], ["AsterFlow"])
+
+    def test_subject_validation_precedes_discovery_and_empty_list_is_compatible(self):
+        self.statement(); self.wiki()
+        self.assertEqual(self.recall(), self.recall(subjects=[]))
+        for subjects in ("method X", [""], ["  "], [1], ["x"] * 4, ["x" * 161]):
+            with self.subTest(subjects=subjects), \
+                 patch.object(qa, "_navigation_recall_data") as navigation, \
+                 patch.object(ks, "search") as knowledge, patch.object(si, "search") as source:
+                result = qa.execute("hybrid_recall", {"query": "lookup", "subjects": subjects})
+                self.assertFalse(result["ok"])
+                navigation.assert_not_called(); knowledge.assert_not_called(); source.assert_not_called()
+
+    def test_subject_lane_failure_discloses_issue_and_keeps_bounded_survivors(self):
+        self.statement()
+        original = ks.search
+        def flaky(query, **kwargs):
+            if query == "unavailable subject":
+                raise ValueError("synthetic lane failure")
+            return original(query, **kwargs)
+        with patch.object(ks, "search", side_effect=flaky):
+            result = self.recall(subjects=["unavailable subject", "method X"])
+        self.assertIn("statement", [c["kind"] for c in result["candidates"]])
+        channel = result["channels"]["knowledge"]
+        self.assertEqual(channel["status"], "partial")
+        self.assertEqual(channel["search_count"], 3)
+        self.assertEqual(channel["issues"][0]["query"], "unavailable subject")
+        self.assertLessEqual(channel["count"], 20)
+
+    def test_subject_cli_and_api_keep_discovery_out_of_read_evidence(self):
+        self.statement(); self.wiki()
+        args = wg.build_parser().parse_args(["hybrid-recall", "conditional", "--subject", "method X",
+                                            "--subject", "Conditional", "--domain", "academic"])
+        with redirect_stdout(io.StringIO()) as output:
+            args.func(args)
+        self.assertEqual(json.loads(output.getvalue())["result"]["subjects"], ["method X", "Conditional"])
+        session = qo.QuerySession(query="conditional", mode="api", stage="evidence")
+        result = qo.execute_plan(session, [{"action": "hybrid_recall", "input": {
+            "query": "conditional", "domain": "academic", "subjects": ["method X"]}}])
+        self.assertTrue(result["results"][0]["ok"], result)
+        self.assertEqual(session.read_sources, [])
+        self.assertEqual(json.loads(result["results"][0]["text"])["subjects"], ["method X"])
+        for intent in ({"query": "conditional"}, {"query": "conditional", "subjects": ["method X"]}):
+            plan = qo.intent_to_plan(intent)
+            self.assertEqual(plan[0]["input"].get("subjects"), intent.get("subjects"))
+            self.assertEqual(qo.tool_contracts.validate(plan[0]["input"], qo._TOOL_SCHEMAS["hybrid_recall"]), "")
+        for subjects in ("method X", [" "], [1], ["x"]*4, ["x"]*161, ["x"*161]):
+            with patch.object(qo.actions, "execute") as execute:
+                result = qo.execute_plan(session, [{"action": "hybrid_recall", "input": {
+                    "query": "conditional", "subjects": subjects}}])
+            execute.assert_not_called()
+            self.assertIn("INPUT_CONTRACT", result["results"][0]["error"])
 
 
 if __name__=="__main__":

@@ -15,7 +15,7 @@ spec.loader.exec_module(module)
 
 
 @contextlib.contextmanager
-def playbook_fixture():
+def playbook_fixture(extra=""):
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "index.md"
         path.write_text(
@@ -31,7 +31,7 @@ def playbook_fixture():
             "---\n"
             "## 更新工程文档\n\n"
             "**触发词**：「更新工程文档」\n\n"
-            "先判断改动类型。\n",
+            "先判断改动类型。\n" + extra,
             encoding="utf-8",
         )
         original = module.PLAYBOOK
@@ -78,20 +78,40 @@ def test_dispatch_no_match():
     assert result is None
 
 
-def test_real_playbook_dispatches_class_meeting_proposal_to_workspace_items():
-    result = module.dispatch("班子会提案：新增实验室空间安排")
+WORKSPACE_ENTRIES = """
+---
+## 班子会提案
+
+**触发词**：「班子会提案」
+
+projects/example-team 使用 workspace proposal；不触发会议纪要摄入。
+
+---
+## 系会汇报
+
+**触发词**：「系会」「系会汇报」
+
+projects/example-team/reports 使用 workspace_state.py item，区分待汇报与已汇报。
+不使用班子会 `proposal` 状态；不触发会议纪要摄入。
+"""
+
+
+def test_workspace_proposal_dispatch_with_portable_fixture():
+    with playbook_fixture(WORKSPACE_ENTRIES):
+        result = module.dispatch("班子会提案：新增实验室空间安排")
     assert result is not None
-    assert "projects/科研副主任工作区" in result
+    assert "projects/example-team" in result
     assert "workspace proposal" in result
     assert "不触发会议纪要摄入" in result
 
 
-def test_real_playbook_dispatches_department_report_aliases():
+def test_workspace_report_aliases_with_portable_fixture():
     for query in ("系会", "系会汇报", "系会：新增科研宣传汇报", "系会汇报：标记已汇报"):
-        result = module.dispatch(query)
+        with playbook_fixture(WORKSPACE_ENTRIES):
+            result = module.dispatch(query)
         assert result is not None
         assert result.startswith("## 系会汇报\n")
-        assert "projects/科研副主任工作区/系会汇报" in result
+        assert "projects/example-team/reports" in result
         assert "待汇报" in result and "已汇报" in result
         assert "workspace_state.py item" in result
         assert "不使用班子会 `proposal` 状态" in result
@@ -100,6 +120,9 @@ def test_real_playbook_dispatches_department_report_aliases():
 
 
 def test_real_playbook_dispatches_ingest_backend_model_aliases():
+    if not module.PLAYBOOK.is_file():
+        print("SKIP local ingest aliases: private playbook index is not published")
+        return
     for query in (
         "将ingest的后端模型改为agent",
         "把 ingest 后端模型切换为 api",
@@ -114,6 +137,9 @@ def test_real_playbook_dispatches_ingest_backend_model_aliases():
 
 
 def test_real_playbook_dispatches_query_backend_model_aliases():
+    if not module.PLAYBOOK.is_file():
+        print("SKIP local query aliases: private playbook index is not published")
+        return
     for query in (
         "query backend是否也做了同样的处理",
         "把 query 后端模型切换为 agent",
@@ -135,7 +161,11 @@ def test_dispatch_short_query():
 
 
 def test_real_oral_entry_links_specialized_fast_playbook():
-    for query in ("/oral help", "/oral start 矩阵乘积态理解程度", "继续口试"):
+    queries = ("/oral help", "/oral start 矩阵乘积态理解程度", "继续口试")
+    if not module.PLAYBOOK.is_file():
+        print("SKIP local oral aliases; still validate the public playbook and route")
+        queries = ()
+    for query in queries:
         result = module.dispatch(query)
         assert result is not None
         assert result.startswith("## 智能口试指令\n")
@@ -171,8 +201,8 @@ def main():
     test_dispatch_rejects_overly_short_reverse_substring()
     test_dispatch_hit_update_docs()
     test_dispatch_no_match()
-    test_real_playbook_dispatches_class_meeting_proposal_to_workspace_items()
-    test_real_playbook_dispatches_department_report_aliases()
+    test_workspace_proposal_dispatch_with_portable_fixture()
+    test_workspace_report_aliases_with_portable_fixture()
     test_real_playbook_dispatches_ingest_backend_model_aliases()
     test_real_playbook_dispatches_query_backend_model_aliases()
     test_dispatch_short_query()

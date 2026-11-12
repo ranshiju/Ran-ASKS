@@ -573,6 +573,36 @@ class PaperImpactTests(unittest.TestCase):
             pi.initialize(self.root, 'escape', '10.1234/target')
         self.assertFalse(list(outside.iterdir()))
 
+    def test_existing_and_explicitly_relocated_projects_remain_writable(self):
+        old = self.root / 'projects/paper-impact'
+        self.assertTrue((old / 'sample/state.json').is_file())
+        self.ingest_list()
+        before = self.state()
+        new = self.root / 'projects/category/paper-impact'
+        new.parent.mkdir()
+        old.rename(new)
+        si.atomic_json(self.root / 'projects/.path-migrations.json', {
+            'schema': 'project-path-migrations-v1',
+            'moves': {'paper-impact': 'category/paper-impact'}})
+        self.assertEqual(self.state(), before)
+        with pi.locked(self.root, 'sample'):
+            state = self.state()
+            pi.save(self.root, state)
+        self.assertEqual(self.state()['revision'], before['revision'] + 1)
+        self.assertFalse(old.exists())
+        pi.initialize(self.root, 'new', '10.1234/new')
+        self.assertTrue((new / 'new/state.json').is_file())
+        outside = self.root / 'outside-state.json'
+        outside.write_text('{}')
+        state_path = new / 'sample/state.json'
+        state_path.unlink()
+        state_path.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'symlinks'):
+            pi.load(self.root, 'sample')
+        with self.assertRaisesRegex(ValueError, 'symlinks'):
+            pi.save(self.root, state)
+        self.assertEqual(outside.read_text(), '{}')
+
     def test_concurrent_writer_fails_without_waiting(self):
         with pi.locked(self.root, 'sample'):
             with self.assertRaisesRegex(ValueError, 'busy'):

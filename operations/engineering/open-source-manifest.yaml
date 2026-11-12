@@ -6,6 +6,7 @@ include:
   - gallery/catalog.json
   - gallery/site/style.css
   - gallery/site/app.js
+  - gallery/site/analytics.js
   - gallery/RIGHTS.md
   - gallery/works/mpe-science-poster/README.md
   - gallery/works/mpe-science-poster/metadata.json
@@ -130,6 +131,14 @@ include:
   - .codex/skills/manuscript-improvement/agents/openai.yaml
   - .codex/skills/manuscript-evaluation/SKILL.md
   - .codex/skills/manuscript-evaluation/agents/openai.yaml
+  - .codex/skills/manuscript-question/SKILL.md
+  - .codex/skills/manuscript-question/agents/openai.yaml
+  - .codex/skills/manuscript-title/SKILL.md
+  - .codex/skills/manuscript-title/agents/openai.yaml
+  - .codex/skills/manuscript-motivation/SKILL.md
+  - .codex/skills/manuscript-motivation/agents/openai.yaml
+  - .codex/skills/manuscript-introduction/SKILL.md
+  - .codex/skills/manuscript-introduction/agents/openai.yaml
   # Reusable project initialization only; never include projects/**.
   - projects/_templates/research/AGENTS.md
   - projects/_templates/research/README.md

@@ -49,7 +49,7 @@ class CitingPapersTests(unittest.TestCase):
         self.assertNotIn('config', state)
         self.assertNotIn('reviews', state)
         self.assertEqual(len(state['batches'][0]['responses']), 2)
-        for path in ('projects/paper-impact', 'academic/raw', 'cross-domain/graph.db', 'temp'):
+        for path in ('projects/学术服务与个人事务/paper-impact', 'academic/raw', 'cross-domain/graph.db', 'temp'):
             self.assertFalse((self.root / path).exists())
 
     def test_bounded_pagination_is_explicitly_partial(self):

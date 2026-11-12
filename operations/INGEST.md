@@ -10,12 +10,21 @@
 持久选择 `source_only/not_required`，零分类/知识模型调用，恢复时保留意图。
 不按“非论文”一律跳过知识；混合材料只整理可复用部分，允许零 KU。
 显式 `--knowledge agent|api` 可在来源发布后准备宿主任务或同步运行有界 KU 整理。
+可加 `--focus '本次用途；相关章节名'`，文件和 S-ID 恢复均传给原知识任务并沿用其幂等身份；
+legacy/none/skip 携带非空 focus 明确拒绝。focus 不保证完整供料，须看 coverage 与未决项。
 none 不抹除已执行知识结果；以后可显式 prepare/run 开启整理。
 来源与知识状态分开，KU 的失败/未决项不回滚来源。Statement 保存为带依据的草稿，
+显式整理失败返回 knowledge_error、入口非零与 wg ok=false；prepared/仅范围未决的 partial
+保持可续做，knowledge.unresolved/results 提供原因，completed 仅指本次知识任务。
 Question 写原生 Frontier；不要求 Wiki/Graph 或执行全库维护。
 默认入口仍为 legacy；首次上下文预热和 Raw/private 边界不变。
 完整命令、恢复和局限见 [Source-first 契约](engineering/source-first-ingestion.md)。
+PDF 默认引用原件及图号，必要时补子图号/已确认页码；独立图片为可复用的派生资源，不要求每篇全部提取。
+资源缺失保留记录，文字整理不因此自动变成未完成；需要视觉信息或展示时再按该契约局部读取/提取。
 KU 新建/局部更新、查询与 Agent/API 边界见 [N2 契约](engineering/knowledge-units.md)。
+已定位所需 Raw 时，可用 `wg.py knowledge prepare|run S-ID --source-locator '<当前解析#行范围>'`
+完整装入所选证据，不必依靠 focus 重新猜选片；调用方先比对旧知识，无增量可零操作复用，
+维护已知对象再加 target。该路径沿原预算、绑定与提交校验，超限拒绝，不认证语义充分性。
 
 
 ---
@@ -43,6 +52,11 @@ python3 .scripts/wg.py task verify <transaction-id>
 - `inspect` 返回 `agent-task-control-v1`、公开 workflow 状态、缺失输出和下一动作；大型 `context` 值只返回类型、字节数与 SHA-256，原事务内容不改写。需要正文或完整上下文时读取 `task.inputs` 或执行任务声明的 `read`，不得把紧凑回执当事实材料。
 - `advance` 在 required output 缺失时停止。任务同时声明 `check` 与 `commit` 时固定先检查，只有检查明确返回 `ready_to_commit` 才提交；其他任务只执行其声明的 `resume` 或 `commit`。所有 action 不经 shell，只能调用仓库 `.scripts/` 下的受管 Python 入口。
 - 终态任务返回 `next_action=none`，不因事务清理了暂存输出而重新要求生成。validator、preflight、提交、回滚和内容类型的 typed schema 仍由原摄入器负责；统一的是宿主控制循环，不是把不同内容协议降为一种自由文本格式。
+
+Source-first 的宿主知识任务也可将 KJ-ID 传给 `task inspect/status/next/advance/run`，沿原 knowledge
+check/apply 校验和保存；无需先创建 Wiki 或复制一份 inbox 状态。部分完成时保留已保存知识与未决项，
+提示 review_partial；完成后重复推进不重做。API 知识任务只在通用 status/next 展示，不隐式交给宿主执行。
+`task verify` 的摄入最终回执校验不适用于 KJ；知识任务使用其 Delta 校验与依据读取。
 - 此入口只接续已经写入 `temp/inbox-state/` 的任务。摄入入口直接返回、尚未建立持久事务的分类裁决继续按该入口自己的批次协议处理，不得伪造 transaction ID。
 - `status` 返回稳定的 `ingest-operation-view-v1`，`next` 只投影下一动作，二者不要求事务含 `agent-task-v1`；`verify` 重算终态 `verification-receipt-v1`，复核状态、转换轨迹、validator 回执哈希和已声明最终产物。三者只读，不执行任务 action，也不修补状态。
 
@@ -122,7 +136,7 @@ python3 .scripts/long_document_plan.py <仓库内 Markdown/TXT 路径>
 
 1. **Raw 不可修改**：原始 ASR 文本是事实源。`corrected.txt`、`entity-resolution.json`、Wiki 和 semantic 都是可重建派生物，先写事务临时目录；任何纠错不得覆盖 Raw。
 2. **程序只准备候选**：`speech_entity_resolver.py <raw.txt> --output <entity-candidates.json>` 从 `graph.db` 的 people、aliases 和人物关系生成 exact/review 候选，不使用 `--apply` 提前形成最终纠错文本。可用 `--candidate-file` 缩小本次局部召回；索引按人物知识指纹增量刷新。
-3. **一个 specialist 一次理解全文**：程序先把 Raw 非空行编成稳定的 `sNNNN` evidence catalog，并列出 `projects/学生指导/students/` 中已有研究记录；`dsh/meeting_compiler_agent.py` 接收只读原文、证据目录、人物候选、学生记录候选、程序生成的 meeting ID/目标 sources 和 validator 错误，在同一上下文中返回 `meeting-compiler-v3`：
+3. **一个 specialist 一次理解全文**：程序先把 Raw 非空行编成稳定的 `sNNNN` evidence catalog，并列出 `projects/教学与学生指导/学生指导/students/` 中已有研究记录；`dsh/meeting_compiler_agent.py` 接收只读原文、证据目录、人物候选、学生记录候选、程序生成的 meeting ID/目标 sources 和 validator 错误，在同一上下文中返回 `meeting-compiler-v3`：
    - `<<<PREPROCESS>>>`：仅包含原文精确片段替换和人物 resolved/unchanged/unresolved 决策；证据不足必须 unresolved。
    - `<<<WIKI>>>`：conference-summary Wiki 草稿，Navigation 和 Content 保留研究问题、关键观察、方法限制与未决矛盾，不重复结构化清单；来源限制简明表述，不挤占研究背景。
    - `<<<MEETING_IR>>>`：顶层固定 `protocol_version: meeting-compiler-v3`，以及参会者、议题、汇报、决策、待办、受限扩展关系和 `person_updates`；每项必须引用 evidence ID。学术术语保留原文有依据的名称，不为双语格式猜测英文全称或替换缩写；topics/reports/relations 的大写缩写须可在该项引用的原文中定位，常规摄入与受管修复共用此校验。`person_updates` 只能指向候选目录中的已有学生记录，类别限进展、下一步、阻塞、决定、里程碑与方向变化。
@@ -318,7 +332,7 @@ section retrieval 思想用于 raw 上——只把关键段计入上下文 token
 
 ### 分级详略（按威胁度）
 
-对标文献按与 KR Wiki 框架的重合度（威胁度，见 `projects/kr-wiki-paper/notes/status.md` 排序）分级：
+对标文献按与 KR Wiki 框架的重合度（威胁度，见 `projects/知识系统研究与建设/kr-wiki-paper/notes/status.md` 排序）分级：
 - **高威胁**（维度重合）：详写「六、关联」对比表 + 完整差异化分析
 - **低威胁**（维度正交）：只留 Core Triple 对比关系 + 一句差异化，不写完整对比表
 

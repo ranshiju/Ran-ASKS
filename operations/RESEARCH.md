@@ -68,6 +68,14 @@ python3 .scripts/research_memory.py profile <project> --refresh  # LLM 重新提
 
 三层调用语义保持分离：`research` 是当前工作上下文；`write` 是落笔时加载的提示与规范能力；`wg.py`/DSH 注册函数是执行检索、读取或计算的工具。
 
+**科学问题与贡献定位**：只凝练或核验论文核心科学问题时调用 `python3 .scripts/route.py --capability manuscript-question`，按[专项规范](research/manuscript-question.md)区分一般科学问题、本文切入点和证据范围。需要贡献分类、重要性评分与强调顺序时组合 `manuscript-evaluation`；复用已认可的问题和有效阅读，不自动进入改稿。
+
+**论文标题**：取标题或比较候选时调用 `python3 .scripts/route.py --capability manuscript-title`，综合已认可的问题、贡献排序及全文内容，见[标题规范](research/manuscript-title.md)。该入口已组合共享落笔约定，不重复加载下述通用 academic profile；整篇改进中的标题阶段复用已有阅读与定位。
+
+**完整引言**：调用 `python3 .scripts/route.py --capability manuscript-introduction`，按[引言规范](research/manuscript-introduction.md)基于或参考原稿，复用最新定位和有效证据完成带引用的引言。单独应用默认交付候选；全文改进复用同一规范，不重复加载通用 academic profile。
+
+**论文背景与动机**：调用 `python3 .scripts/route.py --capability manuscript-motivation`，按[专项规范](research/manuscript-motivation.md)交付摘要用一至两句话和引言用两至三段。结合稿件、已有引用、领域知识、知识库与必要网络来源核验科学背景；入口已组合共享落笔约定，不重复加载通用 academic profile。
+
 **落笔写作能力**：当用户要求实际起草、改写、润色论文的标题、摘要、正文、图注、附录或补充材料时，Agent 在落笔前自动调用一次：
 
 ```bash
@@ -78,7 +86,7 @@ python3 .scripts/route.py --capability write --capability-profile academic
 
 摘要起草与修改使用更聚焦的 `python3 .scripts/route.py --capability write --capability-profile academic-abstract`。仅讨论摘要时按需读取 `operations/research/academic-abstract.md`；该规范处理科学结论先于数据、比较证据边界、实验贡献和多轮意见落实，学科 overlay 按需组合。
 
-整篇论文改进使用 `python3 .scripts/route.py --capability write --capability-profile academic-manuscript`，仍保持 `research` 上下文。宿主 Agent 自行通读全文与补充材料，再按摘要、标题、引言、全文的顺序修改并回查一致性；流程维护于 `operations/research/manuscript-improvement.md`，摘要阶段复用摘要规范。只讨论时读取规范而不自动改稿，接续任务复用已完成的阅读。
+**论文撰写与优化持续工作**：在现有 research 工作区中以 manuscript 类型事项维护稿件基线、主稿/候选、进度与下一步，新工作区可用 `research` profile 和 `manuscript` domain。按[专项规范](research/manuscript-improvement.md)初始化或 recall，复用科学定位与已有稿件，按证据安排起草、优化顺序；真正落笔时加载 `python3 .scripts/route.py --capability write --capability-profile academic-manuscript`。文献需求随时作为 question 事项跟踪；授权摄入走受管流程，返回后核验原文并恢复写作位置。工作区实现只负责存储与校验，写作和判断由宿主完成，不创建独立模型控制循环或自动定时任务。
 
 研究中需要查知识库文献、定位已有结果、回溯 raw 原文核验，或操作研究记忆，调用 `.scripts/wg.py`（统一 JSON 输出，跨功能、回合中可调）：
 
@@ -110,7 +118,7 @@ python3 .scripts/route.py --capability write --capability-profile academic
 新研究项目从通用模板创建：
 
 ```bash
-python3 .scripts/research_project.py init <project> --name "项目名" --topic "一句话主题"
+python3 .scripts/research_project.py init <分类/项目> --name "项目名" --topic "一句话主题"
 ```
 
 校验既有项目结构、schema 与产物边界：
@@ -233,3 +241,5 @@ shared 程序不因此自动转发命令，API 路径仍遵守其原有授权与
 - **`computing/ssh_run.py`** — 历史 SSH 远程工具（上传/执行/下载/状态查询），读取 `.env` 中的 SSH 配置；当前关闭主机密钥检查，密码传给 expect 命令参数。首次使用新凭据前须改用验证主机身份且不在进程参数传密码的入口；此次登记不调用它连接。
 
 这些资源由各研究项目积累，跨项目复用，不属于任何单个研究项目。
+
+新研究项目可直接在分类目录下初始化，例如 `research/demo`。迁移后的旧项目简称可由本地显式路径映射解析；创建和校验使用解析后的完整路径，避免重新建立旧根目录。映射契约见 `operations/WORKSPACE.md`“分类目录与路径迁移”。

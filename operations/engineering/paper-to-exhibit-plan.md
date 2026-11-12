@@ -167,7 +167,7 @@ P2 与 P3 在 P0 契约确定后可独立推进；P4 同时依赖两者。本计
 
 沿用已讨论的传播目标：一般本科生、五分钟以内、主线清晰、借直观图景理解工作内核，不要求掌握技术细节。深海故事是已选方案，不是以后展板的默认类比。
 
-- 承接 `projects/MPE科普展板/exhibits/mpe-2026`，先读取 workspace status 和 resume；不重置 revision 39 的真实历史。
+- 承接 `projects/科普与报告/MPE科普展板/exhibits/mpe-2026`，先读取 workspace status 和 resume；不重置 revision 39 的真实历史。
 - 第六版讨论稿可作为明确来源的素材和设计参考，经新契约提交后重新正式 build；不把旧 SVG/PNG 伪登记为已编译正式预览。
 - 检查“参照像普通数轴”的歧义是否减少。
 - 检查新增单层例子是否真正补上直觉过渡，还是增加了本科生的技术负担；允许结论是需要换讲法，而不是继续堆解释。
@@ -232,7 +232,7 @@ P2 与 P3 在 P0 契约确定后可独立推进；P4 同时依赖两者。本计
 
 回归：review **36/36**、workflow **32/32**（含真实 render）、science-exhibit 真实混排 render、artwork、原 API reader mock、agent-task、WG、workspace、visual-QA、function-registry、公开树测试通过。运行时目录为 32 功能/4 类持续工作；工程图为 337 节点/627 边；工作树公开构建验证 603 文件且无意外内容，未发布。已有 `test_prompt_audit.py` 的 query-start 提示词长度断言仍失败：13995 字符超过 13000；未通过放宽阈值或扩大本任务修复范围消除。
 
-具体产物、输入哈希、真实调用 ID、取舍及接续入口见 `projects/MPE科普展板/outputs/fullflow-implementation-review-20261022.md`。该次闭环记录为 revision 51、reviewing；后续实际看图修订以展板 store 和 workspace 状态为准。用户看到对应实际预览后再作接受决定，不把“继续”或制作授权转换为预览接受。
+具体产物、输入哈希、真实调用 ID、取舍及接续入口见 `projects/科普与报告/MPE科普展板/outputs/fullflow-implementation-review-20261022.md`。该次闭环记录为 revision 51、reviewing；后续实际看图修订以展板 store 和 workspace 状态为准。用户看到对应实际预览后再作接受决定，不把“继续”或制作授权转换为预览接受。
 
 ## 12. 受众锚定的术语优化（2026-10-23）
 
@@ -249,4 +249,4 @@ P2 与 P3 在 P0 契约确定后可独立推进；P4 同时依赖两者。本计
 
 风险与验证：用户手改使旧输出清单与 PPTX 字节不再一致，此历史差异保留，不改旧哈希掩盖；新输出重新绑定。先运行 review 定向回归，再运行展板 workflow（含 render）及工程图验证；不触碰已知无关 prompt-audit 失败。
 
-实施结果：创作方法与 reader-comprehension v3 已更新，反馈 schema 仍为 v2；review 37/37、workflow 32/32（含真实 render）、science-exhibit 回归及工程图/运行时目录验证通过。手改原件按哈希另存，六图及 Raw 不变，新受管 A0 输出已生成，当前 revision 67、reviewing；未新增盲读或登记接受。具体改动、历史哈希差异与机械证据见 `projects/MPE科普展板/outputs/terminology-optimization-20261023/README.md` 和同目录 `validation.json`。这不是术语替换能提升真人理解率的实验结论。
+实施结果：创作方法与 reader-comprehension v3 已更新，反馈 schema 仍为 v2；review 37/37、workflow 32/32（含真实 render）、science-exhibit 回归及工程图/运行时目录验证通过。手改原件按哈希另存，六图及 Raw 不变，新受管 A0 输出已生成，当前 revision 67、reviewing；未新增盲读或登记接受。具体改动、历史哈希差异与机械证据见 `projects/科普与报告/MPE科普展板/outputs/terminology-optimization-20261023/README.md` 和同目录 `validation.json`。这不是术语替换能提升真人理解率的实验结论。

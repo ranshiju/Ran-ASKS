@@ -16,10 +16,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 ASKS_RELEASE_VERSION = "0.2.0"
 ARTIFACT_VERSION = "1.0.0"
-DEFAULT_EXPERIMENT = REPO / "projects/ASKS/experiments/e1-chronological-56"
+DEFAULT_EXPERIMENT = REPO / "projects/知识系统研究与建设/ASKS/experiments/e1-chronological-56"
 DEFAULT_RUN = DEFAULT_EXPERIMENT / "runs/bd7dc4b6e166"
 DEFAULT_MANUSCRIPT_METRICS = (
-    REPO / "projects/ASKS/manu/v16/figures/manuscript-derived-metrics.json"
+    REPO / "projects/知识系统研究与建设/ASKS/manu/v16/figures/manuscript-derived-metrics.json"
 )
 DEFAULT_OUTPUT = REPO / f"paper-artifacts/v{ASKS_RELEASE_VERSION}"
 GENERATED_DIRS = ("config", "corpus", "graph", "metrics", "validation", "wiki")

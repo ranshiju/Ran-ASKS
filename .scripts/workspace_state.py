@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 import yaml
+from project_paths import project_path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / ".scripts"))
@@ -73,14 +74,18 @@ def resolve_project(value: str | Path, *, require_exists: bool = True) -> Path:
     base = PROJECTS_DIR.resolve()
     raw = Path(value)
     if raw.is_absolute():
-        candidate = raw.resolve()
+        try:
+            relative = raw.relative_to(base)
+        except ValueError:
+            relative = None
+        candidate = (project_path(base, relative) if relative is not None else raw).resolve()
     else:
         parts = PurePosixPath(str(value)).parts
         if parts and parts[0] == "projects":
             parts = parts[1:]
         if not parts or ".." in parts:
             raise WorkspaceError(f"非法工作区路径: {value}")
-        candidate = (base.joinpath(*parts)).resolve()
+        candidate = project_path(base, Path(*parts)).resolve()
     if candidate == base or not _inside(candidate, base):
         raise WorkspaceError(f"工作区必须位于 projects/ 内: {value}")
     if require_exists and not candidate.is_dir():

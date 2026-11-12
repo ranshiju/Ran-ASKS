@@ -7,6 +7,7 @@ the recovery authority; SQLite contains disposable search projections only.
 from __future__ import annotations
 
 from platform_compat import fcntl, fsync_path
+from project_paths import repo_path
 
 import argparse
 from contextlib import contextmanager
@@ -51,6 +52,7 @@ def managed(repo, relative):
     rel = Path(relative)
     if rel.is_absolute() or ".." in rel.parts or not rel.parts:
         raise ValueError("managed path must be repository-relative")
+    rel = repo_path(repo, rel).relative_to(repo)
     cursor = repo
     for part in rel.parts:
         cursor = cursor / part
@@ -383,6 +385,56 @@ def search(query, *, repo=REPO, topk=5, domain="academic"):
     return result
 
 
+def outline(source_id, *, repo=REPO, query="", start_line=1, limit=40):
+    """Bound structural navigation from a current carrier, never read evidence."""
+    start_line, limit = int(start_line), int(limit)
+    if start_line < 1 or not 1 <= limit <= 80:
+        raise ValueError("outline requires start_line >= 1 and limit between 1 and 80")
+    record = load_receipt(repo, source_id)
+    parsed = selected_parse(record)
+    if record.get("source_status") != "source_ready" or not parsed:
+        raise ValueError("source is not ready; resume source before outlining")
+    validate_binding(repo, record, parsed)
+    text = managed(repo, parsed["text_path"]).read_text(encoding="utf-8")
+    lines = text.splitlines()
+    pieces, _ = segments(text)
+    entries, fence, piece_index = [], None, 0
+    needle = " ".join(query.casefold().split())
+    for n, line in enumerate(lines, 1):
+        delimiter = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if delimiter:
+            if fence is None:
+                fence = delimiter[1]
+            elif delimiter[1][0] == fence[0] and len(delimiter[1]) >= len(fence) and not delimiter[2].strip():
+                fence = None
+            continue
+        if fence or n < start_line:
+            continue
+        heading = re.match(r"^ {0,3}#{1,6}[ \t]+(.+?)\s*#*\s*$", line)
+        caption = re.match(r"^\s*((?:Table|Figure|Fig\.)\s+(?:[A-Z]?\d+|[IVXLCDM]+)\b|[表图]\s*[A-Z]?\d+)", line, re.I)
+        if not heading and not caption:
+            continue
+        label = heading[1] if heading else line.strip()
+        if needle not in " ".join(label.casefold().split()):
+            continue
+        while piece_index < len(pieces) and pieces[piece_index][1] < n:
+            piece_index += 1
+        start, end = n, n
+        if piece_index < len(pieces) and pieces[piece_index][0] <= n:
+            start, end = pieces[piece_index][:2]
+        entries.append({"kind": "source", "structure_kind": "heading" if heading else "caption",
+                        "line": n, "title": label[:200], "title_truncated": len(label) > 200,
+                        "locator": f"{parsed['text_path']}#L{start}-L{end}"})
+        if len(entries) > limit:
+            break
+    return {"schema": "source-outline-v1", "source_id": source_id, "parse_id": parsed["parse_id"],
+            "query": query, "start_line": start_line, "line_count": len(lines),
+            "candidates": entries[:limit], "next_start_line": entries[limit]["line"] if len(entries) > limit else None,
+            "limitations": ["Only explicit Markdown headings and numbered captions; literal label filtering, not semantic search.",
+                             "Locators contain the label's existing segment (or its line); tables, legends and sections may extend beyond it. Read relevant Raw to verify."],
+            "next": "read_raw"}
+
+
 def bundle_files(folder, source_hash):
     """Reuse a bound PDF/text bundle; never follow arbitrary parser file paths."""
     from inbox_finalize import manifest_file
@@ -407,6 +459,11 @@ def bundle_files(folder, source_hash):
             continue
         files[ref] = manifest_file(folder, ref, "image", nested=True)
     return files, sorted(set(missing))
+
+
+def image_resource_notice(count):
+    return (f"解析文字引用的 {count} 个独立图片资源未随包保存；可按原 PDF 图号（必要时页码/子图号）定位，"
+            "展示或视觉核对时按需提取；不影响正文检索，图像内容尚未据此核验。")
 
 
 def parse_source(repo, record, *, reuse_parse=None, allow_paddleocr=False):
@@ -482,7 +539,7 @@ def parse_source(repo, record, *, reuse_parse=None, allow_paddleocr=False):
                 shutil.rmtree(staging)
     limitations = ["全文文字层已建立定位；页覆盖、阅读顺序、公式与图表未作全面语义核验。"]
     if missing:
-        limitations.append(f"解析包缺少 {len(missing)} 个引用图片；正文可检索，图像须回原件核对，不视为完整图表解析。")
+        limitations.append(image_resource_notice(len(missing)))
     return {"parse_id": parse_id, "text_path": rel+"/paper.md", "text_sha256": hashes["paper.md"],
             "parser": spec, "limitations": limitations, "missing_assets": missing,
             "created_at": now(),
@@ -603,6 +660,13 @@ def resume(source_id, *, repo=REPO, reuse_parse=None, allow_paddleocr=False, ref
 def public_receipt(record):
     p = selected_parse(record)
     limitations = list(p.get("limitations", [])) if p else ["原件尚无可检索正文；接收状态以 source_status 为准。"]
+    if p and p.get("missing_assets"):
+        # Project the recorded inventory without rewriting historical receipts.
+        limitations = [note for note in limitations if not re.fullmatch(
+            r"解析包缺少 \d+ 个引用图片；正文可检索，图像须回原件核对，不视为完整图表解析。", note)]
+        notice = image_resource_notice(len(p["missing_assets"]))
+        if notice not in limitations:
+            limitations.append(notice)
     skipped = (record.get("index") or {}).get("skipped_long_lines", [])
     if skipped:
         limitations.append(f"索引未覆盖 {len(skipped)} 个超长行；行号见 index.skipped_long_lines，原件保留。")
@@ -673,6 +737,11 @@ def main(argv=None):
     p.add_argument("--topk", type=int, default=5)
     p = sub.add_parser("show")
     p.add_argument("source_id")
+    p = sub.add_parser("outline")
+    p.add_argument("source_id")
+    p.add_argument("--query", default="")
+    p.add_argument("--start-line", type=int, default=1)
+    p.add_argument("--limit", type=int, default=40)
     args = parser.parse_args(argv)
     if args.command == "ingest":
         if args.reuse_parse and len(args.files)!=1:
@@ -687,6 +756,8 @@ def main(argv=None):
                                 knowledge_required=False if args.knowledge == "none" else None)
             elif args.command == "search":
                 output = search(args.query, topk=args.topk)
+            elif args.command == "outline":
+                output = outline(args.source_id, query=args.query, start_line=args.start_line, limit=args.limit)
             else:
                 output = inspect_source(args.source_id)
         except (OSError, ValueError, KeyError, sqlite3.Error) as exc:

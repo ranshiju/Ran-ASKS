@@ -108,3 +108,19 @@ python3 .scripts/workspace_state.py profile '<path>' --refresh
 - 形成稳定决策或教训：写 memory；改变旧判断时使用 `supersedes`，不要覆盖历史。
 - 阶段结束：将事项转为 done 并写 outcome，运行 `doctor`。
 - 投影损坏或 schema 升级：从 Markdown 执行 `rebuild`；不得手工修补 SQLite 作为最终修复。
+
+## 分类目录与路径迁移
+
+`projects/<分类>/<工作区>` 与更深的子工作区使用相同接口。分类目录只提供文件导航，不自动初始化为工作区；已有 workspace 的 `parent` 仍指向最近的实际父工作区。
+
+目录迁移时记录原路径与文件哈希，按新路径更新 `workspace.yaml` 的 `id`、`parent` 和项目 schema，使用 `rebuild` 重建状态及索引，再运行 `doctor`。事项 ID、业务状态、历史审计事件与不可变版本保持原含义。
+
+若受管快照或旧命令仍包含旧项目根，可在本地 `projects/.path-migrations.json` 显式记录相对于 projects 的根路径映射：
+
+```json
+{"schema":"project-path-migrations-v1","moves":{"example":"research/example"}}
+```
+
+共享 `.scripts/project_paths.py` 仅在旧根缺失时解析该映射；旧根存在时优先旧根。配置缺失时沿用原路径。拒绝隐藏映射根、路径穿越、重叠或链式映射、目标缺失及符号链接；不搜索同名项目，不修改文件内容，调用方继续验证原始 SHA-256、schema 与权限边界。迁移配置属于用户工作实例，不进入公开发布；通用解析器与测试随源码发布。
+
+演示和展板入口支持嵌套工作区。读取已迁移展板预览时只归一化路径后比较，原 manifest、内容和绑定哈希仍须全部匹配，历史批准不会因搬动而新增。

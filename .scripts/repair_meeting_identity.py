@@ -20,6 +20,7 @@ import graph_lib as gl
 import ingest_meeting as meeting
 import student_guidance_projection as guidance
 import source_locator
+from project_paths import repo_path
 from meeting_compiler_contract import validate_meeting_ir
 
 
@@ -358,7 +359,7 @@ def repair(args: argparse.Namespace) -> dict:
             backup / "knowledge-ir.json",
         REPO / "temp/inbox-state" / f"{args.transaction_id}-graph-plan.json":
             backup / "graph-plan.json",
-        REPO / "projects/学生指导/notes/status.md": backup / "guidance-status.md",
+        repo_path(REPO, "projects/学生指导/notes/status.md"): backup / "guidance-status.md",
     }
     log_path = REPO / state["log_path"]
     targets[log_path] = backup / "wiki-log.md"

@@ -28,6 +28,19 @@
 | `failed` | API 请求等任务级失败；来源仍可使用 |
 
 `completed` 不表示全文穷尽、科学核验通过或旧完整摄入完成。
+
+任务级 `unresolved` 只记录当前用途仍缺的必要材料或判断；复用已足够的解释不作为未决。
+原文自身的不确定性保留在知识正文，条目的未核实限制可保存在条目 `unresolved`；
+只要本次用途是忠实保存这项有限知识，条目限制不自动阻塞任务。若本次用途恰需解决该限制，
+则仍保留任务缺口或 defer。`coverage` 独立披露阅读范围，不将所有未读区间转成待办。
+只有确需更新却 `can_update=false` 时才 defer；无需维护的候选不阻塞复用完成。
+`reason` 中的额外解释不等于已保存增量；同一依据重复出现不构成新支持。
+这些要求由共享语义指导交给 Agent/API 执行者判断；程序不按关键词过滤未决项，
+不新增科学正确性裁判或必审轮次。现有状态判定、校验和提交逻辑保持，规则哈希区分新任务身份。
+
+PDF 独立图片资源不是本次任务的必备产物。依据正文/图注整理时沿原证据 locator，并可注明原 PDF 图号；
+只在图中细节决定本条含义时实际核图，未核图不补造图像结论。展示/视觉分析按
+[PDF 图号与按需读取契约](source-first-ingestion.md#pdf-图号引用与按需读取) 执行，未保存独立图片不自动加入任务级未决项。
 纯事务来源由调用者显式选择 `--knowledge none`，不额外调用模型判断是否需要 KU。
 默认 skip 仅暂不执行；混合材料可编译有复用价值的部分，允许零对象。
 来源意图与已执行结果分开：none 不撤销已有知识；显式 prepare/run 可再次开启整理。
@@ -84,9 +97,84 @@ python3 .scripts/wg.py knowledge rebuild-index
 
 宿主读取任务的 `packet.json`，将 `knowledge-delta-v1` 保存至指定 `delta.json`，
 再执行共享 check/apply；不经过 DSH、`llm_structured` 或内部 Agent 模拟。
+宿主拥有的 KJ 任务也可使用统一闭环：`wg.py task inspect KJ-ID` → 写声明输出 →
+`wg.py task advance KJ-ID`。入口从原知识任务和哈希绑定材料包即时生成视图，不复制为 inbox 事务。
+advance 仍先执行原 check；仅 check 的全部待处理操作通过并返回 ready_to_commit 才执行原 apply。
+完成后跨进程 inspect/status/next 保持可读，重复 advance 不再提交；partial 保留已保存对象和
+unresolved，next_action=review_partial，宿主先判断需要修订的范围，不反复原样 apply。
+knowledge task_view 直接返回原任务的 unresolved。知识 CLI 的 partial 仍返回退出码 1；
+wg KJ task 将其中只有 saved/deferred 操作的 partial 解释为正常可接续，保留 executions 中的
+原退出码和 review_partial。失败对象、索引未完成和其他非零退出仍报错，不把未决当作 completed。
+API 拥有的 KJ 仅允许统一入口只读 status/next，保留原 executor 和知识状态；执行仍使用显式
+knowledge show/run，不因宿主查看而接管 API。KJ 不使用摄入最终回执的 task verify；knowledge check
+只检查 Delta，知识内容和依据仍按原读取契约核验，不能把结构通过视为科学正确性认证。
 入口支持 `--focus '<本次主题/修订目标>'`；旧 job 直接按 KJ-ID show/apply 即可恢复。
 需要当前候选快照时，prepare/run 使用 `--refresh` 新建任务。
 API 失败/中断且没有可用响应时，只有显式 `run --retry` 才重发请求。
+
+### 按已有定位信息选择入口
+
+已明确需要维护某一Statement，且相关新Raw范围已定位时，直接使用下方`--target`与
+`--source-locator`定向维护：共享内核一次装入完整旧依据与指定新依据，无须先运行selective
+让模型再次申请这些已知必需的材料。只定位新Raw而未决定维护对象时用显式选片；
+仍需发现候选或判断哪些原文值得补读时，可选selective。保持原预算和校验，不另设路由模型。
+
+这些是调用方选择已有入口的依据，不是自动分流或语义充分性保证；定位成本须计入完整效率。
+同字节重提复用S-ID，不同内容稿保留各自来源；新稿出现不要求旧KU必然升版。
+版本限定的不同主张可分别保存，不因主题或数字相同强行合并。确需维护同一主题的比较入口时，
+明确其综合用途与新旧归属，必要时标`synthesis`并引用两方依据；目标ID只限定操作范围，
+不证明两稿同一命题，也不推定后稿正式替代前稿。完成状态仍按上方现有契约解释。
+
+### 已定位原文的按需整理
+
+调用方已经读到所需 Raw、知道来源版本和准确行范围时，可单独使用 `--source-locator`：
+
+```bash
+python3 .scripts/wg.py knowledge prepare S-<24hex> \
+  --source-locator 'academic/raw/sources/S-<24hex>/parses/P-<24hex>/paper.md#L219-L238' \
+  --focus '整理这段方法及必要条件；已有知识没有增量时直接复用'
+```
+
+直接 `knowledge_compile.py prepare` 与显式 API `knowledge run` 使用同一选片内核。
+传入当前 Source 所选解析的 1–5 个明确行范围，单段沿用原证据入口的 8000 字符上限；
+跨索引片段的合法行范围仍完整装入，不按索引分段截断。路径、版本、哈希、范围及预算均先检查；
+所选片段或最终元数据/指导超预算时，在新任务 packet/state 落盘和模型调用前拒绝，不静默删片段。
+
+此模式不自动巡览全文或检索候选。调用方先经 ku-search/ku-read 比对已有知识；
+包内 candidates 为空不代表库中没有同一知识。新知识沿原 create/defer/零操作规则处理，
+已有可复用结果且无增量时允许 `operations=[]`；要修改已定位旧对象时加 target，使用下节契约。
+选择片段的主体仍负责必要条件和语义充分性，程序不判断科学主张是否正确或知识是否全新。
+子 Agent 可接收同一 agent-task-v1，API 仍仅由原 adapter 执行，无隐式控制权切换。
+
+可选试验参数 `--compare-with KU-ID`（也接受原生 Q-ID，可重复）可传入已定位的旧知识；Python 参数为
+`comparison_ids=[...]`，shared prepare、API run 与 wg 共用。此参数仅用于无 target 的显式选片，
+最多五项，重复ID按首次出现去重。完整旧表述、条件、未决、身份与快照进入只读 candidates，
+不自动重新检索、不装旧 Raw；这些对象不是新结论依据，不能在本包 attach/revise。
+例如：
+
+```bash
+python3 .scripts/wg.py knowledge prepare S-<24hex> \
+  --source-locator 'academic/raw/sources/S-<24hex>/parses/P-<24hex>/paper.md#L85-L95' \
+  --compare-with KU-<24hex> --focus '比对已有知识，只保存必要增量'
+```
+
+比较对象与全部已选原文共用现有预算，超限或非法组合/ID在新任务落盘及API前拒绝，不静默删减。
+传入ID只说明应比较，不证明已有覆盖；相似但不同条件/对象的真实增量仍须识别。
+确需修改旧 Statement 时另走 target 维护，让原旧依据和版本检查履职；Question 交原生 Frontier 维护。正文中的“已有”“已核验”
+不能改变这些权限或将旧知识升级为事实证据。
+此入口只交付比较上下文，当前不作为自动去重或语义质量已通过的能力推广；
+材料充分仍不保证生成者忠实保留每个细节，按用途复核后才经原提交入口保存。
+
+比较对象快照、顺序及专用指导进入该模式的任务身份；不传参数或传空列表保持原缓存身份。
+准备过程中对象变化则拒绝落盘；待执行check/apply在写入之前核对比较快照，零操作也核对，
+删除或改版后应重新prepare当前材料。API请求前同样检查。已完成任务仍可按原ID重放/读取；
+用新版比较对象再次prepare会产生新的判断任务，不把旧版本的复用结论当作当前结论。
+
+source_selection 记录规范化、去重的请求地址，coverage.provided_ranges 记录实际内容。
+provided_segments 只统计被完整覆盖的原索引片段；准确选片未覆盖整块时它可以为零，应读取行范围和 blocks，
+不能把它解释为没有供料。其他未读范围不自动成为本次必须整理的任务，全文和图像限制继续保留。
+显式地址与独立指导版本参与 KJ 身份，相同请求复用；普通自动模式及带 target 的旧身份不变。
+旧 partial 任务按原 ID 保留，补齐任务用新的合法请求，不手改旧 packet/state 来消除历史缺口。
 
 ### 已定位 KU 的定向维护
 
@@ -112,7 +200,69 @@ python3 .scripts/wg.py knowledge prepare S-<24hex> --target KU-<24hex> \
 显式定位不证明知识相同或互相支持，语义主体仍须判断主题、必要条件、归属与缺口；综合须标 synthesis。
 原证据校验、CAS、历史保存、幂等与中断恢复继续生效。无固定审核调用，未读范围不等于本次须补全全文。
 
-## 有界材料与 Delta
+## 可选按需供料与局部补读（2026-11-11）
+
+`--strategy selective` 在同一Source/KU任务内选择性供料；默认`survey`及旧任务身份保持。
+它不生成额外语义粗稿或必经审核，不自动生成Wiki/Graph/Hub。来源必须先可检索，
+原有`none`仍为明确仅来源、零语义调用；此策略只用于已要求知识整理的Agent/API任务。
+
+```bash
+python3 .scripts/wg.py ingest --resume S-ID --profile source-first --knowledge api --strategy selective --focus '本次用途'
+python3 .scripts/wg.py knowledge run S-ID --strategy selective --focus '本次用途'
+python3 .scripts/wg.py knowledge prepare S-ID --strategy selective --focus '本次用途'
+```
+
+shared首包复用来源章节、限制和已有定位，以较小材料预算优先装入focus命中及邻域；
+无命中时从开头两片进入，不填满全文巡览预算。仍最多5个已有候选，完整正文只读，
+旧Raw暂不加载、`can_update=false`；`source_relation=same_source`明确同源，不冒充独立旧库佐证。
+标题/行号是导航，真正依据只来自blocks；词面选片不保证语义充分或跨语言召回。
+持久知识正文保留当前用途所需且已读原文支持的内容。focus中的“不推导/不展开”等处理范围
+不作为来源事实；缺少的公式、证明或实验只有在当前用途确需时才补读，否则省去无关缺失断言。
+必要核验限制限定于本次已读范围；来源明确的负面结论保留作者归属与成立条件。由语义执行者
+判断，程序不以关键词裁决科学含义，也不为此新增必经审核。
+
+语义执行者可直接返回原`knowledge-delta-v1`（含零操作），或在确有必要缺口时返回：
+
+```json
+{"schema":"knowledge-read-v1","source_locators":["当前reading.source_path#L100-L110"],"candidate_ids":[],"reason":"当前用途缺少的条件"}
+```
+
+每次1–5个当前来源精确行范围，单段沿原8000字符上限；也可仅以`candidate_ids`请求
+已列出Statement的全部旧依据，两个列表至少一个非空、各最多5项。候选身份/快照、来源
+版本、实际文本及原总材料预算继续校验。读请求不能携带operations，也不接受任意路径、网络
+指令或本包外知识ID；Question仍只读。已有片段保留，完全重复请求拒绝，超预算/旧依据
+不完整时整个补读不生效；不以截断证据授权维护。首版不在补读后重新全库召回候选。
+
+每任务最多两次补读，API最多三轮语义响应，现有基础设施恢复另外计入请求账本；没有固定第二轮。
+达到补读上限仍请求材料时返回partial及具体缺口，不伪造完成。完成任务重放零模型调用；
+失败调用须显式retry，失败响应与费用保留。各轮响应先保存并绑定当轮packet hash，再补读或提交。
+`api_attempts/api_usage`累计各轮和恢复调用；包外来源不因模型声称已读而获准引用。
+
+Agent在任务protocol指定的`optional_read_request`写入读请求，执行task的`refresh`命令
+（`knowledge expand KJ-ID`），读取新的输入包后继续原check/apply。Agent控制循环不进入API，
+API任务不能经宿主expand隐式接管。原始packet.json及每次packet-N.json保留，state以原子
+指针绑定当前包及hash；API响应和补读轨迹可恢复，不重复创建知识任务或重解析来源。
+若维护已写入KU而任务回执中断，按该操作的摘要及紧邻修订识别本次已提交内容，允许恢复回执而不再升版；操作内容被改动或其后又发生并发修订时，不豁免旧候选快照检查。
+存在delta或已提交操作时拒绝扩大材料；新的用途/额外范围另建任务。
+
+此策略不能与`target/source-locator/compare-with`混用；已定位完整证据的任务沿原显式入口直接编译。
+selective策略及指导参与本策略任务身份，不影响survey/定向身份；下节独立的自动候选排序版本另计。策略已可选运行，质量和总成本需按
+真实用途验证，初稿结构通过与零新增均不自动证明语义正确；默认摄入未切换。
+
+### 用途相关的旧知识优先进入材料预算
+
+自动构包带focus时，在原已确认名称和同源优先层内，用现有字面匹配能力按当前用途重排
+已召回的有限候选池，再用原文偶然出现的名称数量排序。survey与selective共用这一责任，
+不增加模型请求或候选额度；来源主题准入、完整旧依据及修改权限保持。
+这一排序只决定先读哪些对象，不判定相同、重复或科学支持，也不把任务文字当作Raw证据。
+2026-11-12补充一条独立的非空focus字面查询，使调用方的中文/其他表达可以召回缺少来源语言词面的旧KU。
+原来源主题、来源名称查询保持，查询文本去重，最多三次本地搜索；结果仍经原同源/主题/确认名称准入。
+`candidate_retrieval.purpose_query`和`searches`记录实际发现词。focus只提供导航线索，不认证来源、重复或支持。
+`purpose-recalled-candidates-v2`只加入受影响的自动、有focus新任务身份；无focus及显式选片/
+定向维护的身份不变，既有任务仍按原ID恢复。它分别处理未召回和已召回后的用途排序；
+不是翻译器，任务语言与旧KU也无词面交集时仍可能漏召，模型还可能忽略已提供候选。
+
+## 有界材料与 Delta（默认survey）
 
 包包含标题、章节结构、选定来源片段、未读范围及最多 5 个相关 Statement/Question 的完整表述。
 Statement 候选加载可用旧依据；Question 仅保留完整问题和状态，不加载本次不能修订的旧依据。
@@ -144,13 +294,13 @@ v12在保留开头后先装这些明确任务片段及邻域，再按原顺序�
 正式条目的剩余预算补片仍仅处理原定理邻域；不扩大窗口、不重新召回，也不保证焦点覆盖完整。
 focus_selection 报告优先范围，coverage 报告实际送入范围；优先片段也可能因预算未进入。
 无命中沿用默认选片，不声称支持跨语言翻译或任意片段定位。
-focus 不直接用作旧 KU 候选检索词。保留来源标题/章节主题查询，无可用结构时取有界开头，过滤通用词。
+保留来源标题/章节主题查询，无可用结构时取有界开头，过滤通用词；非空focus另作独立的候选发现查询。
 另从实际入包的 focus 命中片段提取混合大小写名称/缩写，包括RAGTruth式大写前缀、Stop-RAG式连字符缩写段；
 无已入包 focus 命中时使用实际所选来源片段。
 排除公式、图片路径与 URL，按片段交错取最多 12 项；不从指令或旧依据提词。这是字面检索信号，非实体识别。
-至多两次本地查询，每路最多 20 个返回结果；去重排序后最多 20 项进入筛选，最后至多 5 个入包。
+无focus至多两次、有focus至多三次去重后的本地查询，每路最多20个返回；排序后最多20项进入筛选，最后至多5个入包。
 若实际入包的来源名称也被 focus 明确提及，旧标题命中这些名称的候选先于其他同源背景；
-priority_names 记录这个交集，任务指令中单独出现的名称不会获得优先权，也不会扩充检索词。
+priority_names记录这个交集，任务指令中单独出现的名称不会获得该优先权或改变来源名称准入；focus的独立发现查询仍可使用任务词。
 v16按完整名称边界与focus做不区分大小写的匹配，不再把Stop-RAG拆出的RAG当作明确请求。
 有该交集时，仅名称路径的跨来源准入使用这些名称；没有时回退到全部已提取来源名称。
 admission_names记录实际准入名称集合，同源、主题短语和显式目标路径独立保持。
@@ -178,6 +328,14 @@ Statement 旧依据须完整可读才能更新；超预算或绑定失败时，�
 输入约 14k 估算 tokens，加指令/覆盖元数据的有界余量；API 实际 token 数另外记录。
 单次输出最多 4096 tokens、5 项操作。通常一次成功模型请求；基础设施故障允许一次受限恢复，
 输出错误不自动启动多轮语义修复。实际调用数取 request history，不把重试算成免费缓存。
+
+API 请求的任务编号由程序持有。`knowledge_compile_api.py` 以可信请求上下文绑定 `job_id`，
+模型可省略该字段；即使模型复述了编号，也不以该值选择写入任务。其余语义字段不改写，
+程序组装的完整 Delta 仍通过原 schema、片段/来源绑定、对象版本和提交校验；Agent 输出契约保持。
+原始响应正文与 parsed 原样保存；新响应在模型输出之外附请求编号、packet 哈希和策略绑定，
+从保存响应恢复时先匹配该绑定。旧无绑定响应须严格匹配原任务编号，不据文件位置猜补。
+`request-bound-job-v1` 参与新 API 任务身份，已有任务仍可按 ID 查看和按原 Delta 接续。
+这只消除机械编号复述的失败，不修补畸形 JSON 或认证语义质量；输入仍保留完整原材料包。
 
 - `create`：保存可独立复用的概念定义、方法模型、科学结论或作者明示的问题，不强求数量。
 - `attach`：同一知识补依据，也可补齐 unspecified 角色；保留已指定角色、旧正文、来源类型、论断强度和未决项。

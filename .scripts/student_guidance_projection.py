@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
+from project_paths import repo_path
 
 
 PROTOCOL_VERSION = "student-guidance-projection-v1"
@@ -36,7 +37,7 @@ def _repo_relative(path: Path, repo: Path) -> str:
 
 
 def discover_student_records(repo: Path) -> dict:
-    students_dir = repo / "projects" / "学生指导" / "students"
+    students_dir = repo_path(repo, "projects/学生指导/students")
     students = []
     if students_dir.is_dir():
         for record in sorted(students_dir.glob("*.md"), key=lambda item: item.name):
@@ -241,7 +242,7 @@ def apply_projection(state: dict, repo: Path) -> tuple[bool, str]:
     wiki_path = repo / wiki_relative
     if not wiki_path.is_file():
         return False, f"会议 Wiki 尚未落位: {wiki_relative}"
-    status_path = repo / "projects" / "学生指导" / "notes" / "status.md"
+    status_path = repo_path(repo, "projects/学生指导/notes/status.md")
     if not status_path.is_file():
         return False, "学生指导总览不存在"
     meeting_id = str(state.get("meeting_id") or "")
@@ -258,8 +259,8 @@ def apply_projection(state: dict, repo: Path) -> tuple[bool, str]:
     try:
         for student_key, student_updates in grouped.items():
             candidate = by_key[student_key]
-            record_path = repo / candidate["record"]
-            students_root = (repo / "projects" / "学生指导" / "students").resolve()
+            record_path = repo_path(repo, candidate["record"])
+            students_root = repo_path(repo, "projects/学生指导/students").resolve()
             if not record_path.is_file() or students_root not in record_path.resolve().parents:
                 raise ValueError(f"学生记录路径无效: {candidate['record']}")
             original = record_path.read_text(encoding="utf-8")

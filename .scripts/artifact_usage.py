@@ -12,7 +12,7 @@ USAGE_INSTRUCTIONS = {
 _ROLES = {name: "navigation" for name in (
     "graph_search", "graph_neighbors", "graph_relations", "graph_hub_of", "node_resolve",
     "semantic_search", "hub_route", "hub_inspect", "read_section", "wiki_context", "admin_recall",
-    "wiki_recall", "hybrid_recall", "source_search", "knowledge_search",
+    "wiki_recall", "hybrid_recall", "source_search", "source_outline", "knowledge_search",
     "lookup", "neighbors", "relations", "hub_of", "resolve", "abbr", "recall",
 )}
 _ROLES.update(read_raw="source_material", knowledge_read="knowledge", ku_read="knowledge",

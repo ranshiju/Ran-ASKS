@@ -50,9 +50,9 @@ def prefer_readable_format(paths: list[Path]) -> list[Path]:
 
 def diagnosis_root(target: Path) -> Path:
     for candidate in (target, *target.parents):
-        if candidate.name == "稿件诊断" and candidate.parent.name == "projects":
+        if candidate.name == "稿件诊断" and any(parent.name == "projects" for parent in candidate.parents):
             return candidate
-    raise ValueError("target must be inside a projects/稿件诊断 directory")
+    raise ValueError("target must be inside a projects/学术服务与个人事务/稿件诊断 directory")
 
 
 def relative(path: Path, base: Path) -> str:
@@ -104,7 +104,7 @@ def preflight(target_arg: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("target", help="manuscript-diagnosis subfolder under projects/稿件诊断")
+    parser.add_argument("target", help="manuscript-diagnosis subfolder under projects/学术服务与个人事务/稿件诊断")
     args = parser.parse_args()
     try:
         payload = preflight(args.target)

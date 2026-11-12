@@ -767,21 +767,31 @@ def test_task_specific_execution_guidance_is_dispatched():
 
 def test_manuscript_evaluation_dispatch_is_focused_and_discoverable():
     listing = run("python3", ".scripts/route.py", "--list").stdout
-    assert "manuscript-evaluation: academic.manuscript_evaluation profiles=general" in listing
-    output = run("python3", ".scripts/route.py", "--capability", "manuscript-evaluation").stdout
-    path = "operations/research/manuscript-evaluation.md"
-    assert output.count(f"--- {path} (全文) ---") == 1
-    assert (REPO / path).read_text().strip() in output
-    # Evaluation dispatch must not silently start rewriting or an API review.
-    for unrelated in ("operations/WRITE.md", "operations/REVIEW.md",
-                      "operations/research/physics-manuscript-editing.md"):
-        assert f"--- {unrelated}" not in output
-    invalid = subprocess.run(
-        ["python3", ".scripts/route.py", "--capability", "manuscript-evaluation",
-         "--capability-profile", "academic-abstract"],
-        cwd=REPO, capture_output=True, text=True,
-    )
-    assert invalid.returncode != 0
+    for suffix in ("evaluation", "question", "title", "motivation", "introduction"):
+        capability = f"manuscript-{suffix}"
+        assert f"{capability}: academic.manuscript_{suffix} profiles=general" in listing
+        output = run("python3", ".scripts/route.py", "--capability", capability).stdout
+        path = f"operations/research/{capability}.md"
+        assert output.count(f"--- {path} (全文) ---") == 1
+        assert (REPO / path).read_text().strip() in output
+        # Drafting capabilities compose shared writing sections, not a full rewrite or API review.
+        for unrelated in ("operations/REVIEW.md",
+                          "operations/research/physics-manuscript-editing.md"):
+            assert f"--- {unrelated}" not in output
+        if suffix in ("title", "motivation", "introduction"):
+            for section in ("总体原则", "共享落笔约定", "事实与主张控制"):
+                assert has_routed_locator(output, "operations/WRITE.md", section)
+            assert "--- operations/research/manuscript-improvement.md" not in output
+        else:
+            assert "--- operations/WRITE.md" not in output
+        if suffix in ("question", "title", "motivation", "introduction"):
+            assert "--- operations/research/manuscript-evaluation.md" not in output
+        invalid = subprocess.run(
+            ["python3", ".scripts/route.py", "--capability", capability,
+             "--capability-profile", "academic-abstract"],
+            cwd=REPO, capture_output=True, text=True,
+        )
+        assert invalid.returncode != 0
 
 
 def test_state_capability_tool_dispatch_is_explicit():
@@ -1197,9 +1207,8 @@ def test_use_task_execution_discipline():
     assert backend_gate not in build
     assert "[WikiGraph build 方法]" in build
     agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
-    assert "对用户目标负责，保持独立判断" in agents
-    assert "给出真实、专业的建议" in agents
-    assert "对用户目标负责，保持独立判断" not in build
+    assert "依据事实和目标独立判断，不刻意迎合用户。" in agents
+    assert "依据事实和目标独立判断，不刻意迎合用户。" in build
     assert "Raw 为事实层" in build
     assert "Wiki 为面向理解且桥接 Raw 的语义层" in build
     assert "graph.db 为发现与到达所需的关键导航边" in build

@@ -20,6 +20,7 @@ import citing_papers as discovery
 import source_ingest as si
 import source_locator as sl
 from external_bibliography import doi, normalized
+from project_paths import repo_path
 
 REPO = Path(__file__).resolve().parent.parent
 SCHEMA = "paper-impact-v1"
@@ -50,13 +51,18 @@ def read_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def folder(repo, project):
+def project_file(repo, project, filename=""):
     need(bool(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", project)), "invalid paper-impact project ID")
-    return si.managed(repo, f"projects/paper-impact/{project}")
+    target = repo_path(repo, f"projects/paper-impact/{project}") / filename
+    return si.managed(repo, target.relative_to(Path(repo).absolute()))
+
+
+def folder(repo, project):
+    return project_file(repo, project)
 
 
 def load(repo, project):
-    data = read_json(si.managed(repo, f"projects/paper-impact/{project}/state.json"))
+    data = read_json(project_file(repo, project, "state.json"))
     need(data.get("schema") == SCHEMA and data.get("id") == project, "invalid project state")
     return data
 
@@ -65,7 +71,7 @@ def load(repo, project):
 def locked(repo, project):
     root = folder(repo, project)
     root.mkdir(parents=True, exist_ok=True)
-    lock = si.managed(repo, f"projects/paper-impact/{project}/.lock")
+    lock = project_file(repo, project, ".lock")
     with lock.open("a") as stream:
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -82,14 +88,14 @@ def save(repo, state):
     state["updated_at"] = discovery.now()
     need(len(json.dumps(state, ensure_ascii=False, indent=2).encode()) + 1 <= MAX_JSON,
          "project snapshot exceeds size limit; retain existing project and start a separate collection")
-    si.atomic_json(si.managed(repo, f"projects/paper-impact/{state['id']}/state.json"), state)
+    si.atomic_json(project_file(repo, state['id'], "state.json"), state)
 
 
 def initialize(repo, project, target_doi="", title=""):
     target_doi = doi(target_doi) if target_doi else ""
     need(target_doi or title.strip(), "a valid DOI or exact title is required")
     with locked(repo, project):
-        path = si.managed(repo, f"projects/paper-impact/{project}/state.json")
+        path = project_file(repo, project, "state.json")
         need(not path.exists(), "project already exists")
         state = {"schema": SCHEMA, "id": project, "revision": 0, "created_at": discovery.now(),
                  "target": {"doi": target_doi, "title": title.strip()}, "batches": [], "candidates": {},

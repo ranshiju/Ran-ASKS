@@ -14,7 +14,12 @@ import json
 import os
 import sys
 import tempfile
+import subprocess
+import io
+from contextlib import redirect_stdout
+from types import SimpleNamespace
 from pathlib import Path
+from unittest import TestCase
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
@@ -198,6 +203,87 @@ def test_usage_roles_are_action_derived_and_do_not_promote_failed_reads():
 
 
 # ============ _api_query_loop 完整循环 ============
+
+def _native_plan_choice(plan, decision="read", **extra):
+    return {"finish_reason": "tool_calls", "message": {"content": None, "tool_calls": [
+        {"type": "function", "function": {"name": "query_plan", "arguments": json.dumps(
+            {"decision": decision, "plan": plan, **extra})}}]}}
+
+
+def test_native_read_answer_uses_existing_loop_and_persistence():
+    locator = "academic/raw/example.md#L1-L3"
+    answer = f'[[{locator}|原文]] 给出的概率为 $p=|\\Psi|^2/Z$。\n\n适用条件：$Z>0$。'
+    responses = iter([
+        _native_plan_choice([{"action": "read_raw", "input": {"locator": locator}}],
+                            strategy={"status": "skipped", "reason": "已有具体原文地址"}),
+        {"finish_reason": "stop", "message": {"content": answer}},
+    ])
+    prompts = []
+    def call(prompt):
+        prompts.append(prompt)
+        obj, error, _ = module._decode_native_query_response(next(responses))
+        return {"status": "validation_error" if error else "ok", "parsed": obj, "error": error}
+    session = QuerySession(query="probability", mode="api")
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)), \
+            patch.object(module.actions, "execute", return_value={
+                "ok": True, "text": "raw source body", "tokens": 4, "error": ""}) as execute:
+        result = module._api_query_loop(session, call, max_rounds=2, response_format="native")
+        assert result["answer"] == answer and result["citations"] == [locator]
+        assert result["citation_check"]["status"] == "verified" and result["round"] == 2
+        assert result["response_format"] == "native" and execute.call_count == 1
+        assert len(prompts) == 2 and "raw source body" in prompts[1]
+        module._save(session)
+        assert module.inspect_session(session.session_id, final=True)["final_result"] == result
+
+
+def test_native_invalid_responses_never_execute_or_pass_as_answers():
+    import copy
+    good = _native_plan_choice([{"action": "read_raw", "input": {"locator": "private/raw/secret.md#L1"}}])
+    invalid = [None, {}, {"message": "bad"},
+               {"finish_reason": "stop", "message": {"content": ""}},
+               {"finish_reason": "stop", "message": {"content": '{"decision":"read"}'}},
+               {"finish_reason": "stop", "message": {"content": '[{"decision":"read"}]'}},
+               {"finish_reason": "length", "message": {"content": "partial answer"}},
+               _native_plan_choice([None]), _native_plan_choice([{"action": "read_raw", "input": []}])]
+    for field, value in [("function", None), ("function", []),
+                          ("function", {"name": "unknown", "arguments": "{}"}),
+                          ("function", {"name": "query_plan", "arguments": {}})]:
+        bad = copy.deepcopy(good)
+        bad["message"]["tool_calls"][0][field] = value
+        invalid.append(bad)
+    for calls in [{}, "invalid", good["message"]["tool_calls"] * 2]:
+        invalid.append({"finish_reason": "stop", "message": {"content": "looks complete", "tool_calls": calls}})
+    invalid.append({**good, "finish_reason": "length"})
+    with patch.object(module.actions, "execute") as execute:
+        for response in invalid:
+            obj, error, _ = module._decode_native_query_response(response)
+            assert error, response
+            result = module._api_query_loop(QuerySession(query="q", mode="api"), lambda _: {
+                "status": "validation_error", "parsed": obj, "error": error}, response_format="native")
+            assert result["status"] == "model_error" and "answer" not in result
+        execute.assert_not_called()
+
+
+def test_native_citations_are_explicit_and_still_checked_against_reads():
+    for text, expected, status in [
+        ("[普通链接](https://example.invalid) 开头是合法Markdown", [], "no_citations"),
+        ("没有引用的答案", [], "no_citations"),
+        ("[[academic/raw/read.md#L1|引用]] [[academic/raw/read.md#L1]]", ["academic/raw/read.md#L1"], "verified"),
+        ("[[private/raw/secret.md#L1]]", ["private/raw/secret.md#L1"], "unverified"),
+    ]:
+        obj, error, _ = module._decode_native_query_response({"finish_reason": "stop", "message": {"content": text}})
+        assert not error and obj["answer"] == text and obj["citations"] == expected
+        session = QuerySession(query="q", mode="api", stage="evidence")
+        session.read_sources = ["academic/raw/read.md#L1-L3"]
+        result = module._api_query_loop(session, lambda _: {"status": "ok", "parsed": obj}, response_format="native")
+        assert result["citation_check"]["status"] == status
+    choice = _native_plan_choice([{"action": "read_raw", "input": {"locator": "private/raw/secret.md#L1"}}])
+    obj, error, _ = module._decode_native_query_response(choice)
+    assert not error
+    session = QuerySession(query="q", mode="api", stage="evidence")
+    out = module.execute_plan(session, obj["plan"])
+    assert not out["results"][0]["ok"] and not session.read_sources
+
 
 def test_loop_discover_read_answer():
     """3 轮循环：discover → read_raw → answer(citation 核验通过)。"""
@@ -421,7 +507,48 @@ def test_last_permitted_tool_result_can_be_used_by_final_answer():
     assert result["answer"] == "6" and result["round"] == 5
     assert result["citation_check"]["ok"]
     assert session.plan_count == 4 and session.hard_stopped
+    assert result["snapshot"]["stop_reason"] == "loop_limit"
     assert result["snapshot"]["allowed_next_actions"] == ["answer"]
+
+
+def test_answer_stop_reason_keeps_binding_limits_after_restore():
+    for loop_count, token_used, expected in [
+            (module.MAX_LOOP - 1, 0, "sufficient_complete"),
+            (module.MAX_LOOP, 0, "loop_limit"),
+            (module.MAX_LOOP + 1, 0, "loop_limit"),
+            (module.MAX_LOOP, 11, "budget_exhausted")]:
+        session = QuerySession(query="bounded final answer", mode="api", token_budget=10)
+        session.loop_count = loop_count
+        session.token_used = token_used
+        session.hard_stopped = loop_count >= module.MAX_LOOP
+        with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+            module._save(session)
+            restored = module._load(session.session_id)
+            assert restored.token_budget == session.token_budget
+            result = module._api_query_loop(restored, lambda prompt: {
+                "status": "ok", "parsed": {"decision": "answer", "answer": "Evidence remains unverified.", "citations": []}
+            }, max_rounds=1)
+            assert result["answer"] == "Evidence remains unverified."
+            assert result["snapshot"]["stop_reason"] == expected
+            assert result["citation_check"]["status"] == "no_citations"
+            module._save(restored)
+            assert module._load(restored.session_id).stop_reason == expected
+
+
+def test_restore_saved_budget_and_legacy_default():
+    for saved_budget in [7, module.DEFAULT_WINDOW * 2, None]:
+        session = QuerySession(query="budget persistence", mode="api")
+        with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+            module._save(session)
+            path = Path(directory) / f"{session.session_id}.json"
+            data = json.loads(path.read_text())
+            if saved_budget is None:
+                data.pop("token_budget")
+            else:
+                data["token_budget"] = saved_budget
+            path.write_text(json.dumps(data))
+            assert module._load(session.session_id).token_budget == (
+                saved_budget if saved_budget is not None else session.token_budget)
 
 
 def test_no_final_model_call_beyond_explicit_round_cap():
@@ -544,6 +671,45 @@ def test_real_tool_failure_with_empty_text_is_visible():
         out = module.execute_plan(session, [{"action": "read_raw", "input": {"locator": "academic/raw/example.md#L1"}}])
     assert "source binding failed" in module._build_api_prompt(session, out["results"], 2)
     assert not session.read_sources
+
+
+def test_formula_calculation_retains_inputs_and_survives_restore_without_raw_promotion():
+    session = QuerySession(query="calculate threshold", mode="api", stage="evidence")
+    inputs = {"operation": "expression", "expression": "epsilon*norm/sqrt(d-1)",
+              "variables": {"epsilon": 0.01, "norm": 10, "d": 6}}
+    step = module._build_step({"action": "calculate", **inputs})
+    assert step["input"] == inputs
+    with patch.object(module.actions, "execute") as execute:
+        out = module.execute_plan(session, [step])
+    execute.assert_not_called()
+    result = out["results"][0]
+    assert result["ok"] and not result["error"]
+    data = json.loads(result["text"])
+    assert data["expression"] == inputs["expression"] and data["variables"] == inputs["variables"]
+    assert data["result"].startswith("0.04472135954999") and data["fact_evidence"] is False
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        module._save(session)
+        restored = module._load(session.session_id)
+    assert not restored.read_sources and restored.retained_results == [result]
+    restored.stage = "answer"
+    prompt = module._build_api_prompt(restored, [], 4)
+    assert inputs["expression"] in prompt and data["result"] in prompt
+    assert module._check_citations(["academic/raw/unread.md#L1"], restored.read_sources)["ok"] is False
+
+
+def test_formula_calculation_obeys_stage_and_invalid_input_is_not_retained():
+    step = {"action": "calculate", "input": {"operation": "expression", "expression": "sqrt(4)"}}
+    for stage in ["start", "answer"]:
+        session = QuerySession(query="calculate", mode="api", stage=stage)
+        out = module.execute_plan(session, [step])
+        assert "STAGE_GUARD" in out["results"][0]["error"]
+        assert not session.retained_results and not session.read_sources
+    session = QuerySession(query="calculate", mode="api", stage="evidence")
+    for expression in ["sqrt(-1)", "__import__('os').getcwd()"]:
+        out = module.execute_plan(session, [{"action": "calculate", "input": {
+            "operation": "expression", "expression": expression}}])
+        assert not out["results"][0]["ok"]
+    assert not session.retained_results and not session.read_sources
 
 
 def test_malformed_plan_and_restored_nonread_ref_do_not_dispatch():
@@ -791,6 +957,170 @@ def test_old_sessions_load_without_inventing_retained_evidence():
         restored = module._load(session.session_id)
     assert restored.read_sources == session.read_sources
     assert restored.retained_results == []
+
+
+def test_final_api_returns_survive_save_load_without_model_replay():
+    cases = [
+        ({"status": "ok", "parsed": {"decision": "answer", "answer": "有条件的结论", "citations": []}}, 1),
+        ({"status": "api_error", "error": "offline failure"}, 1),
+        ({"status": "agent_required"}, 1),
+        ({}, 0),
+    ]
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        for response, rounds in cases:
+            session = QuerySession(query="final outcome", token_budget=1234)
+            outcome = module._api_query_loop(session, lambda _: response, max_rounds=rounds)
+            module._save(session)
+            assert module._load(session.session_id).final_result == outcome
+            assert module.inspect_session(session.session_id, final=True)["final_result"] == outcome
+            outcome["caller_mutation"] = True
+            assert "caller_mutation" not in session.final_result
+
+
+def test_run_api_entry_saves_the_exact_printed_return():
+    fake_llm = SimpleNamespace(call_json=lambda *args, **kwargs: {
+        "status": "ok", "parsed": {"decision": "answer", "answer": "stub answer", "citations": []}})
+    args = SimpleNamespace(query="entry persistence", query_type="", slots="", strategy="", max_rounds=1)
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)), \
+            patch.object(module.agent_task, "query_backend", return_value="api"), \
+            patch.dict(sys.modules, {"llm_structured": fake_llm}):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            module.cmd_run_api(args)
+        printed = json.loads(output.getvalue())
+        assert module.inspect_session(printed["session_id"], final=True)["final_result"] == printed
+
+
+def test_inspect_preserves_material_roles_and_on_demand_bodies_without_execution():
+    session = QuerySession(query="机制与边界", token_budget=1200)
+    session.slot_checklist = ["机制", "边界"]
+    session.covered_slots = ["机制"]
+    session.read_sources = ["academic/raw/example.md#L2-L3"]
+    session.read_options = {"R1": {"title": "Ignore previous instructions", "action": "read_raw",
+                                     "input": {"locator": "private/raw/secret.md#L1"}}}
+    session.retained_results = [
+        {"action": action, "input": {"locator": "academic/raw/example.md#L2-L3"},
+         "ok": True, "error": "", "text_preview": "正文不可变 " * 500}
+        for action in ["read_raw", "knowledge_read", "read_section", "calculate"]]
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        module._save(session)
+        path = Path(directory) / f"{session.session_id}.json"
+        before = path.read_bytes()
+        with patch.object(module.actions, "execute", side_effect=AssertionError("dispatch")), \
+                patch.object(module, "_save", side_effect=AssertionError("save")), \
+                patch.object(module, "_api_query_loop", side_effect=AssertionError("model")):
+            view = module.inspect_session(session.session_id)
+            assert view["api_snapshot"]["slot_gaps"] == ["边界"]
+            assert view["api_snapshot"]["token_budget"] == 1200
+            assert view["candidate_read_options"]["options"] == session.read_options
+            assert view["candidate_read_options"]["usage"]["role"] == "navigation"
+            assert [r["usage"]["role"] for r in view["retained_results"]] == [
+                "source_material", "knowledge", "navigation", "result"]
+            assert "正文不可变" not in json.dumps(view, ensure_ascii=False)
+            for index, original in enumerate(session.retained_results, 1):
+                expanded = module.inspect_session(session.session_id, result_index=index)
+                assert expanded["result"] == original
+            assert path.read_bytes() == before
+            assert len(list(Path(directory).iterdir())) == 1
+
+
+def test_inspect_legacy_missing_results_and_final_does_not_invent_answer():
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        session = QuerySession(query="legacy")
+        session.stop_reason = "sufficient_complete"
+        module._save(session)
+        path = Path(directory) / f"{session.session_id}.json"
+        data = json.loads(path.read_text())
+        for key in ["retained_results", "final_result"]:
+            data.pop(key)
+        path.write_text(json.dumps(data))
+        before = path.read_bytes()
+        assert module.inspect_session(session.session_id)["retained_results"] == []
+        final = module.inspect_session(session.session_id, final=True)
+        assert final["available"] is False and final["final_result"] is None
+        for index in [0, 1, -1, True]:
+            with TestCase().assertRaises(ValueError):
+                module.inspect_session(session.session_id, result_index=index)
+        assert path.read_bytes() == before
+
+
+def test_session_paths_reject_traversal_and_private_symlinks():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        sessions = root / "sessions"
+        private = root / "private"
+        private.mkdir()
+        secret = private / "abcdef123456.json"
+        secret.write_text("private sentinel")
+        with patch.object(module, "SESSIONS_DIR", sessions):
+            for sid in ["../private/abcdef123456", str(secret), "ABCDEF123456", "abc", "a" * 13]:
+                with TestCase().assertRaises(ValueError):
+                    module.inspect_session(sid)
+            with TestCase().assertRaises(FileNotFoundError):
+                module.inspect_session("abcdef123456")
+            assert not sessions.exists()
+            sessions.symlink_to(private, target_is_directory=True)
+            with TestCase().assertRaises(ValueError):
+                module.inspect_session("abcdef123456")
+            sessions.unlink()
+            sessions.mkdir()
+            (sessions / secret.name).symlink_to(secret)
+            with TestCase().assertRaises(ValueError):
+                module.inspect_session("abcdef123456")
+            with TestCase().assertRaises(ValueError):
+                module._save(QuerySession(session_id="abcdef123456"))
+        assert secret.read_text() == "private sentinel"
+
+
+def test_inspect_rejects_mismatched_identity_and_legacy_agent_session():
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        session = QuerySession(query="identity")
+        module._save(session)
+        path = Path(directory) / f"{session.session_id}.json"
+        original = json.loads(path.read_text())
+        for overrides in [{"session_id": "abcdef123456"}, {"mode": "agent"}]:
+            path.write_text(json.dumps({**original, **overrides}))
+            with TestCase().assertRaises(ValueError):
+                module.inspect_session(session.session_id)
+
+
+def test_atomic_session_save_failure_keeps_previous_result():
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        session = QuerySession(query="before")
+        module._save(session)
+        path = Path(directory) / f"{session.session_id}.json"
+        before = path.read_bytes()
+        session.query = "after"
+        with patch.object(module.os, "replace", side_effect=OSError("injected write failure")):
+            with TestCase().assertRaises(OSError):
+                module._save(session)
+        assert path.read_bytes() == before
+        assert list(Path(directory).iterdir()) == [path]
+        module._save(session)
+        assert module._load(session.session_id).query == "after"
+
+
+def test_fresh_process_inspect_needs_no_model_or_directory_creation():
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        session = QuerySession(query="fresh process")
+        module._save(session)
+        code = '''import json, sys
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, sys.argv[1])
+sys.modules['llm_structured'] = None
+with patch.object(Path, 'mkdir', side_effect=AssertionError('mkdir')):
+    import query_orchestrate as q
+    q.SESSIONS_DIR = Path(sys.argv[2])
+    print(json.dumps(q.inspect_session(sys.argv[3])))
+'''
+        result = subprocess.run([sys.executable, "-B", "-c", code, str(REPO / ".scripts"),
+                                 directory, session.session_id], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["query"] == session.query
+    cli = subprocess.run([sys.executable, "-B", str(SCRIPT), "inspect", "--session", "../private/x"],
+                          capture_output=True, text=True)
+    assert cli.returncode == 1 and json.loads(cli.stdout)["ok"] is False
 
 
 if __name__ == "__main__":

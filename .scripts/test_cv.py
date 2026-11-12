@@ -242,7 +242,7 @@ def test_render_collision_history_and_diff(workspace: Path, source: Path, data: 
 
 
 def test_current_workspace_renders_all_selected_records() -> None:
-    workspace = REPO / "projects" / "简历维护"
+    workspace = REPO / "projects" / "学术服务与个人事务" / "简历维护"
     if not (workspace / "cv-records.yaml").is_file():
         return
     _, source, data = module.load_workspace("简历维护")

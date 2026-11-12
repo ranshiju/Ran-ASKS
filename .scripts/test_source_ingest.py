@@ -59,6 +59,83 @@ class SourceIngestTests(unittest.TestCase):
         self.assertFalse((self.root / "cross-domain/graph.db").exists())
         self.assertFalse((self.root / "academic/wiki").exists())
 
+    def test_outline_locates_deep_table_without_knowledge_or_index_and_never_writes(self):
+        self.source.write_text("# Experiment\n" + "Unrelated paragraph.\n" * 80 +
+                               "## Wall clock time\n<table><tr><td>1.57s</td></tr></table>\n\nTable 10: timing setup\n")
+        ready = self.ingest()
+        si.index_path(self.root).unlink()
+        before = {p: p.read_bytes() for p in (self.root / "academic").rglob("*") if p.is_file()}
+        result = qa.execute("source_outline", {"source_id": ready["source_id"], "query": "table 10"})
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["usage"]["role"], "navigation")
+        hits = json.loads(result["text"])["candidates"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["title"], "Table 10: timing setup")
+        read = qa.execute("read_raw", {"locator": hits[0]["locator"]})
+        self.assertTrue(read["ok"], read)
+        self.assertIn("1.57s", read["text"])
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.root / "academic").rglob("*") if p.is_file()})
+
+    def test_outline_paginates_literal_structure_ignores_fences_and_does_not_invent_matches(self):
+        self.source.write_text("# Start\nOrdinary Table 5 mention\n```md\n# Forged\nTable 5: code sample\n```\n"
+                               "## Results\nTable 5: values\nFigure 2: plot\n图3：说明\n")
+        sid = self.ingest()["source_id"]
+        first = si.outline(sid, repo=self.root, limit=2)
+        second = si.outline(sid, repo=self.root, limit=2, start_line=first["next_start_line"])
+        third = si.outline(sid, repo=self.root, start_line=second["next_start_line"])
+        titles = [c["title"] for page in [first, second, third] for c in page["candidates"]]
+        self.assertEqual(titles, ["Start", "Results", "Table 5: values", "Figure 2: plot", "图3：说明"])
+        self.assertIsNone(third["next_start_line"])
+        self.assertEqual(si.outline(sid, repo=self.root, query="Table 5")["candidates"][0]["line"], 8)
+        self.assertFalse(si.outline(sid, repo=self.root, query="missing table")["candidates"])
+        self.assertFalse(si.outline(sid, repo=self.root, start_line=1000)["candidates"])
+        for kwargs in [{"start_line": 0}, {"limit": 0}, {"limit": 81}]:
+            with self.assertRaises(ValueError): si.outline(sid, repo=self.root, **kwargs)
+
+    def test_outline_requires_bound_source_and_rejects_private_and_tampered_carriers(self):
+        ready = self.ingest()
+        inputs = {"source_id": ready["source_id"]}
+        self.assertFalse(qa.execute("source_outline", inputs, subproject="private")["ok"])
+        self.assertFalse(qa.execute("source_outline", {"source_id": "../../private/file"})["ok"])
+        carrier = self.root / ready["parse_path"]
+        carrier.write_text("# Altered\n")
+        self.assertFalse(qa.execute("source_outline", inputs)["ok"])
+        carrier.unlink(); carrier.symlink_to(self.source)
+        self.assertFalse(qa.execute("source_outline", inputs)["ok"])
+
+    def test_outline_api_handles_are_navigation_until_guarded_raw_read(self):
+        self.source.write_text("# Experiment\nTable 10: measured timing\nResult = 1.57s.\n")
+        ready = self.ingest()
+        session = qo.QuerySession(query="Table 10", mode="api")
+        out = qo.execute_plan(session, [{"action": "source_outline", "input": {
+            "source_id": ready["source_id"], "query": "Table 10"}}])
+        self.assertTrue(out["results"][0]["ok"], out)
+        self.assertFalse(session.read_sources)
+        self.assertFalse(session.retained_results)
+        self.assertEqual(len(session.read_options), 1)
+        session.stage = "evidence"
+        out = qo.execute_plan(session, [{"action": "read_ref", "input": {"ref": next(iter(session.read_options))}}])
+        self.assertTrue(out["results"][0]["ok"], out)
+        self.assertIn("1.57s", session.retained_results[0]["text"])
+        self.assertTrue(session.read_sources)
+        session.stage = "answer"
+        out = qo.execute_plan(session, [{"action": "source_outline", "input": {"source_id": ready["source_id"]}}])
+        self.assertFalse(out["results"][0]["ok"])
+
+    def test_outline_cli_and_dsh_use_same_source_bound_navigation(self):
+        from dsh.tools import build_tools
+        ready = self.ingest()
+        args = wg.build_parser().parse_args(["source-outline", ready["source_id"], "--query", "Tensor"])
+        output = io.StringIO()
+        with redirect_stdout(output): args.func(args)
+        cli = json.loads(output.getvalue())
+        self.assertTrue(cli["ok"], cli)
+        self.assertEqual(cli["usage"]["role"], "navigation")
+        tool = next(t for t in build_tools() if t.name == "source_outline")
+        payload = json.loads(tool.execute_fn({"source_id": ready["source_id"], "query": "Tensor"}))
+        self.assertEqual(payload["candidates"], cli["result"]["candidates"])
+        self.assertEqual(payload["usage"]["role"], "navigation")
+
     def test_same_bytes_reuse_identity_and_keep_all_origins(self):
         a = self.ingest()
         other = self.root / "renamed.md"
@@ -169,6 +246,183 @@ class SourceIngestTests(unittest.TestCase):
             parsed.func(parsed)
         command=run.call_args.args[0]
         self.assertEqual(command[command.index("--knowledge")+1],"none")
+
+    def source_entry(self, *extra, profile="source-first", resume=None, dry_run=False):
+        import ingest_inbox as inbox
+        args = ["ingest_inbox.py", "--profile", profile]
+        args += ["--resume", resume] if resume else ["--file", str(self.source)]
+        if not dry_run:
+            args.append("--run")
+        args += list(extra)
+        code = 0
+        with patch.object(inbox, "REPO", self.root), patch("sys.argv", args), \
+             redirect_stdout(io.StringIO()) as output:
+            try:
+                inbox.main()
+            except SystemExit as exc:
+                code = exc.code
+        return code, json.loads(output.getvalue()) if output.getvalue() else None
+
+    def test_scoped_agent_entry_reuses_completed_zero_delta_without_api(self):
+        import knowledge_compile as kc
+        import knowledge_compile_api as ka
+        focus = "仅核验当前用途；已有来源足够，不要求新增知识。"
+        with patch.object(ka, "run", side_effect=AssertionError("no API fallback")):
+            code, first = self.source_entry("--knowledge", "agent", "--focus", focus)
+            self.assertEqual(code, 0)
+            self.assertEqual(first["knowledge_status"], "prepared")
+            job = first["knowledge_run"]
+            state, packet = kc.load_job(self.root, job)
+            self.assertEqual(packet["focus"], focus)
+            self.assertEqual(state["executor"], "agent")
+            self.assertIsNotNone(first["files"][0]["knowledge"]["agent_task"])
+            si.atomic_json(kc.job_dir(self.root, job)/"delta.json",
+                           {"schema": kc.PROTOCOL, "job_id": job, "operations": [], "unresolved": []})
+            self.assertEqual(kc.apply(job, repo=self.root)["status"], "completed")
+            code, replay = self.source_entry("--knowledge", "agent", "--focus", focus,
+                                            resume=first["files"][0]["source_id"])
+            self.assertEqual(code, 0)
+            self.assertEqual(replay["knowledge_run"], job)
+            self.assertEqual(replay["knowledge_status"], "completed")
+            self.assertEqual(replay["knowledge"]["results"], {})
+            self.assertIsNone(replay["knowledge"]["agent_task"])
+            _, changed = self.source_entry("--knowledge", "agent", "--focus", "different purpose")
+            self.assertNotEqual(changed["knowledge_run"], job)
+
+    def test_selective_source_entry_and_wg_forward_strategy(self):
+        import knowledge_compile as kc
+        code,result=self.source_entry("--knowledge","agent","--strategy","selective")
+        self.assertEqual(code,0)
+        state,packet=kc.load_job(self.root,result["knowledge_run"])
+        self.assertEqual(packet["reading"]["round"],0)
+        self.assertEqual(state["executor"],"agent")
+        args=wg.build_parser().parse_args(["ingest",str(self.source),"--profile","source-first",
+                                           "--knowledge","api","--strategy","selective"])
+        with patch.object(wg,"run_script",return_value=(0,'{"status":"source_ready","files":[]}',"")) as run,redirect_stdout(io.StringIO()):
+            args.func(args)
+        command=run.call_args.args[0]
+        self.assertEqual(command[command.index("--strategy")+1],"selective")
+
+    def test_selective_invalid_modes_reject_before_source_write(self):
+        for mode in ("none","skip"):
+            code,result=self.source_entry("--knowledge",mode,"--strategy","selective")
+            self.assertEqual(code,1)
+            self.assertIn("strategy",result["error"])
+            self.assertFalse((self.root/"academic").exists())
+        with patch("sys.stderr",new=io.StringIO()):
+            code,_=self.source_entry("--strategy","selective",profile="legacy")
+        self.assertEqual(code,2)
+        self.assertFalse((self.root/"academic").exists())
+
+    def test_focus_invalid_combinations_fail_before_writes(self):
+        for mode in ("none", "skip"):
+            for dry_run in (False, True):
+                with self.subTest(mode=mode, dry_run=dry_run):
+                    code, result = self.source_entry("--knowledge", mode, "--focus", "purpose", dry_run=dry_run)
+                    self.assertEqual(code, 1)
+                    self.assertIn("--focus", result["error"])
+                    self.assertFalse((self.root/"academic").exists())
+        with patch("sys.stderr", new=io.StringIO()):
+            code, _ = self.source_entry("--focus", "purpose", profile="legacy")
+        self.assertEqual(code, 2)
+        self.assertFalse((self.root/"academic").exists())
+
+    def test_api_partial_is_visible_and_focus_passed_without_host_takeover(self):
+        import knowledge_compile_api as ka
+        import knowledge_compile as kc
+        response = {"job_id": "KJ-test", "status": "partial", "results": {}, "new_model_calls": 1}
+        with patch.object(ka, "run", return_value=response) as run, \
+             patch.object(kc, "prepare", side_effect=AssertionError("host must not take over")):
+            code, result = self.source_entry("--knowledge", "api", "--focus", "direct sampling")
+        self.assertEqual(code, 0)
+        self.assertEqual(result["status"], "source_ready")
+        self.assertEqual(result["knowledge_status"], "partial")
+        self.assertEqual(result["knowledge_run"], "KJ-test")
+        self.assertNotIn("knowledge_error", result)
+        self.assertEqual(run.call_args.kwargs["focus"], "direct sampling")
+
+    def test_api_failed_result_returns_nonzero_but_source_remains_searchable(self):
+        import knowledge_compile_api as ka
+        response = {"job_id": "KJ-test", "status": "failed", "error": "provider unavailable", "new_model_calls": 1}
+        with patch.object(ka, "run", return_value=response) as run:
+            code, result = self.source_entry("--knowledge", "api", "--focus", "direct sampling")
+        self.assertEqual(code, 1)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(result["status"], "source_ready")
+        self.assertEqual(result["knowledge_status"], "failed")
+        self.assertEqual(result["knowledge_error"], "provider unavailable")
+        self.assertEqual(result["knowledge_run"], "KJ-test")
+        self.assertTrue(si.search("contraction", repo=self.root)["candidates"])
+        self.assertEqual((self.root/result["files"][0]["source_path"]).read_bytes(), self.source.read_bytes())
+
+    def test_preparation_exception_does_not_mislabel_previous_job(self):
+        import knowledge_compile as kc
+        import knowledge_compile_api as ka
+        original = self.ingest()
+        old = kc.prepare(original["source_id"], repo=self.root)
+        with patch.object(ka, "run", side_effect=ValueError("backend mismatch")):
+            code, result = self.source_entry("--knowledge", "api", "--focus", "purpose", resume=original["source_id"])
+        self.assertEqual(code, 1)
+        self.assertEqual(result["status"], "source_ready")
+        self.assertIsNone(result["knowledge_run"])
+        self.assertEqual(result["knowledge_error"], "backend mismatch")
+        self.assertEqual(si.load_receipt(self.root, original["source_id"])["knowledge_run"], old["job_id"])
+
+    def test_partial_failure_is_not_confused_with_coverage_only_partial(self):
+        import knowledge_compile_api as ka
+        response = {"job_id": "KJ-test", "status": "partial", "unresolved": ["unread scope"],
+                    "results": {"item-1": {"status": "failed", "error": "evidence changed"}}}
+        with patch.object(ka, "run", return_value=response):
+            code, result = self.source_entry("--knowledge", "api")
+        self.assertEqual(code, 1)
+        self.assertEqual(result["status"], "source_ready")
+        self.assertEqual(result["knowledge_status"], "partial")
+        self.assertIn("knowledge_error", result)
+        self.assertEqual(result["files"][0]["knowledge"]["unresolved"], ["unread scope"])
+
+    def test_partial_agent_replay_keeps_unresolved_in_intake_receipt(self):
+        import knowledge_compile as kc
+        _, result = self.source_entry("--knowledge", "agent", "--focus", "purpose")
+        job = result["knowledge_run"]
+        si.atomic_json(kc.job_dir(self.root, job)/"delta.json",
+                       {"schema": kc.PROTOCOL, "job_id": job, "operations": [], "unresolved": ["needed passage missing"]})
+        kc.apply(job, repo=self.root)
+        code, result = self.source_entry("--knowledge", "agent", "--focus", "purpose")
+        self.assertEqual(code, 0)
+        self.assertEqual(result["knowledge_status"], "partial")
+        self.assertEqual(result["files"][0]["knowledge"]["unresolved"], ["needed passage missing"])
+        self.assertNotIn("knowledge_error", result)
+
+    def test_failed_source_never_starts_requested_knowledge(self):
+        import knowledge_compile_api as ka
+        with patch.object(si, "parse_source", side_effect=ValueError("parse unavailable")), \
+             patch.object(ka, "run", side_effect=AssertionError("source not ready")) as run:
+            code, result = self.source_entry("--knowledge", "api", "--focus", "purpose")
+        self.assertEqual(code, 1)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["files"][0]["source_status"], "received")
+        self.assertEqual(run.call_count, 0)
+
+    def test_wg_forwards_focus_and_preserves_independent_failure_receipt(self):
+        payload = {"status": "source_ready", "knowledge_status": "failed", "knowledge_run": "KJ-test",
+                   "knowledge_error": "provider unavailable", "files": [{"source_path": "academic/raw/source.md"}]}
+        args = wg.build_parser().parse_args(["ingest", str(self.source), "--profile", "source-first",
+                                            "--knowledge", "api", "--focus", "purpose with spaces"])
+        with patch.object(wg, "run_script", return_value=(1, json.dumps(payload), "")) as run, \
+             redirect_stdout(io.StringIO()) as output:
+            wg.cmd_ingest(args)
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["ok"])
+        self.assertIn("provider unavailable", result["error"])
+        self.assertIn("source_ready", json.dumps(result))
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--focus")+1], "purpose with spaces")
+        for flags in ([], ["--profile", "source-first"], ["--profile", "source-first", "--knowledge", "none"]):
+            args = wg.build_parser().parse_args(["ingest", str(self.source), "--focus", "purpose", *flags])
+            with patch.object(wg, "run_script", side_effect=AssertionError("reject before invoking intake")), \
+                 redirect_stdout(io.StringIO()) as output:
+                wg.cmd_ingest(args)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
 
     def test_concurrent_duplicate_receives_commit_once(self):
         with ThreadPoolExecutor(max_workers=3) as pool:
@@ -281,9 +535,33 @@ class SourceIngestTests(unittest.TestCase):
         folder = self.bundle("Result ![figure](images/missing.png)\n")
         result = self.ingest(folder / "paper.pdf", reuse_parse=folder)
         self.assertEqual(result["status"], "source_ready")
-        self.assertTrue(any("缺少 1 个" in note for note in result["limitations"]))
+        self.assertTrue(any("1 个独立图片资源" in note and "按需提取" in note for note in result["limitations"]))
         self.assertEqual(self.receipt(result)["parses"][0]["missing_assets"], ["images/missing.png"])
         self.assertTrue(si.search("Result", repo=self.root)["candidates"])
+
+    def test_old_missing_resource_notice_is_projected_without_receipt_or_raw_changes(self):
+        folder = self.bundle("# Result\nA textual conclusion. ![figure](images/missing.png)\n")
+        result = self.ingest(folder / "paper.pdf", reuse_parse=folder, knowledge_required=False)
+        record = self.receipt(result)
+        record["parses"][0]["limitations"] = [
+            "公式尚未核对。",
+            "解析包缺少 1 个引用图片；正文可检索，图像须回原件核对，不视为完整图表解析。"]
+        si.write_receipt(self.root, record)
+        paths = [si.receipt_path(self.root, result["source_id"]),
+                 self.root / result["source_path"], self.root / result["parse_path"]]
+        before = [p.read_bytes() for p in paths]
+        with patch.object(si, "parse_source", side_effect=AssertionError("no image re-extraction")):
+            current = si.inspect_source(result["source_id"], repo=self.root)
+            hit = si.search("textual conclusion", repo=self.root)["candidates"][0]
+        self.assertEqual(current["source_status"], "source_ready")
+        self.assertEqual(current["knowledge_status"], "not_required")
+        self.assertEqual(current["parse_id"], result["parse_id"])
+        self.assertIn("公式尚未核对。", current["limitations"])
+        self.assertEqual(current["limitations"], hit["limitations"])
+        self.assertTrue(any("1 个独立图片资源" in s for s in current["limitations"]))
+        self.assertFalse(any("解析包缺少" in s for s in current["limitations"]))
+        self.assertEqual(before, [p.read_bytes() for p in paths])
+        self.assertEqual(self.receipt(result)["parses"][0]["missing_assets"], ["images/missing.png"])
 
     def test_failed_bundle_reuse_stays_on_same_route_until_explicit_refresh(self):
         folder = self.bundle()

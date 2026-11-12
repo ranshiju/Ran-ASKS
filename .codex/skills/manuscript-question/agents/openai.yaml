@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文核心科学问题凝练"
+  short_description: "依据稿件凝练科学问题，兼顾科学性与概念清晰，明确研究切入点和证据范围"
+  default_prompt: "使用 $manuscript-question 核对这篇论文，凝练核心科学问题，并说明本文的研究切入点与证据范围。"
