@@ -163,42 +163,60 @@ def embed(text, timeout=30):
     d = json.loads(resp.read())
     return d["data"][0]["embedding"]
 
-def embed_batch(texts, batch_size=64, timeout=60):
-    """批量文本 → np.array(shape=[N, 2048])。API 失败重试一次，仍失败则抛 RuntimeError。"""
+def embed_batch(texts, batch_size=64, timeout=60, *, retries=1, events=None):
+    """Batch embeddings, with optional per-request accounting and bounded retries."""
     _require_online()
     np = require_numpy()
+    if not 1 <= batch_size <= 64 or not 0 <= retries <= 1:
+        raise ValueError("embedding batch_size must be 1..64 and retries 0..1")
     all_embs = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i+batch_size]
-        last_err = None
-        last_status = None
-        for attempt in range(2):
+        for attempt in range(retries + 1):
             req = urllib.request.Request(
                 _embedding_endpoint(),
                 data=json.dumps({"model": _MODEL, "input": batch}).encode(),
                 headers={"Authorization": f"Bearer {_API_KEY}", "Content-Type": "application/json"},
             )
+            event = {"kind": "request", "batch_start": i, "texts": len(batch), "attempt": attempt + 1,
+                     "input_chars": sum(map(len, batch)), "model": _MODEL, "namespace": _cache_namespace()}
+            started = time.perf_counter()
             try:
-                resp = urllib.request.urlopen(req, timeout=timeout)
-                d = json.loads(resp.read())
-                all_embs.extend([x["embedding"] for x in d["data"]])
-                last_err = None
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    event["http_status"] = resp.status
+                    d = json.loads(resp.read())
+                event["usage"] = d.get("usage")
+                data = d["data"]
+                if len(data) != len(batch):
+                    raise ValueError("embedding response count mismatch")
+                if any("index" in item for item in data):
+                    if sorted(item.get("index", -1) for item in data) != list(range(len(batch))):
+                        raise ValueError("embedding response index mismatch")
+                    data = sorted(data, key=lambda item: item["index"])
+                vectors = np.asarray([item["embedding"] for item in data], dtype=np.float32)
+                if vectors.ndim != 2 or not vectors.shape[1] or not np.isfinite(vectors).all() or (np.linalg.norm(vectors, axis=1) == 0).any():
+                    raise ValueError("embedding response contains invalid vectors")
+                if all_embs and len(all_embs[0]) != vectors.shape[1]:
+                    raise ValueError("embedding response dimension changed")
+                all_embs.extend(vectors)
+                event["status"] = "ok"
                 break
-            except Exception as e:
-                last_err = _provider_error_detail(e)
-                last_status = getattr(e, "code", None)
-                if attempt == 0:
-                    print(f"[embed_batch] batch {i} fail: {e}, 重试一次...", file=sys.stderr)
-                    time.sleep(1)
-        if last_err is not None:
-            raise EmbeddingAPIError(
-                f"embed_batch 批次 {i}（{len(batch)} 条）API 两次均失败: {last_err}",
-                status_code=last_status,
-            )
+            except Exception as exc:
+                status = getattr(exc, "code", None)
+                event.update(status="error", http_status=status or event.get("http_status"), error_type=type(exc).__name__)
+                detail = _provider_error_detail(exc)
+                # Configuration/provider rejections and malformed successes are not transport retries.
+                if attempt >= retries or status in {400, 401, 403, 404, 413, 422, 429} or isinstance(exc, (ValueError, KeyError, TypeError)):
+                    raise EmbeddingAPIError(f"embedding batch {i} failed: {detail}", status_code=status) from exc
+                time.sleep(1)
+            finally:
+                event["elapsed_seconds"] = round(time.perf_counter() - started, 6)
+                if events is not None:
+                    events.append(event)
     return np.array(all_embs)
 
 
-def embed_cached_batch(texts, cache_type="keyword"):
+def embed_cached_batch(texts, cache_type="keyword", *, request_options=None, events=None):
     """带 db 缓存的批量 embed: 命中 embeddings 表复用,未命中调 embed_batch + 写回。
     向量与 path 解耦(v8.2): 统一按文本查,所有用途(keyword/seed/node title)共享去重。
     cache_type 参数保留向后兼容但不再用于查询过滤(向量只跟文本绑定)。
@@ -212,53 +230,61 @@ def embed_cached_batch(texts, cache_type="keyword"):
     cache_path = _get_embed_db()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(cache_path)
-    _ensure_cache_schema(db)
-    namespace = _cache_namespace()
-    uniq = list(dict.fromkeys(texts))
-    cached = {}
-    # 空串/纯空白不送 API(GLM embedding 对空 input 返回 400),返回时填零向量
-    empty = {t for t in uniq if not t or not t.strip()}
-    query_uniq = [t for t in uniq if t not in empty]
-    if query_uniq:
-        ph = ",".join("?" * len(query_uniq))
-        for r in db.execute(
-            f"SELECT text, vector FROM embeddings WHERE namespace=? AND text IN ({ph})",
-            [namespace] + query_uniq,
-        ):
-            cached[r[0]] = np.frombuffer(r[1], dtype=np.float32)
-    # touch last_used for hits (LRU 复用频率追踪)
-    hits = [t for t in query_uniq if t in cached]
-    if hits:
-        now_touch = time.time()
-        ph2 = ",".join("?" * len(hits))
-        db.execute(
-            f"UPDATE embeddings SET last_used=? WHERE namespace=? AND text IN ({ph2})",
-            [now_touch, namespace] + hits,
-        )
-        db.commit()
-    miss = [t for t in query_uniq if t not in cached]
-    n_api = 0
-    if miss:
-        new_vecs = embed_batch(miss)
-        # 校验范数，零范数/非有限向量不写入缓存（防止坏数据污染聚类）
-        norms = np.linalg.norm(new_vecs, axis=1)
-        bad = [miss[i] for i, n in enumerate(norms) if n == 0.0 or not np.isfinite(n)]
-        if bad:
-            raise RuntimeError(f"embed 返回零范数/非有限向量，拒绝写入缓存: {bad}")
-        now = time.time()
-        rows = [
-            (namespace, miss[i], new_vecs[i].astype(np.float32).tobytes(), None, now)
-            for i in range(len(miss))
-        ]
-        db.executemany(
-            "INSERT OR REPLACE INTO embeddings(namespace, text, vector, last_used, created) VALUES(?,?,?,?,?)",
-            rows,
-        )
-        db.commit()
-        for i, t in enumerate(miss):
-            cached[t] = new_vecs[i]
-        n_api = len(miss)
-    db.close()
+    try:
+        _ensure_cache_schema(db)
+        namespace = _cache_namespace()
+        uniq = list(dict.fromkeys(texts))
+        cached = {}
+        # 空串/纯空白不送 API(GLM embedding 对空 input 返回 400),返回时填零向量
+        empty = {t for t in uniq if not t or not t.strip()}
+        query_uniq = [t for t in uniq if t not in empty]
+        if query_uniq:
+            ph = ",".join("?" * len(query_uniq))
+            for r in db.execute(
+                f"SELECT text, vector FROM embeddings WHERE namespace=? AND text IN ({ph})",
+                [namespace] + query_uniq,
+            ):
+                cached[r[0]] = np.frombuffer(r[1], dtype=np.float32)
+        # touch last_used for hits (LRU 复用频率追踪)
+        hits = [t for t in query_uniq if t in cached]
+        if hits:
+            now_touch = time.time()
+            ph2 = ",".join("?" * len(hits))
+            db.execute(
+                f"UPDATE embeddings SET last_used=? WHERE namespace=? AND text IN ({ph2})",
+                [now_touch, namespace] + hits,
+            )
+            db.commit()
+        miss = [t for t in query_uniq if t not in cached]
+        if events is not None:
+            events.append({"kind": "cache", "requested": len(texts), "unique": len(query_uniq),
+                           "hits": len(hits), "misses": len(miss), "namespace": namespace})
+        n_api = 0
+        if miss:
+            options = dict(request_options or {})
+            if events is not None:
+                options["events"] = events
+            new_vecs = embed_batch(miss, **options) if options else embed_batch(miss)
+            # 校验范数，零范数/非有限向量不写入缓存（防止坏数据污染聚类）
+            norms = np.linalg.norm(new_vecs, axis=1)
+            bad = [miss[i] for i, n in enumerate(norms) if n == 0.0 or not np.isfinite(n)]
+            if bad:
+                raise RuntimeError(f"embed 返回零范数/非有限向量，拒绝写入缓存: {bad}")
+            now = time.time()
+            rows = [
+                (namespace, miss[i], new_vecs[i].astype(np.float32).tobytes(), None, now)
+                for i in range(len(miss))
+            ]
+            db.executemany(
+                "INSERT OR REPLACE INTO embeddings(namespace, text, vector, last_used, created) VALUES(?,?,?,?,?)",
+                rows,
+            )
+            db.commit()
+            for i, t in enumerate(miss):
+                cached[t] = new_vecs[i]
+            n_api = len(miss)
+    finally:
+        db.close()
     if n_api:
         import sys
         print(f"[embed_cached_batch] 命中{len(cached)-n_api} 新增{n_api}", file=sys.stderr)

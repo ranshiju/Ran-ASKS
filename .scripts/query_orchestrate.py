@@ -832,7 +832,7 @@ def _build_api_prompt(session: QuerySession, last_results: list, round_num: int,
             if r.get("error"):
                 content = f"工具失败: {r['error']}\n{content}"
             parts.append(f"  - {r['action']}({r.get('input', {})}): {content}")
-    if not last_results and not prior_results:
+    if not last_results and not prior_results and not session.steps:
         parts.append("这是第一轮，尚未执行任何动作。")
     citation_rule = ("正文中用[[已读Raw路径或locator]]明确引用；读取companion时可引用原件路径。"
                      if response_format == "native" else
@@ -867,7 +867,8 @@ def _build_api_prompt(session: QuerySession, last_results: list, round_num: int,
     parts.append("- read: KU候选evidence_preview给出已存Raw地址、relation和评估版本；按问题相关性选择地址直接read_raw，relation只是原KU的关系标记。预览截断或需要完整条件/冲突时knowledge_read；不用另搜同篇原文猜段落。Wiki用read_section/wiki_context，其他已知相关Raw也可直接读；导航不必排净噪声，事实仍核对Raw。")
     parts.append("- 联合召回 channels 披露缺失/不可用路；未命中不等于无知识。跨语言缺口可在当前规划中将必要英文术语加入 query；不因单路未命中反复重跑全部通道。查询不自动编译或维护；具体修订需求记录后走受管更新。")
     parts.append("- 已定位source_id但缺具体章节/表图地址时，可用source_outline按原文标签字面筛选（query如Table 10或WALL CLOCK TIME；空串列目录，next_start_line接续），再读返回Raw入口。目录不等于已读证据，所在片段不保证表体/图例完整；按问题核对所需符号、行列及测量条件，不必遍历全目录。")
-    parts.append("- 入口范围：source_search查已登记Source原文，当前索引位于academic，但同时包含论文和非论文，纯事务材料也可只有Source；用返回locator直接read_raw。admin_recall仅查admin Wiki。domain是存储范围，不能仅按内容主题推定；存储域未知时wiki_recall/hybrid_recall留空domain，后者已联合Wiki/Graph与Source/KU，指定teaching/admin/business则仅查相应导航。Source仅词汇检索；摘录和pending状态不代表知识已核验。")
+    parts.append("- 已知source_id且缺关键正文时，source_search传该source_id并用正文问题作query，先限定来源再检索；已有相关地址可直接读。默认retrieval=lexical；跨语言或措辞差异可显式选hybrid，使用查询embedding与已建Source向量。vector_channel披露缺失、partial或失败，勿把降级当完整召回；查询不构建文档向量，向量相似不认证条件或事实。")
+    parts.append("- 入口范围：source_search查已登记Source原文，当前索引位于academic，但同时包含论文和非论文，纯事务材料也可只有Source；用返回locator直接read_raw。admin_recall仅查admin Wiki。domain是存储范围，不能仅按内容主题推定；存储域未知时wiki_recall/hybrid_recall留空domain，后者已联合Wiki/Graph与Source/KU，指定teaching/admin/business则仅查相应导航。Source默认词汇检索，可显式选hybrid并查看覆盖；摘录和pending状态不代表知识已核验。")
     parts.append("- knowledge_search/knowledge_read 可复用 KU 和 Frontier Question；保留 draft、claim_mode、unresolved 和 evidence_issues，事实答案仍须 read_raw 核验，读取 KU 不登记为已核验 Raw。")
     parts.append("- KU content_role 区分研究问题、概念定义、方法模型和科学结论，仅用于理解内容用途。Question 的 source_question_status=addressed/left_open 只描述当前来源是否处理/留下该问题，不等于本库已有完整答案或科学界已解决/仍开放。")
     parts.append("- 正文没有wikilink引用时标记为无引用；引用未在已读来源中时标记为未核验"

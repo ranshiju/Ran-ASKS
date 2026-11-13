@@ -227,7 +227,12 @@ shared首包复用来源章节、限制和已有定位，以较小材料预算�
 {"schema":"knowledge-read-v1","source_locators":["当前reading.source_path#L100-L110"],"candidate_ids":[],"reason":"当前用途缺少的条件"}
 ```
 
-每次1–5个当前来源精确行范围，单段沿原8000字符上限；也可仅以`candidate_ids`请求
+每次1–5个当前来源精确行范围；shared按完整行把每个选定范围拆为不超过8000字符的证据块，
+所有块仍经原`evidence_ref`绑定和总材料预算检查。请求范围与存储块大小分开，不截断或读取
+范围外正文，不增加补读轮数或模型调用；小范围的依据身份保持。单行超过8000字符、空依据、
+越界或总材料超限仍整体拒绝，不能借拆分绕过限制。已保存且绑定有效的API读请求可由原
+API恢复路径继续消费，无需重新生成选片决定。此能力只用于selective补读，显式选片/
+定向维护及查询读取器保持各自原限制。也可仅以`candidate_ids`请求
 已列出Statement的全部旧依据，两个列表至少一个非空、各最多5项。候选身份/快照、来源
 版本、实际文本及原总材料预算继续校验。读请求不能携带operations，也不接受任意路径、网络
 指令或本包外知识ID；Question仍只读。已有片段保留，完全重复请求拒绝，超预算/旧依据
@@ -419,7 +424,28 @@ Statement 使用增量 FTS，Question 直接只读原生 Markdown；当前仅 ac
 搜索候选另带至多3条`evidence_preview`，原样投影locator/relation/assessed_revision及总数/截断标记；
 沿记录顺序，不按支持关系删去反驳或未知关系。此处不读Raw、不认证绑定，地址可供直接read_raw；
 完整条件、冲突或其余依据按需knowledge_read，所有实际来源读取仍校验绑定。无依据则空预览。
-可与来源、Wiki/Graph 一起用于普通查询。KU embedding、自动维护调度和全库迁移尚未实现。
+可与来源、Wiki/Graph 一起用于普通查询。自动维护调度和全库迁移尚未实现。
+
+### 可选 Statement 语义发现
+
+`knowledge_search(..., retrieval="hybrid")` 或 `wg.py ku-search '<主题>' --retrieval hybrid`
+显式使用已建 Statement 向量；默认 `lexical` 保持原 FTS/原生 Question 路径且不联网。
+API 与 DSH 透传同一参数，不改变两种控制循环。`hybrid_recall` 与摄入的候选查找仍默认词汇。
+
+显式构建：`python3 .scripts/knowledge_vectors.py build KU-<id> [KU-<id> ...]`。
+仅使用当前 Statement 的现有标题、完整表述、未决项，不生成摘要、不修改知识状态。
+`academic/knowledge/vectors.sqlite` 是可丢弃的派生索引；绑定 ID/revision/完整文件哈希、
+模型端点 namespace、窗口规则及输入/向量校验。`vector_windows.py` 与 Source 共用原连续
+2400 UTF-8 字节窗口，保持 Source 既有索引兼容。每16个窗口一次缓存调用，成功小批可复用，
+失败不重试；提交在原 KU 锁内复验当前版本，原子替换每条投影。历史/删除/改版/同版改文均不可复用。
+
+查询只编码问题，不隐式建库；每 KU 取最佳窗口，同一 topk 深度的词汇与语义排名用 RRF 合并，
+长条目不按窗口数重复投票。`vector_channel` 披露 ready/partial、缺失与失效、请求事件和失败，
+失败保留词汇结果并明确标记。Question 保持词汇并明确不在 Statement 向量覆盖中。
+相似度只作导航；候选保留 draft、claim_mode、版本、未决项及原依据预览，
+需完整条件时 knowledge_read，事实仍回 read_raw。不得以高相似度去重、升版、认证事实或认定已读来源。
+私有范围在外部请求前拒绝；查询过长、缺索引或无有效投影不调用服务。
+工程回归还包括 `test_knowledge_vectors.py`；真实质量/全成本的采用判断与机制回归分别记录。
 
 执行 `test_knowledge_units.py`，并按工程影响卡运行来源、Frontier、查询、入口回归及工程图校验。
 自动产物在少量真实使用中曾出现实质语义错误，不能以结构通过证明质量无损。

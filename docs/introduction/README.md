@@ -6,9 +6,31 @@ or [download the PDF edition](ASKS-Chinese-Introduction-2026-09-03.pdf).
 The dated Markdown document is the default online reading view for this
 general-user project and outreach introduction. It explains the problem ASKS
 addresses, the roles of its main knowledge surfaces, its engineering
-characteristics, and how to start using it. The PDF preserves the reviewed Word
-layout for download and printing; the repository does not rely on GitHub's PDF
-previewer.
+characteristics, and how to start using it. Starting with v0.27.0, the PDF is
+regenerated from the reviewed current Markdown, then normalized and checked for
+text coverage and rendering. Earlier releases retained the original Word layout
+and appended updates; those statements below describe their historical editions.
+The repository does not rely on GitHub's PDF previewer.
+
+## Current edition: v0.27.0 / 当前版本
+
+The current name is **Agent-Native Scientific Knowledge System**, guided by
+**Interpret knowledge. Organize for use. Reason to solve.** The 2026-11-13
+revision updates the introduction itself, not only a final addendum. It explains
+source preservation, purpose-driven interpretation, optional Source/KU vector
+access and separate Agent/API control. Legacy remains the default intake;
+Source-first/selective remains an opt-in preview. This compatible MINOR release
+does not certify stable automatic semantics or full-cost savings.
+
+当前全称为 **Agent-Native Scientific Knowledge System（智能体原生的科学知识系统）**，
+核心观点为 **Interpret knowledge. Organize for use. Reason to solve.**
+2026年11月13日更新正文及其PDF，说明来源保留、按需理解、可选Source/KU向量访问和
+Agent/API控制分工。默认legacy保持，Source-first/selective仍为显式预览。
+本次兼容MINOR发布不代表自动语义质量或完整净收益已经稳定验收。
+
+PDF由同一Markdown全文重新排版，已规范化并核对文本与渲染；不再在旧首页后仅追加补充。
+论文原题、实验数字、冻结产物及以下历史版本记录保留其原范围；工程版本1.0.0与
+已有论文数据产物1.0.0是不同的版本体系。
 
 The paper remains the academic source for the project's ideas, methodology, and
 supporting evidence. The content edition was first published with the

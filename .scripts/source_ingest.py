@@ -205,6 +205,97 @@ def segments(text):
     return out, skipped
 
 
+def reading_blocks(lines):
+    """Literal Markdown units for reading navigation, independent of FTS chunks."""
+    blocks, i = [], 0
+    fence_re = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+    heading_re = re.compile(r"^ {0,3}#{1,6}[ \t]+")
+    math_ends = {"$$": "$$", r"\[": r"\]"}
+    definition = re.compile(r"^(?:where\b|in which\b|其中|式中)", re.I)
+    while i < len(lines):
+        line = lines[i].strip()
+        fence = fence_re.match(lines[i])
+        if fence:
+            marker = fence[1]
+            i += 1
+            while i < len(lines):
+                closing = fence_re.match(lines[i])
+                i += 1
+                if (closing and closing[1][0] == marker[0] and
+                        len(closing[1]) >= len(marker) and not closing[2].strip()):
+                    break
+            continue
+        if not line or heading_re.match(lines[i]):
+            i += 1
+            continue
+        start = i
+        if line in math_ends:
+            closing = math_ends[line]
+            i += 1
+            while (i < len(lines) and lines[i].strip() != closing and
+                   not heading_re.match(lines[i]) and not fence_re.match(lines[i])):
+                i += 1
+            complete = i < len(lines) and lines[i].strip() == closing
+            if complete:
+                i += 1
+            blocks.append((start + 1, i, "math" if complete else "unclosed_math"))
+        else:
+            i += 1
+            while (i < len(lines) and lines[i].strip() and
+                   lines[i].strip() not in math_ends and
+                   not heading_re.match(lines[i]) and not fence_re.match(lines[i])):
+                i += 1
+            blocks.append((start + 1, i, "paragraph"))
+    # Only blank-separated, explicitly marked definitions join a formula.
+    # Never join through a heading or a skipped code fence.
+    joined, i = [], 0
+    while i < len(blocks):
+        start, end, kind = blocks[i]
+        if kind == "math":
+            while i + 1 < len(blocks):
+                a, b, following = blocks[i + 1]
+                if (following != "paragraph" or any(s.strip() for s in lines[end:a-1]) or
+                        not definition.match(lines[a-1].strip())):
+                    break
+                end, kind, i = b, "math_definition", i + 1
+                # A standalone "where" may introduce another displayed definition.
+                bare = re.fullmatch(r"(?:where|in which|其中|式中)\s*[:：,，]?",
+                                    " ".join(lines[a-1:b]).strip(), re.I)
+                if (bare and i + 1 < len(blocks) and blocks[i+1][2] == "math" and
+                        not any(s.strip() for s in lines[end:blocks[i+1][0]-1])):
+                    end, i = blocks[i+1][1], i + 1
+                else:
+                    break
+        joined.append((start, end, kind))
+        i += 1
+    return joined
+
+
+def reading_navigation(lines, start, end, path, *, blocks=None):
+    """Suggest an explicit, bounded Raw read without reinterpreting the hit locator."""
+    if not 1 <= start <= end <= len(lines):
+        raise ValueError("reading navigation requires an existing line range")
+    first, last = start, end
+    for a, b, kind in reading_blocks(lines) if blocks is None else blocks:
+        if a > end:
+            break
+        if b < start:
+            continue
+        if kind == "unclosed_math":
+            return {"reading_context": {"status": "limited", "reason": "unclosed_display_math"}}
+        first, last = min(first, a), max(last, b)
+    if (first, last) == (start, end):
+        return {}
+    original_chars = len("\n".join(lines[start-1:end]))
+    expanded_chars = len("\n".join(lines[first-1:last]))
+    added_chars, added_lines = expanded_chars - original_chars, start-first + last-end
+    if expanded_chars > 8000 or added_chars > 2000 or added_lines > 32:
+        return {"reading_context": {"status": "limited", "reason": "structural_context_exceeds_budget"}}
+    return {"read_action": "read_raw", "read_input": {"locator": f"{path}#L{first}-L{last}"},
+            "reading_context": {"status": "expanded", "added_chars": added_chars,
+                                "added_lines": added_lines}}
+
+
 def index_path(repo):
     return managed(repo, "academic/sources/index.sqlite")
 
@@ -300,72 +391,106 @@ def reference_section_lines(lines):
     return marked
 
 
-def search(query, *, repo=REPO, topk=5, domain="academic"):
+def source_candidates(rows, *, repo, query, issues):
+    """Validate and render lexical/vector hits through one Raw navigation contract."""
+    import lexical_relevance as lr
+    candidates = []
+    checked, carriers, reference_lines, labels, read_blocks = {}, {}, {}, {}, {}
+    for row in rows:
+        sid = row["source_id"]
+        if sid not in checked:
+            try:
+                r = load_receipt(repo, sid)
+                p = selected_parse(r)
+                if r["source_status"] != "source_ready" or not p or p["parse_id"] != row["parse_id"] or p["text_sha256"] != row["text_sha256"]:
+                    raise ValueError("stale/unpublished source index; resume source to recover")
+                validate_binding(repo, r, p)
+                checked[sid] = r
+                carriers[sid] = managed(repo, p["text_path"]).read_text(encoding="utf-8").splitlines()
+                read_blocks[sid] = reading_blocks(carriers[sid])
+                reference_lines[sid] = reference_section_lines(carriers[sid])
+                labels[sid] = {"title": row["title"], "title_basis": r.get("title_basis", "unknown")}
+                opening = next((line.strip() for line in carriers[sid] if line.strip()), "")
+                heading = re.fullmatch(r"#\s+(.+?)(?:\s+#+)?", opening)
+                if r.get("title_basis") == "filename_unverified" and heading:
+                    labels[sid] = {"title": heading[1][:200],
+                                   "title_basis": "opening_heading_unverified",
+                                   "filename_title": row["title"]}
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                checked[sid] = None
+                issues.append({"source_id": sid, "error": str(exc)})
+        record = checked[sid]
+        if not record:
+            continue
+        parsed = selected_parse(record)
+        match = re.fullmatch(re.escape(parsed["text_path"])+r"#L(\d+)-L(\d+)", row["locator"])
+        if not match:
+            issues.append({"source_id": sid, "error": "index locator mismatch; resume to rebuild"})
+            continue
+        start, end = map(int, match.groups())
+        if (not 1 <= start <= end <= len(carriers[sid]) or
+                row["body"] != "\n".join(carriers[sid][start-1:end])):
+            issues.append({"source_id": sid, "error": "index excerpt mismatch; resume to rebuild"})
+            continue
+        candidates.append({"kind": "source", "source_id": sid, **labels[sid],
+            "source_path": record["original"], "parse_id": row["parse_id"], "locator": row["locator"],
+            **reading_navigation(carriers[sid], start, end, parsed["text_path"], blocks=read_blocks[sid]),
+            "section_role": "references" if all(n in reference_lines[sid] or not carriers[sid][n-1].strip()
+                                                 for n in range(start, end+1)) else "unspecified",
+            **lr.excerpt(query, row["body"]),
+            "lexical_match": lr.match(query, row["title"], row["body"]),
+            "limitations": public_receipt(record)["limitations"],
+            "knowledge_status": record.get("knowledge_status", "pending")})
+    return candidates
+
+
+def search(query, *, repo=REPO, topk=5, domain="academic", source_id="", retrieval="lexical"):
     import lexical_relevance as lr
     if domain not in ("academic", "public", ""):
         raise ValueError("Source-first search currently supports academic public sources only")
+    if retrieval != "lexical":
+        if retrieval != "hybrid":
+            raise ValueError("retrieval must be lexical or hybrid")
+        from source_vectors import search as vector_search
+        return vector_search(query, repo=repo, topk=topk, domain=domain, source_id=source_id)
+    scoped = None
+    if source_id:
+        scoped = load_receipt(repo, source_id)
+        parsed_scope = selected_parse(scoped)
+        if scoped.get("source_status") != "source_ready" or not parsed_scope:
+            raise ValueError("source is not ready")
+        validate_binding(repo, scoped, parsed_scope)
     limit = max(1, min(int(topk), 20))
     query_terms = terms(query)
     result = {"query": query, "domain": "academic", "mode": "source_fulltext",
               "candidates": [], "issues": [], "query_terms_truncated": len(query_terms)>32,
               "index_available": managed(repo, "academic/sources/index.sqlite").is_file(),
               "retrieval_capabilities": ["lexical", "cjk_bigrams"], "next": "read_raw"}
-    if not query_terms:
+    if scoped:
+        result["search_scope"] = {"source_id": source_id, "parse_id": parsed_scope["parse_id"]}
+    if not query_terms and not scoped:
         return result
     conn = connect_index(repo)
     if conn is None:
+        if scoped:
+            result["issues"].append({"source_id": source_id, "error": "source index missing; resume to rebuild"})
         return result
     result["index_available"] = True
     try:
+        if scoped:
+            indexed = conn.execute("SELECT * FROM sources WHERE source_id=?", (source_id,)).fetchone()
+            if not indexed or indexed["parse_id"] != parsed_scope["parse_id"] or indexed["text_sha256"] != parsed_scope["text_sha256"]:
+                raise ValueError("source index missing/stale; resume to rebuild")
+        if not query_terms:
+            return result
         expression = " OR ".join('"'+t.replace('"','""')+'"' for t in query_terms[:32])
+        scope_sql = " AND c.source_id=?" if scoped else ""
+        parameters = [expression] + ([source_id] if scoped else []) + [limit*5]
         rows = conn.execute("""SELECT c.source_id,c.locator,c.body,s.parse_id,s.text_sha256,s.title,
                    bm25(chunks) AS rank FROM chunks c JOIN sources s ON s.source_id=c.source_id
-                   WHERE chunks MATCH ? ORDER BY rank,c.source_id,c.locator LIMIT ?""",
-                   (expression, limit*5)).fetchall()
-        checked, carriers, reference_lines, labels = {}, {}, {}, {}
-        for row in rows:
-            sid = row["source_id"]
-            if sid not in checked:
-                try:
-                    r = load_receipt(repo, sid)
-                    p = selected_parse(r)
-                    if r["source_status"] != "source_ready" or not p or p["parse_id"] != row["parse_id"] or p["text_sha256"] != row["text_sha256"]:
-                        raise ValueError("stale/unpublished source index; resume source to recover")
-                    validate_binding(repo, r, p)
-                    checked[sid] = r
-                    carriers[sid] = managed(repo, p["text_path"]).read_text(encoding="utf-8").splitlines()
-                    reference_lines[sid] = reference_section_lines(carriers[sid])
-                    labels[sid] = {"title": row["title"], "title_basis": r.get("title_basis", "unknown")}
-                    opening = next((line.strip() for line in carriers[sid] if line.strip()), "")
-                    heading = re.fullmatch(r"#\s+(.+?)(?:\s+#+)?", opening)
-                    if r.get("title_basis") == "filename_unverified" and heading:
-                        labels[sid] = {"title": heading[1][:200],
-                                       "title_basis": "opening_heading_unverified",
-                                       "filename_title": row["title"]}
-                except (OSError, ValueError, KeyError, TypeError) as exc:
-                    checked[sid] = None
-                    result["issues"].append({"source_id": sid, "error": str(exc)})
-            record = checked[sid]
-            if not record:
-                continue
-            parsed = selected_parse(record)
-            match = re.fullmatch(re.escape(parsed["text_path"])+r"#L(\d+)-L(\d+)", row["locator"])
-            if not match:
-                result["issues"].append({"source_id": sid, "error": "index locator mismatch; resume to rebuild"})
-                continue
-            start, end = map(int, match.groups())
-            if (not 1 <= start <= end <= len(carriers[sid]) or
-                    row["body"] != "\n".join(carriers[sid][start-1:end])):
-                result["issues"].append({"source_id": sid, "error": "index excerpt mismatch; resume to rebuild"})
-                continue
-            result["candidates"].append({"kind": "source", "source_id": sid, **labels[sid],
-                "source_path": record["original"], "parse_id": row["parse_id"], "locator": row["locator"],
-                "section_role": "references" if all(n in reference_lines[sid] or not carriers[sid][n-1].strip()
-                                                     for n in range(start, end+1)) else "unspecified",
-                **lr.excerpt(query, row["body"]),
-                "lexical_match": lr.match(query, row["title"], row["body"]),
-                "limitations": public_receipt(record)["limitations"],
-                "knowledge_status": record.get("knowledge_status", "pending")})
+                   WHERE chunks MATCH ?""" + scope_sql + " ORDER BY rank,c.source_id,c.locator LIMIT ?",
+                   parameters).fetchall()
+        result["candidates"] = source_candidates(rows, repo=repo, query=query, issues=result["issues"])
         result["candidates"].sort(key=lambda item: lr.rank_key(item["lexical_match"]))
         bibliography_query = re.search(r"\b(?:references?|bibliograph\w*|citations?|cited|cites?|doi)\b|参考文献|引用文献|参考资料", query, re.I)
         result["passage_preference"] = "literal" if bibliography_query else "non_reference_within_source"
@@ -398,6 +523,7 @@ def outline(source_id, *, repo=REPO, query="", start_line=1, limit=40):
     text = managed(repo, parsed["text_path"]).read_text(encoding="utf-8")
     lines = text.splitlines()
     pieces, _ = segments(text)
+    read_blocks = reading_blocks(lines)
     entries, fence, piece_index = [], None, 0
     needle = " ".join(query.casefold().split())
     for n, line in enumerate(lines, 1):
@@ -424,6 +550,7 @@ def outline(source_id, *, repo=REPO, query="", start_line=1, limit=40):
             start, end = pieces[piece_index][:2]
         entries.append({"kind": "source", "structure_kind": "heading" if heading else "caption",
                         "line": n, "title": label[:200], "title_truncated": len(label) > 200,
+                        **reading_navigation(lines, start, end, parsed["text_path"], blocks=read_blocks),
                         "locator": f"{parsed['text_path']}#L{start}-L{end}"})
         if len(entries) > limit:
             break
@@ -735,6 +862,8 @@ def main(argv=None):
     p = sub.add_parser("search")
     p.add_argument("query")
     p.add_argument("--topk", type=int, default=5)
+    p.add_argument("--source-id", default="")
+    p.add_argument("--retrieval", choices=("lexical", "hybrid"), default="lexical")
     p = sub.add_parser("show")
     p.add_argument("source_id")
     p = sub.add_parser("outline")
@@ -755,7 +884,7 @@ def main(argv=None):
                                 allow_paddleocr=args.allow_paddleocr, refresh_parse=args.refresh_parse,
                                 knowledge_required=False if args.knowledge == "none" else None)
             elif args.command == "search":
-                output = search(args.query, topk=args.topk)
+                output = search(args.query, topk=args.topk, source_id=args.source_id, retrieval=args.retrieval)
             elif args.command == "outline":
                 output = outline(args.source_id, query=args.query, start_line=args.start_line, limit=args.limit)
             else:

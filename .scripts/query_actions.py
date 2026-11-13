@@ -827,7 +827,7 @@ def hybrid_recall(query: str = "", intent: str = "exploration", domain: str = ""
                     identity = (candidate["source_id"], candidate["parse_id"])
                     if identity not in sources:
                         sources[identity] = {**candidate, "id": ":".join(identity), "path": candidate["source_path"],
-                            "read_action": "read_raw", "read_input": {"locator": candidate["locator"]},
+                            "read_action": "read_raw", "read_input": candidate.get("read_input", {"locator": candidate["locator"]}),
                             "matched_locators": []}
                     locators = sources[identity]["matched_locators"]
                     if candidate["locator"] not in locators and len(locators) < 3:
@@ -964,12 +964,13 @@ def raw_citation_sources(locator: str) -> list[str]:
 
 
 @scoped_query
-def source_search(query: str, domain: str = "", topk: str = "5") -> tuple[str, int]:
+def source_search(query: str, domain: str = "", topk: str = "5", source_id: str = "",
+                  retrieval: str = "lexical") -> tuple[str, int]:
     """Find source-only Raw evidence without requiring Wiki or Graph entries."""
     if scope_for() == "private":
         raise ValueError("Source-first search is academic-only; private sources remain isolated")
     from source_ingest import search
-    payload = search(query, repo=_REPO, domain=domain, topk=int(topk))
+    payload = search(query, repo=_REPO, domain=domain, topk=int(topk), source_id=source_id, retrieval=retrieval)
     text = json.dumps(payload, ensure_ascii=False)
     return text, _tok(text)
 
@@ -985,11 +986,11 @@ def source_outline(source_id: str, query: str = "", start_line: str = "1", limit
 
 
 @scoped_query
-def knowledge_search(query: str, domain: str = "", topk: str = "5") -> tuple[str, int]:
+def knowledge_search(query: str, domain: str = "", topk: str = "5", retrieval: str = "lexical") -> tuple[str, int]:
     if scope_for() == "private" or domain not in {"", "academic", "public"}:
         raise ValueError("KU search currently supports academic public sources only")
     import knowledge_store as ks
-    text = json.dumps(ks.search(query, repo=_REPO, topk=int(topk)), ensure_ascii=False)
+    text = json.dumps(ks.search(query, repo=_REPO, topk=int(topk), retrieval=retrieval), ensure_ascii=False)
     return text, _tok(text)
 
 
@@ -1009,9 +1010,9 @@ def knowledge_read(unit_id: str) -> tuple[str, int]:
 
 DISPATCH = {
     "source_outline": lambda inp: source_outline(inp.get("source_id", ""), inp.get("query", ""), inp.get("start_line", "1"), inp.get("limit", "40")),
-    "knowledge_search": lambda inp: knowledge_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5")),
+    "knowledge_search": lambda inp: knowledge_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5"), inp.get("retrieval", "lexical")),
     "knowledge_read": lambda inp: knowledge_read(inp.get("unit_id", "")),
-    "source_search": lambda inp: source_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5")),
+    "source_search": lambda inp: source_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5"), inp.get("source_id", ""), inp.get("retrieval", "lexical")),
     "read_section": lambda inp: read_section(inp.get("page", ""), inp.get("section", "")),
     "read_raw": lambda inp: read_raw(inp.get("locator", "")),
     "graph_search": lambda inp: graph_search(inp.get("term", ""), inp.get("include_deprecated", False)),

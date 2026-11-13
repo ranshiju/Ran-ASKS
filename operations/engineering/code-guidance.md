@@ -407,6 +407,8 @@ Source 回执/搜索及新知识包按同一公共回执展示资源缺项，旧
 知识任务可选`--strategy selective`，统一摄入在`source-first + knowledge agent|api`下同样接受。
 首包以较小预算选择当前用途原文及只读候选；模型可直接Delta/零增量，或发`knowledge-read-v1`
 请求当前来源精确行段、已列Statement完整旧依据。shared最多两次追加，保留已有片段和版本绑定，
+已选来源范围按完整行拆为每块最多8000字符的证据；不截断/越界或增加轮数，单行过长、空依据
+及总预算超限仍原子拒绝。已有合法API读响应沿原绑定恢复，不重新生成选择；显式选片限制保持。
 原check/apply提交；API最多三轮语义响应并持久保存每轮响应/累计费用。Agent写task协议给出的
 read-request.json，再执行task的refresh（`knowledge expand KJ-ID`），不隐式调用API。
 编号包快照与原子state指针支持中断恢复；重复/越界/超预算请求拒绝，额度耗尽保留partial。
@@ -1002,7 +1004,7 @@ python3 .scripts/graph_metrics.py tight_clusters
 - **阅读索引与归属（API-only）**：提示中的read_options投影ref→action/input，并保留已存的非空候选title，使发现结果离开上下文后仍能辨认入口。沿用至多80入口及签发时200字符标题上限；无标题旧映射仍可执行，answer-only仍隐藏工具入口。标题是不可信导航标签，不是已读证据、同源判定或相关性认证；新检索结果、已读Raw/KU/计算正文和session原始映射保持，不重查来源或保留完整候选摘录。普通及仅作答分支共享简短归属指导：原文陈述以已读Raw为准，KU是解释、导航是线索，公式推导和算例标明为本次推导，保留典型/可能与适用范围。不新增语义校验、状态、模型调用或必填字段；标签增加少量输入，是否减少误读与净提速按实际使用验证。
 - **导航展示压缩（API-only）**：成功且有合法candidates列表的Source/KU/hybrid/admin/wiki发现结果使用紧凑JSON，只移除JSON排版空白；候选顺序、摘录中的文字和空白、限制／版本／匹配信号／阅读入口及未知字段均完整保留，不合并重复候选。具体阅读／计算正文、失败结果和不支持的形态原样显示，共享工具输出、session结构及预算账不变；不新增展示编号、权限或模型调用。该改动只减少序列化开销，不认证答案语义或承诺整体提速。
 - **按缺口发现（API-only）**：明确文档/知识主题/跨类型关系分别优先source_search/knowledge_search/hybrid_recall；同一文档多槽位共用初始发现，读相关入口后按实际缺口补查，独立来源可批量。提示说明Source索引当前位于academic且含论文/非论文，纯事务可Source-only；admin_recall只查admin Wiki，domain是存储范围而非内容类别，未知时Wiki/hybrid可留空。hybrid留空包含公共导航及Source/KU，指定teaching/admin/business仅该域导航。候选evidence_preview可直接read_raw，完整条件或冲突按需knowledge_read。只替换现有规划说明，不硬删通道、不自动读依据或改变权限/预算；不能保证模型遵循或完整会话提速。
-- **失败阅读记录（API-only）**：visited_action_keys记录已尝试动作，继续阻止原样重复失败；visited_pages只登记成功read_section。缺少保留正文的重复动作提示“已尝试”，不将失败或旧会话的尝试称为已读；成功保留结果仍提示复用，修正后的参数可在原预算内执行。不新增重试、状态或自动补读，也不改写历史会话。
+- **失败阅读记录（API-only）**：visited_action_keys记录已尝试动作，继续阻止原样重复失败；visited_pages只登记成功read_section。缺少保留正文的重复动作提示“已尝试”，不将失败或旧会话的尝试称为已读；成功保留结果仍提示复用，修正后的参数可在原预算内执行。当前结果为空但已有动作记录（包括失败及恢复后的会话）时，不再提示“第一轮，尚未执行任何动作”；仅真正无动作的会话显示该提示。不新增重试、状态或自动补读，也不改写历史会话。
 - **模型失败边界（API-only）**：模型adapter恢复后仍失败、parsed决策不合法或answer为空白时，循环立即返回`model_error`，报告实际轮次、原始模型status和错误；session保存`model_error`停止原因及先前已读正文。失败响应不执行plan、不默认转为answer，也不标记sufficient；编排器不再追加模型恢复。此项只保证完成状态真实，不保证下一次生成成功或降低单次请求成本。
 - **按用途消费**：成功动作旁展示程序派生的navigation/source_material/knowledge/result短说明；错误或未知动作不冒充来源，正文自报usage不影响角色。已明确相关Raw地址可直接核对当前问题，避免为净化导航或补齐非关键字段继续检索；引用白名单、预算和停止机制保持。
 - **会话预算恢复（API-only）**：恢复保存的`token_budget`，不以当前默认覆盖原有较小或较大预算；旧会话缺该字段才使用既有默认。读取成本和硬限制沿原值继续，不追加预算。
@@ -1023,7 +1025,7 @@ python3 .scripts/graph_metrics.py tight_clusters
 
 ### 4.2 `.scripts/query_actions.py`
 
-- **来源目录（shared）**：`source_outline(source_id,query="",start_line=1,limit=40)`列绑定Source的显式Markdown标题与带编号图表题注，query为原文标签字面子串，最多80项、按`next_start_line`分页。wg的`source-outline`、API及DSH共用；不需要KU/Wiki/图或全文索引。返回包含标签的现有分片地址（无分片则标签行），不猜跨片段图表/图例关系、不保证语义完整；目录是navigation，仍须read_raw，private/篡改/失效绑定拒绝，无模型、联网或写入。
+- **来源目录（shared）**：`source_outline(source_id,query="",start_line=1,limit=40)`列绑定Source的显式Markdown标题与带编号图表题注，query为原文标签字面子串，最多80项、按`next_start_line`分页。wg的`source-outline`、API及DSH共用；不需要KU/Wiki/图或全文索引。返回包含标签的现有分片地址（无分片则标签行），并共享下述有界结构阅读建议；不猜跨片段图表/图例关系、不保证语义完整；目录是navigation，仍须read_raw，private/篡改/失效绑定拒绝，无模型、联网或写入。
 
 - **图路径贡献（shared）**：navigation RRF 对同页每个 `wiki/graph_exact/graph` 通道只计最佳名次；同通道不同 `via` 不重复加分，但路径仍完整保留在 `signals`。intent权重、候选/遍历预算和章节引用加分保持；共享字面融合保持，多路径不认证身份或事实。
 
@@ -1033,15 +1035,17 @@ python3 .scripts/graph_metrics.py tight_clusters
 
 - **用途回执**：`execute`在成功结果外层附`usage`，原工具text保留；wg envelope同样标记，DSH文本适配器在JSON外层或原文本前交付短说明。存储正文不写分类标记；完整KU的knowledge与检索摘录的navigation不同，分类不代表真实性认证。规则集中在`artifact_usage.py`，共享提示面纳入工程契约。
 - **发现摘录**：Source及KU/Question通道复用`lexical_relevance.excerpt`，在原700字符上限内展示查询命中附近的连续原文；完整片段排名、身份与读取入口保持。`excerpt_span`为相对完整候选正文的零起点、右端不包含字符偏移，`excerpt_truncated`标明省略；无正文命中则用前缀。纯字面展示不保证条件完整，也不登记Raw证据，仍需沿原入口读取核验。
+- **KU 可选向量（shared）**：`knowledge_vectors.py build KU-<id> ...` 从现有标题/完整表述/未决项生成派生索引，绑定当前版本、文件哈希和模型 namespace；复用 embed_helper 与 Source 的纯窗口函数。`knowledge_search`/`wg.py ku-search --retrieval hybrid` 显式合并 Statement 语义发现，默认词汇、Question 原生路径和摄入候选机制保持。覆盖/失效/服务失败披露，查询不建库、不认证或改写知识；命中仍沿 KU/Raw 入口读取。见[KU契约](knowledge-units.md#可选-statement-语义发现)。
 - **KU 入口**：`knowledge_search/knowledge_read` 统一查询 Statement 与原生 Question，
   宿主用 `wg.py ku-search/ku-read`；API/DSH 同步注册。KU 正文/状态/来源用于导航及理解，
   透传 content_role/source_question_status；用途和来源处境不认证科学状态。
   不登记 Raw citation；必须另行 read_raw。仅 academic/public，词汇召回，已合入 hybrid 的类型化结果。
   搜索候选增加至多3条`evidence_preview`（原locator/relation/assessed_revision），原顺序、总数与截断可见；
   不读Raw、不认证支持关系、不改变排名。可直接沿相关地址read_raw，完整条件/其他依据仍knowledge_read。
-- **来源全文入口**：`source_search(query,domain,topk)` 检索 N1 来源投影，无 Wiki/Graph 依赖。
-  `wg.py source-search` 和 API/DSH discovery 已注册，候选含版本化 Raw locator，直接 read_raw 核验。
-  仅 academic/public，private 明确拒绝；字面召回，不隐式联网。新来源的原件映射和哈希校验由 source_locator 接入共享来源内核。
+- **来源全文入口**：`source_search(query,domain,topk,source_id="",retrieval="lexical")` 检索 N1 来源投影，无 Wiki/Graph 依赖。
+  `wg.py source-search` 和 API/DSH discovery 已注册，候选含版本化 Raw locator；有结构阅读建议时可沿 read_input 调用 read_raw 核验。
+  仅 academic/public，private 明确拒绝；默认字面召回不联网。可选source_id在LIMIT前限定；显式hybrid使用查询embedding与已建Source向量，披露缺覆盖/失效/失败，查询不建文档索引。向量复用原片段与结构阅读建议，事实仍回Raw。显式构建用source_vectors.py build，详见Source契约；hybrid_recall仍保持原通道。新来源的原件映射和哈希校验由source_locator接入共享来源内核。
+- **Source结构阅读建议（shared）**：search/outline保持原索引locator、摘录和排序；若边界切开普通段落、配对独立行显示公式及紧随的where/in which/其中/式中定义，额外给read_action/read_input和reading_context。最多补2000字符、32行，总范围8000字符；围栏/标题阻断连接，不闭合或超限标limited且不提供部分补充。hybrid保留所选建议，API沿原read_ref机制读取；不自动读取、不改Raw/索引、不认证语义充分。详见[Source契约](source-first-ingestion.md#查询与实际范围)。
 - **API 证据传递**：query_orchestrate 和 DSH query loop 将工具实际有界输出传给模型；
   `text_preview` 只作摘要，不可截去长地址或 Raw 正文后仍宣称已交付证据。
 
@@ -1054,7 +1058,7 @@ python3 .scripts/graph_metrics.py tight_clusters
 - **写入**：可能更新会话计量；具体取决于 orchestrator 上下文。
 - **后续**：读取返回的 Evidence Profile、预算状态和允许的下一动作；不能把动作输出直接当最终答案。
 - **Raw 读取**：`read_raw` 区分 `source_path`（Raw 原件/引用目标）与 `read_path`、`evidence_locator`（实际读取载体和片段）。二进制来源默认读取同 stem companion；读取前验证 `raw-companion-v1` 双哈希，明确失效时硬停且不向模型返回文本。缺少新绑定字段的历史包按 legacy 兼容；历史 PDF 没有 companion 时才回退原生页码读取。两者都不可读时明确失败，不登记为已核验证据。
-- **Raw超限反馈（shared）**：query_actions（API/DSH及shared调用）的单次上限为12000字符；wg独立入口为6000字符。超限仍报错、不给正文；`read_size`披露上限/实际长度，显式行locator可得到至多8项完整行子范围及不可再按行拆小的过长单行，未规划余段以`remaining_range`另列。建议只来自原请求范围内已取得的片段，不额外扫描或执行；标题、页码、表格、事实锚点不猜行号。调用方按任务选择`suggested_reads`再走正常读取与绑定检查；子范围只是导航，不认证语义完整，未执行前不登记为已读/引用。权限和companion失效先拒绝，private建议仍受原范围约束。query_actions的完整工具`text`携带JSON建议，短`error`只作摘要；API提示沿既有完整工具正文传递，DSH的失败read_raw也传完整错误正文；仍属失败、CitationGuard不登记证据，不修改提示/预算/恢复次数。
+- **Raw超限反馈（shared）**：query_actions与wg共用12000字符单次上限；wg绑定共享常量，使有界Source阅读建议可由Agent/API/DSH执行。超限仍报错、不给正文；`read_size`披露上限/实际长度，显式行locator可得到至多8项完整行子范围及不可再按行拆小的过长单行，未规划余段以`remaining_range`另列。建议只来自原请求范围内已取得的片段，不额外扫描或执行；标题、页码、表格、事实锚点不猜行号。调用方按任务选择`suggested_reads`再走正常读取与绑定检查；子范围只是导航，不认证语义完整，未执行前不登记为已读/引用。权限和companion失效先拒绝，private建议仍受原范围约束。query_actions的完整工具`text`携带JSON建议，短`error`只作摘要；API提示沿既有完整工具正文传递，DSH的失败read_raw也传完整错误正文；仍属失败、CitationGuard不登记证据，不修改提示/预算/恢复次数。
 - **图片停止规则**：`read_raw` 对图片只读取同 stem companion，不解码图片或调用视觉能力；companion 片段满足文本答案槽位后即停止。需要视觉语义时由宿主转入独立视觉流程，不把视觉能力注册进 query action 或 CitationGuard 链。
 - **Hub 路由工具**：`hub_route` 返回论文定位句→Scope 候选及 floor 决策（margin 已移除）；`hub_inspect` 返回 Scope、keyword/proposition/People 类型化成员和 split candidate。两者只读，不向弱 LLM 暴露 membership 写入、merge 或生命周期能力。`wiki_recall` 搜 title + Navigation + 论文方向定位，不读旧 Hub 关键词段。
 - **Wiki 召回**：每次每个范围内 Wiki 文件只读取一次，`hub_semantics.read_paper_profile(page,text=loaded_text)` 复用已校验文本并沿用 section/citation 解析器；不建缓存或索引。图中的规范 title、alias、status 保留，完整标签→标签短语→导航短语→词项召回依次排序，同档按不同词项覆盖、标签命中数、path 稳定排序；重复提及不加分，`%/_/反斜杠` 不作为 SQL 通配符。返回 `match_kind/matched_terms/term_coverage` 只解释词汇导航，不确认身份或事实；文件全文被机械读取，但 Content 不参与该评分，事实仍下钻 Raw。`hybrid_recall` 仍只消费排名做 RRF，不混加这些词汇分数。
@@ -1336,6 +1340,7 @@ python3 .scripts/test_presentation_delivery.py --render
 - **P0 摄入遥测与完成判定**（`recovery_policy.py`/`llm_structured.py`/`inbox_state.py`）：事务 `telemetry.events` 只记录状态与 typed recovery 时间线；旧 `llm_calls` 移入 `legacy_stage_call_estimates`。真实 API 次数唯一来自 `temp/llm-events/` 的逐请求 ExecutionEvent。`step_update_graph` 在 graph_ingest 输出非 JSON 或缺 `edges_added` 时返回失败；`validate_completion` 在标记 `completed` 前继续检查历史错误、语义槽和 graph report。
 - **JSON 本地恢复（API-only）**：标准解析失败且报 Invalid control character 时，仅允许裸 LF/CR/TAB 的兼容解码，保留字符串原值并继续 schema；其他控制字符、错误转义、缺字段、截断不猜补。`parse_json` 保持两元接口；`decode_json_response` 额外返回恢复标记。调用结果、history、逐请求事件以 `local_json_recovery=literal_string_whitespace` 披露；本地恢复不消耗模型重试，canonical 日志仍只存正文 hash/长度。恢复不是语义修复，schema 不合格仍失败；原生正文无需 JSON 字符串转义。
 - **完整 JSON 后的多余闭合符（API-only）**：仅标准解析报 `Extra data`，且已完整解析一个顶层 object/array、余部只含同类闭合符与 JSON 空白时，以 `redundant_top_level_closer` 恢复。完整对象中的值保持，继续原 schema；异类括号、多对象、附加字段/文字、内部语法错误和截断仍失败，不组合容错推断缺失结构。原始响应不改写，事件记录恢复类型；不增加模型调用。
+- **JSON 尾注恢复（API-only）**：仅普通JSON的call_json收到finish_reason=stop时显式启用；标准解析只报Extra data且已有完整object/array，余部全部为JSON空白及`//`行注释才接受。注释内对象/数组括号、非法控制字符、第二个值、附加字段/普通正文、内部/块注释、截断与组合容错均拒绝。JSON值和原响应保持，结果/history/事件记`local_json_recovery=trailing_line_comments`，继续原schema及工具/来源校验，不执行注释或增加模型调用。decode_json_response的开关默认关闭，shared parse_json和原生工具参数解析保持原边界；本地恢复不认证最终语义或整体收益。
 - **JSON 截断恢复（API-only）**：`llm_structured.call_json`收到非空正文、JSON解析失败且服务端`finish_reason=length`时，仅利用同profile剩余的既有`output_transport`重试，将下一次输出额度倍增至65536；调用方原额度已更大时保持。推理档位、初次额度、尝试次数、模型路由及`call_text`行为保持。普通格式错误、可解析但schema失败不因此扩容；无恢复额度时返回失败，半截JSON不得补造为成功。扩大额度可能增加该次费用，不保证答案语义或总体降本；实际请求与token全部计账。
 - `wg.py`：横向能力面统一入口（跨功能、回合中可调）。薄包 `query_graph.py`/`read_section.sh`/`workspace_state.py`/`research_memory.py`/`frontier.py`/`query_actions.py`/`source_locator.py`，输出统一 JSON envelope（`{ok,action,result,sources,status,error}`）。能力包括 `lookup`/`neighbors`/`relations`/`hub-of`/`read-section`/`read-raw`/`workspace`/`recall`/`remember`/`abbr`/`frontier`。`workspace ...` 是通用工作区入口；顶层 `recall/remember` 保留旧研究记忆兼容。供写作/研究中 agent 回合内组合调用，不必"切换任务"。
 - `frontier.py`：研究前沿 overlay 管理器。Markdown 主数据位于 `academic/frontier/{questions,trajectories}/`，一个开放问题由同一 Question Page 贯穿 captured→triaged→active→resolved；`frontier.db` 仅为可重建索引。Agent 后端把有界 KB packet 写入 `temp/frontier-agent/` 并返回 assessment/answer task；API 后端才调用模型。两端结果都经同一 schema 和 packet 内 Raw locator 白名单后写回 Question Page。不得修改 Raw/Wiki/事实 graph.db。

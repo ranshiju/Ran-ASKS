@@ -54,6 +54,10 @@ DSH 新注册该工具，API 默认发现计划继续复用原动作；没有新
 
 每个候选保留 path/id、kind、read_action/read_input、retrieval_channel/channel_rank，
 并标 `evidence_read=false`。旧 Wiki 的 semantic_address、capsule、signals 等字段继续保留。
+Source分组保留所选片段的结构阅读建议 `read_input`；原索引 `locator`、摘录和
+`matched_locators` 含义不变，不把建议重新缩成索引范围。建议仅补齐有界的段落、
+显示公式及明确相邻定义，不认证语义充分；预算和 `reading_context=limited` 说明见
+[Source阅读契约](source-first-ingestion.md#查询与实际范围)。没有建议时仍沿原locator读取。
 KU/Question 候选和读取结果透传 content_role；Question 另含 source_question_status，
 其 addressed/left_open 仅描述捕获来源的处境，与本库答案和科学状态分开。角色不改变排名或认证真实性。
 只有实际 `read_raw` 成功才进入已读证据集合；KU/Question/Wiki 不因命中或读取升格为事实依据。
@@ -124,7 +128,7 @@ Statement/Question 各自保持 ID；同一论文的不同 KU、Wiki 与原件�
 
 只有 domain=academic 或公共跨域查询才加入 academic Source/KU；
 private/admin/teaching/business 均不调用这两路。private 继续使用已有本地 Wiki/Graph 及物理隔离规则。
-KU/Source 仍是词汇召回；已有中文 KU 可作为中文问题到英文依据的桥梁，但未实现自动语义翻译。
+本联合入口的 KU/Source 默认通道仍是词汇召回；独立的`source_search`与`knowledge_search`可显式选择预建向量混合发现。已有中文 KU 可作为中文问题到英文依据的桥梁，不额外生成语义翻译。
 必要时由当前查询规划主体补充英文术语，不加固定翻译请求。
 
 ## 当前版本、局部维护与验证
@@ -137,3 +141,7 @@ KU/Source 仍是词汇召回；已有中文 KU 可作为中文问题到英文依
 公开合成回归覆盖多路发现、分类型读取、版本更新、API 取证和 private 隔离。
 少量存量来源的本地重放只验证具体问题和地址可达；真实材料与运行记录不公开。
 尚未完成大型语料、最终答案盲测或自动维护吞吐评估；词汇匹配不认证语义相关性。
+
+### 独立 KU 语义入口
+
+`knowledge_search` 可显式 `retrieval=hybrid` 使用当前 Statement 的预建向量，Question仍为词汇，覆盖/失效/失败显式披露。此能力与 Source 向量共用文本窗口及 embedding 请求/缓存，保留不同产物身份和阅读路径；不改变本联合检索默认候选来源，不在查询时整理或认证知识。构建、版本绑定及读取契约见[KU规范](knowledge-units.md#可选-statement-语义发现)。

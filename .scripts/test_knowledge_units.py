@@ -1767,6 +1767,52 @@ class KnowledgeTests(unittest.TestCase):
         self.assertTrue(candidate["old_evidence_blocks"])
         self.assertEqual(kc.validate_operation(self.root, expanded, self.op(expanded, action="attach", target=uid))["action"], "attach")
 
+    def long_read_source(self):
+        lines = ["# Exact requested evidence"] + [f"Condition {i}: " + "x" * 400 for i in range(2, 151)]
+        return self.receive("long-read.md", "\n".join(lines)), lines
+
+    def test_selective_large_read_preserves_every_line_and_commits_bound_blocks(self):
+        source, lines = self.long_read_source()
+        task, original = self.prepare(source, strategy="selective")
+        folder = kc.job_dir(self.root, task["job_id"])
+        request = self.read_request(original, start=70, end=110)
+        si.atomic_json(folder/"read-request.json", request)
+        kc.expand(task["job_id"], repo=self.root)
+        state, packet = kc.load_job(self.root, task["job_id"])
+        added = packet["blocks"][len(original["blocks"]):]
+        self.assertGreater(len(added), 1)
+        self.assertEqual("\n".join(b["text"] for b in added), "\n".join(lines[69:110]))
+        self.assertEqual(packet["blocks"][:len(original["blocks"])], original["blocks"])
+        self.assertEqual(packet["reading"]["round"], 1)
+        self.assertEqual(state["reading_history"][0]["request"], request)
+        for block in added:
+            self.assertLessEqual(len(block["text"]), 8000)
+            self.assertEqual(ks.resolve_evidence(self.root, block["ref"]), block["text"])
+        evidence = [{"block_id":b["id"],"relation":"supports"} for b in added]
+        self.stage(task, [self.op(packet, evidence=evidence)])
+        result = kc.apply(task["job_id"], repo=self.root)
+        self.assertEqual(result["status"], "completed", result)
+        uid = result["results"]["item-1"]["id"]
+        saved = ks.read(uid, repo=self.root)
+        self.assertEqual(len(saved["evidence"]), len(added))
+        self.assertEqual(kc.apply(task["job_id"], repo=self.root)["results"], result["results"])
+        self.assertEqual(ks.read(uid, repo=self.root)["revision"], 1)
+
+    def test_selective_unsplittable_or_empty_range_fails_atomically(self):
+        for content in ("x" * 8001, "   "):
+            with self.subTest(length=len(content)):
+                lines = ["# Evidence"] + ["Readable source content"] * 120
+                lines[90] = content
+                source = self.receive(f"bad-line-{len(content)}.md", "\n".join(lines))
+                task, packet = self.prepare(source, strategy="selective")
+                folder = kc.job_dir(self.root, task["job_id"])
+                before = (folder/"state.json").read_bytes()
+                si.atomic_json(folder/"read-request.json", self.read_request(packet, start=91, end=91))
+                with self.assertRaises(ValueError):
+                    kc.expand(task["job_id"], repo=self.root)
+                self.assertEqual((folder/"state.json").read_bytes(), before)
+                self.assertFalse((folder/"packet-1.json").exists())
+
     def test_selective_invalid_or_redundant_reads_do_not_mutate_packet(self):
         source = self.selective_source()
         task, packet = self.prepare(source, strategy="selective")
@@ -1889,6 +1935,25 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(ka.run(source["source_id"], repo=self.root, strategy="selective")["new_model_calls"], 0)
         self.assertEqual(si.inspect_source(source["source_id"],repo=self.root)["status"], "source_ready")
 
+    def test_selective_saved_large_read_resumes_without_regenerating_request(self):
+        source, _ = self.long_read_source()
+        def response(packet):
+            value = (self.read_request(packet, start=70, end=110) if packet["reading"]["round"] == 0
+                     else {"schema":kc.PROTOCOL,"operations":[]})
+            return {"ok":True,"parsed":value,"usage":{"total_tokens":13},"history":[{"status":"ok"}]}
+        call = self.mock_api(response)
+        with patch.object(kc, "source_read_ranges", side_effect=ValueError("old single-block limit")):
+            failed = ka.run(source["source_id"], repo=self.root, strategy="selective")
+        self.assertEqual(failed["status"], "failed", failed)
+        folder = kc.job_dir(self.root, failed["job_id"])
+        saved = (folder/"round-0-response-1.json").read_bytes()
+        result = ka.run_selective(failed["job_id"], repo=self.root)
+        self.assertEqual(result["status"], "completed", result)
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual((folder/"round-0-response-1.json").read_bytes(), saved)
+        self.assertEqual(result["api_usage"]["usage"]["total_tokens"], 26)
+        self.assertEqual(ka.run_selective(failed["job_id"], repo=self.root)["new_model_calls"], 0)
+
     def test_selective_api_failed_attempt_is_retained_and_requires_explicit_retry(self):
         call = self.mock_api(lambda p: {"ok":False,"error":"offline provider","usage":{"total_tokens":9},"history":[{"status":"api_error"}]})
         failed = ka.run(self.source["source_id"], repo=self.root, strategy="selective")
@@ -1909,11 +1974,12 @@ class KnowledgeTests(unittest.TestCase):
         folder = kc.job_dir(self.root,task["job_id"])
         original = (folder/"state.json").read_bytes()
         locators=[packet["reading"]["source_path"]+f"#L{i}-L{i+6}" for i in (50,60,70,80,90)]
-        si.atomic_json(folder/"read-request.json", self.read_request(packet, source_locators=locators))
-        with self.assertRaisesRegex(ValueError, "budget"):
-            kc.expand(task["job_id"],repo=self.root)
-        self.assertEqual((folder/"state.json").read_bytes(),original)
-        self.assertFalse((folder/"packet-1.json").exists())
+        for requested in (locators, [packet["reading"]["source_path"]+"#L50-L100"]):
+            si.atomic_json(folder/"read-request.json", self.read_request(packet, source_locators=requested))
+            with self.assertRaisesRegex(ValueError, "budget"):
+                kc.expand(task["job_id"],repo=self.root)
+            self.assertEqual((folder/"state.json").read_bytes(),original)
+            self.assertFalse((folder/"packet-1.json").exists())
 
     def test_selective_response_binding_blocks_replay_and_delta_failure_reuses_response(self):
         call = self.mock_api()

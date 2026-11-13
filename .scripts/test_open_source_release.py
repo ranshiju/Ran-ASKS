@@ -406,8 +406,9 @@ def main() -> None:
         assert introduction_markdown.is_file()
         assert introduction_markdown.stat().st_size > 10_000
         introduction_text = introduction_markdown.read_text(encoding="utf-8")
-        assert introduction_text.startswith("# ASKS 智能知识系统\n")
-        assert "assets/knowledge-compilation-zh.png" in introduction_text
+        assert introduction_text.startswith("# ASKS")
+        assert "Agent-Native Scientific Knowledge System" in introduction_text
+        assert "Interpret knowledge. Organize for use. Reason to solve." in introduction_text
         assert "assets/author-research-portrait.png" in introduction_text
         assert introduction_pdf_relative.rsplit("/", 1)[-1] in introduction_text
         assert "/tmp/" not in introduction_text

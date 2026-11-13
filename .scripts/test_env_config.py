@@ -196,7 +196,7 @@ def test_embedding_match_does_not_repeat_rejected_provider_requests() -> None:
                 assert error.status_code == status_code
             else:
                 raise AssertionError("Rejected requests must preserve the provider failure")
-            assert request.call_count == 2
+            assert request.call_count == 1  # No retry or smaller fallback on provider rejection.
 
 
 if __name__ == "__main__":

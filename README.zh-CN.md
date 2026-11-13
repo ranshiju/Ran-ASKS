@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前 main 版本: v0.26.0
+> 当前 main 版本: v0.27.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -38,9 +38,11 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 论文侧重阐述学术思想、方法论与实验依据。中文说明更侧重项目介绍和传播，帮助
 一般使用者理解 ASKS 解决什么问题、具有哪些特点，以及如何开始使用。
 
-**ASKS（Agent-Driven Scientific Knowledge System，智能体驱动的科学知识系统）**
+**ASKS（Agent-Native Scientific Knowledge System，智能体原生的科学知识系统）**
 是一个面向持续科研工作的持久化、来源可追溯知识系统。Ran-ASKS 是它的
 源代码可用工程实现。
+
+**Interpret knowledge. Organize for use. Reason to solve.**
 
 **理解知识，组织以供使用，推理以解决问题。** 来源完整保留，可读知识与导航
 按实际用途编译，让研究者与智能体能够检查、修订和接续已有工作。导航允许近似，
@@ -51,18 +53,33 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
 
-## v0.26.0 的主要改进
+## v0.27.0 的主要改进
 
-本版增加可选的选择性知识编译、原文章节/表图目录，并改进按用途检索、任务接续
-与确定性恢复。Agent 与 API 分别持有控制循环，共享校验和受管提交。
-默认摄入仍为 `legacy`，选择性编译须显式启用；稳定语义质量与整体净收益仍在验证。
+ASKS 的全称更新为 **Agent-Native Scientific Knowledge System（智能体原生的科学知识系统）**。
+核心观点是 **Interpret knowledge. Organize for use. Reason to solve.**
+仓库名称、命令和已有来源身份保持兼容。
 
-Gallery 接入免费的 Cloudflare Web Analytics，并支持首页显示近7天/30天汇总、
-热门作品和更新时间；每日由 Actions 刷新。缺失数据明确标为不可用，不填假零。
-网站同时增加分享预览、规范地址及部署版本，详见[配置说明](operations/GALLERY.md)。
+本版为原文片段与当前版本的 Statement 知识单元增加显式语义发现，与词汇检索、
+来源目录及 Wiki/Graph 导航配合。只为选定对象建立向量；来源或知识修订后，旧投影
+不再参与匹配。检索提供阅读入口，事实使用仍须核对对应 Raw。
 
-论文题名、核心科学问题、背景动机和引言能力随仓库交付，项目路径与持续工作接续
-统一使用受管入口。主仓库仍仅维护和验收 macOS。
+选定的长原文范围可在原预算内自动拆成合规证据块，不截断正文，也无需模型重新选片。
+正文上下文阅读建议和完整 JSON 后有限尾注的本地恢复减少了特定执行失败，来源绑定
+与结构校验继续生效；这些改进不认证语义正确。
+
+默认摄入仍为 `legacy`，Source-first/selective 与新向量通道须显式启用。
+近期使用验证了有界恢复与局部知识复用，但 API 草稿仍可能误解条件或扩大结论，
+自动语义质量和完整净收益尚未稳定验收。本版为兼容的开发阶段发布，尚不宣告1.0稳定承诺。
+
+### Agent-native 在这里意味着什么
+
+当前宿主 Agent 根据任务决定读什么、如何推理，使用仓库内规范、工具和可接续的工作记录；
+程序负责解析、来源绑定、校验及事务写入。API 用户保留由程序控制的独立循环和受限
+worker，支持的工作流仍可使用子 agent。两种模式共享存储与确定性内核，
+Agent 执行不会隐式退回 API 模型。
+
+Gallery 继续提供免费 Cloudflare 汇总统计和精选作品。以下使用说明保留 macOS
+维护范围、现有科研能力及明确的试用边界。
 
 论文评估先提炼核心科学问题，再逐条分类贡献、给出 1–10 分重要性评分，并单独评价
 证据强度，建议强调顺序与补证事项。评分不是录用概率。摘要和全文改进在实质改稿前
@@ -104,8 +121,8 @@ KU 保存完整表述、必要条件、不确定性和绑定具体版本的来�
 这些产物仍是知识草稿，不是经过认证的科学结论。
 
 产物要求由用途决定：导航帮助找到材料，知识表示保留含义与关键条件，事实回答回到 Raw。
-联合检索汇集 Source、KU/Question 与 Wiki/Graph，并提供后续读取动作。Source/KU 当前
-使用词汇检索，未实现自动跨语言语义召回。实际使用发现缺口后，可定向维护知识对象。
+联合检索汇集 Source、KU/Question 与 Wiki/Graph，并提供后续读取动作。Source/KU 默认
+使用词汇检索，显式混合检索可使用已建立且有效的向量。实际使用发现缺口后，可定向维护知识对象。
 
 已定位 KU 时，可在 `knowledge prepare` 或 `knowledge run` 中成对传入
 `--target KU-ID` 与 `--source-locator '<当前解析的Raw路径>#L起-L止'`，最多指定五段。
@@ -132,6 +149,33 @@ python3 .scripts/wg.py read-raw 'academic/raw/sources/.../paper.md#L10-L30'
 再使用原有check/apply提交；API执行须显式选择已配置API后端及 `--knowledge api`。
 候选发现增加任务表述的有界词汇查询，任务词只帮助导航，不作为事实或同一性证据。
 篇内目录提供章节和题注位置，不保证完整表体已读；实际使用仍须核对必要Raw上下文。
+
+### 让向量服务于发现
+
+| 产物 | 作用 | 下一步读取 |
+| --- | --- | --- |
+| 原文片段向量 | 在指定资料或已索引来源中发现相关表达，可辅助跨语言匹配 | 返回的 Raw 地址及必要上下文 |
+| Statement 知识向量 | 找到与当前用途有关的、可修订的已有解释 | 完整 KU 及绑定版本的原文依据 |
+| Wiki 与 Graph | 解释主题，沿有用关系导航 | 相关知识与 Raw 来源 |
+
+配置 embedding 服务后，只为选定对象显式建立投影：
+
+```bash
+# 用本库实际返回的来源ID、知识ID替换 S-ID / KU-ID。
+python3 .scripts/source_vectors.py build S-ID
+python3 .scripts/wg.py source-search '实现该方法的条件' --source-id S-ID --retrieval hybrid
+python3 .scripts/knowledge_vectors.py build KU-ID
+python3 .scripts/wg.py ku-search '实现该方法的条件' --retrieval hybrid
+```
+
+`--source-id` 在候选限额前限定单份资料，省略则跨来源搜索。Source 是文档身份，
+并非固定长度的片段；其原有正文片段可对应多个向量窗口，命中仍回到原来的阅读单位。
+向量增加访问路径，不替代知识或来源，也不裁决两个主张是否相同或正确。
+
+查询不会自动为缺失文档补建向量；混合检索可能调用配置的服务编码查询文本，
+并披露覆盖与失败，保留词汇结果。来源或 KU 修订后，只需按需重建受影响对象。
+摄入候选和联合发现保持当前词汇默认，不自动向量化全库。候选排名改善须与
+最终答案质量、后续维护和完整成本分别评价。
 
 详见 [Source-first](operations/engineering/source-first-ingestion.md)、
 [KU](operations/engineering/knowledge-units.md)、[产物用途](operations/engineering/artifact-use-contracts.md)

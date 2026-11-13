@@ -137,6 +137,19 @@ class UnifiedRetrievalTests(unittest.TestCase):
             self.assertIn('绑定失效', result['error'])
             guidance.assert_not_called()
 
+    def test_failed_read_session_is_not_reported_as_unstarted_after_restore(self):
+        with patch.object(qa, 'RAW_PREVIEW_CHARS', 55), patch.object(qo, 'SESSIONS_DIR', self.root/'sessions'):
+            session = qo.QuerySession(query='resume attempted read', stage='evidence')
+            self.assertIn('尚未执行任何动作', qo._build_api_prompt(session, [], 1))
+            result = qo.execute_plan(session, [{'action': 'read_raw', 'input': {'locator': self.ref['locator']}}])
+            self.assertFalse(result['results'][0]['ok'])
+            self.assertEqual(session.retained_results, [])
+            self.assertEqual(session.read_sources, [])
+            qo._save(session)
+            restored = qo._load(session.session_id)
+            self.assertNotIn('尚未执行任何动作', qo._build_api_prompt(restored, [], 2))
+            self.assertEqual(restored.read_sources, [])
+
     def question(self):
         return ks.capture_question(repo=self.root,operation_id="first-question",title="Conditional method X generality",
             question="Does conditional method X generalize?",claim_mode="conjecture",
@@ -315,6 +328,20 @@ class UnifiedRetrievalTests(unittest.TestCase):
         citation=self.recall(query='Aster trainability DOI')
         cited=next(c for c in citation['candidates'] if c.get('source_id')==source['source_id'])
         self.assertEqual(cited['section_role'],'references')
+
+    def test_source_grouping_retains_structural_read_suggestion(self):
+        path = self.root/'definition.md'
+        path.write_text('\n'.join(['# Definition']+['padding']*26+
+                                 ['', '$$', 'anchorformula = x', '$$', '', 'where x is fixed.']))
+        source = si.ingest(path, repo=self.root)
+        item = next(c for c in self.recall(query='anchorformula')['candidates']
+                    if c.get('source_id') == source['source_id'])
+        self.assertTrue(item['locator'].endswith('#L1-L32'))
+        self.assertTrue(item['read_input']['locator'].endswith('#L1-L33'))
+        self.assertIn(item['locator'], item['matched_locators'])
+        read = qa.execute(item['read_action'], item['read_input'])
+        self.assertTrue(read['ok'], read)
+        self.assertIn('where x is fixed.', read['text'])
 
     def test_source_only_works_without_graph_or_ku_and_does_not_create_them(self):
         result=self.recall()

@@ -175,13 +175,16 @@ def build_tools() -> list[ToolDefinition]:
         ),
         ToolDefinition(
             name="source_search",
-            description="检索 source-first academic 来源的全文片段；无 Wiki 也可返回精确 Raw locator，随后必须 read_raw 核验；仅词汇召回",
+            description="检索academic Source正文；已知source_id时先限定来源。默认lexical；显式hybrid使用查询embedding与已建向量，缺覆盖会披露。候选仍须read_raw核验",
             input_schema={"type": "object", "properties": {
                 "query": {"type": "string"},
                 "domain": {"type": "string", "enum": ["", "academic", "public"], "default": ""},
+                "source_id": {"type": "string", "pattern": "^(?:S-[0-9a-f]{24})?$", "default": ""},
+                "retrieval": {"type": "string", "enum": ["lexical", "hybrid"], "default": "lexical"},
                 "topk": {"type": "string", "default": "5"}}, "required": ["query"]},
             execute_fn=lambda args: _qa_call("source_search", {
-                "query": args.get("query", ""), "domain": args.get("domain", ""), "topk": args.get("topk", "5")}),
+                "query": args.get("query", ""), "domain": args.get("domain", ""), "topk": args.get("topk", "5"),
+                "source_id": args.get("source_id", ""), "retrieval": args.get("retrieval", "lexical")}),
         ),
         ToolDefinition(
             name="source_outline",
@@ -194,9 +197,10 @@ def build_tools() -> list[ToolDefinition]:
             execute_fn=lambda args: _qa_call("source_outline", args),
         ),
         ToolDefinition(
-            name="knowledge_search", description="检索 academic KU Statement 与原生 Frontier Question，候选仍须读取并回溯 Raw",
+            name="knowledge_search", description="检索 academic KU；默认lexical，显式hybrid补充已有Statement向量，Question仍走词汇；候选须读取并回溯Raw",
             input_schema={"type": "object", "properties": {"query": {"type": "string"},
-                "domain": {"type": "string", "default": "academic"}, "topk": {"type": "string", "default": "5"}}, "required": ["query"]},
+                "domain": {"type": "string", "default": "academic"}, "topk": {"type": "string", "default": "5"},
+                "retrieval": {"type": "string", "enum": ["lexical", "hybrid"], "default": "lexical"}}, "required": ["query"]},
             execute_fn=lambda args: _qa_call("knowledge_search", args),
         ),
         ToolDefinition(

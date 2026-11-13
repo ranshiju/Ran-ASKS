@@ -59,6 +59,74 @@ class SourceIngestTests(unittest.TestCase):
         self.assertFalse((self.root / "cross-domain/graph.db").exists())
         self.assertFalse((self.root / "academic/wiki").exists())
 
+    def test_structural_read_preserves_hit_and_reaches_condition_across_all_readers(self):
+        lines = ["# Fixture"] + ["p" * 210] * 26 + ["", "$$", "anchorformula = x", "$$", "",
+                 "where x is a fixed target independent of parameters. " + "q" * 1000,
+                 "", "# Unrelated", "Do not include this section."]
+        self.source.write_text("\n".join(lines))
+        ready = self.ingest()
+        before = {p: p.read_bytes() for p in (self.root / "academic").rglob("*") if p.is_file()}
+        hit = si.search("anchorformula", repo=self.root)["candidates"][0]
+        self.assertTrue(hit['locator'].endswith('#L1-L32'))
+        self.assertTrue(hit['read_input']['locator'].endswith('#L1-L33'))
+        old = qa.execute('read_raw', {'locator': hit['locator']})
+        self.assertNotIn('fixed target', old['text'])
+        current = qa.execute(hit['read_action'], hit['read_input'])
+        self.assertTrue(current['ok'], current)
+        self.assertIn('fixed target', current['text'])
+        self.assertNotIn('Do not include', current['text'])
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            wg.cmd_read_raw(SimpleNamespace(locator=hit['read_input']['locator']))
+        cli = json.loads(stream.getvalue())
+        self.assertTrue(cli['ok'], cli)
+        self.assertGreater(len(cli['result']['text']), 6000)
+        self.assertEqual(cli['result']['text'], '\n'.join(lines[:33]))
+        outline = si.outline(ready['source_id'], repo=self.root, query='Fixture')['candidates'][0]
+        self.assertEqual(outline['read_input'], hit['read_input'])
+        session = qo.QuerySession(query='anchorformula', mode='api')
+        qo.execute_plan(session, [{'action': 'source_search', 'input': {'query': 'anchorformula'}}])
+        self.assertEqual(session.read_sources, [])
+        ref = next(k for k,v in session.read_options.items() if v['input'] == hit['read_input'])
+        session.stage = 'evidence'
+        qo.execute_plan(session, [{'action': 'read_ref', 'input': {'ref': ref}}])
+        self.assertIn(hit['read_input']['locator'], session.read_sources)
+        self.assertNotIn(hit['locator'], session.read_sources)
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.root / 'academic').rglob('*') if p.is_file()})
+
+    def test_reading_context_completes_math_from_either_side(self):
+        lines = ['# Model', '$$', 'loss =', '1 - overlap', '$$', '', 'where the target is fixed.', '', '# Next']
+        for start, end in [(3,4), (7,7), (2,5)]:
+            nav = si.reading_navigation(lines, start, end, 'academic/raw/test.md')
+            self.assertEqual(nav['read_input']['locator'], 'academic/raw/test.md#L2-L7')
+        self.assertEqual(si.reading_navigation(lines, 2, 7, 'academic/raw/test.md'), {})
+        self.assertEqual(si.reading_navigation(lines, 9, 9, 'academic/raw/test.md'), {})
+
+    def test_reading_context_keeps_paragraphs_and_skips_fenced_pseudo_math(self):
+        lines = ['# A', 'a wrapped', 'paragraph.', '', '# B', 'other paragraph', '',
+                 '```md', '$$', 'not math', '$$', 'where code ends.', '```', '',
+                 '$$', 'real = x', '$$', '', '# New section', 'where unrelated.']
+        nav = si.reading_navigation(lines, 3, 3, 'x.md')
+        self.assertEqual(nav['read_input']['locator'], 'x.md#L2-L3')
+        self.assertEqual(si.reading_navigation(lines, 10, 10, 'x.md'), {})
+        self.assertEqual(si.reading_navigation(lines, 15, 17, 'x.md'), {})
+
+    def test_reading_context_handles_definition_display_and_chinese_markers(self):
+        lines = [r'\[', 'a = b', r'\]', '', '其中：', '', '$$', 'b = c', '$$', '', '式中 c 为常量。']
+        nav = si.reading_navigation(lines, 7, 9, 'x.md')
+        self.assertEqual(nav['read_input']['locator'], 'x.md#L1-L11')
+
+    def test_reading_context_limits_disclose_without_partial_or_unbounded_expansion(self):
+        for lines, end in [(['$$','x = y','$$','','where ' + 'z'*2001], 3),
+                           (['word']*40, 1), (['a'*6000,'b'*2000], 1)]:
+            nav = si.reading_navigation(lines, 1, end, 'x.md')
+            self.assertEqual(nav['reading_context']['status'], 'limited')
+            self.assertNotIn('read_input', nav)
+        unclosed = ['# A', '$$', 'x = y', '', '# B', 'new paragraph']
+        nav = si.reading_navigation(unclosed, 3, 3, 'x.md')
+        self.assertEqual(nav['reading_context']['reason'], 'unclosed_display_math')
+        self.assertEqual(si.reading_navigation(unclosed, 6, 6, 'x.md'), {})
+
     def test_outline_locates_deep_table_without_knowledge_or_index_and_never_writes(self):
         self.source.write_text("# Experiment\n" + "Unrelated paragraph.\n" * 80 +
                                "## Wall clock time\n<table><tr><td>1.57s</td></tr></table>\n\nTable 10: timing setup\n")

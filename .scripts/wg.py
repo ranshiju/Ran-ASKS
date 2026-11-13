@@ -67,7 +67,7 @@ import agent_task
 from platform_compat import configure_stdio, run_python
 import inbox_state
 
-RAW_PREVIEW_CHARS = 6000
+RAW_PREVIEW_CHARS = qa.RAW_PREVIEW_CHARS
 
 
 def envelope(action, result, sources=None, status="ok", error="", ok=None):
@@ -280,7 +280,8 @@ def cmd_recall(args):
 
 
 def cmd_source_search(args):
-    result = qa.execute("source_search", {"query": args.query, "domain": args.domain, "topk": str(args.topk)})
+    result = qa.execute("source_search", {"query": args.query, "domain": args.domain, "topk": str(args.topk),
+                         "source_id": getattr(args, "source_id", ""), "retrieval": getattr(args, "retrieval", "lexical")})
     if not result["ok"]:
         return envelope("source-search", None, status="error", error=result["error"])
     return envelope("source-search", json.loads(result["text"]), status="ok")
@@ -385,7 +386,7 @@ def cmd_ingest(args):
 
 def cmd_knowledge_query(args):
     action = "knowledge_search" if args.cmd == "ku-search" else "knowledge_read"
-    inputs = {"query": args.query, "domain": args.domain, "topk": str(args.topk)} if action == "knowledge_search" else {"unit_id": args.unit_id}
+    inputs = {"query": args.query, "domain": args.domain, "topk": str(args.topk), "retrieval": getattr(args, "retrieval", "lexical")} if action == "knowledge_search" else {"unit_id": args.unit_id}
     result = qa.execute(action, inputs, subproject=getattr(args, "domain", "academic"))
     return envelope(args.cmd, json.loads(result["text"]) if result["ok"] else None,
                     status="ok" if result["ok"] else "error", error=result["error"])
@@ -892,6 +893,8 @@ def build_parser():
     p.add_argument("locator"); p.set_defaults(func=cmd_read_raw)
 
     p = sub.add_parser("source-search", help="检索 source-first 来源全文并返回可直接读取的 Raw locator")
+    p.add_argument("--source-id", default="", help="先限定已知Source，再检索正文")
+    p.add_argument("--retrieval", choices=("lexical", "hybrid"), default="lexical", help="hybrid显式使用查询embedding与已建来源向量；缺覆盖会披露")
     p.add_argument("query")
     p.add_argument("--domain", default="academic")
     p.add_argument("--topk", type=int, default=5)
@@ -904,7 +907,9 @@ def build_parser():
 
     p = sub.add_parser("ku-search", help="检索 Statement KU 和原生 Frontier Question")
     p.add_argument("query"); p.add_argument("--domain", default="academic")
-    p.add_argument("--topk", type=int, default=5); p.set_defaults(func=cmd_knowledge_query)
+    p.add_argument("--topk", type=int, default=5)
+    p.add_argument("--retrieval", choices=("lexical", "hybrid"), default="lexical", help="hybrid显式查询已有Statement向量；Question仍为词汇检索")
+    p.set_defaults(func=cmd_knowledge_query)
     p = sub.add_parser("ku-read", help="读取 KU 当前表述与来源依据")
     p.add_argument("unit_id"); p.add_argument("--domain", default="academic"); p.set_defaults(func=cmd_knowledge_query)
     p = sub.add_parser("knowledge", help="Source-first 知识任务：prepare 为宿主 Agent，run 为显式 API")

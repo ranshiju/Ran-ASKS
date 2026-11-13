@@ -44,8 +44,10 @@
 
 ## 检索策略
 
+已确定Source但缺正文时，source-search可用--source-id先限定来源；语义或跨语言措辞缺口可显式选--retrieval hybrid并查看vector_channel覆盖。目录source-outline仍用于明确章节/表图；已有相关Raw地址可直接读。
+
 **Source-first 来源发现（N1）**：查询新收录、尚无 Wiki/Graph 的 academic 材料时，
-使用 `wg.py source-search '<词项>'` 或 `source_search(query,domain,topk)`，按返回的精确
+使用 `wg.py source-search '<词项>'` 或 `source_search(query,domain,topk,source_id="",retrieval="lexical")`，按返回的精确
 locator 直接 `read_raw`。它与已有 Wiki/Graph 入口并列，不强制先有 Wiki；片段摘录只是候选。
 当前是英文词/中文二元词组的字面召回，中文问英文材料可显式用对应英文术语；
 不承诺跨语言语义召回。来源 `pending` 仅指知识整理待处理，不阻止阅读真实 Raw。
@@ -320,12 +322,12 @@ private 是标准 query 的存储范围，不是另一套问答方法。共用 `
 
 ## embedding 应用(v3,2026-07-25 局部引入)
 
-**已引入（局部）**：embedding 用于节点/Hub description 的语义候选、身份门控和 Hub 路由，不做全文向量检索；`hybrid_recall` 只将其候选排名作为一路 rank 信号。
+**已引入（局部）**：embedding 用于节点/Hub description 的语义候选、身份门控和 Hub 路由；Source另有显式可选的正文混合检索（见下）；`hybrid_recall` 只将其候选排名作为一路 rank 信号。
 - 模型：`embedding-3`（复用项目 `.env`，dim=2048，中英混排）
 - 节点名 embedding 预算缓存(graph.db `embeddings` 表,ingest 时算)+ query 向量缓存(LRU 500 + TTL 7 天【初始工程参数】)
 - 采样:节点名 + query 向量余弦 → 两阶段(top-k cutoff 截断 + softmax 温度 T)→ 不重复采样
 
-**远期第五层（全文语义检索，未引入）**：当前 section capsule 从 heading、section 正文和 Raw 脚注即时派生，不建立全文向量库。
+**Source正文语义检索（可选）**：已有source_id时先限定范围，source_search显式传retrieval="hybrid"可在预建Source向量与词汇两路召回后读取Raw；默认lexical不联网。vector_channel披露当前覆盖与失败，缺向量不自动建库，不能以partial认定完整召回。向量窗口仍指回原片段及阅读建议，不生成Wiki/KU或图边，知识整理仍按需。构建与维护见[Source契约](engineering/source-first-ingestion.md#可选正文向量与既有产物的结合)。Wiki section capsule保持即时派生。KU可另用`knowledge_search(..., retrieval="hybrid")`或`wg.py ku-search --retrieval hybrid`补充现有Statement语义发现；默认词汇、Question原生路径与Raw核验要求保持，见[KU契约](engineering/knowledge-units.md#可选-statement-语义发现)。
 - 触发判据(满足任一):漏召率上升(月度 >10% 进第三层未命中)/ 规模临界(页面 >500 且图检索召回率下降)
 - 引入形态:作第五层兜底,不替代图路由,召回仍需锚点定位 + raw 回溯
 

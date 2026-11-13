@@ -1465,11 +1465,31 @@ nodes:
   source_ingest:
     path: .scripts/source_ingest.py
     kind: implementation
-    role: shared-source-first-receipt-backed-immutable-ingestion-versioned-parser-reuse-fulltext-search-and-bound-structural-outline
+    role: shared-source-first-receipt-backed-immutable-ingestion-versioned-parser-reuse-fulltext-search-outline-and-bounded-structural-reading-navigation
   source_ingest_test:
     path: .scripts/test_source_ingest.py
     kind: test
     role: source-first-independent-commit-recovery-duplicate-binding-and-query-regression
+  source_vectors:
+    path: .scripts/source_vectors.py
+    kind: implementation
+    role: shared-explicit-public-source-vector-projection-and-scoped-hybrid-retrieval-with-bound-raw-navigation
+  source_vectors_test:
+    path: .scripts/test_source_vectors.py
+    kind: test
+    role: source-vector-binding-scope-cache-and-hybrid-retrieval-regression
+  vector_windows:
+    path: .scripts/vector_windows.py
+    kind: implementation
+    role: shared-pure-contiguous-utf8-vector-input-windowing-without-model-or-store
+  knowledge_vectors:
+    path: .scripts/knowledge_vectors.py
+    kind: implementation
+    role: shared-explicit-current-statement-vector-projection-and-optional-hybrid-ku-discovery
+  knowledge_vectors_test:
+    path: .scripts/test_knowledge_vectors.py
+    kind: test
+    role: ku-vector-current-version-evidence-navigation-scope-cache-and-adapter-regression
   source_ingest_ops:
     path: operations/engineering/source-first-ingestion.md
     kind: spec
@@ -2170,6 +2190,57 @@ edges:
 - - source_ingest_ops
   - governs
   - source_ingest
+- - source_ingest_ops
+  - governs
+  - source_vectors
+- - source_ingest
+  - uses
+  - source_vectors
+- - source_vectors
+  - uses
+  - source_ingest
+- - source_vectors
+  - uses
+  - embed_helper
+- - source_vectors
+  - uses
+  - graph_lib
+- - source_vectors
+  - uses
+  - vector_windows
+- - knowledge_vectors
+  - uses
+  - vector_windows
+- - vector_windows
+  - tested_by
+  - source_vectors_test
+- - knowledge_vectors
+  - uses
+  - knowledge_store
+- - knowledge_vectors
+  - uses
+  - source_ingest
+- - knowledge_vectors
+  - uses
+  - graph_lib
+- - knowledge_vectors
+  - uses
+  - embed_helper
+- - knowledge_vectors
+  - tested_by
+  - knowledge_vectors_test
+- - knowledge_store
+  - uses
+  - knowledge_vectors
+- - knowledge_units_ops
+  - governs
+  - knowledge_vectors
+- - source_vectors
+  - tested_by
+  - source_vectors_test
+- - embed_helper
+  - tested_by
+  - source_vectors_test
 - - query_actions
   - uses
   - source_ingest
@@ -2980,6 +3051,9 @@ edges:
 - - llm_structured
   - tested_by
   - api_ingest_test
+- - llm_structured
+  - tested_by
+  - llm_events_test
 - - llm_structured
   - references
   - llm_model_catalog
@@ -5507,6 +5581,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   knowledge_store:
     preconditions:
+    - optional retrieval=hybrid delegates to knowledge_vectors for current Statement semantic discovery; default lexical and native Question search retain prior behavior, public Agent/API/DSH callers share the optional parameter, no automatic knowledge compilation or Raw certification
     - shared search adds up to three stored evidence locator/relation/assessed_revision previews in original order plus total and truncation; ranking and existing candidate fields are unchanged, no Raw read or binding certification occurs at discovery, and full knowledge_read remains available
     - shared academic-only Markdown primary Statement store; native Frontier Question identity and states remain authoritative
     - optional content_role describes research_question/concept_definition/method_model/scientific_finding; legacy Statements stay unspecified without forced rewriting; roles do not certify truth
@@ -5535,6 +5610,7 @@ script_contracts:
     - automatic candidate packets with a nonempty focus rank the bounded pool by literal purpose coverage within the established confirmed-name and same-source tiers before incidental passage-name counts; no semantic identity classifier is added. Only affected automatic focused jobs receive a candidate-policy identity key; old jobs remain recoverable by ID.
     - automatic focused compilation includes one distinct literal task-focus query alongside source-topic and passage-name queries, so translated existing knowledge can be discovered even without source-language lexical overlap. At most three deduplicated local queries return twenty hits each, ranked into the existing twenty-item pool and five-candidate packet budget. Focus is discovery context only and never evidence or a new admission rule; existing source/topic/name admission, complete-old-evidence requirements and version validation remain authoritative. Unfocused and explicit-selection/target paths retain their existing behavior and task identities.
     - optional selective strategy prepares a smaller source-local evidence packet with headings and read-only existing candidates; the shared kernel may append explicitly requested current-source spans and complete evidence of an already-listed Statement, with original source/version/budget validation. No semantic classifier, mandatory review or source-text-driven arbitrary tool execution is introduced.
+    - selective current-source read requests may span multiple evidence blocks; the shared expander partitions only the explicitly requested line range at whole-line boundaries into blocks of at most 8000 characters, then validates each block with the original evidence binder. No clipping, outside-range reading, extra expansion rounds or model calls; unsplittable long lines, empty evidence, invalid sources/ranges and total packet budget violations still fail atomically. Existing small spans retain their evidence identity, explicit selection/target and query-reader limits are unchanged, and a saved successful API read request can resume through the original response-binding path.
     - selective reading uses immutable numbered packet snapshots and an atomic state pointer; at most two evidence expansions retain already-read blocks, reject no-progress requests, and preserve the existing Delta/check/apply authority. Agent tasks expose a deterministic read-request expansion entry; API-owned tasks cannot be taken over by the host. The selective strategy identity does not alter survey or explicit-selection identities; independent automatic candidate-ranking policy versions are scoped separately.
     - selective candidate snapshots are checked before further reading, generation and zero-operation completion; same-source candidates are marked as such rather than counted as independent prior coverage. Knowledge reading requests cannot publish operations, and source readiness is independent of their success.
     - shared optional source-locator selection without target loads every requested current-selected-parse span within the existing budget or fails before job creation/model execution; source_selection is explicit, with no automatic survey or candidate retrieval, and callers compare existing knowledge before choosing create/defer/zero operations or target maintenance
@@ -5600,7 +5676,9 @@ script_contracts:
   source_ingest:
     preconditions:
     - shared deterministic Source-first profile; first release accepts academic PDF/Markdown/plain text, with no semantic LLM or Graph dependency
-    - shared source_outline lists only explicit Markdown headings and numbered table/figure captions from the current hash-bound source_ready carrier; optional literal label filtering and bounded line pagination return existing containing-segment Raw locators or the label line when no indexed-size segment exists. Labels are navigation, never evidence or a guarantee that a table, legend or section is complete; no automatic expansion, index rebuild, model call or Raw writes
+    - optional source_id filters before candidate LIMIT and validates selected source/index even on no hits; omitted/empty preserves global lexical behavior. Explicit retrieval=hybrid delegates to source_vectors; default lexical performs no embedding calls. All Agent/API/DSH entrypoints preserve optional parameters and original Raw navigation.
+    - shared search and outline preserve original index/label locators, ranking and excerpt offsets while providing explicit read_action/read_input for a bounded contiguous structural context when needed. Complete intersected paragraphs and paired display-math blocks with adjacent literal where/in-which/其中/式中 definitions outside code fences; add at most 2000 characters and 32 lines with an 8000-character total cap. Incomplete syntax or over-budget completion remains disclosed as limited, never silently truncated or certified semantically sufficient. No index migration, Raw write, automatic read or model call; precise old locators retain their meaning.
+    - shared source_outline lists only explicit Markdown headings and numbered table/figure captions from the current hash-bound source_ready carrier; optional literal label filtering and bounded line pagination return existing containing-segment Raw locators or the label line when no indexed-size segment exists, plus the same optional bounded structural read suggestion as search. Labels are navigation, never evidence or a guarantee that a table, legend or section is complete; no automatic reading, index rebuild, model call or Raw writes
     - PDF figure citations default to the retained original plus figure/subfigure and known page; separate parser images are optional derived resources. Missing assets remain recorded and disclosed without making text readiness or task completion depend on extracting every figure. Live receipts normalize the exact legacy missing-image notice without rewriting saved receipts, parse identities or Raw; existing resource integrity checks remain
     - shared Source search may display the bound carrier's opening H1 for filename_unverified titles; title_basis remains explicitly unverified and filename_title is preserved, without changing ranking, receipts, indexes or Raw
     - Source and KU discovery use shared contiguous match-centered excerpts within the existing 700-character cap, with zero-based end-exclusive body offsets; ranking and full reading locators remain unchanged, excerpts are not evidence and never rewrite or concatenate source text
@@ -5616,7 +5694,7 @@ script_contracts:
     - temp/source-ingest/ for parser staging and resumable checkpoints
     forbidden:
     - direct publication of unbound parse text, source_ready before successful index readback, implicit legacy completed receipt
-    - private source import or cross-domain traversal/symlinks; model or network calls during search/read
+    - private source import or cross-domain traversal/symlinks; model or network calls during default lexical search, outline or read; implicit vector construction during queries
     - deleting received originals after parse/index failure; rewriting old parse carriers or silently reinterpreting old locators
     verify:
     - python3 .scripts/test_source_ingest.py
@@ -5855,8 +5933,57 @@ script_contracts:
     - automatic batch expansion; every page requires an explicit transaction and validated agent output
     verify:
     - python3 .scripts/test_private_reingest.py
+  vector_windows:
+    preconditions:
+    - shared pure consecutive UTF-8 windows with a 2400-byte budget and existing newline preference; offsets refer to the input string, whitespace-only windows may be omitted, nonempty text is never truncated
+    writes: []
+    forbidden:
+    - model calls
+    - file IO
+    - semantic boundaries or evidence claims
+    verify:
+    - python3 .scripts/test_source_vectors.py
+    - python3 .scripts/test_knowledge_vectors.py
+  knowledge_vectors:
+    preconditions:
+    - shared explicit public Statement vector projection from existing title, complete statement and unresolved items; current id/revision/file hash, exact text windows, policy and endpoint/model namespace bind every projection
+    - no generative summary, knowledge editing, automatic merge or truth promotion; original draft/claim_mode/version/condition and stored evidence previews survive discovery, actual Raw read remains required
+    - native Question remains lexical and explicitly outside Statement vector coverage; deleted, changed or historical KU projections are rejected before ranking, model/cache mismatch never silently reused
+    - explicit build batches selected units through existing embedding cache with zero retries and successful-small-batch reuse; publication rechecks the current unit under its managed lock and atomically replaces only its derived projection
+    - query embeds only the query for explicit hybrid, never rebuilds units; missing/partial/invalid coverage and service failure disclosed, private and path escapes rejected before network
+    writes:
+    - academic/knowledge/vectors.sqlite
+    - configured embedding text cache
+    - existing knowledge-lock files
+    forbidden:
+    - Raw or KU primary/history writes
+    - public graph relationships
+    - implicit semantic control-loop fallback
+    - auto compilation during query
+    verify:
+    - python3 .scripts/test_knowledge_vectors.py
+    - python3 .scripts/test_knowledge_units.py
+    - python3 .scripts/test_private_query.py
+    - python3 .scripts/engineering_graph.py validate
+  source_vectors:
+    preconditions:
+    - shared explicit academic/public Source vector build and hybrid query; Source receipts and hash-bound Raw remain authority, vectors are rebuildable navigation only
+    - fixed bounded UTF-8 subwindows preserve parent Source chunk locators and exact body offsets; same-parent matches contribute only their best vector rank, no similarity-based identity or fact decisions
+    - projection binds source_id, selected parse_id, carrier hash, segmentation policy, input hash and endpoint/model namespace; validate before using, partial/missing/stale coverage and fallback are explicit
+    - build is explicit and per-source atomic, reuses embedding text cache; query never embeds documents or changes ingestion readiness, may only embed the query when explicitly requested; private and out-of-scope access rejected before provider calls
+    - shared telemetry counts actual embedding attempts, usage, cache hits/misses and failures; source pilot uses zero retries, auth/config errors stop build
+    writes:
+    - academic/sources/vectors.sqlite derived projection and configured embedding cache; no Raw/KU/Graph relations
+    forbidden:
+    - silently truncating embedding text, globally ranking before requested source filtering, claiming partial coverage as complete, implicit semantic-model control-loop fallback
+    verify:
+    - python3 .scripts/test_source_vectors.py
+    - python3 .scripts/test_source_ingest.py
+    - python3 .scripts/test_private_query.py
+    - python3 .scripts/engineering_graph.py validate
   embed_helper:
     preconditions:
+    - optional request options expose bounded batch/timeout/retry and structured attempts/cache telemetry without credentials or input text; default signatures remain compatible, response vectors must match input count/index and be finite and nonzero
     - shared 数值依赖在实际向量计算前按需加载；模块导入、离线上下文与配置读取不要求 NumPy。缺少 NumPy 时给出 analysis extra 安装命令，内部损坏的导入错误原样传播，不在缺包后发起 API 或写缓存。
     - shared Agent/API graph scope is context-local and restored on exit; private cache selection precedes any provider call
     - match_by_embedding 可把 caller 已确定且后续必需的 extra_texts 附加到原请求预热同一 namespace 文本缓存；匹配只使用原新/旧文本及原阈值，联合请求失败回退原匹配请求，但 provider 401/403/429 明确拒绝时直接保留原失败，不重复同服务请求；EmbeddingAPIError 保持 RuntimeError 兼容并携带最后 HTTP status，默认无附加文本行为不变
@@ -6818,7 +6945,8 @@ script_contracts:
     - 检查 paper.md 并继续骨架/摄入流程
   query_actions:
     preconditions:
-    - query_actions read_raw admits at most 12000 characters per precise excerpt for its shared callers including API and DSH; oversized reads remain errors without evidence promotion. After existing scope and companion checks, shared read_size guidance discloses the actual cap and bounded whole-line suggestions within the requested range. Callers choose later reads through the normal validator; no automatic splitting/execution, extra retries or cumulative budget extension; wg keeps its independent 6000-character cap
+    - query_actions read_raw and wg read-raw share the existing 12000-character per-excerpt limit, with wg bound to the shared constant so Source structural reading suggestions are usable across Agent/API/DSH. Oversized reads remain errors without evidence promotion. After existing scope and companion checks, shared read_size guidance discloses the actual cap and bounded whole-line suggestions within the requested range. Callers choose later reads through the normal validator; no automatic splitting/execution, extra retries or cumulative budget extension.
+    - hybrid Source grouping preserves the selected passage's explicit structural read_input when present, alongside its unchanged index locator/excerpt and alternate matched locators; it does not silently narrow the reading suggestion or independently expand Raw.
     - shared query scope selects public or private across discovery, Wiki, Raw and companion reads; nested actions cannot change storage domain
     - navigation weighted RRF counts only the best rank per page and channel (wiki, graph_exact, graph); repeated via paths within one channel remain visible in signals but do not add votes; intent weights, candidate/traversal budgets and cited-section bonus remain, with no identity or evidence promotion
     - optional subjects (at most three caller-supplied nonempty names, each at most 160 characters) preserve explicit subject discovery before candidate cutoffs; same-scope Wiki scan is reused for subject and question ranking, graph traversal/embedding budgets stay unchanged, and bounded Source/KU searches merge subject/question lanes into at most 20 candidates per channel; no implicit subject inference or model call
@@ -6950,6 +7078,7 @@ script_contracts:
     - python3 dsh/test_dsh_ingest_tools.py
   llm_structured:
     preconditions:
+    - API普通JSON传输仅在finish_reason=stop时显式开启trailing_line_comments恢复；标准解析须只报Extra data且已完整解析object/array，余部仅JSON空白与//行注释，注释不得含对象/数组括号或非法控制字符。保留原JSON值与响应，仍经原schema和后续工具/来源校验，local_json_recovery记录类型，不新增模型调用；完整性未知、截断、普通正文、第二个值、附加字段、内部/块注释及混合修补均不接受。decode_json_response默认关闭该恢复，shared parse_json和原生tool arguments保持原边界
     - JSON解码先按标准解析；仅标准解析报Invalid control character且裸控制字符限LF/CR/TAB时，兼容解码保留字符串字符值，再经原schema。其余控制字符、错误转义和截断不补造；local_json_recovery记录本地恢复，不计额外模型尝试，canonical事件仍不存正文
     - 标准JSON仅报Extra data且已完整解析一个顶层object/array时，若余部仅为与顶层类型相同的多余闭合符及JSON空白，可按redundant_top_level_closer本地恢复；保持全部键值，仍经原schema。异类闭合符、多对象、额外字段/文字、内部语法错误与截断均不修补，也不组合其他容错猜测结构
     - call_json可显式接收provider原生tools与choice解码器，复用原HTTP、backend、重试和事件路径；解码器只映射响应到既有schema，不执行工具。原JSON调用默认保持，原生请求审计hash覆盖messages与tools，无隐式协议降级
@@ -7326,7 +7455,7 @@ script_contracts:
     - inspect is a shared read-only projection of public API session history; it never calls models, dispatches recorded actions, reads source addresses, saves a session or transfers execution ownership. Host Agents may inspect then continue with shared query tools after the API caller has stopped; API loop controls remain API-only
     - inspect returns query, recorded API budget/stop/slot state, candidate read options and an indexed retained-result directory; explicit result/final selectors return unchanged historical payloads. Missing legacy final results remain unavailable, candidate and retained-material roles remain distinct, and recorded coverage/citations never certify semantic quality or current source freshness
     - completed API loop returns are retained as final_result including answers and failure outcomes; save/load preserves them without replaying models. Session IDs must be twelve lowercase hexadecimal characters, stored IDs must match, session file/directory symlinks are rejected, imports do not create the session directory, and saves use same-directory atomic replacement
-    - API records attempted action keys to block unchanged repeats but only successful read_section results enter visited_pages; duplicate-attempt messages never imply failed or old-session actions were read, while retained successful results remain reusable. Corrected input is eligible under existing budgets, with no new state or automatic retry
+    - API records attempted action keys to block unchanged repeats but only successful read_section results enter visited_pages; duplicate-attempt messages never imply failed or old-session actions were read, while retained successful results remain reusable. Corrected input is eligible under existing budgets, with no new state or automatic retry; an empty current-result window does not label a session with recorded steps as unstarted, including after failed reads and restore
     - API prompts with successful calculation results guide task-bounded numerical answers using returned values, source numbers and equivalent formatting; necessary new arithmetic uses existing tools or remains explicitly uncomputed when tools end, without new schemas, states, retries or semantic certification
     - API prompt read-handle indexes preserve stored candidate titles alongside action/input so navigation labels remain available after discovery leaves context; titles remain untrusted navigation, not evidence, source equivalence or relevance certification; old title-less handles remain usable, existing 80-handle and 200-character issuance bounds and answer-only hiding remain, and discovery fields, retained reads/calculations, saved handle metadata and guarded execution are unchanged
     - API-only navigation display removes JSON formatting whitespace from valid successful candidate payloads without dropping fields or merging candidates; order, excerpts, limits, versions, retrieval signals and read actions remain complete. Concrete reads/calculations, errors and unsupported shapes remain verbatim; shared outputs/session schemas/budgets do not change, and display is not evidence or semantic certification

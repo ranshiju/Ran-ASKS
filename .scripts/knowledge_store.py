@@ -194,7 +194,21 @@ def _evidence_navigation(record):
             "evidence_truncated": len(preview) < len(refs)}
 
 
-def search(query, *, repo=REPO, topk=5, kind="all"):
+def candidate(record, query):
+    """The same current knowledge metadata and reading addresses for every channel."""
+    fields = ("id", "kind", "title", "revision", "path", "status", "kb_state", "scientific_state",
+              "claim_mode", "origin_kind", "unresolved", "content_role", "source_question_status")
+    return {**{k: record.get(k) for k in fields}, **lr.excerpt(query, record["statement"]),
+            **_evidence_navigation(record),
+            "lexical_match": lr.match(query, record["title"], record["statement"]), "next": "knowledge_read"}
+
+
+def search(query, *, repo=REPO, topk=5, kind="all", retrieval="lexical"):
+    if retrieval not in {"lexical", "hybrid"}:
+        raise ValueError("unsupported KU retrieval")
+    if retrieval == "hybrid":
+        from knowledge_vectors import search as hybrid_search
+        return hybrid_search(query, repo=repo, topk=topk, kind=kind)
     if kind not in {"all", "statement", "question"}:
         raise ValueError("unsupported KU kind")
     limit = max(1, min(int(topk), 20))
@@ -230,9 +244,7 @@ def search(query, *, repo=REPO, topk=5, kind="all"):
         record["lexical_match"] = lr.match(query, record["title"], record["statement"])
     records.sort(key=lambda record: (*lr.rank_key(record["lexical_match"]), record["id"]))
     return {"query": query, "domain": "academic", "capability": "lexical", "issues": issues,
-            "candidates": [{k: r.get(k) for k in ("id", "kind", "title", "revision", "path", "status", "kb_state", "scientific_state", "claim_mode", "origin_kind", "unresolved", "content_role", "source_question_status")} |
-                           {**lr.excerpt(query, r["statement"]), **_evidence_navigation(r), "lexical_match": r["lexical_match"],
-                            "next": "knowledge_read"} for r in records[:limit]]}
+            "candidates": [candidate(r, query) for r in records[:limit]]}
 
 
 def _unchanged_content(old, proposed):

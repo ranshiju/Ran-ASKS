@@ -1,4 +1,4 @@
-# Ran-ASKS: Agent-Driven Scientific Knowledge System
+# Ran-ASKS: Agent-Native Scientific Knowledge System
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -40,7 +40,7 @@ The paper develops the academic ideas, methodology, and supporting evidence.
 The Chinese introduction is a more accessible, use-oriented project guide for
 general readers who want to understand what ASKS does and how to approach it.
 
-**ASKS (Agent-Driven Scientific Knowledge System)** is a persistent,
+**ASKS (Agent-Native Scientific Knowledge System)** is a persistent,
 source-traceable knowledge system for sustained scientific work. Ran-ASKS is
 its source-available engineering implementation.
 
@@ -55,24 +55,42 @@ be approximate; factual answers return to version-bound source evidence.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.26.0
+## What changes in v0.27.0
 
-This release adds opt-in selective knowledge compilation, bounded source
-outlines, and more reliable purpose-based discovery and task recovery. Agent
-and API control loops remain separate and share deterministic validation and
-publication. The default intake profile stays `legacy`; selective compilation is
-an explicit preview, with overall semantic quality and net efficiency still
-under evaluation.
+ASKS now expands to **Agent-Native Scientific Knowledge System**. Its guiding
+principle is **Interpret knowledge. Organize for use. Reason to solve.** The
+repository name, command names and existing source identities remain compatible.
 
-Gallery now supports free Cloudflare Web Analytics, public seven/thirty-day
-aggregate statistics, sharing metadata and a visible deployment version. A
-daily Actions refresh reads only aggregate metrics; unavailable data is labelled
-instead of displayed as invented zeros. See [Gallery setup](operations/GALLERY.md).
+This release adds explicit semantic discovery over Source passages and current
+Statement KUs, alongside lexical search, source outlines and Wiki/Graph navigation.
+Build vectors only for chosen objects; stale projections are excluded after
+source or knowledge changes. Retrieval returns reading addresses, and factual
+use still requires the underlying Raw evidence.
 
-Manuscript title, scientific-question, motivation and introduction workflows now
-ship as repository-owned capabilities. Project paths and persistent-work
-recovery use the same managed interfaces across supported Agent hosts. The main
-repository continues to maintain and validate macOS only.
+Selected long source ranges can now be split into bounded evidence blocks
+without truncation or another model decision. Reading-context suggestions and
+local recovery of a complete JSON value followed only by an allowed line comment
+reduce specific execution failures while preserving source and schema checks.
+They do not certify semantic correctness.
+
+The default ingestion profile remains `legacy`. Source-first/selective and the
+new vector channels are opt-in. Recent use confirmed bounded recovery and
+knowledge reuse, but API drafts still sometimes misread conditions or overstate
+findings. Overall automatic quality and net cost savings remain unverified;
+this is a compatible development release, not a 1.0 stability declaration.
+
+### Agent-native in practice
+
+The host Agent chooses what to read and how to reason, using repository-owned
+instructions, tools and resumable work. Deterministic programs handle parsing,
+source binding, validation and transactional changes. API users retain a separate
+program-controlled loop and bounded workers; subagents remain available where
+the chosen workflow supports them. Both modes share the same storage and
+validation kernel. Agent execution does not silently fall back to an API model.
+
+The Gallery continues to offer free Cloudflare aggregate statistics and selected
+works. [Installation and supported workflows](#using-real-material) and the sections
+below explain the current macOS edition and its limits.
 
 Manuscript evaluation identifies the core scientific question, classifies each
 contribution and scores its importance from 1 to 10, with a separate assessment
@@ -133,8 +151,9 @@ knowledge objects, not certified scientific conclusions.
 Artifact requirements follow their use: navigation should help find material;
 knowledge should preserve meaning and essential conditions; factual answers must
 return to Raw. Unified discovery combines Source, KU/Question and Wiki/Graph
-candidates and supplies the next reading action. Source/KU search is lexical,
-not automatic cross-language semantic retrieval. Use-triggered maintenance can
+candidates and supplies the next reading action. Source/KU search defaults to
+lexical retrieval; explicit hybrid search can use valid, prebuilt vectors.
+Use-triggered maintenance can
 repair a bounded knowledge object without recompiling the whole document.
 
 For an already located KU, pair `--target KU-ID` with one or more
@@ -171,6 +190,38 @@ under the configured API backend. Candidate discovery also uses the task wording
 as a bounded lexical query; it supplies navigation, not evidence or a semantic
 identity decision. A source outline locates headings and captions, not necessarily
 the complete table body. Read the necessary Raw context before using facts.
+
+### Use vectors where they help discovery
+
+| Surface | Role | What to read next |
+| --- | --- | --- |
+| Source passage vectors | Find relevant wording, including possible cross-language matches, within one chosen source or the indexed collection | The returned Raw locator and necessary surrounding context |
+| Statement KU vectors | Find an existing, revisable interpretation for the current purpose | The full KU and its version-bound source evidence |
+| Wiki and Graph | Explain topics and navigate useful relationships | Relevant knowledge and Raw sources |
+
+After configuring an embedding service, explicitly build selected projections:
+
+```bash
+# Replace S-ID / KU-ID with actual IDs returned by your workspace.
+python3 .scripts/source_vectors.py build S-ID
+python3 .scripts/wg.py source-search 'conditions for implementing this method' --source-id S-ID --retrieval hybrid
+python3 .scripts/knowledge_vectors.py build KU-ID
+python3 .scripts/wg.py ku-search 'conditions for implementing this method' --retrieval hybrid
+```
+
+`--source-id` restricts discovery to that source before candidate limits; omitting
+it searches across sources. A source is a document identity, not a fixed-length
+chunk. Its existing passages may use multiple vector windows, but all matches
+return to the original reading units. Vectors add access paths without replacing
+knowledge or sources, and do not decide whether two claims are identical or true.
+
+Queries never build missing document vectors. Hybrid queries may call the
+configured embedding service for the query text; coverage and failures are
+reported, with lexical results retained. After a source or KU revision, rebuild
+only the affected selected objects. Compilation candidates and unified discovery
+retain their current lexical defaults; this is not automatic whole-library
+vectorization. Better candidate ranking alone does not establish better answers
+or lower total cost.
 
 See [Source-first](operations/engineering/source-first-ingestion.md),
 [Knowledge Units](operations/engineering/knowledge-units.md),

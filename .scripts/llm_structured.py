@@ -343,7 +343,7 @@ def strip_json_fence(text: str) -> str:
     cleaned = re.sub(r"\s*```$", "", cleaned)
     return cleaned.strip()
 
-def decode_json_response(text: str):
+def decode_json_response(text: str, *, allow_trailing_comments: bool = False):
     """Decode model JSON; preserve literal string whitespace without guessing content."""
     cleaned = strip_json_fence(text)
     try:
@@ -358,6 +358,14 @@ def decode_json_response(text: str):
             if closer and remainder.strip(" \t\r\n") and all(
                     char in closer + " \t\r\n" for char in remainder):
                 return obj, None, "redundant_top_level_closer"
+            if (allow_trailing_comments and closer
+                    and all(ord(char) >= 32 or char in "\t\r\n" for char in text)):
+                lines = [line.strip(" \t") for line in re.split(r"\r\n|\r|\n", remainder)
+                         if line.strip(" \t")]
+                # Only explicit suffix comments; structured alternatives stay errors.
+                if lines and all(line.startswith("//") and not any(
+                        char in "{}[]" for char in line[2:]) for line in lines):
+                    return obj, None, "trailing_line_comments"
         if (exc.msg.startswith("Invalid control character")
                 and all(ord(char) >= 32 or char in "\n\r\t" for char in cleaned)):
             try:
@@ -503,7 +511,8 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
                     if (choice.get("message") or {}).get("tool_calls"):
                         text = json.dumps(choice["message"], ensure_ascii=False)
                 else:
-                    obj, parse_error, local_json_recovery = decode_json_response(text)
+                    obj, parse_error, local_json_recovery = decode_json_response(
+                        text, allow_trailing_comments=finish_reason == "stop")
                 reasoning_exhausted = _reasoning_exhausted(text, finish_reason, usage)
                 error = parse_error or (None if schema_check(obj) else "schema 校验失败")
                 if error and not text.strip() and finish_reason == "length":

@@ -1,198 +1,133 @@
 {
   "manifest_sha256": "e0bada9a08c9b2732d921911e01e397385253fc23be71017a873ab23407aa96b",
-  "payload_sha256": "af23d9a96baa881cd1efa3deb8b89ce6bce40b41e42066e7584cb5149fb993b4",
+  "payload_sha256": "3fd9097f863399ed18f041e27c7d6bd13f0d08b2a7f2800062036df69347bf66",
   "pdf_render_health": {
     "docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf": {
-      "page_count": 36,
+      "page_count": 23,
       "pages": [
         {
-          "ink_pixels": 13861,
+          "ink_pixels": 24217,
           "page": 1,
-          "text_chars": 577
+          "text_chars": 964
         },
         {
-          "ink_pixels": 24113,
+          "ink_pixels": 23342,
           "page": 2,
-          "text_chars": 1244
+          "text_chars": 1112
         },
         {
-          "ink_pixels": 24234,
+          "ink_pixels": 19742,
           "page": 3,
+          "text_chars": 930
+        },
+        {
+          "ink_pixels": 17230,
+          "page": 4,
+          "text_chars": 1033
+        },
+        {
+          "ink_pixels": 19779,
+          "page": 5,
+          "text_chars": 1146
+        },
+        {
+          "ink_pixels": 26368,
+          "page": 6,
+          "text_chars": 929
+        },
+        {
+          "ink_pixels": 27051,
+          "page": 7,
+          "text_chars": 1443
+        },
+        {
+          "ink_pixels": 16728,
+          "page": 8,
+          "text_chars": 945
+        },
+        {
+          "ink_pixels": 19589,
+          "page": 9,
           "text_chars": 1197
         },
         {
-          "ink_pixels": 23807,
-          "page": 4,
-          "text_chars": 1166
-        },
-        {
-          "ink_pixels": 23306,
-          "page": 5,
-          "text_chars": 1118
-        },
-        {
-          "ink_pixels": 26594,
-          "page": 6,
-          "text_chars": 1273
-        },
-        {
-          "ink_pixels": 21104,
-          "page": 7,
-          "text_chars": 1028
-        },
-        {
-          "ink_pixels": 25767,
-          "page": 8,
-          "text_chars": 921
-        },
-        {
-          "ink_pixels": 21818,
-          "page": 9,
-          "text_chars": 1735
-        },
-        {
-          "ink_pixels": 16782,
+          "ink_pixels": 21605,
           "page": 10,
-          "text_chars": 974
+          "text_chars": 1400
         },
         {
-          "ink_pixels": 19439,
+          "ink_pixels": 19576,
           "page": 11,
-          "text_chars": 1036
+          "text_chars": 1155
         },
         {
-          "ink_pixels": 18167,
+          "ink_pixels": 20945,
           "page": 12,
-          "text_chars": 1179
+          "text_chars": 1306
         },
         {
-          "ink_pixels": 15485,
+          "ink_pixels": 22881,
           "page": 13,
-          "text_chars": 917
+          "text_chars": 1511
         },
         {
-          "ink_pixels": 14488,
+          "ink_pixels": 20805,
           "page": 14,
-          "text_chars": 823
+          "text_chars": 1342
         },
         {
-          "ink_pixels": 14534,
+          "ink_pixels": 21123,
           "page": 15,
-          "text_chars": 916
+          "text_chars": 1298
         },
         {
-          "ink_pixels": 12447,
+          "ink_pixels": 20558,
           "page": 16,
-          "text_chars": 670
+          "text_chars": 1257
         },
         {
-          "ink_pixels": 12351,
+          "ink_pixels": 21292,
           "page": 17,
-          "text_chars": 658
+          "text_chars": 1234
         },
         {
-          "ink_pixels": 18247,
+          "ink_pixels": 25075,
           "page": 18,
-          "text_chars": 975
+          "text_chars": 1520
         },
         {
-          "ink_pixels": 13336,
+          "ink_pixels": 25461,
           "page": 19,
-          "text_chars": 781
+          "text_chars": 1586
         },
         {
-          "ink_pixels": 15262,
+          "ink_pixels": 24093,
           "page": 20,
-          "text_chars": 903
+          "text_chars": 1442
         },
         {
-          "ink_pixels": 16436,
+          "ink_pixels": 26337,
           "page": 21,
-          "text_chars": 928
+          "text_chars": 1579
         },
         {
-          "ink_pixels": 17636,
+          "ink_pixels": 25747,
           "page": 22,
-          "text_chars": 921
+          "text_chars": 1538
         },
         {
-          "ink_pixels": 16503,
+          "ink_pixels": 6363,
           "page": 23,
-          "text_chars": 878
-        },
-        {
-          "ink_pixels": 9266,
-          "page": 24,
-          "text_chars": 650
-        },
-        {
-          "ink_pixels": 19245,
-          "page": 25,
-          "text_chars": 973
-        },
-        {
-          "ink_pixels": 5756,
-          "page": 26,
-          "text_chars": 273
-        },
-        {
-          "ink_pixels": 10567,
-          "page": 27,
-          "text_chars": 512
-        },
-        {
-          "ink_pixels": 8169,
-          "page": 28,
-          "text_chars": 458
-        },
-        {
-          "ink_pixels": 18057,
-          "page": 29,
-          "text_chars": 1166
-        },
-        {
-          "ink_pixels": 14327,
-          "page": 30,
-          "text_chars": 867
-        },
-        {
-          "ink_pixels": 8374,
-          "page": 31,
-          "text_chars": 500
-        },
-        {
-          "ink_pixels": 4665,
-          "page": 32,
-          "text_chars": 312
-        },
-        {
-          "ink_pixels": 14906,
-          "page": 33,
-          "text_chars": 843
-        },
-        {
-          "ink_pixels": 15607,
-          "page": 34,
-          "text_chars": 970
-        },
-        {
-          "ink_pixels": 24764,
-          "page": 35,
-          "text_chars": 1497
-        },
-        {
-          "ink_pixels": 13074,
-          "page": 36,
-          "text_chars": 753
+          "text_chars": 501
         }
       ]
     }
   },
   "schema": "wikigraph-public-release-provenance-v1",
   "source": {
-    "commit": "dcac0fb2f867e0a58a68319fa420e0c38884d260",
+    "commit": "f1ccd19c95c491e2528cbd6e3aecc08d0210774b",
     "mode": "committed",
-    "tree": "c05de6465e4326fc683789a88082b928c3dedd7d"
+    "tree": "41152cbb011e263d0a25210e2302e7a6f350fa62"
   },
-  "version": "0.26.0"
+  "version": "0.27.0"
 }

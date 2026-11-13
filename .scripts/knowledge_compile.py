@@ -32,7 +32,7 @@ SELECTIVE_RULES = """\n本包按需编译：headings 和 reading 供定位，blo
 候选旧依据尚未加载时可复用其已有表述，但不能据此改写或把它当新主张的原文支持。
 本次用途确缺原文时，输出以下读请求，代替本轮Delta：
 {"schema":"knowledge-read-v1","source_locators":["reading.source_path#L起始-L结束"],"candidate_ids":[],"reason":"缺少什么必要依据"}。
-source_locators 只读当前来源，按章节行号和coverage选择，每段最多8000字符、每次最多5段；
+source_locators 只读当前来源，按章节行号和coverage选择，每次最多5个范围；程序按完整行拆为每块最多8000字符的证据，总材料仍受预算约束；
 candidate_ids 只填本包已有Statement的ID，用于加载其全部旧依据以支持必要维护，每次最多5项。
 两个列表可省略空项，但至少请求一项新内容。已读原文会保留，无须重复请求；不请求网络或其他路径。
 需要修改已有候选时先请求其旧依据；原文已有充分材料则直接生成，不为分类、完整摘要或凑产物补读。
@@ -676,6 +676,25 @@ def read_request_schema(value):
             and isinstance(value.get("reason"), str) and 0 < len(value["reason"].strip()) <= 2000)
 
 
+def source_read_ranges(lines, start, end):
+    """Partition exactly the selected range; never skip or truncate source lines."""
+    if type(start) is not int or type(end) is not int or not 1 <= start <= end <= len(lines):
+        raise ValueError("invalid evidence span")
+    ranges, first, size = [], start, 0
+    for number in range(start, end + 1):
+        length = len(lines[number - 1])
+        if length > 8000:
+            raise ValueError("requested source line exceeds the 8000-character evidence limit")
+        needed = size + (number > first) + length
+        if needed > 8000:
+            ranges.append((first, number - 1))
+            first, size = number, length
+        else:
+            size = needed
+    ranges.append((first, end))
+    return ranges
+
+
 def expand_locked(repo, state, packet, request):
     """Caller holds the job lock. Validate entirely before switching the packet pointer."""
     if not packet.get("reading") or not read_request_schema(request):
@@ -689,6 +708,9 @@ def expand_locked(repo, state, packet, request):
         raise ValueError("selective reading budget exhausted")
     source = si.load_receipt(repo, state["source_id"])
     parsed = si.selected_parse(source)
+    si.validate_binding(repo, source, parsed)
+    text = si.managed(repo, parsed["text_path"]).read_text(encoding="utf-8")
+    lines = text.splitlines()
     next_packet = copy.deepcopy(packet)
     known = {b["id"] for b in next_packet["blocks"]}
     progressed = False
@@ -703,11 +725,12 @@ def expand_locked(repo, state, packet, request):
         selected = directed_request(source, None, spans)
         for locator in selected["source_locators"]:
             start, end = sl.line_range(sl.split_locator(locator)[1])
-            ref, body = ks.evidence_ref(repo, source["source_id"], parsed["parse_id"], start, end)
-            if any(a <= start and end <= b for a,b in packet["coverage"]["provided_ranges"]):
-                continue
-            add(ref, body)
-            progressed = True
+            for first, last in source_read_ranges(lines, start, end):
+                ref, body = ks.evidence_ref(repo, source["source_id"], parsed["parse_id"], first, last)
+                if any(a <= first and last <= b for a,b in packet["coverage"]["provided_ranges"]):
+                    continue
+                add(ref, body)
+                progressed = True
     candidates = {c["id"]: c for c in next_packet["candidates"]}
     for uid in dict.fromkeys(request.get("candidate_ids", [])):
         if uid not in candidates or candidates[uid]["kind"] != "statement":
@@ -730,7 +753,6 @@ def expand_locked(repo, state, packet, request):
     if not progressed:
         raise ValueError("reading request adds no new evidence")
     next_packet["reading"]["round"] += 1
-    text = si.managed(repo, parsed["text_path"]).read_text(encoding="utf-8")
     chunks, skipped = si.segments(text)
     finish_packet(next_packet, source, parsed, text, chunks, skipped, reading["max_packet_tokens"])
     if token_count(next_packet) > reading["max_packet_tokens"]:

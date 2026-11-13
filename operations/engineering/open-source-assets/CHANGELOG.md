@@ -7,6 +7,27 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-13
+
+### Version decision / 版本判断
+
+- MINOR: Add explicit version-bound Source and Statement vector discovery and bounded reading recovery; clarify Agent-Native identity while preserving defaults and preview status
+- MINOR（中文）：兼容新增绑定版本的Source与Statement向量发现及有界阅读恢复；统一Agent-Native定位，保留默认行为和预览状态
+
+### Highlights
+
+- Adopted the name Agent-Native Scientific Knowledge System and the principle “Interpret knowledge. Organize for use. Reason to solve.” Updated bilingual guidance and the Chinese introduction/PDF around artifact roles and current usage.
+- Added explicit source-scoped hybrid retrieval and current-Statement semantic discovery, with selected-object vector builds, version-bound invalidation and visible coverage. Existing lexical defaults remain available.
+- Improved source-context reading and bounded long-range expansion, and recovered a narrowly defined JSON line-comment tail locally while preserving evidence, schema and controller boundaries.
+- Kept Source-first/selective in preview and disclosed remaining API semantic errors and unproven full-cost gains. Preserved macOS maintenance scope and frozen paper artifacts.
+
+### 主要更新
+
+- 将当前全称统一为 Agent-Native Scientific Knowledge System，以“Interpret knowledge. Organize for use. Reason to solve.”为核心观点，围绕产物角色和实际用法更新双语说明及中文介绍/PDF。
+- 新增指定来源的混合检索和当前Statement的语义发现，支持选定对象向量构建、版本失效及覆盖披露；保留既有词汇默认。
+- 改进原文上下文阅读、有界长范围补读，并在本地恢复限定形态的JSON行尾注，保持证据、schema和控制权边界。
+- Source-first/selective继续作为预览，明确API语义错误与完整成本收益的待验收状态；保留macOS维护范围及冻结论文产物。
+
 ## [0.26.0] - 2026-11-12
 
 ### Version decision / 版本判断
@@ -857,5 +878,7 @@ manifests and checksums.
 
 [0.25.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.25.2
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.26.0...HEAD
 [0.26.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.26.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.27.0

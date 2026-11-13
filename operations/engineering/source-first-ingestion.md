@@ -150,8 +150,12 @@ N2 KU 依据绑定具体解析版本与片段哈希；新解析不会悄悄替�
 
 ## 查询与实际范围
 
-`query_actions.source_search(query, domain, topk)`、API query orchestrator 与 DSH query tools
+`query_actions.source_search(query, domain, topk, source_id="", retrieval="lexical")`、API query orchestrator 与 DSH query tools
 均已注册，Agent 可经 `wg source-search` 直接调用。首次 N1 查询无需 Wiki/Graph。
+已知来源时可传 `source_id`／`--source-id`，在候选LIMIT前限定正文搜索；省略或空串保留全库默认行为。
+限定范围的来源、当前解析和索引绑定在无命中时也校验；非法/未就绪/失效来源拒绝，缺索引披露，
+与有效范围无命中区分。不自动扩大范围或触发重建。query表达正文所需内容，已有地址可直接阅读。
+默认lexical不联网；显式 `retrieval="hybrid"`／`--retrieval hybrid` 的向量通道见下。
 返回 `source_id/parse_id/source_path/locator/excerpt/limitations`，随后 `read_raw` 核对。
 来源搜索在原有有界 FTS 候选中，按已校验完整片段的查询短语/整词和不同词项覆盖重排，
 然后在完整片段内选择至多700字符的连续摘录：优先覆盖完整查询短语/英文整词及不同词项，
@@ -159,6 +163,18 @@ N2 KU 依据绑定具体解析版本与片段哈希；新解析不会悄悄替�
 `excerpt_span.start/end` 为相对完整片段正文的零起点、右端不包含的字符偏移，
 `excerpt == body[start:end]`，不拼接或生成原文；`excerpt_truncated` 表示省略了任一侧文字。
 `locator` 仍指向已校验的完整片段，摘录范围不是新的引用地址；不改变排名、索引或Raw绑定。
+索引片段是发现单位，不能据其32行/6000字符边界推定阅读上下文完整。
+搜索与目录共享有界结构阅读建议：若边界切开普通非空段落、配对的独立行显示公式
+（`$$` 或 `\[`…`\]`），或公式紧邻的 `where/in which/其中/式中` 定义段，
+返回额外的 `read_action=read_raw`、`read_input.locator` 和 `reading_context.status=expanded`，
+补齐所交叠的结构块；代码围栏和Markdown标题阻断跨块连接。
+旧 `locator` 与 excerpt 含义保持，建议是另一个连续Raw地址，不把旧地址重解释为扩张范围。
+新增最多2000字符、32行，总范围最多8000字符；不闭合公式或不能在预算内完整补足时，
+只返回 `reading_context.status=limited` 及原因，不提供被截断的补充建议。
+无需补充时不增字段；没有建议时仍可按任务沿原地址阅读或明确补读。
+结构补齐不保证语义充分、完整图表或章节外条件，不增加模型调用、自动阅读或索引迁移。
+联合检索保留所选片段的 `read_input`，API阅读编号沿此地址执行；只有实际读取成功才登记证据。
+WG与API/DSH共用原12000字符单次Raw读取上限，所有建议仍经绑定、范围与大小校验。
 `lexical_match` 供联合检索复用，仅表示完整片段的字面匹配，不是证据核验或置信度。
 窗口可能遗漏限定语，仍需read_raw；该共享摘录函数也用于KU/Question发现，不改变其完整读取。
 普通查询在同一来源已召回的片段内，优先非参考文献章节的命中；保留各来源在候选池中的
@@ -178,13 +194,13 @@ API 提示接收工具的实际有界输出，200 字符 preview 仅用于日志
 query是忽略大小写并合并空白后的原文标签子串；空串列目录，不翻译或推断缺失题注。
 每次最多80项，`next_start_line`非空时可继续；超过文件末尾返回空候选。
 每项保留标签所在行、至多200字符的标题及截断标记，locator指向现有分片算法中包含该行的片段；
-超长单行无分片时只给该行。地址不保证完整表体、图例或章节，跨片段所需内容仍按任务补读。
+超长单行无分片时只给该行；可补齐结构时另附上述 `read_input`。地址不保证完整表体、图例或章节，其他所需内容仍按任务补读。
 目录是navigation，不登记已读证据；事实仍经原read_raw绑定、大小和引用检查。
 Agent、API、DSH共用内核，API可选择目录后沿原阅读编号执行，不增加固定轮或自动补读。
 目录不执行来源指令、不写Raw/回执/索引、不调用模型或联网，private与无效来源绑定明确拒绝。
 
 SQLite FTS5 存储片段及词汇索引，不存图关系；公共关系唯一权威仍为 `cross-domain/graph.db`。
-英文词及中文二元词组支持字面检索；不会自动翻译、embedding 召回或语义扩展。
+默认lexical以英文词及中文二元词组支持字面检索；不会自动翻译、embedding召回或语义扩展。
 中文问英文资料时可显式查询对应英文术语，或用 N3 联合入口经已有中文 KU 回到英文依据；
 这不代表原文索引具备自动跨语言语义召回能力。
 索引按来源增量替换，每片不超过 32 行/6000 字符。
@@ -193,6 +209,47 @@ SQLite FTS5 存储片段及词汇索引，不存图关系；公共关系唯一�
 
 仅 academic/public 的 source-first 来源可搜索。private 查询显式拒绝此动作，
 不会用公共来源替代；private 导入、源路径/托管路径软链接、越界和未登记载体拒绝。
+
+## 可选正文向量与既有产物的结合
+
+显式构建已接入的公共Source：
+
+```bash
+python3 .scripts/source_vectors.py build S-<24hex> S-<24hex>
+python3 .scripts/wg.py source-search '目标态与训练参数的关系' --source-id S-<24hex> --retrieval hybrid
+```
+
+`source_vectors`是shared受管派生索引，不改变摄入完成条件。来源必须已source_ready且原件与当前
+解析哈希有效。复用现有embedding模型/endpoint与文本缓存，将投影独立保存于
+`academic/sources/vectors.sqlite`；LRU缓存不是来源索引权威。逐来源原子替换，失败保留旧投影；
+只构建显式来源，不自动遍历建库。索引、向量缓存及用户原文均不进入公开源码发布。
+
+既有32行/6000字符片段仍是返回与Raw阅读单位。向量输入为其中连续的至多2400 UTF-8字节窗口，
+优先在自然换行处分界，长行以连续字符切分，不静默截尾；该字节预算不冒充token计数。
+每个窗口绑定parent locator、正文字符偏移、输入哈希、Source/parse、分片策略与模型/endpoint
+命名空间。整个片段有多个向量时只取最佳匹配，不累计重复票数；不生成新摘要、KU或图边。
+被旧词汇分片排除的超长单行仍不覆盖，`coverage_basis`披露此边界，不声称全文完整。
+
+hybrid先执行同范围词汇检索，再在当前有效向量投影内按来源范围作精确余弦检索；按
+`1/(60+rank)`融合通道名次，不直接混加余弦与字面分数。`retrieval_ranks/vector_match`
+解释命中，向量span是parent正文中的字符范围，不是新的事实引用。全库混合结果每来源至多
+两个片段，限定来源时无此限制。向量候选复用原Source校验、连续摘录与有界阅读建议，仍须
+沿Raw入口读取，向量相似不认证同一性、支持或条件充分。
+
+查询不会编码文档或补建索引，仅显式hybrid可编码当前query并使用文本缓存；超出2400字节
+的query不截断，返回`query_over_limit`及词汇结果。`vector_channel`给覆盖来源数、缺失/失效来源、
+实际请求与缓存计量；`partial`仅代表部分当前来源有向量，`ready`也仅表示现有索引片段覆盖。
+没有索引、模型命名空间变化、失效投影或服务失败时保留词汇结果并明确通道状态；private在
+服务前拒绝。查询不改变Raw、来源回执、KU或公共图；可更新查询embedding缓存。API/Agent/DSH
+共用检索内核，各自控制循环不变，Agent不会隐式进入API语义规划。
+
+embedding构建每批最多16条、零重试；默认helper其他用途保留至多一次传输重试，明确配置/
+provider拒绝与无效成功响应不重试。真实请求记录输入数量/字符数、模型命名空间、HTTP状态、
+usage与耗时，不记录输入正文或凭据；缓存单独记hits/misses。响应数量、索引顺序、维度及
+非零有限性须有效。配置拒绝即停本次构建；已完成来源和原失败记录保留。
+
+Source投影只为原文增加语义发现；KU可另经`knowledge_search(retrieval="hybrid")`使用当前Statement投影，详见[KU契约](knowledge-units.md#可选-statement-语义发现)。两者默认仍为词汇，目录负责明确章节和表图，
+`hybrid_recall`的Source通道仍默认词汇，不将本次可选能力等同全库默认启用或知识融合已完成。
 
 ## 验证与下一阶段
 

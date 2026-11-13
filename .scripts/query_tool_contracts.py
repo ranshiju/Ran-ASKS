@@ -35,6 +35,10 @@ def schemas(signatures, *, intents, domains):
                 field.update(minLength=3, pattern=r"^[^#\r\n]+#[^#\r\n]+$")
             elif action == "source_outline" and name == "source_id":
                 field["pattern"] = r"S-[0-9a-f]{24}"
+            elif action == "source_search" and name == "source_id":
+                field.update(pattern=r"(?:S-[0-9a-f]{24})?", description="Optional known source; filter before ranking. Empty searches all public Sources.")
+            elif action in {"source_search", "knowledge_search"} and name == "retrieval":
+                field.update(enum=["lexical", "hybrid"], description="lexical is offline default; hybrid explicitly uses query embedding and an already-built public Source or Statement KU vector projection, disclosing missing coverage.")
             elif action == "source_outline" and name in {"start_line", "limit"}:
                 field = {"anyOf": [{"type": "integer", "minimum": 1},
                                    {"type": "string", "pattern": r"[1-9][0-9]*"}]}
@@ -43,7 +47,7 @@ def schemas(signatures, *, intents, domains):
                     field["anyOf"][1]["pattern"] = r"(?:[1-9]|[1-7][0-9]|80)"
             elif action == "source_outline" and name == "query":
                 field["description"] = "Literal substring of a source heading/caption, e.g. Table 10; empty lists all."
-            if name in required_names and not (action == "source_outline" and name == "query"):
+            if name in required_names and (action, name) not in {("source_outline", "query"), ("source_search", "source_id")}:
                 required.append(name)
                 if field.get("type") == "string":
                     field["minLength"] = 1

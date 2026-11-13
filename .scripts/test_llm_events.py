@@ -357,6 +357,62 @@ def test_redundant_root_closer_rejects_ambiguous_or_incomplete_structure():
     assert events[0]["local_json_recovery"]=="redundant_top_level_closer"
 
 
+def test_complete_json_with_suffix_comments_preserves_values_and_one_request():
+    value = {"answer": '中文 // literal https://example.invalid/a \\path "quote"\nnext',
+             "items": [{"false": False, "zero": 0, "literal": "{}[]/*text*/"}]}
+    encoded = json.dumps(value, ensure_ascii=False)
+    for suffix in ['\n// 等待工具结果。', ' // explanatory note',
+                   '\r\n // first note\r\n\t// second note\r\n', '\n//\n\n']:
+        raw = encoded + suffix
+        result, requests, events = _json_transport_probe(
+            [(raw, "stop")], schema_check=lambda obj: obj == value)
+        assert result["ok"] and result["parsed"] == value and result["text"] == raw
+        assert len(requests) == len(events) == len(result["history"]) == 1
+        assert result["local_json_recovery"] == "trailing_line_comments"
+        assert events[0]["local_json_recovery"] == result["history"][0]["local_json_recovery"]
+        assert not events[0]["recovery_scheduled"]
+        assert events[0]["output_len"] == len(raw) and 'explanatory' not in json.dumps(events)
+    assert module.decode_json_response('[1,{"x":false}]\n// array', allow_trailing_comments=True) == (
+        [1, {"x": False}], None, "trailing_line_comments")
+    assert module.decode_json_response(encoded, allow_trailing_comments=True) == (value, None, "")
+
+
+def test_suffix_comments_reject_ambiguous_incomplete_and_combined_repair():
+    for raw in ['{}\n// note\n{}', '{} {} // note', '{}\n// note\n[]',
+                '{}\n// note\ntrue', '{}\n// note\n"another value"',
+                '{}\n// alternative {"action":"other"}', '{}\n// alternative []',
+                '{},"extra":1 // note', '{} plain text', '{} /* block */',
+                '{/* internal */"x":1}', '// prefix\n{}', '{"x":1\n// incomplete',
+                '{"x":"unfinished // comment', '{"x":1,}\n// trailing comma',
+                '{"x":"a\nb"}\n// no combined recovery', '{} }\n// no combined recovery',
+                '"scalar"\n// note', '{}\n// illegal\x01control', '{}\n// trailing\x0b',
+                '{}\n// illegal\v\n', '{}\n\x00// note']:
+        obj, error, recovery = module.decode_json_response(raw, allow_trailing_comments=True)
+        assert obj is None and error and not recovery, repr(raw)
+    result, requests, events = _json_transport_probe(
+        [('{"answer":"wrong"}\n// note', "stop")], retries=0)
+    assert not result["ok"] and result["error"] == "schema 校验失败"
+    assert result["parsed"] == {"answer": "wrong"} and len(requests) == 1
+    assert events[0]["local_json_recovery"] == "trailing_line_comments"
+
+
+def test_suffix_recovery_requires_completed_json_transport_only():
+    raw = '{"answer":"complete"}\n// note'
+    assert module.decode_json_response(raw)[1]
+    assert module.parse_json(raw)[1]
+    for finish_reason in ("length", "content_filter", None):
+        result, requests, events = _json_transport_probe([(raw, finish_reason)], retries=0)
+        assert not result["ok"] and result["parsed"] is None
+        assert len(requests) == 1 and not events[0]["local_json_recovery"]
+    import query_orchestrate as qo
+    plan = {"decision": "read", "plan": [{"action": "read_raw", "input": {"locator": "academic/raw/x.md#L1"}}]}
+    message = {"content": None, "tool_calls": [{"type": "function", "function": {
+        "name": "query_plan", "arguments": json.dumps(plan) + '\n// note'}}]}
+    result, requests, _ = _json_transport_probe([(message, "tool_calls")], retries=0,
+        response_decoder=qo._decode_native_query_response, schema_check=qo._api_decision_schema)
+    assert not result["ok"] and result["parsed"] is None and len(requests) == 1
+
+
 def test_local_json_recovery_does_not_guess_or_bypass_schema():
     for broken in ['{"answer":"a\x01b"}', '{"answer":"a\nb\x00"}',
                    '{"answer":"unfinished\n', r'{"answer":"bad\q"}',
