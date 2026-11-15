@@ -7,6 +7,23 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-15
+
+### Version decision / 版本判断
+
+- PATCH: Fix Gallery image loading with a lightweight display preview while retaining original artifacts and existing interfaces
+- PATCH（中文）：修复Gallery图片加载，使用轻量展示预览并保留原始成品与既有接口
+
+### Highlights
+
+- Reduced MPE poster image transfer by about 93% on the Gallery home and detail pages with a lightweight WebP preview; retained full-resolution image and PDF access.
+- Load the first detail image immediately and keep subsequent previews lazy-loaded. Wrap long download lists to preserve preview space. Audited all 16 works and retained the other already-compressed previews.
+
+### 主要更新
+
+- Gallery首页与详情页改用MPE海报轻量WebP预览，图片传输体积减少约93%，保留高清原图及PDF入口。
+- 详情首图立即加载，后续预览延迟加载，较长下载按钮列表换行以保留预览空间；检查全部16件作品，保留其他已适当压缩的预览。
+
 ## [0.28.0] - 2026-11-15
 
 ### Version decision / 版本判断
@@ -905,5 +922,7 @@ manifests and checksums.
 
 [0.27.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.27.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.28.0...HEAD
 [0.28.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.28.1...HEAD
+[0.28.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.1

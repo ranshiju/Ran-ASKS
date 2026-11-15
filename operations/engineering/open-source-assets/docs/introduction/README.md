@@ -12,7 +12,16 @@ text coverage and rendering. Earlier releases retained the original Word layout
 and appended updates; those statements below describe their historical editions.
 The repository does not rely on GitHub's PDF previewer.
 
-## Current edition: v0.28.0 / 当前版本
+## Current edition: v0.28.1 / 当前版本
+
+The v0.28.1 PATCH separates lightweight Gallery display previews from original
+image links, reduces MPE poster transfer size on the home/detail pages and loads
+the first detail image immediately. The other reviewed WebP previews retain
+their quality. The introduction and PDF include the same reading guidance.
+
+v0.28.1按兼容修复发布：Gallery轻量预览与原图入口分开，首页/详情减少MPE海报
+传输体积，首张详情图立即加载；其余已适当压缩的WebP保持清晰度。正文/PDF同步
+阅读指引，不涉及知识流程或科学功能变化。下段描述此前v0.28.0的范围。
 
 The name remains **Agent-Native Scientific Knowledge System**, guided by
 **Interpret knowledge. Organize for use. Reason to solve.** The 2026-11-15
@@ -26,7 +35,7 @@ or overall cost savings.
 2026年11月15日同步正文与同源PDF，补齐快速接入、选择性组织、使用驱动深化的职责，
 说明可选整节阅读、已读编号引用、会议恢复、素材复用及带起算日的Gallery累计统计。
 正常使用照常反哺，系统优化由明确指令触发；两种控制循环、默认legacy和预览边界保持。
-本次兼容MINOR发布不代表1.0成熟度或模型完整质量/净效率已通过验收。
+此前v0.28.0兼容MINOR发布不代表1.0成熟度或模型完整质量/净效率已通过验收。
 
 PDF由同一Markdown重新排版、规范化并核对文本与渲染。历史论文题名、实验数字、
 冻结产物与以下版本记录保持原范围；系统版本与论文产物版本分别维护。

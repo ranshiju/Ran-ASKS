@@ -6590,6 +6590,7 @@ script_contracts:
   gallery_site:
     preconditions:
     - shared static build validates the exact Gallery allowlist and artifact hashes without model or network calls; optional canonical site URL has an HTTPS origin and a fixed project path without credentials, query or fragment
+    - display previews may name a separate original raster for click-through; both are exact-allowlisted and hash-verified before copying. The first detail preview loads eagerly and later previews lazily; existing preview-only metadata keeps its current link target
     - README preview sync/check uses the same verified Gallery metadata and covers, selects up to three recent works by selected_on with distinct kinds preferred and catalog order for ties, and preflights both bounded bilingual blocks before any write; it neither publishes nor edits other README content
     - curated asset-library ZIP downloads require the same exact-file allowlist and SHA-256 checks as other final artifacts; Agent reviews each member and records public-copy provenance locally, while the builder only copies the archive and never extracts or executes it
     - optional Cloudflare Web Analytics uses a public 32-hex site token supplied at build time; empty configuration emits no collection token and never loads a remote script

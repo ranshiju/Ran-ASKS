@@ -335,6 +335,32 @@ console.log('Gallery loader: production scope, single load, opt-out and blocked 
             self.change_metadata(lambda m:m['presentation'].update({'previews':[preview]}))
             with self.assertRaisesRegex(ValueError,'Preview'):site.build(self.root,self.out)
 
+    def test_lightweight_preview_keeps_separate_original_and_loading_order(self):
+        image=b'lightweight display image'
+        self.write('gallery/works/poster-one/preview.webp',image,True)
+        self.save_manifest()
+        def edit(m):
+            m['files']['preview.webp']=hashlib.sha256(image).hexdigest()
+            m['presentation']['preview']='preview.webp'
+            m['presentation']['previews']=[
+                {'file':'preview.webp','original':'poster.png','label':'Complete preview','document':'poster.pdf'},
+                {'file':'cover.webp','label':'Second preview','document':'poster.pdf'}]
+        self.change_metadata(edit)
+        site.build(self.root,self.out)
+        page=(self.out/'works/poster-one/index.html').read_text()
+        self.assertIn('class="full-poster" href="../../assets/works/poster-one/poster.png"',page)
+        self.assertIn('src="../../assets/works/poster-one/preview.webp" alt="Complete preview" loading="eager"',page)
+        self.assertIn('alt="Second preview" loading="lazy"',page)
+        self.assertIn('src="assets/works/poster-one/preview.webp"',(self.out/'index.html').read_text())
+        self.assertEqual((self.out/'assets/works/poster-one/poster.png').read_bytes(),b'fixture image')
+        self.assertEqual((self.out/'assets/works/poster-one/preview.webp').read_bytes(),image)
+
+    def test_original_cannot_escape_verified_raster_boundary(self):
+        for original in ['../../local/private.png','missing.png','poster.pdf','https://example.org/image.png']:
+            self.change_metadata(lambda m:m['presentation'].update({'previews':[
+                {'file':'poster.png','original':original,'label':'Preview','document':'poster.pdf'}]}))
+            with self.assertRaisesRegex(ValueError,'Preview original'):site.build(self.root,self.out)
+
     def test_unapproved_and_excluded_assets_rejected(self):
         for mode in ('unapproved','excluded'):
             with self.subTest(mode=mode):

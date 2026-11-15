@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Native Scientific Knowledge System
-> Current main version: v0.28.0
+> Current main version: v0.28.1
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -69,7 +69,12 @@ be approximate; factual answers return to version-bound source evidence.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.28.0
+## Recent updates: v0.28.1
+
+The Gallery image-loading patch uses a lightweight WebP for the MPE poster on
+the home and detail pages; click it to open the full-resolution original. The
+first detail preview loads immediately, while later images remain lazy-loaded.
+The compatible v0.28.0 capabilities below remain available.
 
 ASKS is **Agent-Native Scientific Knowledge System**, guided by
 **Interpret knowledge. Organize for use. Reason to solve.** This compatible

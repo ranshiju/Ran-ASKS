@@ -123,6 +123,8 @@ def load_source(root: Path) -> tuple[dict, list[dict], dict[str, Path]]:
                 text(preview.get('label'), 'preview label')
                 if preview.get('file') not in m['files'] or Path(preview['file']).suffix.lower() not in {'.png', '.jpg', '.jpeg', '.webp'}:
                     raise ValueError('Preview must reference a verified raster image')
+                if 'original' in preview and (preview['original'] not in m['files'] or Path(preview['original']).suffix.lower() not in {'.png', '.jpg', '.jpeg', '.webp'}):
+                    raise ValueError('Preview original must reference a verified raster image')
                 if preview.get('document') not in {d['file'] for d in display['downloads']}:
                     raise ValueError('Preview document must reference a listed download')
         for download in display['downloads']:
@@ -270,11 +272,13 @@ def work_page(work: dict, catalog: dict, works: list[dict], site: dict | None = 
     refs = ''.join(f'<a href="{esc(r["url"])}">{esc(r.get("doi", "研究来源"))} ↗</a>' for r in work['references'])
     previews = p.get('previews', [{'file': p['preview'], 'label': p['name'] + ' · 完整预览'}])
     figures = []
-    for preview in previews:
+    for index, preview in enumerate(previews):
         document = preview.get('document')
+        original = preview.get('original', preview['file'])
+        loading = 'eager' if index == 0 else 'lazy'
         link = (f'<a href="{media}{esc(document)}">阅读全文 PDF ↗</a>' if document else
-                f'<a href="{media}{esc(preview["file"])}" download>下载图片 ↓</a>')
-        figures.append(f'''<figure class="artifact-preview"><figcaption>{esc(preview['label'])}</figcaption><a class="full-poster" href="{media}{esc(preview['file'])}" aria-label="查看{esc(preview['label'])}高清图片"><img src="{media}{esc(preview['file'])}" alt="{esc(preview['label'])}" loading="lazy"></a><div class="image-caption"><span>点击图片放大阅读</span>{link}</div></figure>''')
+                f'<a href="{media}{esc(original)}" download>下载图片 ↓</a>')
+        figures.append(f'''<figure class="artifact-preview"><figcaption>{esc(preview['label'])}</figcaption><a class="full-poster" href="{media}{esc(original)}" aria-label="查看{esc(preview['label'])}高清图片"><img src="{media}{esc(preview['file'])}" alt="{esc(preview['label'])}" loading="{loading}" decoding="async"></a><div class="image-caption"><span>点击图片放大阅读</span>{link}</div></figure>''')
     visual = ''.join(figures)
     by_id = {w['id']: w for w in works}
     related_links = ''.join(
@@ -401,7 +405,7 @@ def build(root: Path, output: Path, *, cloudflare_token: str = '', metrics: dict
             slug=work['id'];p=work['presentation'];dest=staging/'works'/slug;dest.mkdir(parents=True)
             (dest/'index.html').write_text(work_page(work,catalog,works,site),encoding='utf-8')
             media=staging/'assets/works'/slug;media.mkdir(parents=True)
-            for name in {p['cover'],p['preview'],*[d['file'] for d in p['downloads']],*[v['file'] for v in p.get('previews', [])]}:
+            for name in {p['cover'],p['preview'],*[d['file'] for d in p['downloads']],*[v['file'] for v in p.get('previews', [])],*[v['original'] for v in p.get('previews', []) if 'original' in v]}:
                 shutil.copyfile(inputs[f'gallery/works/{slug}/{name}'],media/name)
         rights=(root/'gallery/RIGHTS.md').read_text().split('\n\n')
         rights_html=''.join(f'<p>{esc(p)}</p>' for p in rights[1:])
