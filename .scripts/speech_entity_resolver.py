@@ -22,18 +22,22 @@ TOKEN_RE = re.compile(r"[\u3400-\u9fff]{2,6}|\b[A-Za-z][A-Za-zÀ-ÖØ-öø-ÿ.-]
 
 
 def _read_people_from_db():
+    if not DB.is_file():
+        raise FileNotFoundError(f"graph database does not exist: {DB}")
     conn = sqlite3.connect(str(DB))
     conn.row_factory = sqlite3.Row
     people = {}
     for row in conn.execute("SELECT path,title FROM nodes WHERE type='people'"):
         people[row["path"]] = row["title"]
-    aliases = {}
+    alias_targets = {}
     # 只读 confirmed 别名做自动替换; pending(待确认)不自动替换, 由模糊匹配进 review
     for row in conn.execute(
         "SELECT a.alias,a.node_path FROM aliases a "
         "JOIN nodes n ON n.path=a.node_path WHERE n.type='people'"
     ):
-        aliases[row["alias"]] = row["node_path"]
+        alias_targets.setdefault(row["alias"], set()).add(row["node_path"])
+    aliases = {name: next(iter(targets)) for name, targets in alias_targets.items()
+               if len(targets) == 1}
     graph = {}
     graph_rows = [dict(row) for row in conn.execute(
         "SELECT subject,predicate,object FROM edges "

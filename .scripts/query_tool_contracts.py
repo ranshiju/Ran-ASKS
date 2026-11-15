@@ -47,6 +47,8 @@ def schemas(signatures, *, intents, domains):
                     field["anyOf"][1]["pattern"] = r"(?:[1-9]|[1-7][0-9]|80)"
             elif action == "source_outline" and name == "query":
                 field["description"] = "Literal substring of a source heading/caption, e.g. Table 10; empty lists all."
+            elif action == "source_outline" and name == "include_sections":
+                field["description"] = "Add whole-section boundaries/sizes and optional read_raw inputs up to8000 characters when full section context is needed. Default keeps compact entry navigation; choose a returned section.read_input explicitly to read it."
             if name in required_names and (action, name) not in {("source_outline", "query"), ("source_search", "source_id")}:
                 required.append(name)
                 if field.get("type") == "string":
@@ -136,9 +138,11 @@ def _evaluate_expression(expression, variables):
             raise ValueError("expression intermediate magnitude outside 1e-100..1e100")
         return value
 
-    functions = {"sqrt", "min", "max"}
+    functions = {"sqrt", "min", "max", "log", "exp"}
     for name in variables:
-        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,31}", name) or name in functions:
+        # Keep pre-existing variables named log/exp valid: Name and Call are
+        # distinct AST nodes, so variables cannot override mathematical calls.
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,31}", name) or name in {"sqrt", "min", "max"}:
             raise ValueError("expression variable must be a short name distinct from sqrt/min/max")
     values = {name: bounded(Decimal(str(value))) for name, value in variables.items()}
     try:
@@ -175,11 +179,23 @@ def _evaluate_expression(expression, variables):
             return bounded(value)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in functions and not node.keywords:
             name = node.func.id
-            if (name == "sqrt" and len(node.args) != 1) or not 1 <= len(node.args) <= 16:
-                raise ValueError("sqrt requires one argument; min/max require 1..16")
+            if (name in {"sqrt", "log", "exp"} and len(node.args) != 1) or not 1 <= len(node.args) <= 16:
+                raise ValueError("sqrt/log/exp require one argument; min/max require 1..16")
             args = [visit(arg, depth+1) for arg in node.args]
-            return bounded(args[0].sqrt() if name == "sqrt" else min(args) if name == "min" else max(args))
-        raise ValueError("expression permits numbers, supplied variables, + - * / ** and sqrt/min/max only")
+            if name == "log":
+                if args[0] <= 0:
+                    raise ValueError("log requires a positive argument (natural logarithm)")
+                value = args[0].ln()
+            elif name == "exp":
+                # ln(1e100) < 231: reject huge arguments before expensive
+                # evaluation. The ordinary bound checks the precise result.
+                if abs(args[0]) > 231:
+                    raise ValueError("exp result outside 1e-100..1e100")
+                value = args[0].exp()
+            else:
+                value = args[0].sqrt() if name == "sqrt" else min(args) if name == "min" else max(args)
+            return bounded(value)
+        raise ValueError("expression permits numbers, supplied variables, + - * / ** and sqrt/min/max/log/exp only")
 
     with localcontext() as context:
         context.prec = 34

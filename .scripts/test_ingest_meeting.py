@@ -1150,6 +1150,19 @@ def test_source_binding_rebases_all_yaml_styles_in_both_backends():
                 shutil.rmtree(work)
 
 
+def test_wiki_validation_rejects_meeting_type_from_another_domain():
+    for domain, page_type in (("academic", "conference-summary"), ("admin", "meeting-summary"), ("business", "meeting-summary")):
+        source = f"{domain}/raw/conferences/2026/test/input.txt"
+        wiki = meeting.bind_meeting_source(_proposal()["wiki_markdown"], source)
+        wiki = wiki.replace("type: conference-summary", f"type: {page_type}")
+        state = {"wiki_path": f"{domain}/wiki/conferences/test", "raw_dir": source.rsplit("/", 1)[0],
+                 "source_filename": "input.txt", "wiki_content": wiki}
+        assert meeting.step_validate_wiki(state) == []
+        wrong_type = "meeting-summary" if domain == "academic" else "conference-summary"
+        state["wiki_content"] = wiki.replace(f"type: {page_type}", f"type: {wrong_type}")
+        assert any("type 应为" in error for error in meeting.step_validate_wiki(state))
+
+
 def test_wiki_validation_rejects_noncanonical_or_missing_sources():
     expected = "academic/raw/conferences/2026/0903-test/input.txt"
     wiki = meeting.bind_meeting_source(_proposal()["wiki_markdown"], expected)
@@ -1407,7 +1420,150 @@ def test_unsupported_acronym_is_rejected_before_meeting_staging():
         shutil.rmtree(work)
 
 
+def test_domain_contract_is_shared_by_generation_validation_and_publication():
+    import ingest_inbox
+    for domain, cfg in meeting.MEETING_DOMAINS.items():
+        work = _workspace()
+        try:
+            state = _state(work)
+            state["subproject"] = domain
+            calls = []
+            def runner(fields):
+                calls.append(fields)
+                return SimpleNamespace(status="compiled", reason="proposal_ready", proposal=_proposal(),
+                                       trace=lambda: {"status": "compiled"})
+            with patch.object(meeting, "ingest_mode", return_value="api"), \
+                    patch.object(meeting, "run_api_meeting_compiler", side_effect=runner):
+                ok, error = meeting.step_write_wiki(state)
+            assert ok, error
+            assert f"type: {cfg['type']}" in calls[0]["prompt"]
+            assert f"status: {cfg['status']}" in calls[0]["prompt"]
+            assert meeting.step_validate_wiki(state) == []
+            fm, _ = meeting._meeting_frontmatter(state["wiki_content"])
+            assert (fm["type"], fm["status"]) == (cfg["type"], cfg["status"])
+            assert fm["sources"][0].startswith(domain + "/raw/" + cfg["raw_sub"] + "/")
+            source = (REPO / state["source"]).read_text()
+            task = meeting.prepare_meeting_agent_task(state, source, {}, work / "agent.txt", [])
+            template = task["protocol"]["template"] if "protocol" in task else state["agent_task"]["protocol"]["template"]
+            assert f"type: {cfg['type']}" in template and f"status: {cfg['status']}" in template
+            def tail(current, repo, config):
+                assert config["entry_prefix"] == cfg["wiki_sub"] + "/"
+                assert config["get_index_path"](current, repo) == repo / cfg["index"]
+                log = config["build_log_entry"]({"today": "2026-11-15", "doc_id": "m",
+                    "page_name": "m", "title": "title", "edges": 0, "report": {}, "state": current})
+                assert f"{cfg['wiki_sub']}/m.md" in log and cfg["type"] in log
+                return True, ""
+            with patch.object(meeting.ic, "step_finalize_tail", side_effect=tail):
+                assert meeting.step_finalize_tail(state)[0]
+            command = ingest_inbox.dispatch_command("meeting", "inbox/m.txt", domain)
+            assert command[command.index("--subproject") + 1] == domain
+            assert ingest_inbox.dsi_tool("meeting", "inbox/m.txt", domain)[1]["subproject"] == domain
+            state["subproject"] = "admin" if domain == "academic" else "academic"
+            with patch.object(meeting, "run_api_meeting_compiler", side_effect=AssertionError("domain conflict must precede model")):
+                ok, error = meeting.step_write_wiki(state)
+                assert not ok and "冲突" in error
+        finally:
+            shutil.rmtree(work)
+
+
+def test_explicit_transport_resume_is_bounded_and_keeps_semantic_budget():
+    from dsh.meeting_compiler_agent import MeetingCompilerResult
+    work = _workspace()
+    try:
+        state = _state(work)
+        state["wiki_retry"] = 1
+        calls = []
+        def runner(fields):
+            calls.append(fields)
+            return MeetingCompilerResult("escalated", "URLError: nodename nor servname provided", model_calls=1)
+        with patch.object(meeting, "ingest_mode", return_value="api"), \
+                patch.object(meeting, "run_api_meeting_compiler", side_effect=runner), \
+                patch.object(meeting.inbox_state, "save"), \
+                patch.object(meeting, "progress"):
+            assert meeting.run_pipeline(state)["status"] == "failed"
+            assert len(calls) == 1
+            assert meeting.run_pipeline(state)["status"] == "failed"
+            assert len(calls) == 2
+            assert len(state["meeting_compiler_attempts"]) == 2
+            assert state["recovery"]["attempts"] == {"wiki_revision": 1, "infrastructure": 1}
+            assert meeting.run_pipeline(state)["status"] == "failed"
+            assert len(calls) == 2
+            assert state["recovery"]["last_action"]["outcome"] == "exhausted"
+            state["errors"] = ["403 forbidden"]
+            assert meeting.run_pipeline(state)["status"] == "failed" and len(calls) == 2
+        # An old recorded network failure may instead be continued by the host Agent.
+        state["errors"] = ["URLError: nodename nor servname provided"]
+        with patch.object(meeting, "ingest_mode", return_value="agent"), \
+                patch.object(meeting, "run_api_meeting_compiler", side_effect=AssertionError("implicit API")), \
+                patch.object(meeting.inbox_state, "save"), patch.object(meeting, "progress"):
+            assert meeting.run_pipeline(state)["status"] == "prepared"
+        assert state["recovery"]["attempts"]["infrastructure"] == 1
+    finally:
+        shutil.rmtree(work)
+
+
+def test_transport_resume_can_complete_without_losing_failed_attempt():
+    from dsh.meeting_compiler_agent import MeetingCompilerResult
+    work = _workspace()
+    try:
+        state = _state(work)
+        state["wiki_retry"] = 1
+        results = [MeetingCompilerResult("escalated", "URLError: nodename nor servname provided", model_calls=1),
+                   MeetingCompilerResult("compiled", "proposal_ready", proposal=_proposal(), model_calls=1)]
+        committed = []
+        spec = dict(meeting.MEETING_SPEC, cleanup_after=None)
+        spec["steps"] = dict(spec["steps"],
+            validate_semantics=lambda _s: ([], []),
+            finalize=lambda _s: committed.append("raw") or (True, ""),
+            update_graph=lambda _s: committed.append("graph") or (True, ""),
+            validate_graph=lambda _s: [], post_commit_projection=lambda _s: (True, ""),
+            finalize_tail=lambda _s: (True, ""))
+        with patch.object(meeting, "MEETING_SPEC", spec), \
+                patch.object(meeting, "ingest_mode", return_value="api"), \
+                patch.object(meeting, "run_api_meeting_compiler", side_effect=results) as compiler, \
+                patch.object(meeting.inbox_state, "REPO", work), patch.object(meeting, "progress"), \
+                patch.object(meeting.ic, "validate_completion", return_value=[]):
+            meeting.inbox_state.save(state["transaction_id"], state)
+            assert meeting.run_pipeline(state)["status"] == "failed"
+            assert not committed
+            state = meeting.inbox_state.load(state["transaction_id"])
+            first_attempt = json.loads(json.dumps(state["meeting_compiler_attempts"][0]))
+            assert meeting.run_pipeline(state)["status"] == "completed", state.get("errors")
+            assert compiler.call_count == 2
+            persisted = meeting.inbox_state.load(state["transaction_id"])
+            assert persisted["status"] == "completed"
+        assert state["meeting_compiler_attempts"][0] == first_attempt
+        assert len(state["meeting_compiler_attempts"]) == 2
+        assert state["recovery"]["attempts"] == {"wiki_revision": 1, "infrastructure": 1}
+        assert committed == ["raw", "graph"]
+    finally:
+        shutil.rmtree(work)
+
+
+def test_graph_validation_resume_does_not_replay_committed_steps():
+    calls = []
+    state = {"transaction_id": "graph-validation-resume", "status": "validate_graph"}
+    spec = {"script_name": "test_meeting.py", "steps": {
+        "validate_semantics": lambda _s: ([], []),
+        "validate_graph": lambda _s: calls.append("validate") or (["injected validator defect"] if len(calls) == 1 else []),
+        "finalize": lambda _s: (_ for _ in ()).throw(AssertionError("duplicate Raw commit")),
+        "update_graph": lambda _s: (_ for _ in ()).throw(AssertionError("duplicate Graph commit")),
+        "finalize_tail": lambda _s: (True, ""),
+    }}
+    with patch.object(meeting.ingest_pipeline, "_save"), \
+            patch.object(meeting.ic, "validate_before_commit", return_value=[]), \
+            patch.object(meeting.ic, "validate_completion", return_value=[]):
+        assert meeting.ingest_pipeline.run_pipeline(state, spec, lambda *a, **k: None)["status"] == "failed"
+        assert state["resume_from"] == "validate_graph"
+        assert meeting.ingest_pipeline.run_pipeline(state, spec, lambda *a, **k: None)["status"] == "completed"
+    assert calls == ["validate", "validate"]
+
+
 def main():
+    test_domain_contract_is_shared_by_generation_validation_and_publication()
+    test_explicit_transport_resume_is_bounded_and_keeps_semantic_budget()
+    test_transport_resume_can_complete_without_losing_failed_attempt()
+    test_graph_validation_resume_does_not_replay_committed_steps()
     test_invalid_record_patch_exhausts_existing_revision_budget_without_commit()
     test_record_repair_persists_patch_and_assembled_protocol_and_agent_gets_all_issues()
     test_source_bound_noop_is_consumed_in_both_backends_without_semantic_retry()

@@ -20,7 +20,7 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / ".scripts" / "query_orchestrate.py"
@@ -360,6 +360,73 @@ def test_loop_records_valid_search_strategy():
     assert session.plan_count == 1
 
 
+def test_strategy_optional_clues_preserve_original_metadata_and_restore():
+    base = {"status": "drafted", "slots": [{"need": "source", "clues": ["title"]}],
+            "search_order": ["source_search"], "stop_conditions": ["read relevant Raw"]}
+    for extra in [{}, {"clues": []}, {"clues": ["title"]}]:
+        strategy = {**base, **extra}
+        replies = iter([
+            {"status": "ok", "parsed": {"decision": "discover", "strategy": strategy,
+             "plan": [{"action": "source_search", "input": {"query": "title"}}]}},
+            {"status": "ok", "parsed": {"decision": "answer", "answer": "test only", "citations": []}},
+        ])
+        session = QuerySession(query="title", mode="api")
+        with patch.object(module.actions, "execute", return_value={"ok": True, "text": "{}", "tokens": 1, "error": ""}) as execute:
+            module._api_query_loop(session, lambda _: next(replies), max_rounds=2)
+        execute.assert_called_once_with("source_search", {"query": "title"})
+        assert session.search_strategy == strategy
+        assert ("clues" in session.search_strategy) == ("clues" in extra)
+        with tempfile.TemporaryDirectory() as td, patch.object(module, "SESSIONS_DIR", Path(td)):
+            module._save(session)
+            assert module._load(session.session_id).search_strategy == strategy
+    for clues in [None, "title", {"title": "x"}, False, 1]:
+        assert not module._valid_search_strategy({**base, "clues": clues})
+    for key in ("slots", "search_order", "stop_conditions"):
+        assert not module._valid_search_strategy({**base, key: []})
+
+
+def test_strategy_rejection_cannot_bypass_next_round_and_correction_is_recorded():
+    strategy = {"status": "drafted", "slots": ["source"],
+                "search_order": ["source_search"], "stop_conditions": ["Raw read"]}
+    plan = [{"action": "source_search", "input": {"query": "title"}}]
+    replies = iter([
+        {"status": "ok", "parsed": {"decision": "discover", "plan": plan}},
+        {"status": "ok", "parsed": {"decision": "discover", "strategy": {**strategy, "clues": "bad type"}, "plan": plan}},
+        {"status": "ok", "parsed": {"decision": "discover", "strategy": strategy, "plan": plan}},
+        {"status": "ok", "parsed": {"decision": "answer", "answer": "test only", "citations": []}},
+    ])
+    session = QuerySession(query="title", mode="api")
+    with patch.object(module.actions, "execute", return_value={"ok": True, "text": "{}", "tokens": 1, "error": ""}) as execute:
+        result = module._api_query_loop(session, lambda _: next(replies), max_rounds=4)
+    execute.assert_called_once_with("source_search", {"query": "title"})
+    assert result["round"] == 4 and session.plan_count == 1
+    assert session.search_strategy == strategy
+    assert session.steps[0]["action"] == "search_strategy"
+
+
+def test_optional_strategy_clues_do_not_bypass_tool_input_validation():
+    strategy = {"status": "drafted", "slots": ["source"],
+                "search_order": ["source_search"], "stop_conditions": ["Raw read"]}
+    reply = {"status": "ok", "parsed": {"decision": "discover", "strategy": strategy,
+             "plan": [{"action": "source_search", "input": {"query": "title", "topk": "invalid"}}]}}
+    session = QuerySession(query="title", mode="api")
+    with patch.object(module.actions, "execute") as execute:
+        module._api_query_loop(session, lambda _: reply, max_rounds=1)
+        execute.assert_not_called()
+    assert session.search_strategy == strategy and not session.read_sources
+
+
+def test_historical_session_without_strategy_does_not_require_retroactive_metadata():
+    session = QuerySession(query="resume", mode="api", stage="evidence")
+    session.record_step({"action": "source_search", "input": {"query": "old query"}, "output_summary": "old history"})
+    reply = {"status": "ok", "parsed": {"decision": "discover",
+             "plan": [{"action": "source_search", "input": {"query": "new gap"}}]}}
+    with patch.object(module.actions, "execute", return_value={"ok": True, "text": "{}", "tokens": 1, "error": ""}) as execute:
+        module._api_query_loop(session, lambda _: reply, max_rounds=1)
+    execute.assert_called_once_with("source_search", {"query": "new gap"})
+    assert session.search_strategy == {}
+
+
 def test_loop_citation_unverified():
     """answer 引用了未读来源 → citation_check 标记 unverified。"""
     calls = [
@@ -440,6 +507,49 @@ def test_model_failure_keeps_previous_read_and_error_in_session():
     assert restored.stop_reason == "model_error" and restored.hard_stopped
     assert restored.read_sources == [locator]
     assert restored.retained_results == session.retained_results
+
+
+def test_model_failure_reports_budget_and_transport_without_response_content():
+    responses = [
+        {"status": "validation_error", "parsed": None,
+         "error": "JSON parse error", "model": "actual-model",
+         "finish_reason": "length", "max_tokens": 4096, "reasoning_tokens": 2398,
+         "recovery_class": "output_transport", "local_json_recovery": "",
+         "usage": {"prompt_tokens": 100, "completion_tokens": 4096, "total_tokens": 4196,
+                   "provider_extra": "not projected"},
+         "text": "incomplete response must not become an answer", "history": [{"private": "detail"}]},
+        {"status": "api_error", "http_status": 429, "model": "alternate-model",
+         "error": "rate limited", "usage": {}},
+        {"status": "ok", "parsed": None},
+    ]
+    for response in responses:
+        session = QuerySession(query="failure diagnosis", mode="api")
+        with patch.object(module.actions, "execute") as execute:
+            model = Mock(return_value=response)
+            result = module._api_query_loop(session, model, max_rounds=5)
+        assert result["status"] == "model_error" and "answer" not in result
+        assert model.call_count == 1
+        execute.assert_not_called()
+        diagnostics = result["model_diagnostics"]
+        assert all(key not in diagnostics for key in ("text", "history", "parsed", "error"))
+        if "model" in response:
+            assert diagnostics["model"] == response["model"]
+        if response.get("finish_reason") == "length":
+            assert diagnostics["finish_reason"] == "length"
+            assert diagnostics["max_tokens"] == 4096 and diagnostics["reasoning_tokens"] == 2398
+            assert diagnostics["usage"] == {"prompt_tokens": 100, "completion_tokens": 4096,
+                                            "total_tokens": 4196}
+            response["usage"]["completion_tokens"] = 0
+            assert diagnostics["usage"]["completion_tokens"] == 4096
+        elif response.get("http_status") == 429:
+            assert diagnostics["http_status"] == 429 and diagnostics["usage"] == {}
+            assert "finish_reason" not in diagnostics and "reasoning_tokens" not in diagnostics
+        else:
+            assert diagnostics == {}
+        with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+            module._save(session)
+            assert module._load(session.session_id).final_result == result
+            assert module.inspect_session(session.session_id, final=True)["final_result"] == result
 
 
 def test_loop_exhausted():
@@ -705,11 +815,33 @@ def test_formula_calculation_obeys_stage_and_invalid_input_is_not_retained():
         assert "STAGE_GUARD" in out["results"][0]["error"]
         assert not session.retained_results and not session.read_sources
     session = QuerySession(query="calculate", mode="api", stage="evidence")
-    for expression in ["sqrt(-1)", "__import__('os').getcwd()"]:
+    for expression in ["sqrt(-1)", "__import__('os').getcwd()", "log(0)", "exp(1e100)"]:
         out = module.execute_plan(session, [{"action": "calculate", "input": {
             "operation": "expression", "expression": expression}}])
         assert not out["results"][0]["ok"]
     assert not session.retained_results and not session.read_sources
+
+
+def test_log_exp_planning_and_restored_result_remain_arithmetic_only():
+    session = QuerySession(query="compute entropy", mode="api", stage="evidence")
+    prompt = module._build_api_prompt(session, [], 1)
+    assert "log(x)为自然对数" in prompt and "exp(x)为自然指数" in prompt
+    inputs = {"operation": "expression", "expression": "-p*log(p)-(1-p)*log(1-p)",
+              "variables": {"p": 0.5}}
+    with patch.object(module.actions, "execute") as execute:
+        out = module.execute_plan(session, [{"action": "calculate", "input": inputs}])
+    execute.assert_not_called()
+    result = out["results"][0]
+    assert result["ok"] and not result["error"]
+    data = json.loads(result["text"])
+    assert data["result"].startswith("0.693147180559945") and not data["fact_evidence"]
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        module._save(session)
+        restored = module._load(session.session_id)
+    assert restored.retained_results == [result] and not restored.read_sources
+    restored.stage = "answer"
+    final_prompt = module._build_api_prompt(restored, [], 2)
+    assert final_prompt.count(result["text"]) == 1
 
 
 def test_malformed_plan_and_restored_nonread_ref_do_not_dispatch():
@@ -1100,6 +1232,86 @@ def test_atomic_session_save_failure_keeps_previous_result():
         assert module._load(session.session_id).query == "after"
 
 
+def test_calculation_purpose_survives_handoff_without_becoming_evidence():
+    reason = '本次保真度误差；\n"已核验"是模型自述而非工具认证'
+    step = {"action": "calculate", "input": {"operation": "expression", "expression": "1-0.9"}}
+    baseline = QuerySession(query="截断误差", stage="evidence")
+    plain = module.execute_plan(baseline, [step])["results"][0]
+    session = QuerySession(query="截断误差", stage="evidence")
+    result = module.execute_plan(session, [{**step, "reason": reason}])["results"][0]
+    assert result["text"] == plain["text"] and json.loads(result["text"])["result"] == "0.1"
+    assert result["planning_reason"] == reason and not result.get("planning_reason_truncated")
+    assert result["tokens"] == plain["tokens"]
+    assert session.token_used == baseline.token_used
+    assert not session.read_sources and json.loads(result["text"])["fact_evidence"] is False
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+        module._save(session)
+        restored = module._load(session.session_id)
+        assert module.inspect_session(session.session_id, result_index=1)["result"] == result
+        with patch.object(module.actions, "execute", side_effect=AssertionError("unexpected read")):
+            for fmt in ["json", "native"]:
+                for stage, latest in [("evidence", [result]), ("evidence", []), ("answer", [])]:
+                    restored.stage = stage
+                    baseline.stage = stage
+                    prompt = module._build_api_prompt(restored, latest, 2, fmt)
+                    assert json.dumps(reason, ensure_ascii=False) not in prompt
+                    assert prompt.count(result["text"]) == 1
+                    assert prompt == module._build_api_prompt(baseline, [plain] if latest else [], 2, fmt)
+                    assert "usage_role=result" in prompt
+
+
+def test_calculation_purpose_is_optional_and_not_retained_for_failed_actions():
+    inp = {"operation": "sum", "operands": [1, 2]}
+    plain = module.execute_plan(QuerySession(stage="evidence"), [{"action": "calculate", "input": inp}])["results"][0]
+    for reason in [None, False, 7, [], {}, " \n\t"]:
+        result = module.execute_plan(QuerySession(stage="evidence"), [
+            {"action": "calculate", "input": inp, "reason": reason}])["results"][0]
+        assert result == plain
+    for stage, bad in [("start", inp), ("evidence", {"operation": "quotient", "operands": [1, 0]}),
+                       ("evidence", {"operation": "unknown", "operands": [1]})]:
+        session = QuerySession(stage=stage)
+        result = module.execute_plan(session, [{"action": "calculate", "input": bad, "reason": "未执行成功"}])["results"][0]
+        assert not result["ok"] and "planning_reason" not in result and not session.retained_results
+    session = QuerySession(stage="evidence")
+    module.execute_plan(session, [{"action": "calculate", "input": inp, "reason": "第一次意图"}])
+    repeated = module.execute_plan(session, [{"action": "calculate", "input": inp, "reason": "改理由并不算新计算"}])["results"][0]
+    assert not repeated["ok"] and "ACTION_ALREADY_VISITED" in repeated["error"]
+    assert len(session.retained_results) == 1 and "planning_reason" not in repeated
+    with patch.object(module.actions, "execute", return_value={"ok": True, "text": "source text", "tokens": 3, "error": ""}), \
+            patch.object(module.actions, "raw_citation_sources", return_value=[]):
+        read = module.execute_plan(QuerySession(stage="evidence"), [
+            {"action": "read_raw", "input": {"locator": "academic/raw/a.md#L1"}, "reason": "只读目的"}])["results"][0]
+    assert "planning_reason" not in read
+
+
+def test_calculation_purpose_is_bounded_without_adding_prompt_or_budget_cost():
+    step = {"action": "calculate", "input": {"operation": "sum", "operands": [1, 2]}}
+    plain = module.execute_plan(QuerySession(stage="evidence"), [step])["results"][0]
+    reason = ' ' * 600 + '用途"\n' * 300
+    session = QuerySession(stage="evidence", token_budget=plain["tokens"] + 1)
+    result = module.execute_plan(session, [{**step, "reason": reason}])["results"][0]
+    excerpt = reason.strip()[:512]
+    assert result["planning_reason"] == excerpt and result["planning_reason_truncated"] is True
+    assert session.token_used == plain["tokens"] < session.token_budget
+    assert "calculate" in session.allowed_next_actions()
+    prompt = module._build_api_prompt(session, [result], 2)
+    assert "规划意图" not in prompt and reason not in prompt
+    assert json.dumps(excerpt, ensure_ascii=False) not in prompt
+    session.token_budget = session.token_used - 1
+    next_result = module.execute_plan(session, [{"action": "calculate", "input": {
+        "operation": "sum", "operands": [4, 5]}, "reason": "下一项"}])["results"][0]
+    assert not next_result["ok"] and "BUDGET_EXHAUSTED" in next_result["error"]
+
+
+def test_answer_attached_plan_still_is_not_an_execution_request():
+    decision = {"decision": "answer", "answer": "original", "citations": [], "plan": [
+        {"action": "calculate", "input": {"operation": "sum", "operands": [1, 2]}, "reason": "附带计划"}]}
+    session = QuerySession(stage="evidence")
+    with patch.object(module, "execute_plan", side_effect=AssertionError("answer must not execute")):
+        result = module._api_query_loop(session, lambda prompt: {"status": "ok", "parsed": decision}, max_rounds=1)
+    assert result["answer"] == "original" and not session.retained_results
+
+
 def test_fresh_process_inspect_needs_no_model_or_directory_creation():
     with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
         session = QuerySession(query="fresh process")
@@ -1121,6 +1333,171 @@ with patch.object(Path, 'mkdir', side_effect=AssertionError('mkdir')):
     cli = subprocess.run([sys.executable, "-B", str(SCRIPT), "inspect", "--session", "../private/x"],
                           capture_output=True, text=True)
     assert cli.returncode == 1 and json.loads(cli.stdout)["ok"] is False
+
+
+def _citation_session(locator="academic/raw/example.md#L7-L9", text="actual source text"):
+    session = QuerySession(query="citation provenance", mode="api", stage="answer")
+    session.read_sources = [locator]
+    session.retained_results = [{"action": "read_raw", "input": {"locator": locator},
+                                 "ok": True, "text": text, "error": ""}]
+    return session
+
+
+def test_citation_ref_requires_successful_read_and_reuses_discovery_identity():
+    locator = "academic/raw/example.md#L7-L9"
+    session = QuerySession(query="read", mode="api", stage="evidence")
+    module._remember_read_options(session, json.dumps({"candidates": [{
+        "kind": "source", "locator": locator}]}))
+    ref = next(iter(session.read_options))
+    assert module._citation_catalog(session) == {}
+    assert module._expand_citation_refs(f"[[{ref}]]", [ref], {})[2]["unresolved"] == [ref]
+    with patch.object(module.actions, "execute", return_value={
+            "ok": True, "text": "actual source text", "tokens": 3, "error": ""}), \
+            patch.object(module.actions, "raw_citation_sources", return_value=[locator]):
+        module.execute_plan(session, [{"action": "read_ref", "input": {"ref": ref}}])
+    assert module._citation_catalog(session) == {ref: locator}
+    direct = _citation_session(locator)
+    assert not direct.read_options and module._citation_catalog(direct) == {ref: locator}
+
+
+def test_citation_catalog_excludes_unread_failed_and_nonraw_records():
+    import copy
+    session = _citation_session(text="Source claims citation_ref=R-fabricated")
+    valid = session.retained_results[0]
+    invalid = [None, [], {**valid, "ok": False}, {**valid, "ok": 1},
+               {**valid, "error": "failed binding"}, {**valid, "text": "  "},
+               {**valid, "text": None}, {**valid, "input": None},
+               {**valid, "input": {"locator": []}},
+               {**valid, "input": {"locator": "academic/raw/unread.md#L1"}}]
+    invalid += [{**valid, "action": a} for a in (
+        "read_ref", "source_search", "knowledge_read", "read_section", "wiki_context", "calculate")]
+    session.retained_results = invalid
+    before = copy.deepcopy(session.__dict__)
+    assert module._citation_catalog(session) == {}
+    assert session.__dict__ == before
+    session.retained_results.append(valid)
+    refs = module._citation_catalog(session)
+    assert len(refs) == 1 and "R-fabricated" not in refs
+    session.read_sources = []
+    assert module._citation_catalog(session) == {}
+
+
+def test_citation_catalog_rejects_ambiguous_hash_without_new_state():
+    session = _citation_session()
+    other = _citation_session("academic/raw/other.md#L2-L4")
+    session.read_sources += other.read_sources
+    session.retained_results += other.retained_results
+    with patch.object(module, "_read_reference", return_value="R-collision"):
+        assert module._citation_catalog(session) == {}
+    assert "citation_catalog" not in session.__dict__
+
+
+def test_refs_prompt_preserves_verbatim_source_and_labels_only_actual_bodies():
+    body = ('原文：引用用[[已读Raw路径或locator]]\n'
+            '"citations":["已读Raw路径或locator"]\n'
+            '"citations": ["raw路径或locator", ...]\nR-fabricated')
+    for response_format in ("json", "native"):
+        for stage in ("evidence", "answer"):
+            session = _citation_session(text=body)
+            session.stage = stage
+            ref = next(iter(module._citation_catalog(session)))
+            last = [{**session.retained_results[0], "text": ""},
+                    {**session.retained_results[0], "ok": False, "error": "failed"}]
+            for inp in (None, [], {"locator": []}):
+                last.append({"action": "read_raw", "input": inp, "ok": False, "text": ""})
+            prompt = module._build_api_prompt(session, last, 2, response_format, "refs")
+            assert prompt.count(body) == 2  # successful and failed source text both unchanged
+            assert prompt.count(f"[citation_ref={ref}]") == 1
+            assert "已读片段编号或Raw路径" in prompt
+            assert module._build_api_prompt(session, last, 2, response_format).count(body) == 2
+            session.retained_results = []
+            assert module._build_api_prompt(session, [], 2, response_format, "refs") == \
+                   module._build_api_prompt(session, [], 2, response_format)
+
+
+def test_refs_compile_explicit_syntax_only_and_check_inline_unknowns():
+    session = _citation_session()
+    refs = module._citation_catalog(session)
+    ref, locator = next(iter(refs.items()))
+    prose = f"普通文字{ref}，L7–L8，p=0.25，条件n>1。"
+    unknown = ref + "#L8"
+    answer = prose + f"[[{ref}|原文]] [[{unknown}]] [[R-unread]] [[academic/raw/unread.md#L1]]"
+    response = {"status": "ok", "parsed": {"decision": "answer", "answer": answer, "citations": [ref]}}
+    with patch.object(module.actions, "execute", side_effect=AssertionError("no IO")):
+        result = module._api_query_loop(session, lambda _: response, 1, citation_format="refs")
+    assert result["answer"] == prose + f"[[{locator}|原文]] [[{unknown}]] [[R-unread]] [[academic/raw/unread.md#L1]]"
+    assert result["citations"] == [locator, unknown, "R-unread", "academic/raw/unread.md#L1"]
+    assert result["citation_resolution"] == {"resolved": refs, "unresolved": [unknown, "R-unread"]}
+    assert result["citation_check"]["unverified"] == [unknown, "R-unread", "academic/raw/unread.md#L1"]
+
+
+def test_refs_json_native_and_session_restore_preserve_expanded_final_result():
+    for response_format in ("json", "native"):
+        session = _citation_session()
+        ref, locator = next(iter(module._citation_catalog(session).items()))
+        answer = f"来源结论 [[{ref}|原文]]；范围 [[{locator}]]。"
+        parsed = {"decision": "answer", "answer": answer, "citations": [ref, locator]}
+        if response_format == "native":
+            parsed, error, _ = module._decode_native_query_response({
+                "finish_reason": "stop", "message": {"content": answer}})
+            assert error is None
+        with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)):
+            result = module._api_query_loop(session, lambda _: {"status": "ok", "parsed": parsed},
+                                            1, response_format, "refs")
+            assert result["answer"] == answer.replace(f"[[{ref}|", f"[[{locator}|")
+            assert result["citation_check"]["ok"] and result["citations"] == [locator]
+            module._save(session)
+            restored = module._load(session.session_id)
+            assert restored.final_result == result
+            assert module._citation_catalog(restored) == {ref: locator}
+            assert module.inspect_session(session.session_id, final=True)["final_result"] == result
+            assert "citation_catalog" not in json.loads((Path(directory) / f"{session.session_id}.json").read_text())
+
+
+def test_refs_missing_reads_and_malformed_citations_never_gain_verification():
+    for citations in (["R-unread"], None, 1, {"R-unread": "path"}, ["R-unread", {}]):
+        response = {"status": "ok", "parsed": {"decision": "answer", "answer": "[[R-unread]]", "citations": citations}}
+        call = Mock(return_value=response)
+        result = module._api_query_loop(QuerySession(query="q"), call, 1, citation_format="refs")
+        call.assert_called_once()
+        assert not result["citation_check"]["ok"] and result["answer"] == "[[R-unread]]"
+    session = _citation_session()
+    response = {"status": "ok", "parsed": {"decision": "answer", "answer": "[[R-unread]]", "citations": session.read_sources}}
+    # Default keeps the existing contract and output shape.
+    result = module._api_query_loop(session, lambda _: response, 1)
+    assert result["citation_check"]["ok"]
+    assert "citation_format" not in result and "citation_resolution" not in result
+
+
+def test_refs_option_validated_before_calls_and_forwarded_by_cli_entry():
+    call = Mock()
+    with TestCase().assertRaises(ValueError):
+        module._api_query_loop(QuerySession(query="q"), call, citation_format="bad")
+    call.assert_not_called()
+    fake_llm = SimpleNamespace(call_json=Mock(return_value={"status": "ok", "parsed": {
+        "decision": "answer", "answer": "stub answer", "citations": []}}))
+    args = SimpleNamespace(query="refs entry", query_type="", slots="", strategy="", max_rounds=1,
+                           citation_format="refs")
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "SESSIONS_DIR", Path(directory)), \
+            patch.object(module.agent_task, "query_backend", return_value="api"), \
+            patch.dict(sys.modules, {"llm_structured": fake_llm}):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            module.cmd_run_api(args)
+        printed = json.loads(output.getvalue())
+        assert printed["citation_format"] == "refs"
+        assert module.inspect_session(printed["session_id"], final=True)["final_result"] == printed
+        args.citation_format = "bad"
+        fake_llm.call_json.reset_mock()
+        with TestCase().assertRaises(ValueError):
+            module.cmd_run_api(args)
+        fake_llm.call_json.assert_not_called()
+    help_result = subprocess.run([sys.executable, "-B", str(SCRIPT), "run-api", "--help"],
+                                 capture_output=True, text=True)
+    assert help_result.returncode == 0 and "--citation-format {locators,refs}" in help_result.stdout
+    invalid = subprocess.run([sys.executable, "-B", str(SCRIPT), "run-api", "--query", "q",
+                              "--citation-format", "bad"], capture_output=True, text=True)
+    assert invalid.returncode == 2
 
 
 if __name__ == "__main__":

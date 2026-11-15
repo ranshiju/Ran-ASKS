@@ -65,6 +65,72 @@ class GalleryTests(unittest.TestCase):
     def change_metadata(self,edit):
         p=self.root/'gallery/works/poster-one/metadata.json';m=json.loads(p.read_text());edit(m);p.write_text(json.dumps(m))
 
+    def prepare_readmes(self, mapped=False):
+        self.catalog['site_url']='https://example.org/ASKS/'
+        self.write('gallery/catalog.json',json.dumps(self.catalog))
+        self.manifest['public_assets']={}
+        paths=[]
+        for name in ('README.md','README.zh-CN.md'):
+            relative='operations/engineering/open-source-assets/'+name if mapped else name
+            if mapped:self.manifest['public_assets'][name]=relative
+            paths.append(self.write(relative,'UNCHANGED HEADER\n'+site.README_START+'\nold preview\n'+site.README_END+'\nUNCHANGED BODY\n'))
+        self.save_manifest()
+        return paths
+
+    def test_recent_preview_prioritizes_dates_diversity_and_stable_ties(self):
+        works=[{'id':name,'kind':kind,'selected_on':day} for name,kind,day in [
+            ('old','talk','2025-10-01'),('article-a','article','2026-11-12'),
+            ('newest','asset','2026-11-14'),('article-b','article','2026-11-12'),
+            ('recent-talk','talk','2026-11-05')]]
+        self.assertEqual([w['id'] for w in site.recent_works(works)],['newest','article-a','recent-talk'])
+        self.assertEqual([w['id'] for w in site.recent_works(works[1:4])],['newest','article-a','article-b'])
+        self.assertEqual(site.recent_works([]),[])
+        works[0]['selected_on']='2026-02-30'
+        with self.assertRaises(ValueError):site.recent_works(works)
+
+    def test_readme_preview_sync_and_readonly_drift_check_in_both_layouts(self):
+        for mapped in (False,True):
+            with self.subTest(mapped=mapped):
+                paths=self.prepare_readmes(mapped)
+                before=[p.read_bytes() for p in paths]
+                with self.assertRaisesRegex(ValueError,'stale'):site.sync_readme_preview(self.root,check=True)
+                self.assertEqual(before,[p.read_bytes() for p in paths])
+                result=site.sync_readme_preview(self.root)
+                self.assertFalse(result['published']);self.assertEqual(len(result['changed']),2)
+                for p in paths:
+                    content=p.read_text()
+                    self.assertTrue(content.startswith('UNCHANGED HEADER\n'))
+                    self.assertTrue(content.endswith('\nUNCHANGED BODY\n'))
+                    self.assertIn('href="https://example.org/ASKS/works/poster-one/index.html"',content)
+                    self.assertIn('src="gallery/works/poster-one/cover.webp"',content)
+                    self.assertNotIn('old preview',content)
+                    self.assertNotIn('<script',content)
+                self.assertIn('Recent highlights',paths[0].read_text())
+                self.assertIn('近期作品精选',paths[1].read_text())
+                self.assertEqual(site.sync_readme_preview(self.root,check=True)['status'],'current')
+                self.assertEqual(site.sync_readme_preview(self.root)['changed'],[])
+                self.change_metadata(lambda m:m['presentation'].update(name='Changed title '+str(mapped)))
+                with self.assertRaisesRegex(ValueError,'stale'):site.sync_readme_preview(self.root,check=True)
+
+    def test_readme_preview_preflights_both_targets_and_gallery_before_writing(self):
+        paths=self.prepare_readmes();before=paths[0].read_bytes()
+        paths[1].write_text('Missing generated markers')
+        with self.assertRaisesRegex(ValueError,'exactly one'):site.sync_readme_preview(self.root)
+        self.assertEqual(paths[0].read_bytes(),before)
+        paths=self.prepare_readmes()
+        self.write('gallery/works/poster-one/cover.webp','tampered')
+        with self.assertRaisesRegex(ValueError,'hash mismatch'):site.sync_readme_preview(self.root)
+        self.assertEqual(paths[0].read_bytes(),before)
+
+    def test_readme_preview_escapes_titles_and_has_no_implicit_site_url(self):
+        paths=self.prepare_readmes()
+        self.change_metadata(lambda m:m['presentation'].update(name='<img onerror="bad">',name_en='<English & title>'))
+        site.sync_readme_preview(self.root)
+        self.assertIn('&lt;English &amp; title&gt;',paths[0].read_text())
+        self.assertNotIn('<img onerror=',paths[1].read_text())
+        del self.catalog['site_url'];self.write('gallery/catalog.json',json.dumps(self.catalog))
+        with self.assertRaisesRegex(ValueError,'canonical Gallery site_url'):site.sync_readme_preview(self.root)
+
     def test_multiple_works_capabilities_and_project_relative_links(self):
         result=site.build(self.root,self.out);self.assertEqual(result['works'],2)
         index=(self.out/'index.html').read_text()
@@ -91,6 +157,31 @@ class GalleryTests(unittest.TestCase):
         self.write('gallery/works/poster-one/poster.pdf','tampered')
         with self.assertRaisesRegex(ValueError,'hash mismatch'):site.build(self.root,self.out)
         self.assertEqual((self.out/'index.html').read_bytes(),old)
+
+    def test_curated_zip_is_copied_only_when_approved_and_hash_verified(self):
+        import io
+        import zipfile
+        buffer=io.BytesIO()
+        with zipfile.ZipFile(buffer,'w') as archive:
+            archive.writestr('asset/README.md','Reviewed synthetic asset')
+        data=buffer.getvalue()
+        relative='gallery/works/poster-one/assets.zip'
+        self.write(relative,data)
+        def edit(m):
+            m['files']['assets.zip']=hashlib.sha256(data).hexdigest()
+            m['presentation']['downloads'].append({'file':'assets.zip','label':'Asset collection'})
+        self.change_metadata(edit)
+        with self.assertRaisesRegex(ValueError,'Not an approved public file'):
+            site.build(self.root,self.out)
+        self.includes.append(relative);self.save_manifest()
+        site.build(self.root,self.out)
+        copied=self.out/'assets/works/poster-one/assets.zip'
+        self.assertEqual(copied.read_bytes(),data)
+        self.assertFalse((copied.parent/'asset').exists())
+        self.write(relative,b'tampered archive')
+        with self.assertRaisesRegex(ValueError,'hash mismatch'):
+            site.build(self.root,self.out)
+        self.assertEqual(copied.read_bytes(),data)
 
     def test_canonical_social_metadata_sitemap_and_version_use_project_path(self):
         self.catalog['site_url']='https://example.org/gallery/'
@@ -122,6 +213,33 @@ class GalleryTests(unittest.TestCase):
         self.assertIn('最新刷新暂不可用',page)
         self.assertIn('11 次浏览',page)
         self.assertNotIn('PRIVATE_SENTINEL',(self.out/'metrics.json').read_text())
+
+    def test_cumulative_statistics_show_start_gap_and_survive_static_build(self):
+        import gallery_metrics
+        from datetime import datetime, timedelta, timezone
+        # Use the verified fixture catalog; the builder sanitizes the supplied snapshot.
+        catalog=json.loads((self.root/'gallery/catalog.json').read_text())
+        catalog['site_url']='https://example.org/gallery/'
+        (self.root/'gallery/catalog.json').write_text(json.dumps(catalog))
+        now=datetime(2026,11,12,tzinfo=timezone.utc)
+        old=gallery_metrics.aggregate([],catalog,now)
+        later=now+timedelta(days=40)
+        row={'dimensions':{'date':later.date().isoformat(), 'requestPath':'/gallery/'},
+             'count':42,'sum':{'visits':11}}
+        fresh=gallery_metrics.aggregate([row],catalog,later)
+        snapshot=gallery_metrics.merge_history(fresh,old,catalog)
+        site.build(self.root,self.out,metrics=snapshot)
+        page=(self.out/'index.html').read_text()
+        self.assertIn('累计浏览量',page)
+        self.assertIn('累计访问次数',page)
+        self.assertIn('累计自 2026-10-14',page)
+        self.assertIn('10 天数据缺失',page)
+        self.assertIn('<strong>42</strong>',page)
+        self.assertEqual(json.loads((self.out/'metrics.json').read_text())['history'],snapshot['history'])
+        snapshot['history']['site_url']='https://different.example/gallery/'
+        with self.assertRaisesRegex(ValueError,'different Gallery'):
+            site.build(self.root,self.out,metrics=snapshot)
+        self.assertEqual((self.out/'index.html').read_text(),page)
 
     def test_analytics_configuration_is_explicit_and_validated_before_replacement(self):
         self.catalog['site_url']='https://example.org/gallery/'

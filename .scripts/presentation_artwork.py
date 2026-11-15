@@ -93,18 +93,24 @@ def validate_brief(brief: dict) -> dict:
     return brief
 
 
-def validate_artwork(obj: dict, brief: dict) -> dict:
+def validate_artwork(obj: dict, brief: dict, *, allow_v2=False) -> dict:
     if not isinstance(obj, dict) or set(obj) != {"schema", "canvas", "background", "rationale", "objects"}:
         raise ValueError("Invalid artwork fields")
-    if obj["schema"] != SCHEMA or obj["canvas"] != brief["canvas"]:
+    version2 = allow_v2 and obj["schema"] == "presentation-artwork-v2"
+    if (obj["schema"] != SCHEMA and not version2) or obj["canvas"] != brief["canvas"]:
         raise ValueError("Artwork canvas/schema mismatch")
-    color(obj["background"])
+    color(obj["background"], transparent=version2)
     if not isinstance(obj["rationale"], str) or not 1 <= len(obj["rationale"]) <= 4000:
         raise ValueError("Design rationale required")
     if not isinstance(obj["objects"], list) or not 1 <= len(obj["objects"]) <= 100:
         raise ValueError("Invalid object count")
     width, height = brief["canvas"]
+    for value in (width, height):
+        number(value, 1, 4096)
     for item in obj["objects"]:
+        if version2 and isinstance(item, dict) and item.get('type') == 'path':
+            validate_path(item, width, height)
+            continue
         if not isinstance(item, dict) or item.get("type") not in PROTOCOL["objects"]:
             raise ValueError("Unsupported graphic primitive")
         kind = item["type"]
@@ -143,6 +149,34 @@ def validate_artwork(obj: dict, brief: dict) -> dict:
     return obj
 
 
+def validate_path(item: dict, width: float, height: float) -> dict:
+    """Bounded data-only path. Control points inside the frame bound the curve."""
+    if set(item) != {'type', 'x', 'y', 'w', 'h', 'fill', 'stroke', 'stroke_width', 'commands'}:
+        raise ValueError('Invalid path fields')
+    x, y = number(item['x'], 0, width), number(item['y'], 0, height)
+    w, h = number(item['w'], .1, width), number(item['h'], .1, height)
+    if x+w > width or y+h > height:
+        raise ValueError('Path outside canvas')
+    color(item['fill'], transparent=True)
+    color(item['stroke'], transparent=True)
+    number(item['stroke_width'], 0, 12)
+    commands = item['commands']
+    if not isinstance(commands, list) or not 3 <= len(commands) <= 256:
+        raise ValueError('Invalid path command count')
+    arities = {'M': 3, 'L': 3, 'C': 7, 'Z': 1}
+    if not isinstance(commands[0],list) or commands[0][:1] != ['M'] or commands[-1] != ['Z']:
+        raise ValueError('Paths must start with M and close with Z')
+    for i, command in enumerate(commands):
+        if (not isinstance(command, list) or not command or command[0] not in arities
+                or len(command) != arities[command[0]]):
+            raise ValueError('Unsupported path command')
+        if i and command[0] == 'M' or i < len(commands)-1 and command[0] == 'Z':
+            raise ValueError('Only one closed contour per path')
+        for j, value in enumerate(command[1:]):
+            number(value, 0, w if j % 2 == 0 else h)
+    return item
+
+
 def export_artwork(obj: dict) -> tuple[str, str]:
     width, height = obj["canvas"]
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
@@ -151,6 +185,12 @@ def export_artwork(obj: dict) -> tuple[str, str]:
     for item in obj["objects"]:
         a = item
         kind = a["type"]
+        if kind == "path":
+            d = ' '.join(command[0] + ' '.join(str(v) for v in command[1:]) for command in a['commands'])
+            element = f'<path d="{d}" fill="{a["fill"]}" stroke="{a["stroke"]}" stroke-width="{a["stroke_width"]}"/>'
+            svg.append(f'<g transform="translate({a["x"]} {a["y"]})">{element}</g>')
+            fragments.append(f'<svg style="position:absolute;left:{a["x"]}px;top:{a["y"]}px" width="{a["w"]}" height="{a["h"]}" viewBox="0 0 {a["w"]} {a["h"]}">{element}</svg>')
+            continue
         if kind == "line":
             dx, dy = a["x2"] - a["x1"], a["y2"] - a["y1"]
             svg.append(f'<line x1="{a["x1"]}" y1="{a["y1"]}" x2="{a["x2"]}" y2="{a["y2"]}" stroke="{a["stroke"]}" stroke-width="{a["stroke_width"]}"/>')

@@ -1,6 +1,18 @@
 version: 1
 purpose: WikiRan 工程元图：用于任务上下文和建设影响面，不存业务知识关系。
 nodes:
+  local_extension:
+    path: .scripts/local_extension.py
+    kind: implementation
+    role: shared-static-local-extension-discovery-and-explicit-python-dispatch-without-model-control
+  local_extension_ops:
+    path: operations/LOCAL_EXTENSIONS.md
+    kind: spec
+    role: shared-local-extension-trust-publication-and-portable-delivery-contract
+  local_extension_test:
+    path: .scripts/test_local_extension.py
+    kind: test
+    role: shared-local-extension-empty-installation-path-containment-and-explicit-execution-regression
   platform_compat:
     path: .scripts/platform_compat.py
     kind: implementation
@@ -461,6 +473,26 @@ nodes:
     path: .scripts/presentation_artwork.py
     kind: script
     role: explicit-agent-or-api-artwork-authoring-with-shared-bounded-vector-validation-and-local-rendering
+  presentation_asset:
+    path: .scripts/presentation_asset.py
+    kind: implementation
+    role: shared-local-parametric-vector-asset-library-with-agent-creation-tasks-native-export-and-scoped-insertion
+  presentation_asset_render:
+    path: .scripts/presentation_asset_render.py
+    kind: implementation
+    role: shared-bounded-editable-path-and-group-renderer-with-transparent-png-and-native-pptx-output
+  presentation_asset_ops:
+    path: operations/PRESENTATION_ASSET.md
+    kind: spec
+    role: agent-on-demand-local-ppt-asset-creation-discovery-reuse-and-provenance-contract
+  presentation_asset_seed:
+    path: operations/templates/presentation-assets/circular-dual-arrow/asset.json
+    kind: config
+    role: portable-generated-circular-feedback-arrow-without-project-content
+  presentation_asset_test:
+    path: .scripts/test_presentation_asset.py
+    kind: test
+    role: asset-geometry-provenance-privacy-transaction-version-native-export-and-discovery-regression
   presentation_artwork_test:
     path: .scripts/test_presentation_artwork.py
     kind: test
@@ -1433,7 +1465,7 @@ nodes:
   speech_entity_resolver:
     path: .scripts/speech_entity_resolver.py
     kind: implementation
-    role: meeting-voice-entity-resolver
+    role: meeting-voice-entity-resolver-with-unique-explicit-people-alias-reuse-and-ambiguous-alias-exclusion
   extract_citations:
     path: .scripts/extract_citations.py
     kind: implementation
@@ -1635,6 +1667,15 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - wg
+  - uses
+  - local_extension
+- - local_extension
+  - follows
+  - local_extension_ops
+- - local_extension
+  - tested_by
+  - local_extension_test
 - - relocate_own_ip
   - uses
   - platform_compat
@@ -4317,6 +4358,39 @@ edges:
 - - dsh_function_catalog
   - uses
   - function_registry
+- - presentation_asset
+  - uses
+  - presentation_artwork
+- - presentation_asset
+  - uses
+  - presentation_asset_render
+- - presentation_asset
+  - uses
+  - agent_task
+- - presentation_asset_render
+  - uses
+  - presentation_runtime
+- - presentation_asset_ops
+  - documents
+  - presentation_asset
+- - presentation_asset_ops
+  - documents
+  - presentation_asset_render
+- - presentation_asset_test
+  - tests
+  - presentation_asset
+- - presentation_asset_test
+  - tests
+  - presentation_asset_render
+- - presentation_asset
+  - uses
+  - presentation_asset_seed
+- - presentation_ops
+  - uses
+  - presentation_asset_ops
+- - wg
+  - uses
+  - presentation_asset
 - - dsh_tools
   - uses
   - dsh_function_catalog
@@ -4345,6 +4419,24 @@ edges:
   - documents
   - dsh_function_catalog
 capabilities:
+  presentation-asset:
+    entry: route
+    required:
+    - agents
+    - presentation_asset_ops
+    optional:
+    - presentation_asset
+    - presentation_asset_render
+    - presentation_artwork
+    - presentation_ops
+    - slide_library_ops
+    - wg
+    forbidden:
+    - graph_ingest
+    - llm_structured
+    guardrails:
+    - Agent 按需选择或创作局部素材；shared 负责受限图元、参数、原生导出、收藏、版本与检索；不隐式调用 API。
+    - generated 保存创作来源；source-derived 提取须回溯已归档 Raw。private 素材物理隔离；公共内置样例不携带项目数据。
   manuscript-introduction:
     entry: route
     required:
@@ -4971,6 +5063,11 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  local_extension:
+  - python3 .scripts/test_local_extension.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/function_registry.py validate --runtime
   platform_compat:
   - python3 .scripts/test_windows_compat.py
   - python3 .scripts/test_wg.py
@@ -5189,6 +5286,15 @@ verification:
   - python3 .scripts/engineering_graph.py validate
   presentation_artwork:
   - python3 .scripts/test_presentation_artwork.py
+  - python3 .scripts/engineering_graph.py validate
+  presentation_asset:
+  - python3 .scripts/test_presentation_asset.py
+  - python3 .scripts/test_presentation_artwork.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/test_prompt_audit.py
+  - python3 .scripts/engineering_graph.py validate
+  presentation_asset_render:
+  - python3 .scripts/test_presentation_asset.py
   - python3 .scripts/engineering_graph.py validate
   presentation_runtime:
   - python3 .scripts/test_presentation_runtime.py
@@ -5442,6 +5548,16 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  local_extension:
+    preconditions:
+    - shared deterministic discovery reads only explicitly installed private/extensions/<id>/extension.json; no code import during list/show and no auto installation or API controller.
+    - Explicit run executes a confined Python entry with argument vector, current interpreter and inherited host permissions; extension code is trusted installation, never source-document data or a sandbox.
+    writes:
+    - Discovery writes nothing; execution effects belong to the selected extension contract and user-authorized action.
+    forbidden:
+    - Shell expansion, path escape, remote installation, dynamic source instructions or exposing local package identities in public source assets.
+    verify:
+    - python3 .scripts/test_local_extension.py
   platform_compat:
     preconditions:
     - shared 平台适配无语义控制循环；受管 Python I/O 为 UTF-8 严格协议，ZIP 路径独立于宿主文件系统。
@@ -5581,6 +5697,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   knowledge_store:
     preconditions:
+    - shared Statement/current-or-historical and native Question reads derive metadata, body and snapshot_sha256 from one byte read; preserve universal-newline parsing but hash the original bytes. Concurrent managed atomic replacement may yield the old or new complete snapshot, never metadata from one with the other hash. No persistent cache; each call reads again, and identity/revision, stale-index, Raw binding and commit CAS checks remain independent
     - optional retrieval=hybrid delegates to knowledge_vectors for current Statement semantic discovery; default lexical and native Question search retain prior behavior, public Agent/API/DSH callers share the optional parameter, no automatic knowledge compilation or Raw certification
     - shared search adds up to three stored evidence locator/relation/assessed_revision previews in original order plus total and truncation; ranking and existing candidate fields are unchanged, no Raw read or binding certification occurs at discovery, and full knowledge_read remains available
     - shared academic-only Markdown primary Statement store; native Frontier Question identity and states remain authoritative
@@ -5607,6 +5724,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   knowledge_compile:
     preconditions:
+    - API知识提交的assessor优先使用受信任api_usage.model中的实际生成模型；executor继续表示请求配置与任务身份，未提供实际模型的历史任务保持旧executor。Agent任务沿用自身executor，不把模型请求路由名误标为切换后产物的实际生成者
     - automatic candidate packets with a nonempty focus rank the bounded pool by literal purpose coverage within the established confirmed-name and same-source tiers before incidental passage-name counts; no semantic identity classifier is added. Only affected automatic focused jobs receive a candidate-policy identity key; old jobs remain recoverable by ID.
     - automatic focused compilation includes one distinct literal task-focus query alongside source-topic and passage-name queries, so translated existing knowledge can be discovered even without source-language lexical overlap. At most three deduplicated local queries return twenty hits each, ranked into the existing twenty-item pool and five-candidate packet budget. Focus is discovery context only and never evidence or a new admission rule; existing source/topic/name admission, complete-old-evidence requirements and version validation remain authoritative. Unfocused and explicit-selection/target paths retain their existing behavior and task identities.
     - optional selective strategy prepares a smaller source-local evidence packet with headings and read-only existing candidates; the shared kernel may append explicitly requested current-source spans and complete evidence of an already-listed Statement, with original source/version/budget validation. No semantic classifier, mandatory review or source-text-driven arbitrary tool execution is introduced.
@@ -5675,10 +5793,13 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   source_ingest:
     preconditions:
+    - shared Source search finalizes its advisory next from the final candidate list. Empty results use next=null (no immediate reading target, not task completion) and empty-only limitations describing unusable lexical terms, unavailable index or validation issues, otherwise no validated lexical matches; absence of candidates never establishes absence of relevant content. query, search_scope, issues, index_available and existing failures remain authoritative. No invented input, automatic retry, query rewrite, scope expansion, outline/read, index build or evidence registration; nonempty results retain the prior output. Agent/CLI/API/DSH consume the same return.
+    - shared source_outline returns next=source_search for an empty candidate list, explaining that only labels in the scanned range were checked and no body search was performed. A nonblank original query adds next_input with the same validated source_id and unchanged query; blank queries do not invent search terms. This is an advisory handoff, never an automatic search/read, evidence registration, index availability guarantee or statement that the body lacks an answer. Existing nonempty output, pagination, binding/private guards, index-independent outline access and control ownership remain unchanged; Agent/CLI/API/DSH receive the same result.
     - shared deterministic Source-first profile; first release accepts academic PDF/Markdown/plain text, with no semantic LLM or Graph dependency
+    - shared source_outline include_sections=true (CLI --include-sections) optionally adds heading section ranges ending before the next equal-or-higher Markdown heading, including explicit subsections and ignoring fenced pseudo-headings. section reports exact start_line/end_line/chars and readable/limited/heading_only status; only nonempty sections of at most 8000 characters expose an optional read_raw action/input. The boolean defaults false with identical legacy nonempty output and no section scan; empty output follows the shared outline handoff contract. Agent/CLI/API/DSH pass the same option; captions, existing locators/read_input, ordering, pagination and API read_ref issuance remain unchanged. This is an explicit alternative, never automatic expansion, syntax repair, semantic sufficiency or evidence registration; existing binding/scope/read limits apply when chosen.
     - optional source_id filters before candidate LIMIT and validates selected source/index even on no hits; omitted/empty preserves global lexical behavior. Explicit retrieval=hybrid delegates to source_vectors; default lexical performs no embedding calls. All Agent/API/DSH entrypoints preserve optional parameters and original Raw navigation.
     - shared search and outline preserve original index/label locators, ranking and excerpt offsets while providing explicit read_action/read_input for a bounded contiguous structural context when needed. Complete intersected paragraphs and paired display-math blocks with adjacent literal where/in-which/其中/式中 definitions outside code fences; add at most 2000 characters and 32 lines with an 8000-character total cap. Incomplete syntax or over-budget completion remains disclosed as limited, never silently truncated or certified semantically sufficient. No index migration, Raw write, automatic read or model call; precise old locators retain their meaning.
-    - shared source_outline lists only explicit Markdown headings and numbered table/figure captions from the current hash-bound source_ready carrier; optional literal label filtering and bounded line pagination return existing containing-segment Raw locators or the label line when no indexed-size segment exists, plus the same optional bounded structural read suggestion as search. Labels are navigation, never evidence or a guarantee that a table, legend or section is complete; no automatic reading, index rebuild, model call or Raw writes
+    - shared source_outline lists only explicit Markdown headings and numbered table/figure captions from the current hash-bound source_ready carrier; optional literal label filtering and bounded line pagination preserve containing-segment Raw locators or the label line when no indexed-size segment exists. A heading followed only by blanks in its containing segment gets a separate heading_start read suggestion containing the heading and first complete directly following structural body block, with at most 2000 new characters/32 new lines beyond that segment and 8000 total characters. It never crosses another heading or code fence; unavailable, unclosed or oversized bodies disclose limited context and suggest only the heading line when within the total cap. Captions and other headings keep the existing structural navigation, and old locator meanings stay unchanged. Labels are navigation, never evidence or a guarantee of complete sections; no automatic reading, index rebuild, model call or Raw writes
     - PDF figure citations default to the retained original plus figure/subfigure and known page; separate parser images are optional derived resources. Missing assets remain recorded and disclosed without making text readiness or task completion depend on extracting every figure. Live receipts normalize the exact legacy missing-image notice without rewriting saved receipts, parse identities or Raw; existing resource integrity checks remain
     - shared Source search may display the bound carrier's opening H1 for filename_unverified titles; title_basis remains explicitly unverified and filename_title is preserved, without changing ranking, receipts, indexes or Raw
     - Source and KU discovery use shared contiguous match-centered excerpts within the existing 700-character cap, with zero-based end-exclusive body offsets; ranking and full reading locators remain unchanged, excerpts are not evidence and never rewrite or concatenate source text
@@ -5967,6 +6088,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   source_vectors:
     preconditions:
+    - every hybrid return uses the shared Source search handoff after the final candidates are known. Any valid lexical/vector candidate keeps next=read_raw and removes empty-only limitations inherited from lexical no-hit; an empty hybrid result keeps next=null and points to vector_channel availability/coverage/failure diagnostics without declaring semantic absence. Existing status, issues, scope, retrieval, budgets and explicit query-only embedding behavior remain unchanged.
     - shared explicit academic/public Source vector build and hybrid query; Source receipts and hash-bound Raw remain authority, vectors are rebuildable navigation only
     - fixed bounded UTF-8 subwindows preserve parent Source chunk locators and exact body offsets; same-parent matches contribute only their best vector rank, no similarity-based identity or fact decisions
     - projection binds source_id, selected parse_id, carrier hash, segmentation policy, input hash and endpoint/model namespace; validate before using, partial/missing/stale coverage and fallback are explicit
@@ -6007,6 +6129,21 @@ script_contracts:
     verify:
     - python3 .scripts/test_env_config.py
     - python3 .scripts/test_private_isolation.py
+  presentation_asset:
+    preconditions:
+    - shared local-only；Agent prepare 返回 agent-task-v1，不调用语义 API；几何版本显式，不改变旧 artwork-v1 接受范围
+    - 公共/本地素材与 private 素材分目录；新创与已有来源提取分别记录，不伪造 Raw 依据
+    - show 发现颜色参数；use/insert 的重复 --color 只覆盖声明的 color 类型，优先级 preset < values < color；不修改收藏版本
+    writes:
+    - slide-library/assets 或 private/presentation-assets 下不可变版本；temp 素材任务；projects 或 private 下独立实例
+    - 原生 PPTX、SVG、透明PNG及实例回执；实例复制固定版本，不自动改写旧PPT
+    forbidden:
+    - 任意代码/外链/越界几何、symlink输出、修改Raw或现有PPT、隐式API调用、将预览成功当作用户验收
+    verify:
+    - python3 .scripts/test_presentation_asset.py
+    - python3 .scripts/test_presentation_artwork.py
+    - python3 .scripts/function_registry.py validate --runtime
+    - python3 .scripts/engineering_graph.py validate
   presentation_artwork:
     preconditions:
     - Agent 默认返回 agent-task-v1；API 仅显式 creator=api、allow_remote 与 public brief 同时满足才执行，默认模型 GLM-5.3-FlashX
@@ -6453,13 +6590,17 @@ script_contracts:
   gallery_site:
     preconditions:
     - shared static build validates the exact Gallery allowlist and artifact hashes without model or network calls; optional canonical site URL has an HTTPS origin and a fixed project path without credentials, query or fragment
+    - README preview sync/check uses the same verified Gallery metadata and covers, selects up to three recent works by selected_on with distinct kinds preferred and catalog order for ties, and preflights both bounded bilingual blocks before any write; it neither publishes nor edits other README content
+    - curated asset-library ZIP downloads require the same exact-file allowlist and SHA-256 checks as other final artifacts; Agent reviews each member and records public-copy provenance locally, while the builder only copies the archive and never extracts or executes it
     - optional Cloudflare Web Analytics uses a public 32-hex site token supplied at build time; empty configuration emits no collection token and never loads a remote script
     - the browser loads the fixed Cloudflare beacon only on the configured HTTPS origin and project path, honors local opt-out, and disables SPA tracking so filter query changes do not create page views; analytics failures never block core reading or downloads
     - Visits follow the provider definition and are not unique people; custom download or copy events are not claimed, and local knowledge work has no analytics integration
-    - a separate deterministic collector reads Cloudflare aggregate statistics using an Actions secret, limits output to approved public Gallery paths, and publishes only seven/thirty-day totals and public work rankings; failed or missing reads retain a valid previous snapshot as stale or show unavailable, never invent zero counts
+    - a separate deterministic collector reads Cloudflare aggregate statistics using an Actions secret and limits output to approved public Gallery paths. Alongside seven/thirty-day totals and public work rankings, optional site-bound daily aggregates carry cumulative page views/visits since the first covered UTC day. Refresh replaces overlapping dates, preserves older covered days and discloses missing days; legacy window-only snapshots do not invent earlier history. Cumulative values are derived from sanitized daily records, never trusted input totals; failures retain a valid snapshot as stale, never invent zero counts or silently reset retained history
     writes:
     - generate canonical and Open Graph metadata, sitemap and robots files, a privacy page and a deterministic site-info receipt with source VERSION and collection configuration state
+    - explicit local README sync updates only generated preview blocks in the authoritative public README assets (or exported README files); check mode reports drift without writing, and both languages link each cover to the same canonical work detail
     - Pages receives the public site token and account/site IDs through repository variables and the read-only Analytics credential through an Actions secret; manual publication and a daily statistics refresh rebuild the selected public main with a visible version, without writing statistics back to the source repository
+    - explicit reuse-published reads the prior public snapshot before collection even on successful refresh; unreadable/invalid prior snapshots fail the job before deployment rather than discarding cumulative history. The same Pages metrics.json is the durable public aggregate snapshot, with no visitor identifiers or additional service
     forbidden:
     - runtime management API keys, arbitrary tracking-script URLs, local preview collection or exporting Gallery local provenance
     - recording unknown metrics as zero or claiming collection enabled without a configured site token
@@ -6639,6 +6780,10 @@ script_contracts:
     - python3 .scripts/test_ingest_user_assertions.py
   meeting_identity_confirmation:
     preconditions:
+    - shared 确认输入支持逐人原话摘录、显式 confirmed/tentative 和明确全局 nickname；摘录逐字属于完整原话，tentative 不生成确定人物角色边或全局别名，原称呼和待确认状态保留
+    - 同一共享用户事实档案的多份确认由调用方按 prepare→复核→apply 顺序推进；旧包仅在原档案前缀和所有目标页不变时显式刷新追加快照并保留历史，否则拒绝；不自动放宽并发保护
+    - 人物 Wiki 仅保存该人物的局部断言和精确来源，完整多人用户原话在同一确认的 Raw 事实中保留一次；流程完成不等于 tentative 身份已确认
+    - 姓名替换草稿保留已有姓名确认段及其历史原话，新增限定另段记录；不以当前身份重写历史确认或其引用
     - shared 确定性编排；用户原话与显式 mention/label/canonical 由宿主提供，不猜身份、不调用模型、不回落 API
     - 仅处理公共域已完成且有 MEETING_IR 的会议；prepare 只生成完整暂存草稿和 agent-task-v1，宿主复核 Wiki 后 apply
     - 原始输入及机械产物绑定哈希；确认事实锚点含会议事务身份，原文写法逐字绑定，人物页显式对应确认姓名
@@ -6657,6 +6802,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_user_assertions:
     preconditions:
+    - 显式 refresh_archive_snapshot 仅刷新未提交事务的追加型 Raw 快照；旧前缀字节、pending 与所有目标 Wiki 哈希必须保持，事实 ID 不得已归档；记录原快照历史，旧包缺前缀长度或已有回执时拒绝
     - 输入为 inbox/facts-pending.md 或统一姓名纠错入口生成的 temp/meeting-repair/<bundle>/facts-pending.md；每条事实有稳定 fact ID、日期、陈述与目标 Wiki 页面，暂存不是最终事实源
     - 写入 Raw 或建立图副本前复用 ingest_check 的纯 frontmatter 校验；缺字段、非法枚举和日期在昂贵工作前拒绝
     - 用户申明为增量来源；只新增本批关系，保留目标页的既有语义边，不以本批提案清空重建全页关系
@@ -6700,6 +6846,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   graph_ingest:
     preconditions:
+    - shared people 的显式 nickname 经 graph_lib 层1别名提取进入原受管 writer；仅供明确全局别名，不从姓名确认正文推断，speech resolver 排除一词多人的歧义 alias
     - shared Agent/API 语义解析可恢复缺失的概念说明分区，仅限显式三元组区的完整三列前缀加连续双字段说明后缀；说明名称须逐字且唯一覆盖前文论文概念谓词已声明的全部概念，描述须有句内标点且超过合法谓词长度。额外概念、占位值、残缺或交错关系、多竖线及已有概念说明标题均不猜测；恢复只调整内存分区，原文不改，semantic_slot_diagnostics 记录规则和原行号，原校验/IR/提交继续执行
     - shared 实时摄入不因端点名称长度、标点或“基于/表示”等触发词产生 descriptive_phrase 警告或猜测 proposition；命题由明确关系角色及同批该角色的端点声明确定，审计与 writer 同步传播。保留原文字、证据、别名、引用残片/重复/歧义检查；不要求全文逐句结构化，不新增模型调用。旧形态启发式仅服务历史指标兼容，不作为实时验收依据
     - shared writer 在同批关系中统一保留由命题角色确定的端点类型；同一命题再作为关联端点时不得降为 keyword 或进入 concept_map，关系输入顺序不改变其完整 title 与 proposition 身份
@@ -7004,7 +7151,7 @@ script_contracts:
     - 所有来源清理延后到 validate_completion 通过且 completed 状态持久化之后；清理失败保留 cleanup_pending 并可通过 completed resume 只重试清理，不重写 Wiki/图或重复收尾
     - preprocess 允许返回 prepared 的 agent-task-v1；恢复后回到 preprocess 校验源绑定 OCR，再进入 write_wiki，不能把等待图片转写误判为 failed
     - 初次生成不计为 recovery；wiki_revision、semantic_revision、deterministic_repair 与 subagent 分别消费 RecoveryPolicy 预算
-    - LLM infrastructure/output_transport 恢复只由 llm_structured client 处理；pipeline 收到失败结果后不得原样再次调用 provider step
+    - 同一次调用中的 LLM infrastructure/output_transport 恢复只由 llm_structured client 处理；pipeline 收到失败立即返回。领域入口可按显式 resume 契约和原剩余预算恢复，不能自动再次调用 provider step
     - validator、commit 前复验、resume 复验、graph 写后校验和 LINT 是独立正确性闸门，不计入 recovery budget
     - commit/resume 复验必须允许领域 spec 接收同轮非阻断 warning 并持久化质量状态，不得只判断阻断项后丢弃 warning
     - API spec 可选 repair_wiki hook 复用原 wiki_revision 预算；repaired 后原 validator 复验并保留 slots，failed 或复验失败交接，not_applicable 才沿用原重写；Agent 不调用 hook
@@ -7012,12 +7159,13 @@ script_contracts:
     - spec.unified_semantic_worker=true 时，除已验证的仅引用局部补丁外，Wiki 或 semantic 硬错误必须清空同轮成对产物并回到同一 write_wiki provider，重新通过两套 validator；其他 pipeline 不改变既有恢复点
     - spec 声明 post_commit_projection 时，必须在 validate_graph 通过后、finalize_tail 和 completed 之前执行；失败转 failed 并保存 resume_from=post_commit_projection，恢复时不重放 finalize/update_graph
     - graph 写入失败且领域 spec 不提供落位回滚时，必须保存 resume_from=graph_ready；修复外部依赖后从同一事务重试 graph，不重放 Raw/Wiki finalize
+    - graph 写后校验失败且无落位回滚/clean重建时保存 resume_from=validate_graph；修复后只复验，不重放已成功的图提交
     writes:
     - 事务状态、staged artifact 与既有 finalize/graph/post-commit projection 提交边界；不直接估算 API 调用数
     forbidden:
     - 用 wiki_retry+slots_retry 或单个 max_retries 控制不同失败类别
     - 把非阻断 warning 计入 deterministic repair，或用清空 content/error 绕过已耗尽预算
-    - 因 API transport failure 在 pipeline 或 DSH 层重跑整个 write step
+    - 因 API transport failure 在同次 pipeline 或 DSH 调用中自动重跑整个 write step，或显式恢复时清零历史预算
     - 在已声明的 post_commit_projection 失败或尚未执行时进入 completed 或提前清理恢复所需的暂存产物
     verify:
     - python3 .scripts/test_ingest_pipeline.py
@@ -7054,6 +7202,7 @@ script_contracts:
     - python3 .scripts/test_prompt_audit.py
   inbox_state:
     preconditions:
+    - failed→write_wiki 登记为合法恢复边，供会议入口在未提交网络故障与剩余预算检查后显式恢复；必须经真实 save/load 验证，不以 pending transition 或内存测试代替持久化契约
     - output_payload permits trusted adapters to explicitly override or suppress default state/runtime refs; transactions stored outside inbox-state expose their actual plan artifact and executable resume command instead of fabricated state paths
     - status 必须属于已登记摄入状态；每次持久化的前向推进与 failed/agent_required 等非线性恢复都必须命中声明式转换图，pending transition 只记录原因且不能自行授权跳级
     - completed/duplicate_found 自动生成 verification-receipt-v1，绑定稳定事务字段、转换轨迹、validator 回执哈希与已声明最终产物哈希；只读复验对缺失或变化 fail closed
@@ -7078,6 +7227,8 @@ script_contracts:
     - python3 dsh/test_dsh_ingest_tools.py
   llm_structured:
     preconditions:
+    - API call_json/call_text measure each actual request's latency_sec with a monotonic performance counter, including success, validation failure, infrastructure failure and the one-time HTTP429 alternate. Return/history/canonical events share that duration; calendar timestamps and log-day partitioning retain their date semantics. Payloads, timeout/recovery policy and missing usage are unchanged; historical durations are not rewritten or inferred
+    - 可选LLM_429_FALLBACK_FROM_MODEL/LLM_429_FALLBACK_MODEL精确模型对仅在真实HTTPError.code=429后触发一次同endpoint/key替代请求，保留原payload除model外全部字段。API call_json/call_text均支持，allow_rate_limit_fallback可独立关闭，未配置时行为不变；此用户显式启用的一次恢复优先于原模型重试，独立于allow_profile_fallback的普通profile链。替代请求失败立即结束且不追加重试/profile，新调用仍从原模型开始；Agent不进入该路径。事件与history记录实际模型、http_status及切换目标，共用call_id，全部请求和未知usage均保留
     - API普通JSON传输仅在finish_reason=stop时显式开启trailing_line_comments恢复；标准解析须只报Extra data且已完整解析object/array，余部仅JSON空白与//行注释，注释不得含对象/数组括号或非法控制字符。保留原JSON值与响应，仍经原schema和后续工具/来源校验，local_json_recovery记录类型，不新增模型调用；完整性未知、截断、普通正文、第二个值、附加字段、内部/块注释及混合修补均不接受。decode_json_response默认关闭该恢复，shared parse_json和原生tool arguments保持原边界
     - JSON解码先按标准解析；仅标准解析报Invalid control character且裸控制字符限LF/CR/TAB时，兼容解码保留字符串字符值，再经原schema。其余控制字符、错误转义和截断不补造；local_json_recovery记录本地恢复，不计额外模型尝试，canonical事件仍不存正文
     - 标准JSON仅报Extra data且已完整解析一个顶层object/array时，若余部仅为与顶层类型相同的多余闭合符及JSON空白，可按redundant_top_level_closer本地恢复；保持全部键值，仍经原schema。异类闭合符、多对象、额外字段/文字、内部语法错误与截断均不修补，也不组合其他容错猜测结构
@@ -7091,7 +7242,7 @@ script_contracts:
     - call_text 传 messages 时必须原样使用完整会话历史；受限重试只追加一条纠错 user 消息，不得退回 system+prompt 单轮请求
     - 摄入调用必须把 transaction_id 写入 ExecutionEvent；每次真实 HTTP 请求立即写一条 llm_api_call，并以 call_id 关联同一逻辑调用的恢复尝试
     - messages 模式的 input hash/length 覆盖完整序列化会话而非标签 prompt；事件只存 hash+length，不保存正文
-    - client 只消费 infrastructure 与 output_transport 预算；每类独立耗尽，配置/权限错误不重试
+    - client通常只消费infrastructure与output_transport预算，每类独立耗尽，配置/权限错误不重试；显式配置的HTTP429模型切换另有每逻辑调用一次的rate_limit_fallback计数，不重置原预算
     - ingest_proposition 仅作兼容 operation 保留 call_json Schema + fast 档；默认论文 3.6c 不再调用
     - ingest_bibliographic_review 使用 call_json Schema + fast 档，仅做候选裁决与版本含义识别；不得绕过调用方的候选边界
     - ingest_paper_workspace 使用 call_text + standard 档，一次传输 evidence-bound bibliography、Wiki 与 semantic slots；沿用 INGEST_GENERATION specialist profile，调用方仍须分别解析和校验三段产物
@@ -7100,7 +7251,7 @@ script_contracts:
     - ingest_wiki_repair 优先完整 WIKI_RECOVERY_* 专用配置；未配置时沿用原 INGEST_GENERATION/primary，调用方关闭隐式模型回退；不增加wiki_revision预算
     - ingest_content_repair 为 API 论文/普通文档已有 Wiki 或语义内容修订，使用 standard 档及 SEMANTIC_RECOVERY→INGEST_GENERATION→primary 配置选择；须已有修订计数和实际校验错误，retries=0 且 allow_profile_fallback=false，不增加阶段预算或启用全量复核，Agent 不进入该操作
     - 论文和文档 Wiki 修复 adapter 写回前核对调用期间来源 SHA-256 与 Wiki 内容未变；专用路由即使模型名与 primary 相同也尊重完整独立配置
-    - ingest_semantic_recovery 使用 standard 档和可选 SEMANTIC_RECOVERY_* specialist profile；三项配置不完整时沿用主模型；完整专用配置调用失败后不隐式退回主模型。call_json 的 allow_profile_fallback=false 限定本次只用首个已解析 profile，其他调用方保持原行为
+    - ingest_semantic_recovery 使用standard档和可选SEMANTIC_RECOVERY_* specialist profile；三项配置不完整时沿用主模型；完整专用配置失败后不隐式退回主模型。allow_profile_fallback=false关闭普通profile链；用户另行显式配置的429模型对由allow_rate_limit_fallback独立控制，要求固定单模型的调用方同时关闭二者
     - 空输出且 finish_reason=length 时下一尝试必须切到已配置的 fast/low effort 并扩大输出预算；不得以省略字段冒充禁用默认思考
     - call_json 非空输出在 finish_reason=length 且 JSON 解析失败时，仅在同 profile 尚有 output_transport 重试额度内将下一次输出上限倍增至既有 65536 封顶（已高于封顶的调用方额度不降低），保持推理档位；不增加尝试次数、不修补半截 JSON、不因普通格式错误或 schema 失败扩容，初始额度与 call_text 行为保持
     - chat endpoint 由 LLM_API_BASE 与 LLM_API_PATH（默认 /v1/chat/completions）规范化拼接；兼容服务可显式覆盖 path
@@ -7158,6 +7309,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   meeting_compiler_repair:
     preconditions:
+    - shared 针对 validator 指出的无支持缩写提供有界原文逐字出现的 evidence_id 候选；只作补读导航，不自动绑定、扩写或证明人物/关系支持；API记录修复与Agent任务共享，诊断不复制原文
     - shared 复用 parser、IR/术语、原文替换与学生目录校验，汇总可解析当前协议中的独立错误；不宣称覆盖正文语义
     - shared 记录补丁绑定完整旧输出与逐条原记录 hash，只能覆盖请求列出的全部记录；最多16条，删除须带理由且由程序逐条 allow_remove 授权，仅可选 relations 和已有学生目录中无目标的 person_updates 投影可删除；目录缺失/不合法、身份缺失或 key/人物页/姓名任一匹配已有学生时不准删除投影，核心 typed 记录只能替换；未点名内容保持，合并后重新执行全部原校验
     - api-only adapter 在既有修订预算中请求补丁；语法、旧协议、非局部问题保留完整协议恢复，Agent 只消费共享诊断且不调用 API
@@ -7339,12 +7491,15 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_meeting:
     preconditions:
+    - shared MEETING_DOMAINS 统一来源域、目录、Wiki 类型与默认状态；API prompt、Agent 模板、validator、索引和日志共同消费，未知域或事务路径跨域冲突在语义执行前拒绝
+    - API 会议运输失败在本次调用立即停止；后续显式 resume 仅对已记录的 network transient、未提交的编译失败，消费原 infrastructure 剩余预算恢复 write_wiki，保留失败尝试/内容修订预算；耗尽、认证及未知错误不重试，Agent 不隐式调用 API
     - API attempt state 留存有界解析诊断（种类、阶段、字段 issues 与语法坐标），不复制响应全文或原文附近片段；完整输出仍在权限受限的临时文件供 hash 绑定重试使用，完成后的清理沿用 cleanup_pending/cleanup_error
     - shared PREPROCESS 校验保留 bool 入口，详细 parser 返回失败的记录/字段 issues；Agent 和 API 获取相同原因，仅来源精确命中的无变化纠错不执行文本替换，不自动删除其他无效纠错或跳过后续校验
     - shared API prompt 与 Agent manifest 明确每条任务对应一位执行者及其姓名标签；共同执行逐人记录并保留动作和证据，名单、链接及已提取记录条数由同一 IR 派生，自由正文聚焦解释和条件
     - API prompt 与 Agent manifest 复用记录契约中的角色含义；未知责任人任务投影为责任人未明确，保留动作和证据，不生成虚构人物或责任边
     - shared completed 输出保留 canonical state 的 quality_status、当前告警与历史告警；统一 maintenance 发布从同一状态同步质量，不把缺失输出误报为零告警
     - inbox 会议纪要仅接受 .txt 与显式 subproject=academic|admin|business；去重后先生成 entity-candidates.json，不提前 apply 最终纠错
+    - shared Wiki/修复校验按目标域限定 academic=conference-summary、admin/business=meeting-summary；两种会议类型的本会议主体都经 Graph 归一为当前页，其他页面不放宽指代边界
     - 直接入口与统一 inbox 入口均先查询公共 Raw 指纹索引；只有二进制 SHA-256 精确命中可直接返回 duplicate_found，同日、同标题或既有 Raw/Wiki 目录不足以确认重复，不得丢弃不同字节的会议分段来源
     - Meeting Compiler 初次调用返回当前 PREPROCESS/WIKI/MEETING_IR 协议；MEETING_IR 的人物、议题、汇报、决策、待办、扩展关系与学生指导更新均引用程序分配的 Raw evidence_id，API 与 agent handoff/resume 共用同一协议
     - API Meeting Compiler 返回 rejected/协议解析错误时必须保存失败 trace，并在原事务生成 prompt/write_to 后进入 agent_required；不得新建事务或把错误归类为不可恢复 unknown_failure
@@ -7448,6 +7603,9 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   query_orchestrate:
     preconditions:
+    - API run-api accepts explicit citation-format refs (default locators). Reuse the read_ref action/input hash for a derived citation catalog from nonempty successful retained read_raw records intersected with exact read_sources; unread discovery, failed reads, KU/Wiki/calculation records and ambiguous hash collisions never issue citations. No new persistent catalog or IO is introduced. Prompts label only already retained Raw and guide selection of the actual returned range. On answer, known refs in explicit wikilinks and the citations list expand to original read locators, then pass the existing range check; inline explicit links also join citation checking. Unknown refs remain visible/unverified, prose/numbers/bare line ranges are not repaired, and a resolution receipt is kept in final_result. JSON/native share this opt-in adapter, legacy locators remain accepted, no model round/retry/read is added, and Agent/shared tools and default prompts/old saved results remain unchanged. This certifies address mapping only, not semantic support or factual correctness
+    - Successful API calculate results retain an optional planning_reason excerpt from the executed step's string reason (outer whitespace stripped, at most 512 characters, explicit truncation flag); missing/blank/non-string reasons add no metadata or rejection. This unverified model intent is saved in retained results and available through read-only inspect, but ordinary/native/answer-only prompts do not inject it. Hidden metadata adds no tool-token charge for new calculations; historical saved budgets remain unchanged. It never alters arithmetic text, certifies applicability, grants citations, executes an answer's attached plan, or adds a model round. Failed/denied and non-calculation actions do not acquire this field; old sessions remain unchanged and no reasons are reconstructed from history. Shared calculators and Agent execution ownership are unchanged
+    - API drafted search strategies require nonempty slots/search_order/stop_conditions; descriptive clues may be absent or an empty list but must be a list when supplied. No clues are inferred or synthesized. Before an initially empty session's first executed plan, invalid strategies remain blocked across decision rounds and the first valid strategy is recorded; existing sessions with historical steps are not retroactively required to supply a strategy. Tool types, stage/scope guards, budgets, citations and Agent control are unchanged; strategy metadata never certifies semantic quality
     - source_outline is shared structural discovery exposed through the existing API stage and typed tool contracts, not a retained read or citation; the model may locate a known source's headings/captions then read Raw under unchanged budgets. Agent and DSH/CLI use the same deterministic action, without automatic model calls or compulsory outline steps
     - run-api response-format native is opt-in and API-only; one native query_plan function carries short discover/read decisions while ordinary content is the Markdown answer. Explicit wikilinks alone supply citations through the existing read whitelist; plain text is not reinterpreted as tool instructions, and malformed/multiple/unknown calls, empty content and length-truncated output fail through the existing bounded adapter
     - native and default json formats share query tools, evidence retention, stage guards, model/read budgets and persisted final returns; the adapter adds no prepare-answer model round or automatic protocol fallback. Provider function calling does not certify strict server-side schema conformance or scientific quality
@@ -7461,10 +7619,10 @@ script_contracts:
     - API-only navigation display removes JSON formatting whitespace from valid successful candidate payloads without dropping fields or merging candidates; order, excerpts, limits, versions, retrieval signals and read actions remain complete. Concrete reads/calculations, errors and unsupported shapes remain verbatim; shared outputs/session schemas/budgets do not change, and display is not evidence or semantic certification
     - normal and answer-only guidance distinguishes read Raw statements from KU interpretation, navigation and current derivations; it preserves source qualifiers without new semantic validators, output fields or model calls
     - API discovery guidance groups slots by source and explains actual Source/admin/domain coverage; one initial route per source precedes gap-driven supplements, independent sources remain batchable and candidate evidence previews allow direct guarded Raw reads without automatic evidence promotion. Guidance never infers storage domain from topic or removes tools and fallbacks
-    - failed model responses, invalid parsed decisions and empty answers terminate as model_error with actual round and backend status; they never imply sufficient evidence, execute a failed plan or add adapter retries, and prior reads remain in the saved session
+    - failed model responses, invalid parsed decisions and empty answers terminate as model_error with actual round and backend status; model_diagnostics projects only reported model, finish_reason, max_tokens, reasoning_tokens, http_status, recovery_class, local_json_recovery and prompt/completion/total usage so truncation is not hidden by the first parse error. Missing diagnostics remain absent, response text/history are not copied, and saved final_result/inspect preserve the projection. Failures never imply sufficient evidence, execute a failed plan or add adapter retries, and prior reads remain in the saved session
     - artifact use roles are derived from successful executed actions, never source assertions; navigation and KU do not become Raw evidence, and arithmetic does not verify scientific applicability
     - API validates declared input types/enums and reports tool errors/denials; session-local read_ref resolves only issued read actions through existing stage, deduplication and public Raw boundaries
-    - calculate preserves existing scalar/vector arithmetic and adds an explicit expression mode for complete finite scalar formulas with named numeric variables, + - * / **, sqrt/min/max only. It interprets a bounded arithmetic AST without eval, code execution or IO; input shape, syntax, nodes/depth, exponent and intermediate magnitude limits fail explicitly. Formula and inputs remain in the retained result, never Raw evidence or semantic validation; API-only planning keeps existing rounds and no extra preparatory call.
+    - calculate preserves existing scalar/vector arithmetic and uses explicit expression mode for complete finite scalar formulas with named numeric variables, + - * / **, sqrt/min/max, natural log and exp only. Unary log requires a positive argument; exp rejects certainly out-of-range arguments before evaluation and preserves the existing 1e-100..1e100 nonzero intermediate/result bounds. Previously legal variables named log or exp remain valid as bare names, independently of call syntax. It interprets a bounded arithmetic AST without eval, code execution or IO; input shape, syntax, nodes/depth, exponent and intermediate magnitude limits fail explicitly. Formula and inputs remain in the retained result, never Raw evidence or semantic validation; API-only planning keeps existing rounds and no extra preparatory call.
     - API prompts consume bounded actual tool text including source_search locators and read_raw evidence; short log previews do not replace evidence
     - successful concrete reads and calculations persist in the API session and remain visible across later rounds, once per prompt with action-derived use roles; discovery candidates and failed actions are not retained as evidence
     - retained results reuse existing cumulative tool-read budgets and execution limits without new model calls or citation promotion; repeated prompt input costs must be measured separately from tool-read accounting
@@ -7499,6 +7657,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   frontier:
     preconditions:
+    - parse_record_text shares the existing safe YAML parser with file-based parse_record; it parses caller-supplied text with a diagnostic source label and performs no IO or provenance certification. knowledge_store supplies text from its single byte snapshot; the file entry retains its existing behavior
     - shared Markdown frontmatter 读取优先使用 PyYAML CSafeLoader，不可用时回退 SafeLoader；仅替换安全 YAML 解析实现，不缓存记录、不缩减扫描、不改变 schema、实时快照检查或索引重建
     - api-only capture-paper 对独立问题的模型回答最多三路并行；证据包与原回答快照在主线程准备，回答仍逐项经原 apply_answer 验证并串行写页/重建索引，全部完成后才返回；Agent 不启用并行模型工作
     - 学术问题、论文明确开放问题、研究思路或验证记录已进入 Frontier 触发范围

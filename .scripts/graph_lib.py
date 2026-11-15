@@ -1161,6 +1161,9 @@ def extract_aliases_from_md(page_path):
     fm = read_frontmatter(p)
     title = str(fm.get("title", ""))
     candidates = []
+    # This field is an explicit reusable identity declaration, not a prose guess.
+    if fm.get("type") == "people":
+        candidates.extend(parse_list_field(fm, "nickname"))
     # title 括注:抓 (中文/英文短词) 和 （中文）
     for m in re.finditer(r"[（(]([^（）()]{1,30})[)）]", title):
         cand = m.group(1).strip()

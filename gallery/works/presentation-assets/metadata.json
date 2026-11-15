@@ -1,0 +1,126 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "presentation-assets",
+  "title": "PPT 素材库 · 关系箭头与研究方向图标",
+  "kind": "presentation-assets",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-14",
+  "content_as_of": "2026-11-14",
+  "capabilities": [
+    "presentation-asset"
+  ],
+  "related_works": [],
+  "references": [],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "9fc2279a5c03c365b5ff011aef534e4909457ae754ae85029bf85acb9205fb34",
+    "circular-dual-arrow.png": "068c866a7f981aef9ddb7cfaaf732f65dda51c4a048e504d434ef63f7b4ea45d",
+    "circular-dual-arrow.pptx": "db9a19cf48af14b66bb3497df1eac43cff3ff6ce091a99eaf6315c45114e1f55",
+    "circular-dual-arrow.svg": "876ae0c7e54e40a0df21ac57dc9fcc724758ac2ded1add4f57515841ca1b6d07",
+    "colors.webp": "cfbd3f1a9b83121e691d8a547449ff76f345479f403af4ee4e5a99ceef423f09",
+    "cover.webp": "d4310c3324b8ab90657842f6999754a285bd92fc3b395b317ec432258d361cd7",
+    "presentation-assets.zip": "c58c861d0083966025967d2278a9e79235f910446049eb1054e377bfbf33d562",
+    "preview.webp": "f5becbfe3d19e19de3edd2454d382ab20e66240212d2101225ace582d5390e1e",
+    "quantum-inspired-computing.png": "c386fffa79d8e456e3e8f9a4ec1d2df29d461e434a69851e86aaae5070bf1f4f",
+    "quantum-inspired-computing.pptx": "ad8e5051b9e22b7364be77876bc9f73c4e9c09a756ee160eb7acacb2b8433314",
+    "quantum-inspired-computing.svg": "f8da0eaf7120831b33064b9d5ca83a50d3dcfa18b59cb3402d3e98d076af07a8",
+    "quantum-materials-devices.png": "7262708b8f9dd55f115bb409c1cb1fe2fadd787feed0740e4c0e8c765cc6b08a",
+    "quantum-materials-devices.pptx": "08064b1c7280be60411d5f0ee2603c3562e6c3799b7806047679a97a4ede5f60",
+    "quantum-materials-devices.svg": "a214ada8cc1f08abf63f48f3a7862e72bf7e9194e632ba4b399f892d97473be5",
+    "terahertz-optoelectronics.png": "58b1758fd6f4af86865245df1c20ae323306ee99491c3fed47765f7ceb517536",
+    "terahertz-optoelectronics.pptx": "7d165287189289466c76d51b899583d304c9a1ae2fb2b54020abd148d5e82fd4",
+    "terahertz-optoelectronics.svg": "f93ecdedcde9bbfea6133d1d4644721ce39854cd92f04ee4578385c24a74849e",
+    "usage.md": "1fecbbac6c0b8d950848194c2a540b20752566cbe2d415b81e5c89b8767c7306"
+  },
+  "presentation": {
+    "name": "PPT 素材库",
+    "summary": "环形双箭头与三枚研究方向图标：保留可编辑结构和语义配色参数，支持透明 PNG、矢量 SVG 与原生 PPTX；从预览选素材，按报告主题换颜色。",
+    "type_label": "PPT 素材库",
+    "format_label": "4 项素材 · PNG / SVG / PPTX / ZIP",
+    "audience": "制作学术报告、科研展示与教学演示的用户",
+    "cover": "cover.webp",
+    "preview": "preview.webp",
+    "previews": [
+      {
+        "file": "preview.webp",
+        "label": "四项素材 · 默认外观与表达主题",
+        "document": "presentation-assets.zip"
+      },
+      {
+        "file": "colors.webp",
+        "label": "三枚图标 · 四种预设与自定义紫色示例",
+        "document": "presentation-assets.zip"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "presentation-assets.zip",
+        "label": "完整素材包 · 四项素材与配色参数"
+      },
+      {
+        "file": "usage.md",
+        "label": "Agent 调用与自由配色指南"
+      },
+      {
+        "file": "circular-dual-arrow.pptx",
+        "label": "环形双箭头 · PPTX"
+      },
+      {
+        "file": "circular-dual-arrow.svg",
+        "label": "环形双箭头 · SVG"
+      },
+      {
+        "file": "circular-dual-arrow.png",
+        "label": "环形双箭头 · PNG"
+      },
+      {
+        "file": "quantum-inspired-computing.pptx",
+        "label": "量子启发智能计算 · PPTX"
+      },
+      {
+        "file": "quantum-inspired-computing.svg",
+        "label": "量子启发智能计算 · SVG"
+      },
+      {
+        "file": "quantum-inspired-computing.png",
+        "label": "量子启发智能计算 · PNG"
+      },
+      {
+        "file": "quantum-materials-devices.pptx",
+        "label": "量子材料与器件 · PPTX"
+      },
+      {
+        "file": "quantum-materials-devices.svg",
+        "label": "量子材料与器件 · SVG"
+      },
+      {
+        "file": "quantum-materials-devices.png",
+        "label": "量子材料与器件 · PNG"
+      },
+      {
+        "file": "terahertz-optoelectronics.pptx",
+        "label": "太赫兹光电技术 · PPTX"
+      },
+      {
+        "file": "terahertz-optoelectronics.svg",
+        "label": "太赫兹光电技术 · SVG"
+      },
+      {
+        "file": "terahertz-optoelectronics.png",
+        "label": "太赫兹光电技术 · PNG"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "presentation-asset",
+        "text": "将图形结构、表达用途与配色参数一起收藏；通过通用入口确定性导出原生 PPTX、SVG 与透明 PNG。背景、主线、强调元素可以独立换色，环形双箭头还支持环宽、间隙与箭头角度调整。"
+      }
+    ],
+    "prompt": "请使用 Gallery 的 PPT 素材库，为我的报告选择合适的研究方向图标或关系箭头，按页面主题调整配色和尺寸，保留原生可编辑对象。需要时读取素材包中的 asset.json，经 presentation-asset 通用入口生成；用上下文标签说明箭头两种关系。",
+    "source_note": "冉仕举与 ASKS 协作创作并筛选的四项参数化图形。2026 年 11 月 14 日收入 Gallery；包内附公开参数描述及使用指南，制作期来源记录与风格参考图留在本地。",
+    "credit": "冉仕举 × ASKS",
+    "boundary": "图形为概念标识，不指认真实材料晶格、实验谱线或具体器件。PPTX 保留原生分组，圆盘外部透明；当前自由配色支持实色。素材包含参数描述、四项成品和使用说明；下载不自动授予转载、改编或商业许可。",
+    "name_en": "PPT Asset Library"
+  }
+}

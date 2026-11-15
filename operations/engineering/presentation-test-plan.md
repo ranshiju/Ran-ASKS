@@ -213,3 +213,15 @@ python3 .scripts/engineering_graph.py validate
 各阶段运行责任组件的针对性回归，代码改动完成后统一 validate 工程图。B/D 重点为 test_pptx_document.py、test_ingest_document.py、test_inbox_finalize.py；C 为 test_visual_qa.py 和新增 adapter 测试；E 为新增模板事务测试；F 为 test_presentation_state.py、test_presentation_delivery.py、相关 route 测试。shared 测试不发真实网络请求；live API 与真实应用验收另报状态。测试名称/新增命令以实现时登记为准。
 
 首个交付点为 D：原件＋可信伴生 MD＋可检索报告卡。第二个交付点为 E：用户选定页面＋设计参数＋模板检索。第三个交付点为 F：模板辅助制作和 API 视觉闭环；不以此宣称任意模板自动套用、整个制作阶段或人类验收已经完成。
+
+## 局部素材制作与复用（2026-11-13）
+
+可执行：`python3 .scripts/test_presentation_asset.py`。全部用合成图形与隔离目录，零模型/网络调用。
+
+覆盖三配色、两尺寸及旋转、原生 custGeom 分组、透明预览、文本参数转义、参数/路径拒绝、来源变更、版本幂等与冲突、哈希完整性、私密隔离、符号链接、失败回滚、Agent 任务接续及简报绑定、有界提取、指定对象替换、插入其他部件字节保持、注册及 PPT/write 按需路由。配套运行 artwork、注册、路由审计与工程图回归。
+
+真实项目复用、独立公开交付树运行及 PowerPoint GUI 编辑验收分开记录，不能把合成 XML 通过等同于全部 GUI 验收。公开样例不含项目文件引用；用户素材库只生成空目录。
+
+### 颜色角色与自由配色（2026-11-14）
+
+`test_presentation_asset.py` 增加真实CLI解析和show发现、preset/values/color覆盖顺序、SVG/nativePPTX/PNG像素同步、几何及原素材不变、非法/未知/非颜色/重复角色拒绝及失败无输出验证。既有插入用例同时检查颜色传播与非目标包部件保持。实际收藏图标以用户已认可版本的解析图元逐项相同为默认配色验收，用户素材仍不公开。

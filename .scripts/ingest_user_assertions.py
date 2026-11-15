@@ -127,6 +127,7 @@ def prepare_transaction(path: Path | None = None, repo: Path | None = None) -> d
         "pending_sha256": _sha256(pending_bytes),
         "raw_path": "cross-domain/raw/facts/user-assertions.md",
         "raw_sha256": _file_sha256(raw_path),
+        "raw_prefix_bytes": raw_path.stat().st_size if raw_path.exists() else 0,
         "facts": facts,
         "wiki_contract": {
             "required_frontmatter": ingest_check.REQUIRED,
@@ -307,6 +308,39 @@ def _restore(path: Path, existed: bool, data: bytes) -> None:
         _atomic_write(path, data)
     elif path.exists():
         os.remove(path)
+
+
+def refresh_archive_snapshot(transaction_id: str, repo: Path | None = None) -> dict:
+    """Explicitly rebase only append-only archive growth; target pages stay frozen."""
+    repo = (repo or REPO).resolve()
+    workspace, manifest, proposal = _load_apply_inputs(repo, transaction_id)
+    if (workspace / "receipt.json").exists():
+        raise ValueError("archived transaction cannot refresh its snapshot")
+    pending = _pending_path(repo, repo / manifest["pending_path"])
+    if _file_sha256(pending) != manifest["pending_sha256"]:
+        raise ValueError("facts-pending.md changed after transaction preparation")
+    _validate_proposal(repo, manifest, proposal)
+    raw = repo / manifest["raw_path"]
+    current = raw.read_bytes() if raw.exists() else b""
+    size = manifest.get("raw_prefix_bytes")
+    if type(size) is not int or size < 0:
+        raise ValueError("legacy snapshot lacks archive prefix length; explicit new preparation required")
+    prefix_hash = _sha256(current[:size]) if manifest["raw_sha256"] else ""
+    if len(current) < size or prefix_hash != manifest["raw_sha256"]:
+        raise ValueError("archive changed within frozen prefix; refresh refused")
+    present = {item["fact_id"] for item in parse_fact_entries(current.decode("utf-8"))}
+    if present.intersection(item["fact_id"] for item in manifest["facts"]):
+        raise ValueError("pending assertion already exists in archive; refresh refused")
+    digest = _file_sha256(raw)
+    if digest != manifest["raw_sha256"]:
+        manifest.setdefault("archive_refresh_history", []).append({
+            "raw_sha256": manifest["raw_sha256"], "raw_prefix_bytes": size,
+            "refreshed_at": datetime.now().isoformat(timespec="seconds"),
+        })
+        manifest.update(raw_sha256=digest, raw_prefix_bytes=len(current))
+        _write_json(workspace / "manifest.json", manifest)
+    return {"status": "prepared", "transaction_id": transaction_id,
+            "archive_refresh_count": len(manifest.get("archive_refresh_history", []))}
 
 
 def apply_transaction(transaction_id: str, repo: Path | None = None) -> dict:

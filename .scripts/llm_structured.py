@@ -55,6 +55,8 @@ def _log_event(operation: str, result: dict, prompt: str, output_text: str = "",
             "provider_reasoning_effort": result.get("provider_reasoning_effort", ""),
             "attempt": result.get("attempt", 0),
             "status": result.get("status", ""),
+            "http_status": result.get("http_status"),
+            "rate_limit_fallback_model": result.get("rate_limit_fallback_model"),
             "latency_sec": result.get("latency_sec", 0),
             "finish_reason": result.get("finish_reason", ""),
             "usage": result.get("usage", {}),
@@ -213,7 +215,7 @@ def expand_env_references(values: dict[str, str]) -> dict[str, str]:
 def load_env() -> dict[str, str]:
     known = {
         "QUERY_BACKEND", "INGEST_BACKEND", "ORAL_EXAM_BACKEND", "LLM_API_BASE", "LLM_API_PATH",
-        "LLM_API_KEY", "LLM_MODEL",
+        "LLM_API_KEY", "LLM_MODEL", "LLM_429_FALLBACK_FROM_MODEL", "LLM_429_FALLBACK_MODEL",
         "INGEST_KEYWORD_API_BASE", "INGEST_KEYWORD_API_KEY", "INGEST_KEYWORD_MODEL",
         "INGEST_REPAIR_API_BASE", "INGEST_REPAIR_API_KEY", "INGEST_REPAIR_MODEL",
         "INGEST_GENERATION_API_BASE", "INGEST_GENERATION_API_KEY", "INGEST_GENERATION_MODEL",
@@ -430,7 +432,21 @@ def _retry_available(category: str, used: dict[str, int], limits: dict[str, int]
     return attempt < legacy_retries
 
 
-def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束的知识库组件，只输出要求的 JSON。", max_tokens: int = 800, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", timeout_sec: float = 90, allow_profile_fallback: bool = True, tools: list[dict] | None = None, response_decoder=None) -> dict:
+def _rate_limit_profile(config, profile, http_status, payload, audit_prompt,
+                        reasoning_options, *, allowed):
+    """Resolve an explicitly configured, one-request HTTP429 model substitution."""
+    source = config.get("LLM_429_FALLBACK_FROM_MODEL", "").strip()
+    target = config.get("LLM_429_FALLBACK_MODEL", "").strip()
+    if not allowed or http_status != 429 or not source or not target \
+            or profile["model"] != source or target == source:
+        return None
+    return {**profile, "name": "http429_fallback", "model": target,
+            "_request_payload": {**payload, "model": target},
+            "_request_audit_prompt": audit_prompt,
+            "_reasoning_options": dict(reasoning_options)}
+
+
+def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束的知识库组件，只输出要求的 JSON。", max_tokens: int = 800, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", timeout_sec: float = 90, allow_profile_fallback: bool = True, allow_rate_limit_fallback: bool = True, tools: list[dict] | None = None, response_decoder=None) -> dict:
     config = load_env()
     is_ingest = operation == "ingest" or operation.startswith("ingest_")
     if operation == "oral_exam":
@@ -466,8 +482,16 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
     history = []
     force_low_reasoning = False
     for profile_index, profile in enumerate(profiles):
+        if "_request_payload" in profile:
+            # The explicitly authorized alternate gets one request, no retry chain.
+            max_attempts = 1
+            effective_retries = 0
+            client_limits = {key: 0 for key in client_limits}
         attempt_max_tokens = effective_max_tokens
         attempt_reasoning = dict(recovery_reasoning_options if force_low_reasoning else reasoning_options)
+        if "_request_payload" in profile:
+            attempt_max_tokens = profile["_request_payload"]["max_tokens"]
+            attempt_reasoning = dict(profile["_reasoning_options"])
         reasoning_strikes = 0
         for attempt in range(max_attempts):
             used_max_tokens = attempt_max_tokens
@@ -494,10 +518,14 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
                 request_audit_prompt = json.dumps({"messages": conv, "tools": tools or []},
                                                  ensure_ascii=False, sort_keys=True)
             payload_data.update(attempt_reasoning)
+            if "_request_payload" in profile:
+                payload_data = profile["_request_payload"]
+                request_audit_prompt = profile["_request_audit_prompt"]
             payload = json.dumps(payload_data).encode()
             request = urllib.request.Request(_chat_endpoint(config, profile["base"]), data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
-            started = time.time()
+            started = time.perf_counter()
             fast_fail = False
+            http_status = None
             try:
                 with urllib.request.urlopen(request, timeout=timeout_sec) as response:
                     data = json.loads(response.read())
@@ -542,16 +570,22 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
                         attempt_max_tokens = max(
                             attempt_max_tokens, min(attempt_max_tokens * 2, 65536),
                         )
-                last = {"ok": error is None, "status": "ok" if error is None else "validation_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": used_max_tokens, "next_max_tokens": attempt_max_tokens if error and _retry_available("output_transport", recovery_used, client_limits, attempt, effective_retries, typed_recovery) else None, "attempt": attempt + 1, "text": text, "parsed": obj, "error": error, "latency_sec": round(time.time() - started, 2), "finish_reason": finish_reason, "usage": usage, "reasoning_tokens": reasoning_tokens, "reasoning_exhausted": reasoning_exhausted}
+                last = {"ok": error is None, "status": "ok" if error is None else "validation_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": used_max_tokens, "next_max_tokens": attempt_max_tokens if error and _retry_available("output_transport", recovery_used, client_limits, attempt, effective_retries, typed_recovery) else None, "attempt": attempt + 1, "text": text, "parsed": obj, "error": error, "latency_sec": round(time.perf_counter() - started, 2), "finish_reason": finish_reason, "usage": usage, "reasoning_tokens": reasoning_tokens, "reasoning_exhausted": reasoning_exhausted}
                 last["local_json_recovery"] = local_json_recovery
                 recovery_class = "output_transport" if error else ""
                 failure_retryable = bool(error)
             except Exception as exc:
+                http_status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
                 failure_retryable, err_label, recovery_class = _classify_api_exception(exc)
                 fast_fail = not failure_retryable
-                last = {"ok": False, "status": "api_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": attempt_max_tokens, "attempt": attempt + 1, "error": err_label, "latency_sec": round(time.time() - started, 2), "usage": {}}
+                last = {"ok": False, "status": "api_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": attempt_max_tokens, "attempt": attempt + 1, "error": err_label, "latency_sec": round(time.perf_counter() - started, 2), "usage": {}}
+            alternate = _rate_limit_profile(
+                config, profile, http_status, payload_data, request_audit_prompt,
+                attempt_reasoning, allowed=allow_rate_limit_fallback
+                and not recovery_used.get("rate_limit_fallback"),
+            )
             retry_same_profile = (
-                failure_retryable
+                alternate is None and failure_retryable
                 and not fast_fail
                 and reasoning_strikes < 2
                 and _retry_available(
@@ -564,16 +598,23 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
                 "call_id": call_id,
                 "recovery_policy_version": rp.POLICY_VERSION,
                 "recovery_class": recovery_class,
-                "recovery_scheduled": retry_same_profile,
+                "recovery_scheduled": retry_same_profile or alternate is not None,
                 "retryable": failure_retryable,
+                "http_status": http_status,
+                "rate_limit_fallback_model": alternate["model"] if alternate else None,
+                "rate_limit_fallback_used": bool(recovery_used.get("rate_limit_fallback")),
             })
-            history.append({key: last.get(key) for key in ("model", "profile", "reasoning_profile", "reasoning_reason", "reasoning_error_class", "provider_reasoning_effort", "max_tokens", "status", "attempt", "latency_sec", "usage", "recovery_class", "recovery_scheduled", "retryable", "local_json_recovery")})
+            history.append({key: last.get(key) for key in ("model", "profile", "reasoning_profile", "reasoning_reason", "reasoning_error_class", "provider_reasoning_effort", "max_tokens", "status", "attempt", "latency_sec", "usage", "recovery_class", "recovery_scheduled", "retryable", "http_status", "rate_limit_fallback_model", "local_json_recovery")})
             _log_event(operation, last, request_audit_prompt, last.get("text", ""), transaction_id)
             if last["ok"]:
                 last["history"] = history
                 last["fallback_used"] = profile_index > 0
                 last["recovery_attempts"] = dict(recovery_used)
                 return last
+            if alternate is not None:
+                recovery_used["rate_limit_fallback"] = 1
+                profiles[profile_index + 1:] = [alternate]
+                break
             if not retry_same_profile:
                 break
             if typed_recovery:
@@ -588,7 +629,7 @@ def call_json(prompt: str, schema_check, *, system: str = "你是受程序约束
     return _final
 
 
-def call_text(prompt: str, *, system: str = "你是受程序约束的知识库组件，只输出要求的文本。", max_tokens: int = 1600, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", allow_profile_fallback: bool = True) -> dict:
+def call_text(prompt: str, *, system: str = "你是受程序约束的知识库组件，只输出要求的文本。", max_tokens: int = 1600, retries: int = 1, recovery_limits: dict | None = None, operation: str = "query", reasoning: str | None = None, reasoning_context: dict | None = None, messages: list[dict] | None = None, transaction_id: str = "", allow_profile_fallback: bool = True, allow_rate_limit_fallback: bool = True) -> dict:
     """受限 LLM 文本调用：返回原始文本，不做 JSON 解析或 schema 校验。
 
     用于需要长文本输出的场景（如 wiki 页面撰写 + 语义槽），镜像 call_json 的 API 调用与重试逻辑，
@@ -629,8 +670,16 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
     history = []
     force_low_reasoning = False
     for profile_index, profile in enumerate(profiles):
+        if "_request_payload" in profile:
+            # The explicitly authorized alternate gets one request, no retry chain.
+            max_attempts = 1
+            effective_retries = 0
+            client_limits = {key: 0 for key in client_limits}
         attempt_max_tokens = effective_max_tokens
         attempt_reasoning = dict(recovery_reasoning_options if force_low_reasoning else reasoning_options)
+        if "_request_payload" in profile:
+            attempt_max_tokens = profile["_request_payload"]["max_tokens"]
+            attempt_reasoning = dict(profile["_reasoning_options"])
         reasoning_strikes = 0
         for attempt in range(max_attempts):
             used_max_tokens = attempt_max_tokens
@@ -652,10 +701,14 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
                 "max_tokens": attempt_max_tokens,
             }
             payload_data.update(attempt_reasoning)
+            if "_request_payload" in profile:
+                payload_data = profile["_request_payload"]
+                request_audit_prompt = profile["_request_audit_prompt"]
             payload = json.dumps(payload_data).encode()
             request = urllib.request.Request(_chat_endpoint(config, profile["base"]), data=payload, headers={"Authorization": "Bearer " + profile["key"], "Content-Type": "application/json"})
-            started = time.time()
+            started = time.perf_counter()
             fast_fail = False
+            http_status = None
             try:
                 with urllib.request.urlopen(request, timeout=180) as response:
                     data = json.loads(response.read())
@@ -686,15 +739,21 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
                         error = ("空输出(输出预算不足，下一尝试扩容)"
                                  if retry_same_profile or has_later_profile
                                  else "空输出(输出预算耗尽，已无后续尝试)")
-                last = {"ok": error is None, "status": "ok" if error is None else "validation_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": used_max_tokens, "next_max_tokens": attempt_max_tokens if error and _retry_available("output_transport", recovery_used, client_limits, attempt, effective_retries, typed_recovery) else None, "attempt": attempt + 1, "text": text, "error": error, "latency_sec": round(time.time() - started, 2), "finish_reason": finish_reason, "usage": usage, "reasoning_tokens": reasoning_tokens, "reasoning_exhausted": reasoning_exhausted}
+                last = {"ok": error is None, "status": "ok" if error is None else "validation_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": used_max_tokens, "next_max_tokens": attempt_max_tokens if error and _retry_available("output_transport", recovery_used, client_limits, attempt, effective_retries, typed_recovery) else None, "attempt": attempt + 1, "text": text, "error": error, "latency_sec": round(time.perf_counter() - started, 2), "finish_reason": finish_reason, "usage": usage, "reasoning_tokens": reasoning_tokens, "reasoning_exhausted": reasoning_exhausted}
                 recovery_class = "output_transport" if error else ""
                 failure_retryable = bool(error)
             except Exception as exc:
+                http_status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
                 failure_retryable, err_label, recovery_class = _classify_api_exception(exc)
                 fast_fail = not failure_retryable
-                last = {"ok": False, "status": "api_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": attempt_max_tokens, "attempt": attempt + 1, "error": err_label, "latency_sec": round(time.time() - started, 2), "usage": {}}
+                last = {"ok": False, "status": "api_error", "mode": "api", "model": profile["model"], "profile": profile["name"], "reasoning_profile": profile_name, "reasoning_reason": decision["reason"], "reasoning_error_class": decision["error_class"], "provider_reasoning_effort": _provider_reasoning_effort(config, attempt_reasoning), "max_tokens": attempt_max_tokens, "attempt": attempt + 1, "error": err_label, "latency_sec": round(time.perf_counter() - started, 2), "usage": {}}
+            alternate = _rate_limit_profile(
+                config, profile, http_status, payload_data, request_audit_prompt,
+                attempt_reasoning, allowed=allow_rate_limit_fallback
+                and not recovery_used.get("rate_limit_fallback"),
+            )
             retry_same_profile = (
-                failure_retryable
+                alternate is None and failure_retryable
                 and not fast_fail
                 and reasoning_strikes < 2
                 and _retry_available(
@@ -707,16 +766,23 @@ def call_text(prompt: str, *, system: str = "你是受程序约束的知识库�
                 "call_id": call_id,
                 "recovery_policy_version": rp.POLICY_VERSION,
                 "recovery_class": recovery_class,
-                "recovery_scheduled": retry_same_profile,
+                "recovery_scheduled": retry_same_profile or alternate is not None,
                 "retryable": failure_retryable,
+                "http_status": http_status,
+                "rate_limit_fallback_model": alternate["model"] if alternate else None,
+                "rate_limit_fallback_used": bool(recovery_used.get("rate_limit_fallback")),
             })
-            history.append({key: last.get(key) for key in ("model", "profile", "reasoning_profile", "reasoning_reason", "reasoning_error_class", "provider_reasoning_effort", "max_tokens", "status", "attempt", "latency_sec", "usage", "recovery_class", "recovery_scheduled", "retryable")})
+            history.append({key: last.get(key) for key in ("model", "profile", "reasoning_profile", "reasoning_reason", "reasoning_error_class", "provider_reasoning_effort", "max_tokens", "status", "attempt", "latency_sec", "usage", "recovery_class", "recovery_scheduled", "retryable", "http_status", "rate_limit_fallback_model")})
             _log_event(operation, last, request_audit_prompt, last.get("text", ""), transaction_id)
             if last["ok"]:
                 last["history"] = history
                 last["fallback_used"] = profile_index > 0
                 last["recovery_attempts"] = dict(recovery_used)
                 return last
+            if alternate is not None:
+                recovery_used["rate_limit_fallback"] = 1
+                profiles[profile_index + 1:] = [alternate]
+                break
             if not retry_same_profile:
                 break
             if typed_recovery:

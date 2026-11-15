@@ -513,6 +513,8 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                 if spec.get("retry_graph_with_clean"):
                     state["resume_from"] = "graph_ready"
                     state["reingest"] = True
+                else:
+                    state["resume_from"] = "validate_graph"
             _save(state)
             return state
         progress("PASS", flush=True)

@@ -976,12 +976,14 @@ def source_search(query: str, domain: str = "", topk: str = "5", source_id: str 
 
 
 @scoped_query
-def source_outline(source_id: str, query: str = "", start_line: str = "1", limit: str = "40") -> tuple[str, int]:
+def source_outline(source_id: str, query: str = "", start_line: str = "1", limit: str = "40",
+                   include_sections: bool = False) -> tuple[str, int]:
     """Locate explicit headings/captions within one known public source."""
     if scope_for() == "private":
         raise ValueError("Source-first outline is academic-only; private sources remain isolated")
     from source_ingest import outline
-    text = json.dumps(outline(source_id, repo=_REPO, query=query, start_line=int(start_line), limit=int(limit)), ensure_ascii=False)
+    text = json.dumps(outline(source_id, repo=_REPO, query=query, start_line=int(start_line), limit=int(limit),
+                             include_sections=include_sections), ensure_ascii=False)
     return text, _tok(text)
 
 
@@ -1009,7 +1011,7 @@ def knowledge_read(unit_id: str) -> tuple[str, int]:
 
 
 DISPATCH = {
-    "source_outline": lambda inp: source_outline(inp.get("source_id", ""), inp.get("query", ""), inp.get("start_line", "1"), inp.get("limit", "40")),
+    "source_outline": lambda inp: source_outline(inp.get("source_id", ""), inp.get("query", ""), inp.get("start_line", "1"), inp.get("limit", "40"), inp.get("include_sections", False)),
     "knowledge_search": lambda inp: knowledge_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5"), inp.get("retrieval", "lexical")),
     "knowledge_read": lambda inp: knowledge_read(inp.get("unit_id", "")),
     "source_search": lambda inp: source_search(inp.get("query", ""), inp.get("domain", ""), inp.get("topk", "5"), inp.get("source_id", ""), inp.get("retrieval", "lexical")),

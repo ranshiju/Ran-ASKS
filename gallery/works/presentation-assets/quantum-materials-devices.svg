@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512.0" height="512.0" viewBox="0 0 512.0 512.0">
+<g transform="translate(256.0 256.0) rotate(0) translate(-256.0 -256.0)"><rect width="512" height="512" fill="none" />
+<ellipse cx="256.0" cy="256.0" rx="232.0" ry="232.0" fill="#C60000" stroke="none" stroke-width="0" />
+<line x1="256.0" y1="256.0" x2="112.0" y2="205.6" stroke="#DABB79" stroke-width="5.4" />
+<line x1="256.0" y1="256.0" x2="306.4" y2="205.6" stroke="#DABB79" stroke-width="5.4" />
+<line x1="256.0" y1="256.0" x2="306.4" y2="400.0" stroke="#DABB79" stroke-width="5.4" />
+<line x1="256.0" y1="256.0" x2="112.0" y2="400.0" stroke="#DABB79" stroke-width="5.4" />
+<line x1="256.0" y1="256.0" x2="205.6" y2="112.0" stroke="#DABB79" stroke-width="5.4" />
+<line x1="256.0" y1="256.0" x2="400.0" y2="112.0" stroke="#DABB79" stroke-width="5.4" />
+<line x1="256.0" y1="256.0" x2="400.0" y2="306.4" stroke="#DABB79" stroke-width="5.4" />
+<line x1="256.0" y1="256.0" x2="205.6" y2="306.4" stroke="#DABB79" stroke-width="5.4" />
+<line x1="205.6" y1="112.0" x2="400.0" y2="112.0" stroke="#DABB79" stroke-width="9.9" />
+<line x1="400.0" y1="112.0" x2="400.0" y2="306.4" stroke="#DABB79" stroke-width="9.9" />
+<line x1="400.0" y1="306.4" x2="205.6" y2="306.4" stroke="#DABB79" stroke-width="9.9" />
+<line x1="205.6" y1="306.4" x2="205.6" y2="112.0" stroke="#DABB79" stroke-width="9.9" />
+<line x1="112.0" y1="205.6" x2="306.4" y2="205.6" stroke="#DABB79" stroke-width="9.9" />
+<line x1="306.4" y1="205.6" x2="306.4" y2="400.0" stroke="#DABB79" stroke-width="9.9" />
+<line x1="306.4" y1="400.0" x2="112.0" y2="400.0" stroke="#DABB79" stroke-width="9.9" />
+<line x1="112.0" y1="400.0" x2="112.0" y2="205.6" stroke="#DABB79" stroke-width="9.9" />
+<line x1="112.0" y1="205.6" x2="205.6" y2="112.0" stroke="#DABB79" stroke-width="9.9" />
+<line x1="306.4" y1="205.6" x2="400.0" y2="112.0" stroke="#DABB79" stroke-width="9.9" />
+<line x1="306.4" y1="400.0" x2="400.0" y2="306.4" stroke="#DABB79" stroke-width="9.9" />
+<line x1="112.0" y1="400.0" x2="205.6" y2="306.4" stroke="#DABB79" stroke-width="9.9" />
+<ellipse cx="112.0" cy="205.6" rx="18.0" ry="18.0" fill="#FFF9F1" stroke="#DABB79" stroke-width="8.1" />
+<ellipse cx="306.4" cy="205.6" rx="18.0" ry="18.0" fill="#FFF9F1" stroke="#DABB79" stroke-width="8.1" />
+<ellipse cx="306.4" cy="400.0" rx="18.0" ry="18.0" fill="#FFF9F1" stroke="#DABB79" stroke-width="8.1" />
+<ellipse cx="112.0" cy="400.0" rx="18.0" ry="18.0" fill="#FFF9F1" stroke="#DABB79" stroke-width="8.1" />
+<ellipse cx="205.6" cy="112.0" rx="18.0" ry="18.0" fill="#FFF9F1" stroke="#DABB79" stroke-width="8.1" />
+<ellipse cx="400.0" cy="112.0" rx="18.0" ry="18.0" fill="#FFF9F1" stroke="#DABB79" stroke-width="8.1" />
+<ellipse cx="400.0" cy="306.4" rx="18.0" ry="18.0" fill="#FFF9F1" stroke="#DABB79" stroke-width="8.1" />
+<ellipse cx="205.6" cy="306.4" rx="18.0" ry="18.0" fill="#FFF9F1" stroke="#DABB79" stroke-width="8.1" />
+<ellipse cx="256.0" cy="256.0" rx="23.400000000000002" ry="23.400000000000002" fill="#FFF9F1" stroke="#DABB79" stroke-width="9.0" />
+</g></svg>

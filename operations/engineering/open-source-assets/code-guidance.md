@@ -51,6 +51,7 @@
 - **写入**：否。
 - **作用**：按 task 输出本轮工作上下文所需规范，或按 capability 输出工作上下文内临时组合的能力规范，避免模型凭记忆操作。公共域摄入预热不读取或总结完整规范，而是从工程元图 `ingest.context_warmup` 机械选择 paper/meeting/document profile，应用已声明的 mode 覆盖，绑定本次参数并执行最终 JSON 字符预算；private 不进入该预热。paper update 的预热入口与完整卡均指向已有 Wiki 增量修订；整篇重编译另用 `re_ingest.py --raw`。
 - **运行时语义**：持续工作（工程语义：工作上下文；兼容 state 标识）表示围绕用户目标、跨多次功能执行和会话持续存在且可恢复的工作上下文；当前登记 `workspace`、`research`、`frontier`、`oral_exam`。function 表示有明确输入、目标、输出、副作用和完成条件的操作；一次执行可以跨多次底层调用并支持恢复，管线的执行状态不自动成为持续工作。定义、层次区分与现有清单见 `operations/engineering/adr/007-runtime-function-registry.md` 的“功能与持续工作的定义”及“当前功能与持续工作清单”。Route task、按需 capability、`wg.py`、DSH、CLI 与固定 pipeline 都是 function 的执行绑定，不再各自充当功能目录。`operations/config/function-registry.yaml` 是功能、持续工作类型、调用策略和绑定的管理真理源；工程元图只负责组件责任、影响与验证。覆盖检查通过 AST 静态读取 provider 的 `ToolDefinition.name`，不导入需要可选 PDF/视觉依赖的 provider；真实 API 工具加载仍动态导入并绑定完整策略元数据。
+- **本地扩展（shared/Agent）**：`wg.py extension list/show/run` 经 `.scripts/local_extension.py` 读取受信任安装清单并显式执行；空安装不依赖私人包，发现阶段不导入代码。专用注册、规范、模板、测试及工作实例留在 private，公共目录只登记通用 `system.local_extension`；详见 `operations/LOCAL_EXTENSIONS.md`。
 - **输出顺序**：使用任务仍按工程上下文 → 任务卡 → 执行纪律 → 定向规范输出，ingest 另有模板复用补充。`build` 单独走轻量入口：只把 `graph.yaml` 的 build capability guardrails 渲染为 WikiGraph 方法哲学与信息入口，不展开 required/forbidden 节点清单、经验段或 `shared-conventions.md`/code-guidance 正文。缺陷修复须在首次编辑前明确说明，并以复现、代码路径或反事实建立“症状 → 最早错误状态 → 产生机制 → 责任组件”因果链；默认修复责任组件并在该边界回归。局部特判或补偿仅用于明确的边界外根因、兼容性、迁移或历史数据修复，并须限定适用范围和退出条件。具体影响、契约、模型后端门、同步清单和工具细节由 Agent 在确认目标后通过 `engineering_graph.py impact <target> --verify` 推荐的 locator 按需读取；总提示词不承担工程手册功能。
 - **query 固定上下文去重**：query 的 `start` 卡承载工程上下文、执行纪律、任务边界与经验触发；`evidence`/`continue`/`answer` 仅派发当前阶段规范段，不重复注入这些固定上下文。
 - **private 主题派发**：`--query-topic auto|general|metaphysics` 与查询意图 profile 独立；auto 仅在 private 按显式命理词命中，宿主根据语境为短句追问选择 metaphysics，并跨阶段传递。命理指引只在 start/answer 加载，其他阶段保留主题标记；公共域拒绝显式 metaphysics。主题只选择提示，不替 Agent 推理或更改存储、后端和取证规则。
@@ -107,6 +108,7 @@
 
 ### 1.1c `.scripts/ingest_meeting.py`
 
+- **会议域贯通（shared）**：`MEETING_DOMAINS/meeting_domain` 统一生成、校验与收尾的类型、默认状态、目录和日志/索引。academic=`conferences / conference-summary / current`，admin=`meetings / meeting-summary / draft`，business=`conferences / meeting-summary / draft`；API prompt 与 Agent 模板共用配置，程序绑定新编译 type/status。validator 核对域与合法状态；未知域或 subproject 与旧路径冲突在模型前拒绝，旧学术事务无域信息时才默认 academic。Graph 主体归一识别两种会议类型，非会议页仍拒绝“本会议”。
 - **结构化任务条件（shared）**：decisions/tasks/person_updates 与正文采用同一讨论结束状态，逐项检查后续澄清、撤回、替代及适用条件；不只引用开头摘要，无法消解时明确待确认，较晚助手评论不自动优先于直接陈述。已有学生投影只接受目录 student_key；图人物存在不代表已建学生档案。议题关系需要直接支持两端联系的证据，共现或共享术语不足以认定。此指导进入 API 完整编译/记录修订与 Agent 的共享记录契约，不新增程序语义判真门。
 - **质量回执与术语来源**：completed 输出保留当前及历史质量告警；统一维护发布以 canonical state 同步质量，不将旧输出遗漏当作零告警。会议概念不为双语格式猜测英文全称，topics/reports/relations 的新增大写缩写须在各自引用的原文中出现；Agent/API 与受管会议修复共用校验，不增加模型调用。
 - **何时调用**：inbox 下的会议纪要 `.txt` 文件，代码驱动全流程摄入。支持 `--subproject academic|admin|business` 跨域存储（默认 academic）。
@@ -120,14 +122,18 @@ python3 .scripts/ingest_meeting.py --resume <txn-id> --verbose
 ```
 
 - **流程**：3.1 dedup → 3.2 准备人物/已有学生候选与 Raw 行级 evidence catalog → 3.3 一个 Meeting Compiler specialist 一次完成转写纠错决策/精简 Wiki/typed MEETING_IR 与 `person_updates` → 程序从同一 IR 将 `### 会议导航` 投影到 `## Content` 内，并生成学生指导证据块与 semantic slots → 校验、落位、统一 IR/建图/图校验 → 3.9 幂等投影学生记录与总览 → 3.10 finalize_tail+清理。这样默认 `read-section #content` 可直接返回会议事实及 Raw 引用。学生投影失败时整体不进入 completed，以同一 transaction ID 从 `post_commit_projection` 恢复，不重放知识库提交。
-- **驱动器**：10 步调度循环、状态机、修复循环、resume 安全网委托 `ingest_pipeline.py`（`run_pipeline(state, MEETING_SPEC, progress)`）；本脚本只声明 spec + provider step 函数。
+- **驱动器**：10 步调度循环、状态机、修复循环、resume 安全网委托 `ingest_pipeline.py`（`run_pipeline(state, MEETING_SPEC, progress)`）；本脚本声明 spec/provider step，并在新的显式调用中按下述边界恢复运输故障。
 - **后端模式**：两种后端共享 `meeting-compiler-v3` 的 parser/validator、证据目录、学生候选目录和 typed IR schema，不共享控制循环；v2 会议 IR 与 v1 slots parser 仅兼容在途产物。Agent 后端返回 `prepared + agent-task-v1`，当前宿主 Agent 完整读取 transcript/evidence/候选目录、写入 `agent-meeting-compiler.txt`，再执行 task 的 `resume` 命令；路径中不导入 DSH 或 `llm_structured`。API 后端才经 `run_api_meeting_compiler()` 进入 `dsh.meeting_compiler_agent` 和受控 provider transport/fallback。两端产物都不能直接写 Raw/Wiki/Graph/学生档案，所有落位与投影均由程序校验后执行。
 - **完整交接与未解析角色（shared）**：Agent task 直接携带 META、Wiki frontmatter、共享 `meeting_ir_record_contract()` 完整记录字段及可解析的 `protocol.template`；`meeting_ir.fields/template` 含固定 `protocol_version`，与 validator 共用 `MEETING_IR_RECORD_FIELDS`，META 模板明确为逐行 `key: value`，无需从源码或重试反推格式。骨架只服务语法，Wiki 与 IR 仍须据原文填充并通过原校验。v3 的参会、汇报、待办可用空 person/assignee 与原称呼保留事实；Wiki 标示身份待确认，semantic slots 不输出这些未解析角色。正文优先保留研究问题、关键观察与方法限制，不用来源告警替代研究背景。最终 Raw 目录确定后，除 YAML sources 外，也精确重绑定本事务原路径的正文行号脚注；其他来源与普通文本不替换。
 - **用户身份澄清（shared）**：原来 unresolved 的称呼先经 `ingest_user_assertions.py` 归档用户原话与受管人物页；完整投影修复可传 `--identity-corrections-file`，逐项提供 mention/canonical/label/source/quote。入口验证归档 `#fact-*` 原文、人物页来源、Wiki 引用与角色一致性，保留独立身份来源，不扩大语境别名、不改原始转写；计划与应用共享检查，提交后刷新原事务的内容快照与验证回执，失败回滚。
 - **统一姓名确认入口（shared）**：`repair_meeting_identity.py --prepare-confirmation` 接受用户原话与显式 mention/label/canonical，`meeting_identity_confirmation.py` 机械生成本次事实、人物页、IR、引用及 Wiki 草稿，返回宿主复核 Wiki 的 `agent-task-v1`。`--apply-confirmation` 按原事务归档、修复会议并对账原报告；准备输入绑定哈希，确认锚点按会议事务隔离，续跑复核已有内容回执，只补做未完成阶段。阶段失败保留已提交用户事实并明确返回归档/修复状态；不消费普通 inbox、不改原始转写，不新增模型调用。人物页身份仍需显式匹配；复杂跨条目合并沿用原投影入口。详见 INGEST.md「用户确认会议姓名」。
+- **确认依赖与身份限定（shared）**：确认行可附逐人 `statement`、`certainty=confirmed|tentative` 和显式 `nickname`。人物页只保存相关短断言，完整多人原话只归档一次；历史姓名确认段不参加当前姓名替换。tentative 保留原称呼/unresolved 及候选人物，不生成确定角色边；牵涉显式关系或该人物学生投影的降级要求专门修复。昵称只在明确 confirmed 时进入 people frontmatter，经 `graph_lib.extract_aliases_from_md` 与原 writer 进入图；speech resolver 排除多目标 alias，不从正文猜昵称。
+- **确认批次与刷新（shared）**：多份按 prepare→复核→apply 顺序推进。旧包仅共享 Raw 尾部追加时可 `--refresh-confirmation <bundle>`；`refresh_archive_snapshot` 要求原前缀、pending、所有目标 Wiki 和会议输入保持，ID 未归档且无回执，更新快照并保留历史，不重建宿主草稿。旧包缺前缀长度拒绝；归档成功后的失败沿原 apply 续跑。完成状态不认证 tentative 身份。
+- **原事务运输/校验恢复**：同次 API 失败立即停止；新的显式 resume 仅对未落位、无 graph_report/resume_from、compiler escalated 且分类为 api_network_transient 的会议恢复 write_wiki。API 消费原剩余 infrastructure 预算，经已登记的 failed→write_wiki 转换真实保存/重载，保留尝试和语义预算；认证/未知错误及预算耗尽停止。切 Agent 只返回任务。图写后校验失败且无回滚/clean分支时，shared pipeline 保存 validate_graph 恢复点，不重复提交 Raw/Graph。
 - **协议恢复**：Agent 输出缺 section 或校验失败时，原 `agent-task-v1` 带精确 issues 重新进入 `prepared`，继续同一事务与同一输出；API Worker 的 rejected/协议错误才消费有界模型修订，耗尽后保留兼容 `agent_required` handoff。任何恢复都不得新建第二条摄入链。API 初次 `ingest_meeting_compile` 走 INGEST_GENERATION；有同源前次产物和校验错误时，原第二次修订改用 `ingest_meeting_repair`，优先 SEMANTIC_RECOVERY，未配置时继承生成模型。修订调用 retries=0、allow_profile_fallback=false，只尝试选中 profile，不在失败后暗中退回主模型；原编译/修订预算不增加。call_text 的可选 profile fallback 开关默认 true，其他调用方保持原行为。
 - **修订上下文（API-only）**：`ingest_meeting` 将 compiler 的响应全文及结构化诊断按轮次保存在 `temp/inbox-extract/<txn>/compiler-attempt-N.json`（权限 0600）；state/trace 保留引用、校验 hash 及有界 `diagnostic_summary`。摘要仅含解析错误种类、阶段、分段、错误信息、字段 issues 和语法坐标；最多保留 12 条 issue、每条 300 字符，超限显式标记 truncated 并保留原 issue_count，不复制响应全文或附近原文片段。完成后临时目录清理沿用 cleanup_pending/cleanup_error，摘要随事务 state 留存，不把缺失临时文件误认作从未失败。下轮由代码读取最近一次同源、同候选上下文的完整私有产出；完整协议恢复时以 assistant 消息原样注入并附当前错误，记录补丁则只携带待修记录、完整带 evidence ID 的 Raw 与相关契约/学生目录。attempt 分开保留实际 response_text 和程序 assembled_output、repair_request；超时、传输失败、预算耗尽或非法补丁保留完整基线，续跑不把半份补丁当完整协议。来源变化不复用旧产出，已引用文件损坏/缺失则暂停。解析成功但 Wiki/MEETING_IR 或确定性投影校验失败也复用该轮完整产出，不退回更早失败版本。
 - **诊断与修复边界（shared/API）**：shared `parse_proposal_detailed` 提供错误阶段、种类及 JSONDecodeError 的行列/字符位置/附近片段，位置相对去空白与标准 JSON fence 后的 PREPROCESS/MEETING_IR；PREPROCESS 的 schema 拒绝条件也返回记录/字段级 issues，涵盖无效纠错、重复原串、字段类型与身份状态，不回显来源文本值。原 bool validator、双返回值 parser 与通用错误摘要接口保持兼容。格式合法的 original == replacement 现在可通过 schema；应用时仍须原文精确命中，再从实际替换映射跳过，原记录保留在 compiler_transcript_replacements。无变化记录不参与实际替换的重叠判定；重复原串、非法格式、未命中及实际替换冲突仍拒绝。Agent 通过 task issues 获取相同诊断，不进入 API 重试。shared `meeting_compiler_repair.inspect_output` 对可解析 v3 汇总独立的 schema、原文替换、证据/术语与学生目录问题；错误行不阻止其他合法行的术语检查，旧协议与语法错误保留原恢复路径。API 纯 JSON 语法错误要求保留 META/Wiki/MEETING_IR 中未受影响的判断，返回完整协议；PREPROCESS 的 JSON 后直接接 `<<<WIKI>>>`，不添加 `<<</PREPROCESS>>>`，不自动吞掉非法尾部。
+- **修复证据候选（shared）**：`meeting_compiler_repair.evidence_candidates` 对前16个 unsupported acronym 问题各给最多3个逐字边界命中的 evidence ID，标记为 `literal_term_locations_only`；Agent task 和 API 记录补丁请求共享。候选不复制原文、不自动绑定证据，也不证明人物/动作/关系；语义执行者仍读上下文，原校验与预算不变，尚无真实API净收益验证。
 - **记录级修复（shared/API）**：仅当全部问题均可定位到不超过 16 条具体 IR 记录时，API 在原有修订预算中返回 `meeting-ir-row-repair-v1` 补丁。程序绑定完整旧输出及每条记录的 SHA-256，补丁须恰好覆盖指定记录，拒绝错 hash、遗漏、重复及额外目标；合并保留 META/PREPROCESS/Wiki 前缀逐字不变及未点名 IR 值，重新走原校验。删除须给理由并有程序生成的 `allow_remove=true`，只允许可选关系和无已有学生档案目标的 `person_updates` 投影；缺目录/缺身份、已有学生 key/人物页（兼容 .md）/姓名任一精确匹配均不能以删除规避更正，核心决策/任务等不可删除。未建学生指导档案不等于人物身份未关联，不自动新建档案；原文与会议正文保持，旧提议及删除理由留存，理由不成为事实。首次编译不增加调用，修复失败不新增循环；Agent 只获取共享诊断，不回落 API。这些机械校验不能证明全文语义正确。
 - **日期与 ID**：文件名显式 `YYYY-MM-DD` 或 `YYYYMMDD` 时先验证日历合法性，再保留该年份并按其分区；年份前缀不得误读为 `MMDD`。只有 `MMDD` 或无有效日期时才用摄入年推断，并在 state/Wiki frontmatter 写 `date_inferred: true`。Meeting Compiler META 的非空 title 是最终标题依据，提交前据此重算 meeting-id、Raw/Wiki 路径和 `sources`，避免初始 fallback 标题成为 canonical ID。
 - **会议去重**：只有公共 Raw 指纹索引中的二进制 SHA-256 精确命中可直接返回 `duplicate_found`。同日、同标题、文件名分段后缀或既有 Raw/Wiki 路径都不是来源身份；不同字节的分段纪要必须继续进入 Meeting Compiler，并由最终标题生成独立且可避让的 meeting-id，不能因批处理顺序丢弃后段。
@@ -666,6 +672,7 @@ python3 .scripts/ingest_check.py --graph academic/wiki/papers/<paper-id>.md
 
 #### API 模型分工与回退
 
+- **显式429模型切换（API-only）**：可配置`LLM_429_FALLBACK_FROM_MODEL`与`LLM_429_FALLBACK_MODEL`精确模型对。`call_json`/`call_text`收到源模型真实HTTP429后，在同endpoint/key仅替换payload的model并请求一次；保留messages/tools、输出预算及推理字段，schema/decoder继续生效。此恢复优先于原模型重试，替代失败即结束，不继续profile链，新调用仍先用原模型。空配置保持旧行为；`allow_rate_limit_fallback=False`独立关闭该策略，`allow_profile_fallback=False`仍只关闭普通profile链。严格单模型试验须同时关闭二者。每个请求单独记录实际模型/usage，429事件记录http_status与rate_limit_fallback_model，history及rate_limit_fallback计数保留，未知usage不记成免费；混合模型结果不能标为纯源模型实验。本机2026-11-13用户指定FlashX→DeepSeek-V4.1-Flash，通用代码不强制此品牌。
 - **主模型**：`LLM_API_BASE`、`LLM_API_PATH`（默认 `/v1/chat/completions`）、`LLM_API_KEY`、`LLM_MODEL` 用于论文证据卡 claims，默认仍为全部受限任务的稳定回退。base 已含 `/v1` 时共享 URL 拼接器会消除重复段；智谱 BigModel v4 使用 base `https://open.bigmodel.cn/api/paas/v4` 与 path `/chat/completions`。
 - **可选专用模型**：仅当三项同名配置均完整时，`INGEST_KEYWORD_API_BASE`、`INGEST_KEYWORD_API_KEY`、`INGEST_KEYWORD_MODEL` 优先用于候选关键词选择；`INGEST_REPAIR_API_BASE`、`INGEST_REPAIR_API_KEY`、`INGEST_REPAIR_MODEL` 优先用于格式性定向修复。例如可将 `MiniMax-M3` 配为专用模型，而保留 `DeepSeek-V3.2` 负责 claims 和回退。
 - **命题编译不选模型**：论文 3.6c 只登记完整 proposition，概念链接由图写入代码完成；不再调用 `ingest_proposition`，也不因无匹配概念产生 degraded。
@@ -990,9 +997,15 @@ python3 .scripts/graph_metrics.py tight_clusters
 
 ### 4.1 `.scripts/query_orchestrate.py`
 
+- **计算用途记录（API-only）**：成功calculate把本步可选reason去掉首尾空白后保留为planning_reason，至多512字符、截断明确标记；空白／非字符串说明直接忽略，不追加拒绝或模型轮。记录随retained_results保存／恢复，可经inspect按需展开，属于未经核验的模型自述。普通、native及仅作答提示不自动注入用途说明；新计算不为这段未显示元数据增加工具token估算，旧会话已保存预算不回算。算式、输入、数值与Raw引用保持，失败／拒绝及其他动作不附此字段，旧会话不追补。用途不认证公式或最终答案；answer附带计划仍不执行，shared计算器及Agent控制权不变。
+
+- **首次有效检索策略（API-only）**：drafted需非空`slots/search_order/stop_conditions`；说明性`clues`可省略或为空列表，给出时仍须list，原样记录而不从槽位补造。初始无步骤/策略的会话，在首个执行计划前持续检查策略，拒绝后的有效更正也会记录，不能按模型轮号跳过；已有历史步骤的旧会话不追补。skipped仍需reason，实际工具参数/阶段/权限/预算及引用检查保持。此调整避免说明字段缺失导致整轮返工，不认证检索策略或最终答案的语义质量，不新增模型调用。
+
 - **来源结构入口**：`source_outline`为shared发现动作，沿现有API阶段、参数契约和阅读编号传递。已知Source缺具体表图/章节位置时可按原文标签筛选；目录不保留为Raw、不登记引用，不增加固定模型轮，预算和Agent/API控制边界保持。
 
 - **原生输出试验（API-only）**：`run-api --response-format native` 用一个 `query_plan` 函数传 discover/read 短计划，完整答案直接 Markdown；默认 `json`。函数定义由 query adapter 提供，`llm_structured.call_json` 的可选 `tools/response_decoder` 沿原传输、恢复预算与逐请求事件执行，不运行工具、不另建控制循环或自动协议回退。未知/多调用、坏参数形状、空答案和非完整结束拒绝；动作仍由 execute_plan 检查 schema、stage、权限、预算。答案只提取正文明确 wikilink（允许标签）并走原已读范围校验；正文原样保留，不自动引用所有阅读结果。最终返回/失败仍可 inspect。此模式不代表服务端 strict schema 认证，不增加准备作答请求。
+
+- **已读片段编号引用（API-only，显式可选）**：`run-api --citation-format refs`复用既有R阅读编号算法，从成功且有正文的retained Raw记录与read_sources交集临时派生引用映射；默认`locators`，JSON/native共用。提示在实际Raw正文旁附citation_ref，模型用`[[R-编号|可选标签]]`或citations列表选择，程序只展开这些明确地址并走原已读范围检查；原Raw地址仍可用。正文明确引用也纳入检查，未知/未读编号与自行拼接的编号子范围原样保留并标未核验；格式异常仅披露，不补读、不新增模型返工。候选、失败读取、KU/Wiki/计算及来源正文中的编号声明不签发引用；哈希冲突排除。映射随现有成功阅读记录恢复，无新增持久目录；final_result保存展开后的答案、citation_format与citation_resolution，可inspect。源正文、裸行号、条件与数字不改写，编号和地址核验均不认证语义支持；需更细范围时沿原工具定位。shared工具与Agent控制循环保持独立。
 
 - **完整查询输出额度（API-only）**：`cmd_run_api`每次决策初始上限为4000 tokens，同一决策可规划工具或作答；不额外分类或切换控制循环。其他短结构化operation保持各自额度。已有JSON截断恢复在原尝试数内按规则扩容，累计工具读取预算和模型轮数保持；成本统计实际输入/输出及全部恢复尝试，不把配置上限当实际消费。
 
@@ -1005,7 +1018,7 @@ python3 .scripts/graph_metrics.py tight_clusters
 - **导航展示压缩（API-only）**：成功且有合法candidates列表的Source/KU/hybrid/admin/wiki发现结果使用紧凑JSON，只移除JSON排版空白；候选顺序、摘录中的文字和空白、限制／版本／匹配信号／阅读入口及未知字段均完整保留，不合并重复候选。具体阅读／计算正文、失败结果和不支持的形态原样显示，共享工具输出、session结构及预算账不变；不新增展示编号、权限或模型调用。该改动只减少序列化开销，不认证答案语义或承诺整体提速。
 - **按缺口发现（API-only）**：明确文档/知识主题/跨类型关系分别优先source_search/knowledge_search/hybrid_recall；同一文档多槽位共用初始发现，读相关入口后按实际缺口补查，独立来源可批量。提示说明Source索引当前位于academic且含论文/非论文，纯事务可Source-only；admin_recall只查admin Wiki，domain是存储范围而非内容类别，未知时Wiki/hybrid可留空。hybrid留空包含公共导航及Source/KU，指定teaching/admin/business仅该域导航。候选evidence_preview可直接read_raw，完整条件或冲突按需knowledge_read。只替换现有规划说明，不硬删通道、不自动读依据或改变权限/预算；不能保证模型遵循或完整会话提速。
 - **失败阅读记录（API-only）**：visited_action_keys记录已尝试动作，继续阻止原样重复失败；visited_pages只登记成功read_section。缺少保留正文的重复动作提示“已尝试”，不将失败或旧会话的尝试称为已读；成功保留结果仍提示复用，修正后的参数可在原预算内执行。当前结果为空但已有动作记录（包括失败及恢复后的会话）时，不再提示“第一轮，尚未执行任何动作”；仅真正无动作的会话显示该提示。不新增重试、状态或自动补读，也不改写历史会话。
-- **模型失败边界（API-only）**：模型adapter恢复后仍失败、parsed决策不合法或answer为空白时，循环立即返回`model_error`，报告实际轮次、原始模型status和错误；session保存`model_error`停止原因及先前已读正文。失败响应不执行plan、不默认转为answer，也不标记sufficient；编排器不再追加模型恢复。此项只保证完成状态真实，不保证下一次生成成功或降低单次请求成本。
+- **模型失败边界（API-only）**：模型adapter恢复后仍失败、parsed决策不合法或answer为空白时，循环立即返回`model_error`，报告实际轮次、原始模型status和错误。`model_diagnostics`白名单透传已报告的实际model、finish_reason、max_tokens、reasoning_tokens、http_status、recovery_class、local_json_recovery及usage中的prompt/completion/total tokens；缺失保持缺失，不复制响应正文或完整history。这样首个JSON错误不会遮住同时发生的长度耗尽，诊断不推断语义根因。session保存原失败结果及先前已读正文，save/load/inspect保持这些诊断；失败响应不执行plan、不默认转为answer，也不标记sufficient，编排器不追加模型恢复。此项保证失败状态可解释，不保证下一次生成成功或降低单次请求成本。
 - **按用途消费**：成功动作旁展示程序派生的navigation/source_material/knowledge/result短说明；错误或未知动作不冒充来源，正文自报usage不影响角色。已明确相关Raw地址可直接核对当前问题，避免为净化导航或补齐非关键字段继续检索；引用白名单、预算和停止机制保持。
 - **会话预算恢复（API-only）**：恢复保存的`token_budget`，不以当前默认覆盖原有较小或较大预算；旧会话缺该字段才使用既有默认。读取成本和硬限制沿原值继续，不追加预算。
 - **跨轮复用（API-only）**：`retained_results`随会话保存成功的具体Raw/KU/Wiki阅读和计算结果，后续提示补入未在上轮结果中出现的正文，每份只展示一次。搜索候选不累计，最新错误与拒绝仍显示；用途角色按实际动作派生，KU/Wiki/算术不升级为Raw依据。旧会话缺该字段时按空列表恢复，不从地址或日志摘要补造正文。复用原读取预算和轮次限制；再次传入正文的模型输入成本单独计量，不重复记作工具读取，也不宣称一定降低总token。
@@ -1017,7 +1030,7 @@ python3 .scripts/graph_metrics.py tight_clusters
 - **停止与交付**：工具计划达到原上限后，如配置的模型请求次数还有余量且读取预算未超限，允许一次仅作答的收束轮，保留此前正文与最后一次计算结果，隐藏不可再用的阅读入口和工具契约。收束轮仍请求工具则直接停止，绝不继续执行计划；不超出模型次数上限，预算耗尽不请求收束。实际请求与token均计入成本。到达工具续查上限后，即使仅作答轮交付了答案，停止原因也保留`loop_limit`；模型轮数耗尽同样记`loop_limit`，读取预算超限优先记`budget_exhausted`。答案与引用检查分别返回，不把受限收束标为充分完成，也不把资源上限写成没有候选。未上报槽位覆盖只表示记录缺失，不冒称LLM已判断无答案。
 - **类型化工具输入（API-only）**：`query_tool_contracts.py` 从既有签名生成输入契约，并补充实际 intent/domain/scope 枚举、必需参数、数值范围和 locator 语法；执行前拒绝未知字段及非法类型，不替模型猜测修正值。契约随当前 stage 可用动作进入提示，参数拒绝、执行错误和硬约束拒绝均可见；无新增模型评审或重试。
 - **阅读编号（API-only）**：`read_options` 只从结构化工具返回的 Source/KU/Wiki 主入口及 KU evidence 建立至多 80 个会话内编号；`read_ref(ref)` 解析成原动作后，继续执行原 stage、去重、公共域范围和 Raw 绑定检查。编号及候选不是已读事实；存在编号不保证模型会选择正确入口。会话恢复保留映射，Agent/shared 查询工具不依赖该映射。
-- **有界计算（API adapter / 纯确定性内核）**：`calculate`仅在API evidence/continue提供。原`operation,operands`标量sum/product/difference/quotient和等长向量sum_products保持；显式`operation="expression"`可传完整`expression`与数值`variables`，如`epsilon*norm/sqrt(d-1)`。34位十进制解释仅允许数字、变量、四则、`**`及sqrt/min/max，不使用eval或执行代码/IO。表达式上限1024字符、128个AST节点、16层，变量16个，幂指数绝对值≤1000，非零输入/中间量幅度1e-100至1e100；非法域或超限显式失败。公式与原始参数一并保留，避免只核算模型估计的中间小数；旧模式仍返回实际长度和分项。结果不登记Raw citation，不认证公式选择、科学适用性、原文归属或最终复述；模型仍须读Raw，既有轮数和控制边界保持。纯函数可独立使用，不启动API循环。
+- **有界计算（API adapter / 纯确定性内核）**：`calculate`仅在API evidence/continue提供。原`operation,operands`标量sum/product/difference/quotient和等长向量sum_products保持；显式`operation="expression"`可传完整`expression`与数值`variables`，如`epsilon*norm/sqrt(d-1)`。34位十进制解释仅允许数字、变量、四则、`**`及sqrt/min/max/log/exp；log为单参数自然对数（参数>0），exp为单参数自然指数，不使用eval或执行代码/IO。此前合法的log/exp变量名仍可作裸变量使用，函数调用按AST节点独立解析。表达式上限1024字符、128个AST节点、16层，变量16个，幂指数绝对值≤1000，非零输入/中间量幅度1e-100至1e100；exp在求值前拒绝必定越界的巨大参数，实际结果仍经相同幅度检查；非法域或超限显式失败。调用方按用途选择等价稳定式，程序不改写公式。公式与原始参数一并保留，避免只核算模型估计的中间小数；旧模式仍返回实际长度和分项。结果不登记Raw citation，不认证公式选择、科学适用性、原文归属或最终复述；模型仍须读Raw，既有轮数和控制边界保持。纯函数可独立使用，不启动API循环。
 - **效果边界**：完整契约和阅读编号会增加上下文，计算可能增加决策轮次；按最终用途质量和实际总成本验收。机械回归通过不代表模型使用稳定，也不证明 token 预算最优。
 - **引用映射**：API session 的 `read_sources` 同时保留已读 locator 与 `source_locator` 确定性确认的原件路径；读取受管 Markdown companion 后，citation contract 允许引用该原件路径，不把 companion 伪装成另一份事实来源。 同时接受被单个已读范围完整包含的同路径文本行／PDF页子范围（如已读L24–L43后引用L26）；复用source_locator解析，不合并跨段或猜测路径、版本。裸文件白名单不授权任意新片段，标题及文本companion页码仍只按精确白名单匹配；该检查只确认阅读范围，不认证答案语义。
 - **注册派生**（v2）：`_ACTION_SIGS` 从已接入的 `query_actions` 函数签名派生 action→参数清单；API 局部工具 read_ref/calculate 显式补入。清单驱动 `_build_step`（输入组装）、`ALLOWED`（合法性白名单）、按 stage 过滤的 `allowed_next_actions`、去重 set 和 `--action choices`。新增动作需确认签名、stage 和输入契约；已有动作参数变更由签名同步。
@@ -1025,7 +1038,13 @@ python3 .scripts/graph_metrics.py tight_clusters
 
 ### 4.2 `.scripts/query_actions.py`
 
-- **来源目录（shared）**：`source_outline(source_id,query="",start_line=1,limit=40)`列绑定Source的显式Markdown标题与带编号图表题注，query为原文标签字面子串，最多80项、按`next_start_line`分页。wg的`source-outline`、API及DSH共用；不需要KU/Wiki/图或全文索引。返回包含标签的现有分片地址（无分片则标签行），并共享下述有界结构阅读建议；不猜跨片段图表/图例关系、不保证语义完整；目录是navigation，仍须read_raw，private/篡改/失效绑定拒绝，无模型、联网或写入。
+- **正文搜索空结果（shared）**：`source_search`最终无候选时返回`next=null`（无直接阅读目标，非任务结束），仅空结果附顶层`limitations`说明无可用词项、索引不可用、校验问题或有效索引上的词面未命中；`query/search_scope/index_available/issues`和原异常保持。hybrid所有出口按最终候选统一，空时另外指向`vector_channel`覆盖/失败诊断，有有效词汇或向量候选则维持原`read_raw`输出且不遗留空说明。空检索不证明内容不存在；不自动改词、重试、扩范围、切目录、建库、读Raw或登记证据，后续由Agent/API控制循环按任务选择。CLI/DSH共用返回。
+
+- **空目录的正文交接（shared）**：无匹配候选时，`source_outline`返回`next=source_search`，说明只检查了扫描范围内的标题/题注，正文尚未搜索。非空原查询附`next_input={source_id,query}`，原来源和词面保持；空查询不给虚构输入。建议由Agent/API执行者按问题缺口选择，工具不自动搜索、读取、建索引或登记证据；不保证索引可用、词面命中或问题已覆盖。非空目录的原候选、分页、结构/整节地址保持，CLI/DSH共用，private/绑定边界及无索引目录访问不变。
+
+- **可选整节读取（shared）**：`source_outline(...,include_sections=True)`／`wg source-outline <S-ID> --include-sections`在标题条目附`section`边界、字符数和状态，适合核对同一节内的多项条件。只按显式Markdown层级（包含子节、排除围栏假标题）确定范围；正文≤8000字符给`section.read_action/read_input`，可直接交原read_raw。长节/空节只披露边界，不截文或自动读；字面整节不认证语义完整。默认false，有候选时原目录输出、read_ref及小范围建议保持；API布尔schema、DSH与CLI同样传参，不增加控制状态或模型轮。完整契约见[Source查询范围](source-first-ingestion.md#查询与实际范围)。
+
+- **来源目录（shared）**：`source_outline(source_id,query="",start_line=1,limit=40)`列绑定Source的显式Markdown标题与带编号图表题注，query为原文标签字面子串，最多80项、按`next_start_line`分页。wg的`source-outline`、API及DSH共用；不需要KU/Wiki/图或全文索引。保留包含标签的现有分片locator（无分片则标签行）；标题之后在片段内仅有空行时，另给从标题到首个完整直接正文块的read_input，reading_context=heading_start。仍限片段尾外新增2000字符/32行、总8000字符，不跨下一标题/围栏；不可用或不闭合/超限时标limited并仅建议标题行（标题自身超总量则无建议）。其他标题/题注共享下述结构建议，题注可保留前置表图内容；不保证全节或语义完整。目录是navigation，仍须read_raw，private/篡改/失效绑定拒绝，无模型、联网或写入，旧地址及历史会话不改写。
 
 - **图路径贡献（shared）**：navigation RRF 对同页每个 `wiki/graph_exact/graph` 通道只计最佳名次；同通道不同 `via` 不重复加分，但路径仍完整保留在 `signals`。intent权重、候选/遍历预算和章节引用加分保持；共享字面融合保持，多路径不认证身份或事实。
 
@@ -1036,6 +1055,7 @@ python3 .scripts/graph_metrics.py tight_clusters
 - **用途回执**：`execute`在成功结果外层附`usage`，原工具text保留；wg envelope同样标记，DSH文本适配器在JSON外层或原文本前交付短说明。存储正文不写分类标记；完整KU的knowledge与检索摘录的navigation不同，分类不代表真实性认证。规则集中在`artifact_usage.py`，共享提示面纳入工程契约。
 - **发现摘录**：Source及KU/Question通道复用`lexical_relevance.excerpt`，在原700字符上限内展示查询命中附近的连续原文；完整片段排名、身份与读取入口保持。`excerpt_span`为相对完整候选正文的零起点、右端不包含字符偏移，`excerpt_truncated`标明省略；无正文命中则用前缀。纯字面展示不保证条件完整，也不登记Raw证据，仍需沿原入口读取核验。
 - **KU 可选向量（shared）**：`knowledge_vectors.py build KU-<id> ...` 从现有标题/完整表述/未决项生成派生索引，绑定当前版本、文件哈希和模型 namespace；复用 embed_helper 与 Source 的纯窗口函数。`knowledge_search`/`wg.py ku-search --retrieval hybrid` 显式合并 Statement 语义发现，默认词汇、Question 原生路径和摄入候选机制保持。覆盖/失效/服务失败披露，查询不建库、不认证或改写知识；命中仍沿 KU/Raw 入口读取。见[KU契约](knowledge-units.md#可选-statement-语义发现)。
+- **KU 快照一致性（shared）**：`knowledge_store.read`从同次文件字节生成正文、元数据和`snapshot_sha256`，覆盖当前/历史Statement与原生Question；文本保留UTF-8/通用换行兼容，哈希使用原字节。复用Frontier纯文本安全解析，不缓存记录；并发原子修订可返回完整旧/新快照，索引新鲜度、Raw依据与提交CAS仍按原契约独立检查。
 - **KU 入口**：`knowledge_search/knowledge_read` 统一查询 Statement 与原生 Question，
   宿主用 `wg.py ku-search/ku-read`；API/DSH 同步注册。KU 正文/状态/来源用于导航及理解，
   透传 content_role/source_question_status；用途和来源处境不认证科学状态。
@@ -1338,6 +1358,7 @@ python3 .scripts/test_presentation_delivery.py --render
 - `embed_init.py`、`embed_helper.py`：embedding 缓存基础设施（配置见 §2.2「Embedding API」）；不要在普通任务中随意强制重算。
 - `ingest_pipeline.py`：摄入流程共享驱动器（`run_pipeline`）。三编排器的基础 9 步调度、状态机、resume 安全网与回滚由此统一托管；meeting 可在图校验后声明必须成功的 `post_commit_projection` 第 10 阶段。`recovery_limits` 分别限制 Wiki/语义修订、确定性修补和 specialist 尝试，graph write/validate 失败仍调 `rollback_fn` 并保存 `resume_from`。各编排器只声明 spec + provider step 函数。
 - **P0 摄入遥测与完成判定**（`recovery_policy.py`/`llm_structured.py`/`inbox_state.py`）：事务 `telemetry.events` 只记录状态与 typed recovery 时间线；旧 `llm_calls` 移入 `legacy_stage_call_estimates`。真实 API 次数唯一来自 `temp/llm-events/` 的逐请求 ExecutionEvent。`step_update_graph` 在 graph_ingest 输出非 JSON 或缺 `edges_added` 时返回失败；`validate_completion` 在标记 `completed` 前继续检查历史错误、语义槽和 graph report。
+- **API耗时口径**：`llm_structured.call_json/call_text`用单调性能计数器记录每次真实请求的`latency_sec`，成功、格式失败、网络失败及429替代均独立计时，并一致进入返回值、history与事件。日历时间戳／日志分日沿用日期语义；不改变payload、超时或恢复策略，不追改历史耗时。旧账本与独立持续时间记录冲突时保留原值并披露不可靠范围，不据此推算模型快慢。
 - **JSON 本地恢复（API-only）**：标准解析失败且报 Invalid control character 时，仅允许裸 LF/CR/TAB 的兼容解码，保留字符串原值并继续 schema；其他控制字符、错误转义、缺字段、截断不猜补。`parse_json` 保持两元接口；`decode_json_response` 额外返回恢复标记。调用结果、history、逐请求事件以 `local_json_recovery=literal_string_whitespace` 披露；本地恢复不消耗模型重试，canonical 日志仍只存正文 hash/长度。恢复不是语义修复，schema 不合格仍失败；原生正文无需 JSON 字符串转义。
 - **完整 JSON 后的多余闭合符（API-only）**：仅标准解析报 `Extra data`，且已完整解析一个顶层 object/array、余部只含同类闭合符与 JSON 空白时，以 `redundant_top_level_closer` 恢复。完整对象中的值保持，继续原 schema；异类括号、多对象、附加字段/文字、内部语法错误和截断仍失败，不组合容错推断缺失结构。原始响应不改写，事件记录恢复类型；不增加模型调用。
 - **JSON 尾注恢复（API-only）**：仅普通JSON的call_json收到finish_reason=stop时显式启用；标准解析只报Extra data且已有完整object/array，余部全部为JSON空白及`//`行注释才接受。注释内对象/数组括号、非法控制字符、第二个值、附加字段/普通正文、内部/块注释、截断与组合容错均拒绝。JSON值和原响应保持，结果/history/事件记`local_json_recovery=trailing_line_comments`，继续原schema及工具/来源校验，不执行注释或增加模型调用。decode_json_response的开关默认关闭，shared parse_json和原生工具参数解析保持原边界；本地恢复不认证最终语义或整体收益。
@@ -1473,7 +1494,7 @@ python3 .scripts/visual_to_editable_ppt.py <figure.png|document.pdf> \
 
 ## 6. 开源发布：`.scripts/open_source_release.py`
 
-- **Gallery**：静态构建由`gallery_site.py`按白名单完成；`gallery_metrics.py`单独读取Cloudflare汇总，Actions只读凭据不进入网页。手动发布或每日刷新后核对站点版本；缺数据/失败分别显示未就绪/旧快照，不造零，详见`operations/GALLERY.md`。
+- **Gallery**：静态构建由`gallery_site.py`按白名单完成；`--sync-readme-preview`从同源封面/元数据更新双语README的三项近期精选区块，最新优先并兼顾类型；发布前运行只读`--check-readme-preview`，区块外正文保持，两命令均不发布；素材 ZIP 同样逐文件授权并校验哈希，构建器不解包，收录者核对成员与来源边界；`gallery_metrics.py`单独读取Cloudflare汇总，按日替换重叠日期、保留较早汇总形成有起算日的累计PV/Visits；缺期披露，旧快照读取失败停止部署以防累计重置，API失败保留stale。累计及近7/30日数据共用公开metrics.json，Actions只读凭据不进入网页。手动发布或每日刷新后核对站点版本；缺数据/失败分别显示未就绪/旧快照，不造零，详见`operations/GALLERY.md`。
 - **定位**：从个人工作库白名单构建无个人数据的公开模板，并验证发布树不含未批准文件；公开 `graph.yaml` 按目标树实际存在的节点确定性投影，不携带私有项目节点。中英文 README、治理/生态身份规则与根 `CHANGELOG.md` 均由公开资产生成；发布时同步写入版本标记、验证双向语言入口，并要求 changelog 最新版本标题与 `VERSION` 一致。GitHub 外部 PR 在当前阶段是贡献提案：接受后先回灌权威源并保留署名，再通过受管发布器重建公开树，不直接把生成树 merge 当权威修改。每次 GitHub 更新还必须让中英文 README、带日期的中文说明 Markdown 及其版本范围说明同时进入本次 diff，且内容反映受影响的机制、能力、配置或使用方式；PDF 是下载/打印版，在中文说明读者内容变化时同步更新。
 - **排号与引用**：每批实际公开更新由当前 Agent 对照公开仓库状态及 `VERSION` 自动判断最高语义级别并记录依据：兼容修复/小文档为 PATCH，兼容新增能力为 MINOR，破坏公开契约为 MAJOR；不按文件数/行数判断。公开资产 CHANGELOG 的 Unreleased 同时写 `### Highlights` 与 `### 主要更新`，再运行 `python3 .scripts/open_source_release.py prepare-version --level <patch|minor|major> --reason '<English rationale>' --reason-zh '<中文依据>' --from-version <旧版本>` 预览，加 `--apply` 才写入源 VERSION、双语版本判断、公开资产 CHANGELOG 和根 CHANGELOG 镜像。重建同批次不再排号，无实际更新不空升版本；自 v0.12.0 起 publisher 为每个公开版本生成不可变 annotated tag，`--push` 原子推送分支和 tag；GitHub Release 仍须另行授权。
 - **先读**：`operations/engineering/open-source-release.md` 与 `operations/engineering/open-source-manifest.yaml`。
@@ -1537,3 +1558,14 @@ WG、Agent task 与安装 CLI 使用相同 UTF-8 子进程契约；不要把原�
 ### 分类工作区路径兼容
 
 `project_paths.py` 是 shared 的只读路径兼容层，读取可选的 `projects/.path-migrations.json`；它不修改历史快照或取消哈希校验。`workspace_state`、`research_memory`、`source_ingest`、`presentation_state`、`science_exhibit`、`review` 与 `cv` 使用此层读取迁移前定位。分类目录和嵌套项目均位于 projects 边界内；映射不允许链式跳转或符号链接。路径协议及迁移步骤见 `operations/WORKSPACE.md`“分类目录与路径迁移”，定向回归为 `test_project_paths.py`。
+
+
+## PPT 局部素材：`.scripts/presentation_asset.py`
+
+- **角色换色**：`show` 返回 `color_parameters`；`use/insert --color role=#RRGGBB` 可重复指定不同角色，优先级 preset < values < color。只接受已声明的color参数，拒绝重复角色及非法值，解析后同步导出三格式并保存实例快照。新增设计采用背景/主线/节点/符号等语义角色；不猜测硬编码颜色，也不原地更新库版本。
+
+- **注册与发现**：`artifact.presentation_asset`（preview）、`wg.py presentation-asset`、`route.py --capability presentation-asset --capability-profile general`；PPT create 与通用 write 均给按需入口，不强制每页检索。
+- **责任**：Agent 负责图形语义与选择；shared 的 `presentation_asset.py`、`presentation_asset_render.py` 校验、收藏、参数化、原生导出和局部插入，零远程调用。沿用 artwork，v2 增加透明背景和闭合曲线，v1 原接受范围保持。
+- **权威与存储**：`asset.json` 是数据权威；内置样例在 operations/templates/presentation-assets，用户收藏在 slide-library/assets，私密收藏在 private/presentation-assets。后两者不进入公开交付。immutable version、锁内原子提交、素材/输出哈希、实例快照及生成器指纹支持接续；不能把暂存任务记成事实源。
+- **调用与限制**：prepare → Agent 写候选 → check/collect；search/show/use/insert；extract 仅显式选中的有界原生曲线。完整字段、来源分流、依赖和实例命令见 `operations/PRESENTATION_ASSET.md`。新副本只改目标 slide XML，保留其余 ZIP 部件；不覆盖母报告或代替锁页修订授权。
+- **回归**：`test_presentation_asset.py`、`test_presentation_artwork.py`、`test_function_registry.py`、`test_prompt_audit.py`、`engineering_graph.py validate`。实际 Office GUI 编辑与全新环境安装另行声明验证范围。

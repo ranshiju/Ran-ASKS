@@ -617,6 +617,159 @@ def test_long_document_recovery_reuses_specialist_and_keeps_generation_separate(
     assert module.api_profiles(config, "ingest_content_repair")[0]["model"] == "flash"
 
 
+def _http429_probe(outcomes, *, text=False, config_update=None, **kwargs):
+    config = {"QUERY_BACKEND": "api", "INGEST_BACKEND": "api",
+              "LLM_API_BASE": "https://example.invalid", "LLM_API_KEY": "test-key",
+              "LLM_MODEL": "from-model", "LLM_429_FALLBACK_FROM_MODEL": "from-model",
+              "LLM_429_FALLBACK_MODEL": "to-model", "LLM_REASONING_FIELD": "reasoning_effort",
+              "LLM_REASONING_EFFORT_STANDARD": "low"}
+    config.update(config_update or {})
+    requested = []
+
+    class Response:
+        def __init__(self, value): self.value = value
+        def read(self):
+            return json.dumps({"choices": [{"message": self.value.get("message", {"content": self.value.get("content", "{}")}),
+                                             "finish_reason": self.value.get("finish_reason", "stop")}],
+                               "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}}).encode()
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+
+    def urlopen(request, **_kwargs):
+        requested.append({"url": request.full_url, "headers": dict(request.headers), "payload": json.loads(request.data)})
+        value = outcomes[len(requested)-1]
+        if isinstance(value, int):
+            raise module.urllib.error.HTTPError(request.full_url, value, "test HTTP error", None, None)
+        if isinstance(value, Exception): raise value
+        return Response(value)
+
+    args = {"retries": 0, "allow_profile_fallback": False, "reasoning": "standard", **kwargs}
+    with patch.object(module, "load_env", return_value=config), \
+            patch.object(module.urllib.request, "urlopen", side_effect=urlopen), \
+            patch.object(module, "_backoff_sleep") as sleep:
+        if text:
+            result = module.call_text("probe", **args)
+        else:
+            result = module.call_json("probe", lambda value: value == {}, **args)
+        assert not sleep.called
+    return result, requested, _read_today_events()
+
+
+@_isolated_events
+def test_request_duration_ignores_wall_clock_jumps_for_all_outcomes():
+    for text in (False, True):
+        for jump in (1000, -1000):
+            for outcome in ({}, {"content": "" if text else "invalid JSON"}, TimeoutError("timed out")):
+                with patch.object(module.time, "time", side_effect=[2000, 2000 + jump]), \
+                        patch.object(module.time, "perf_counter", side_effect=[10, 12.25]):
+                    result, requests, events = _http429_probe([outcome], text=text)
+                assert len(requests) == len(result["history"]) == 1
+                assert result["latency_sec"] == 2.25
+                assert result["history"][0]["latency_sec"] == events[-1]["latency_sec"] == 2.25
+                expected = "api_error" if isinstance(outcome, Exception) else "validation_error" if outcome else "ok"
+                assert result["status"] == expected
+
+
+@_isolated_events
+def test_each_http429_attempt_has_its_own_monotonic_duration():
+    for text in (False, True):
+        with patch.object(module.time, "time", side_effect=[2000, 5000, 5000, 1000]), \
+                patch.object(module.time, "perf_counter", side_effect=[10, 12, 20, 23.5]):
+            result, requests, events = _http429_probe([429, {}], text=text)
+        assert result["ok"] and len(requests) == 2
+        assert [e["latency_sec"] for e in events[-2:]] == [2, 3.5]
+        assert [e["latency_sec"] for e in result["history"]] == [2, 3.5]
+        assert result["latency_sec"] == 3.5
+        assert events[-2]["usage"] == {} and events[-1]["usage"]["total_tokens"] == 3
+
+
+@_isolated_events
+def test_http429_switch_preserves_payload_and_failed_usage():
+    result, requests, events = _http429_probe([429, {}], recovery_limits={"infrastructure": 0, "output_transport": 0})
+    assert result["ok"] and result["model"] == "to-model" and result["rate_limit_fallback_used"]
+    assert [r["payload"]["model"] for r in requests] == ["from-model", "to-model"]
+    assert requests[1] == {**requests[0], "payload": {**requests[0]["payload"], "model": "to-model"}}
+    assert result["recovery_attempts"] == {"infrastructure": 0, "output_transport": 0, "rate_limit_fallback": 1}
+    assert len(events) == len(result["history"]) == 2
+    assert events[0]["http_status"] == 429 and events[0]["rate_limit_fallback_model"] == "to-model"
+    assert events[0]["usage"] == {} and events[1]["usage"]["total_tokens"] == 3
+    assert events[0]["call_id"] == events[1]["call_id"]
+    assert events[0]["prompt_hash"] == events[1]["prompt_hash"]
+
+
+@_isolated_events
+def test_http429_text_preserves_full_messages_and_next_call_primary():
+    messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "prior"}, {"role": "user", "content": "next"}]
+    result, requests, _ = _http429_probe([429, {"content": "answer"}], text=True, messages=messages, retries=3)
+    assert result["ok"] and result["text"] == "answer"
+    assert all(r["payload"]["messages"] == messages for r in requests)
+    again, requests, _ = _http429_probe([{"content": "next answer"}], text=True)
+    assert again["ok"] and not again["rate_limit_fallback_used"]
+    assert requests[0]["payload"]["model"] == "from-model"
+
+
+@_isolated_events
+def test_http429_native_tools_keep_decoder_and_schema():
+    tools = [{"type": "function", "function": {"name": "choose", "parameters": {"type": "object"}}}]
+    message = {"content": None, "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "choose", "arguments": "{}"}}]}
+    decoded = []
+    def decoder(choice):
+        decoded.append(choice)
+        return json.loads(choice["message"]["tool_calls"][0]["function"]["arguments"]), None, None
+    result, requests, _ = _http429_probe([429, {"message": message, "finish_reason": "tool_calls"}], tools=tools, response_decoder=decoder)
+    assert result["ok"] and len(decoded) == 1
+    assert all(r["payload"]["tools"] == tools and r["payload"]["tool_choice"] == "auto" for r in requests)
+
+
+@_isolated_events
+def test_http429_switch_requires_exact_status_and_explicit_pair():
+    for error in [400, 401, 403, 500, ValueError("HTTP 429 in text")]:
+        result, requests, _ = _http429_probe([error])
+        assert not result["ok"] and len(requests) == 1
+        assert not result["rate_limit_fallback_used"]
+    for update in [{"LLM_429_FALLBACK_FROM_MODEL": "other"}, {"LLM_429_FALLBACK_FROM_MODEL": ""},
+                   {"LLM_429_FALLBACK_MODEL": ""}, {"LLM_429_FALLBACK_MODEL": "from-model"}]:
+        result, requests, _ = _http429_probe([429], config_update=update)
+        assert not result["ok"] and len(requests) == 1
+    result, requests, _ = _http429_probe([429], allow_rate_limit_fallback=False)
+    assert not result["ok"] and len(requests) == 1
+
+
+@_isolated_events
+def test_http429_alternate_failure_stops_retry_and_profile_chains():
+    specialist = {"SEMANTIC_RECOVERY_API_BASE": "https://example.invalid", "SEMANTIC_RECOVERY_API_KEY": "test-key",
+                  "SEMANTIC_RECOVERY_MODEL": "from-model", "LLM_MODEL": "third-model"}
+    for text in (False, True):
+        for failure in [429, 500, {"content": "", "finish_reason": "length"}, {"content": "{\"bad\":1}"}]:
+            result, requests, _ = _http429_probe([429, failure], text=text, retries=3,
+                operation="ingest_semantic_recovery", allow_profile_fallback=True, config_update=specialist)
+            assert len(requests) == 2
+            assert result["rate_limit_fallback_used"] and not result["recovery_scheduled"]
+            if not text or not isinstance(failure, dict) or not failure["content"]:
+                assert not result["ok"]
+
+
+@_isolated_events
+def test_http429_after_output_retry_preserves_exact_failed_request():
+    result, requests, _ = _http429_probe([{"content": '{"unfinished', "finish_reason": "length"}, 429, {}], retries=1)
+    assert result["ok"] and len(requests) == 3
+    assert requests[2] == {**requests[1], "payload": {**requests[1]["payload"], "model": "to-model"}}
+    assert requests[2]["payload"]["max_tokens"] == 1600
+
+
+@_isolated_events
+def test_http429_configuration_never_enables_agent_api():
+    for text in (False, True):
+        try:
+            _http429_probe([], text=text, config_update={"QUERY_BACKEND": "agent"})
+        except RuntimeError as exc:
+            assert "API backend" in str(exc)
+        else:
+            raise AssertionError("Agent must be rejected before provider calls")
+    assert _read_today_events() == []
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -1,15 +1,28 @@
 # Ran-ASKS
-> 当前 main 版本: v0.27.0
+> 当前 main 版本: v0.28.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-## [Gallery · 看看 ASKS 做出了什么](https://ranshiju.github.io/Ran-ASKS/)
+<!-- gallery-recent:start -->
+## [Gallery · 近期作品精选](https://ranshiju.github.io/Ran-ASKS/)
 
-浏览科普展板、学术报告、双语简历和科普文章，了解每件作品用到了哪些 ASKS 功能。
+浏览近期成果，了解 ASKS 的制作能力。点击预览查看完整作品与所用功能。
 
-[![ASKS 作品精选：科普展板局部、学术报告页面与科普漫画配图](docs/assets/gallery-preview.png)](https://ranshiju.github.io/Ran-ASKS/)
+<table>
+<tr>
+<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/presentation-assets/index.html"><img src="gallery/works/presentation-assets/cover.webp" width="280" alt="PPT 素材库"></a></td>
+<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/layer-edelstein-academic-talk/index.html"><img src="gallery/works/layer-edelstein-academic-talk/cover.webp" width="280" alt="层 Edelstein 效应学术报告"></a></td>
+<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/asks-introduction/index.html"><img src="gallery/works/asks-introduction/cover.webp" width="280" alt="ASKS 总介绍"></a></td>
+</tr>
+<tr>
+<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/presentation-assets/index.html"><strong>PPT 素材库</strong></a><br><sub title="收录日期">2026-11-14</sub></td>
+<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/layer-edelstein-academic-talk/index.html"><strong>层 Edelstein 效应学术报告</strong></a><br><sub title="收录日期">2026-11-05</sub></td>
+<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/asks-introduction/index.html"><strong>ASKS 总介绍</strong></a><br><sub title="收录日期">2026-11-03</sub></td>
+</tr>
+</table>
 
 **[浏览全部作品 →](https://ranshiju.github.io/Ran-ASKS/)**
+<!-- gallery-recent:end -->
 
 ---
 
@@ -53,33 +66,35 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
 
-## v0.27.0 的主要改进
+## v0.28.0 的主要改进
 
-ASKS 的全称更新为 **Agent-Native Scientific Knowledge System（智能体原生的科学知识系统）**。
+ASKS 的全称为 **Agent-Native Scientific Knowledge System（智能体原生的科学知识系统）**。
 核心观点是 **Interpret knowledge. Organize for use. Reason to solve.**
-仓库名称、命令和已有来源身份保持兼容。
+本次兼容更新重点改进“找到资料—读到依据—形成可复用成果”的交接。
 
-本版为原文片段与当前版本的 Statement 知识单元增加显式语义发现，与词汇检索、
-来源目录及 Wiki/Graph 导航配合。只为选定对象建立向量；来源或知识修订后，旧投影
-不再参与匹配。检索提供阅读入口，事实使用仍须核对对应 Raw。
+来源目录可显式提供预算内的完整 Markdown 章节入口（`--include-sections`）。空目录
+建议同源正文搜索；正文无候选时说明限制，不提供虚构的阅读目标。API 查询可选
+`run-api --citation-format refs`，由程序展开实际成功读取且保留的 Raw 片段编号。
+合法引用和完整章节都不等于答案已经保留全部条件。
 
-选定的长原文范围可在原预算内自动拆成合规证据块，不截断正文，也无需模型重新选片。
-正文上下文阅读建议和完整 JSON 后有限尾注的本地恢复减少了特定执行失败，来源绑定
-与结构校验继续生效；这些改进不认证语义正确。
+会议摄入统一领域模板与恢复行为，保留明确身份确认和暂定纠正，避免恢复时重复已完成
+的事务步骤；知识读取让正文、元数据和哈希来自同一文件快照。正常使用照常完成必要
+补读、纠错与知识反哺；调参、对照实验和系统修改只在明确的优化指令下开展。
 
-默认摄入仍为 `legacy`，Source-first/selective 与新向量通道须显式启用。
-近期使用验证了有界恢复与局部知识复用，但 API 草稿仍可能误解条件或扩大结论，
-自动语义质量和完整净收益尚未稳定验收。本版为兼容的开发阶段发布，尚不宣告1.0稳定承诺。
+新增可复用的 PPT 素材库，支持本地收藏、换色及原生 PPTX/SVG/PNG 复用；通用本地
+扩展入口可调用独立安装的功能包，私人包及工作实例不进入公开模板。Gallery 新增
+获准公开的素材作品、README 近期作品预览，以及标注起算日和缺期的累计浏览量/
+访问次数，保留近7天和30天统计。
+
+默认摄入仍为 `legacy`，Source-first/selective 与向量检索须显式使用。快速接入、
+选择性组织和使用驱动深化是生命周期职责，不是强制三轮模型处理。API 语义错误和
+完整质量/成本收益仍在验证；本版不宣告1.0稳定承诺，也不将未通过的实验切为默认。
 
 ### Agent-native 在这里意味着什么
 
-当前宿主 Agent 根据任务决定读什么、如何推理，使用仓库内规范、工具和可接续的工作记录；
-程序负责解析、来源绑定、校验及事务写入。API 用户保留由程序控制的独立循环和受限
-worker，支持的工作流仍可使用子 agent。两种模式共享存储与确定性内核，
-Agent 执行不会隐式退回 API 模型。
-
-Gallery 继续提供免费 Cloudflare 汇总统计和精选作品。以下使用说明保留 macOS
-维护范围、现有科研能力及明确的试用边界。
+当前宿主 Agent 决定读什么、如何推理；共享确定性工具负责来源绑定、校验与事务。
+API 用户保留由程序控制的独立循环和受限 worker，支持的工作流仍可使用子 agent。
+Agent 不隐式回落到 API 模型。以下说明保留 macOS 维护范围及可选依赖边界。
 
 论文评估先提炼核心科学问题，再逐条分类贡献、给出 1–10 分重要性评分，并单独评价
 证据强度，建议强调顺序与补证事项。评分不是录用概率。摘要和全文改进在实质改稿前

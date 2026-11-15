@@ -6,6 +6,7 @@
     "mpe-science-poster",
     "mpe-academic-talk",
     "layer-edelstein-academic-talk",
+    "presentation-assets",
     "bilingual-academic-cv",
     "asks-introduction",
     "asks-01-conversation-as-interface",
@@ -67,6 +68,12 @@
       "label": "漫画配图",
       "description": "将文章机制编排成漫画分镜，生成并选用适合解释内容的配图。",
       "doc": "operations/COMIC_GENERATION.md"
+    },
+    {
+      "id": "presentation-asset",
+      "label": "PPT 素材制作与复用",
+      "description": "制作和收藏局部图形，按语义角色换色，输出可编辑素材并复用于演示文稿。",
+      "doc": "operations/PRESENTATION_ASSET.md"
     }
   ]
 }

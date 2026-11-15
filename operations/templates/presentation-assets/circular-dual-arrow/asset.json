@@ -1,0 +1,104 @@
+{
+  "schema": "presentation-asset-v1",
+  "id": "circular-dual-arrow",
+  "version": 1,
+  "name": "环形双箭头",
+  "category": "关系表达/双向反馈",
+  "purpose": "用两段独立弧形箭头表示双向反馈、协同循环、相互支撑与反哺。标签由当前报告填写，不由图形证明关系事实。",
+  "tags": [
+    "环形",
+    "双向",
+    "箭头",
+    "反馈",
+    "协同",
+    "循环",
+    "支撑",
+    "反哺",
+    "circular",
+    "feedback",
+    "cycle"
+  ],
+  "sensitivity": "public",
+  "source": {
+    "kind": "generated",
+    "description": "原创通用几何：两段闭合贝塞尔弧箭头，表达双向反馈。无第三方标识、项目文本或背景。",
+    "files": []
+  },
+  "parameters": {
+    "primary": {
+      "type": "color",
+      "default": "#C60018"
+    },
+    "secondary": {
+      "type": "color",
+      "default": "#E66A72"
+    },
+    "ring-width": {
+      "type": "number",
+      "default": 8,
+      "min": 3,
+      "max": 8
+    },
+    "gap": {
+      "type": "number",
+      "default": 8,
+      "min": 4,
+      "max": 14
+    },
+    "head-angle": {
+      "type": "number",
+      "default": 34,
+      "min": 15,
+      "max": 38
+    }
+  },
+  "presets": {
+    "red": {
+      "primary": "#C60018",
+      "secondary": "#E66A72"
+    },
+    "blue-gray": {
+      "primary": "#245A86",
+      "secondary": "#879CAD"
+    },
+    "mono": {
+      "primary": "#333333",
+      "secondary": "#333333"
+    }
+  },
+  "artwork": {
+    "schema": "presentation-artwork-v2",
+    "canvas": [
+      68,
+      68
+    ],
+    "background": "none",
+    "rationale": "两种颜色对应两类关系，两段箭头保留独立可编辑路径。",
+    "objects": [
+      {
+        "type": "arc_arrow",
+        "cx": 34,
+        "cy": 34,
+        "radius": 24,
+        "width": "@ring-width",
+        "start": 92,
+        "sweep": 190,
+        "gap": "@gap",
+        "head_angle": "@head-angle",
+        "fill": "@primary"
+      },
+      {
+        "type": "arc_arrow",
+        "cx": 34,
+        "cy": 34,
+        "radius": 24,
+        "width": "@ring-width",
+        "start": 272,
+        "sweep": 190,
+        "gap": "@gap",
+        "head_angle": "@head-angle",
+        "fill": "@secondary"
+      }
+    ]
+  }
+}

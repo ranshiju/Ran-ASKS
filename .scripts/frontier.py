@@ -292,7 +292,11 @@ def record_path(root: Path, kind: str, record_id: str) -> Path:
 
 
 def parse_record(path: Path) -> tuple[dict, str]:
-    text = path.read_text(encoding="utf-8")
+    return parse_record_text(path.read_text(encoding="utf-8"), path=path)
+
+
+def parse_record_text(text: str, *, path: Path | str = "<text>") -> tuple[dict, str]:
+    """Parse already-read text; path is a diagnostic label, not a provenance check."""
     if not text.startswith("---\n"):
         raise ValueError(f"Frontier 记录缺 YAML frontmatter: {path}")
     parts = text.split("---\n", 2)

@@ -193,6 +193,8 @@ def build_tools() -> list[ToolDefinition]:
                 "source_id": {"type": "string", "pattern": "^S-[0-9a-f]{24}$"},
                 "query": {"type": "string", "default": ""},
                 "start_line": {"type": "integer", "minimum": 1, "default": 1},
+                "include_sections": {"type": "boolean", "default": False,
+                    "description": "按需附整节边界、大小及8000字符内的section.read_input；仍需显式read_raw，默认只给原入口"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 80, "default": 40}}, "required": ["source_id"]},
             execute_fn=lambda args: _qa_call("source_outline", args),
         ),

@@ -6,6 +6,8 @@ Canonical ID：`artifact.slide_library`，成熟度 preview。模板库是资源
 
 先加载 `python3 .scripts/route.py --capability slide-library --capability-profile general`。统一入口为 `python3 .scripts/wg.py slide-library <子命令>`，返回 WG JSON envelope；底层 `slide_library.py` 命令保持兼容。
 
+局部箭头、循环图等使用独立的 [PPT素材制作与素材库](PRESENTATION_ASSET.md)，入口为 `wg.py presentation-asset`；本库继续负责整页模板，不用页级来源规则阻断新创图形收藏。
+
 ## 两类模板
 
 - **直接使用型（direct）**：内容本身可复用。实例化保留原生 PPTX 字节与来源信息，使用前确认原内容适合当前报告。

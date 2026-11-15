@@ -7,6 +7,29 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-15
+
+### Version decision / 版本判断
+
+- MINOR: Add optional evidence navigation and references, reusable presentation assets and cumulative Gallery analytics while preserving defaults and preview boundaries
+- MINOR（中文）：兼容新增可选证据导航与编号引用、可复用PPT素材及Gallery累计统计，保留默认行为和预览边界
+
+### Highlights
+
+- Added optional whole-section Source navigation and retained-Raw reference identifiers for API answers, with consistent empty-result handoffs across lexical and hybrid search.
+- Improved meeting domain/identity handling and transaction recovery, knowledge snapshot consistency and bounded API failure reporting. Preserved Agent/API control separation and existing defaults.
+- Added reusable presentation assets and a repository-owned local-extension entry; private packages and live work remain outside the public template.
+- Updated Gallery assets and bilingual README previews. Added cumulative views/visits with daily overlap replacement, an explicit starting date, gap disclosure and preservation of prior snapshots on refresh failures.
+- Synchronized bilingual usage guidance and the Chinese introduction/PDF. Source-first/selective remains opt-in; complete semantic quality and net efficiency remain under evaluation.
+
+### 主要更新
+
+- 新增可选整节Source导航及API已读Raw编号引用，统一词汇与混合检索的空结果交接。
+- 改进会议领域/身份处理和事务恢复、知识读取快照一致性及有界API失败报告；保留Agent/API控制分工和既有默认。
+- 新增可复用PPT素材及仓库内通用本地扩展入口；私人功能包和实际工作实例继续隔离。
+- 更新Gallery素材与双语README近期预览；增加按日替换重叠数据的累计浏览量/访问次数，标注起算日与缺期，刷新失败保留历史。
+- 同步双语使用说明和中文介绍/PDF。Source-first/selective仍为显式预览，完整语义质量和净效率继续验证。
+
 ## [0.27.0] - 2026-11-13
 
 ### Version decision / 版本判断
@@ -880,5 +903,7 @@ manifests and checksums.
 
 [0.26.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.26.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.27.0...HEAD
 [0.27.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.27.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.0

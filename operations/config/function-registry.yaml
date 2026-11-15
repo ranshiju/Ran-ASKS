@@ -43,6 +43,20 @@ states:
     route_tasks: [frontier]
 
 functions:
+  system.local_extension:
+    title: 本地扩展
+    summary: 静态发现已安装的私人功能及规范，按用户任务显式调用其入口；不安装或导入来源内容。
+    kind: tool
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, project, state]
+    maturity: preview
+    bindings:
+      wg: [extension]
+      cli: [.scripts/local_extension.py]
+
   system.function_catalog:
     title: 功能目录
     summary: 列出、查看和按调用者、后端、持续工作类型解析 canonical 功能。
@@ -334,6 +348,25 @@ functions:
       cli: [.scripts/review.py]
       implementations: [.scripts/review_contract.py]
     protocols: [advisory-review-content-v1, reviewer-definition-v1, review-host-capabilities-v1, image-view-set-v1]
+
+  artifact.presentation_asset:
+    title: PPT素材制作与素材库
+    summary: 按需创作、收藏、检索和参数化复用局部图形，按颜色角色自由换色，导出原生可编辑PPTX及透明预览，保留来源版本并插入独立报告副本。
+    kind: function
+    audience: [user, agent]
+    control_owners: [host_agent, code]
+    allowed_callers: [main_agent]
+    backends: [agent]
+    effects: [read, temp, project]
+    maturity: preview
+    states: [workspace, research]
+    bindings:
+      route_capabilities:
+        presentation-asset: [general]
+      wg: [presentation-asset]
+      cli: [.scripts/presentation_asset.py]
+      implementations: [.scripts/presentation_asset_render.py]
+    protocols: [agent-task-v1, presentation-asset-v1, presentation-artwork-v2, presentation-asset-instance-v1, presentation-asset-receipt-v1]
 
   artifact.slide_library:
     title: PPT模板管理与复用

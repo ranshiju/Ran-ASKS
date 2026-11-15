@@ -74,30 +74,39 @@ def render(record):
     return "---\n" + json.dumps(meta, ensure_ascii=False) + "\n---\n\n" + record["statement"].strip() + "\n"
 
 
+def _read_snapshot(path):
+    """Bind the parsed content to the same bytes, including during atomic replacement."""
+    from frontier import parse_record_text
+    data = path.read_bytes()
+    text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    record, body = parse_record_text(text, path=path)
+    return record, body, hashlib.sha256(data).hexdigest()
+
+
 def read(unit_id, *, repo=REPO, revision=None):
-    from frontier import parse_record, current_answer_snapshot
+    from frontier import current_answer_snapshot
     if QUESTION_ID.fullmatch(unit_id):
         if revision is not None:
             raise ValueError("native Question uses Frontier answer_history, not synthetic KU revisions")
         path = si.managed(repo, f"academic/frontier/questions/{unit_id}.md")
-        record, body = parse_record(path)
+        record, body, snapshot_sha256 = _read_snapshot(path)
         if record.get("id") != unit_id or record.get("kind") != "question":
             raise ValueError("Question identity mismatch")
         return {**record, "statement": record.get("question", body), "revision": None,
                 "content_role": "research_question", "source_question_status": record.get("source_question_status", "unspecified"),
-                "snapshot_sha256": si.digest(path), "path": str(path.relative_to(repo)),
+                "snapshot_sha256": snapshot_sha256, "path": str(path.relative_to(repo)),
                 "evidence": record.get("ku_evidence", []), "unresolved": record.get("residual_gaps", []),
                 "current_answer": current_answer_snapshot(record), "native_frontier": True}
     path = unit_path(repo, unit_id)
-    record, body = parse_record(path)
+    record, body, snapshot_sha256 = _read_snapshot(path)
     if revision is not None and record.get("revision") != revision:
         path = unit_path(repo, unit_id, revision)
-        record, body = parse_record(path)
+        record, body, snapshot_sha256 = _read_snapshot(path)
     if record.get("id") != unit_id or record.get("schema") != "knowledge-unit-v1":
         raise ValueError("KU identity/schema mismatch")
     if revision is not None and record.get("revision") != revision:
         raise ValueError("KU revision mismatch")
-    return {**record, "statement": body.strip(), "snapshot_sha256": si.digest(path),
+    return {**record, "statement": body.strip(), "snapshot_sha256": snapshot_sha256,
             "content_role": record.get("content_role", "unspecified"),
             "path": str(path.relative_to(repo))}
 

@@ -116,10 +116,15 @@ def _apply_identity_corrections(resolution: dict, source_text: str, corrections:
     validated = []
     seen = set()
     for correction in corrections:
-        if not isinstance(correction, dict) or set(correction) != {
-            "mention", "canonical", "label", "source", "quote",
-        } or any(not isinstance(value, str) or not value.strip() for value in correction.values()):
+        required = {"mention", "canonical", "label", "source", "quote"}
+        if (not isinstance(correction, dict) or not required <= set(correction)
+                or set(correction) - required - {"certainty"}
+                or any(not isinstance(value, str) or not value.strip() for value in correction.values())):
             raise ValueError("identity correction requires mention, canonical, label, source and quote strings")
+        if correction.get("certainty", "confirmed") not in {"confirmed", "tentative"}:
+            raise ValueError("identity certainty must be confirmed or tentative")
+        if correction.get("certainty") == "tentative" and "身份待确认" not in correction["quote"]:
+            raise ValueError("tentative identity requires a qualified archived assertion")
         mention = correction["mention"]
         # Older compiler decisions can group exact source spellings with '/'.
         # The archived assertion still has to confirm the entire group below.
@@ -164,6 +169,15 @@ def _apply_identity_corrections(resolution: dict, source_text: str, corrections:
     for correction in validated:
         mention = correction["mention"]
         decision = next(row for row in resolution["compiler_entity_resolutions"] if row["mention"] == mention)
+        if correction.get("certainty") == "tentative":
+            decision.update({"canonical": "", "status": "unresolved",
+                             "candidate_canonical": correction["canonical"],
+                             "reason": f"用户暂定，身份待确认: {correction['source']}",
+                             "identity_evidence": correction})
+            resolution["resolved"] = [row for row in resolution.get("resolved", [])
+                                      if row.get("original") not in correction["source_mentions"]]
+            continue
+        decision.pop("candidate_canonical", None)
         decision.update({
             "canonical": correction["canonical"], "status": "resolved",
             "reason": f"Archived user assertion: {correction['source']}",
@@ -294,9 +308,11 @@ def repair(args: argparse.Namespace) -> dict:
                 ("tasks", "assignee", "assignee_label"),
             ):
                 for row in repaired_ir[section]:
+                    tentative = correction.get("certainty") == "tentative"
                     if row[label] in {correction["mention"], correction["label"],
                                       *correction["source_mentions"]} and (
-                        row[endpoint] != correction["canonical"] or row[label] != correction["label"]
+                        row[endpoint] != ("" if tentative else correction["canonical"])
+                        or row[label] != (correction["mention"] if tentative else correction["label"])
                     ):
                         raise ValueError("identity correction disagrees with the proposed role projection")
         repair_id += "-" + hashlib.sha256(_json_bytes(identity_evidence)).hexdigest()[:8]
@@ -480,18 +496,23 @@ def main() -> None:
     parser.add_argument("--identity-corrections-file")
     parser.add_argument("--prepare-confirmation", help="JSON with schema/date/statement and mention/label/canonical mappings")
     parser.add_argument("--apply-confirmation", help="managed bundle returned by --prepare-confirmation")
+    parser.add_argument("--refresh-confirmation", help="explicitly refresh append-only archive growth for an uncommitted bundle")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    if args.prepare_confirmation or args.apply_confirmation:
-        if (bool(args.prepare_confirmation) == bool(args.apply_confirmation)
+    if args.prepare_confirmation or args.apply_confirmation or args.refresh_confirmation:
+        if (sum(bool(value) for value in (args.prepare_confirmation, args.apply_confirmation, args.refresh_confirmation)) != 1
                 or any((args.mention, args.canonical_label, args.canonical_entity,
                         args.updates_file, args.meeting_ir_file, args.meeting_ir_patch_file,
                         args.wiki_file, args.identity_corrections_file, args.apply))):
             parser.error("confirmation mode cannot be combined with legacy repair arguments")
         import meeting_identity_confirmation as confirmation
         try:
-            result = (confirmation.prepare(args.transaction_id, Path(args.prepare_confirmation))
-                      if args.prepare_confirmation else confirmation.apply(args.transaction_id, args.apply_confirmation))
+            if args.prepare_confirmation:
+                result = confirmation.prepare(args.transaction_id, Path(args.prepare_confirmation))
+            elif args.refresh_confirmation:
+                result = confirmation.refresh(args.transaction_id, args.refresh_confirmation)
+            else:
+                result = confirmation.apply(args.transaction_id, args.apply_confirmation)
         except (ValueError, OSError, KeyError) as exc:
             result = {"status": "validation_error", "errors": [str(exc)], "transaction_id": args.transaction_id}
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))

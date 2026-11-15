@@ -2,13 +2,26 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-## [Gallery · See what ASKS can make](https://ranshiju.github.io/Ran-ASKS/)
+<!-- gallery-recent:start -->
+## [Gallery · Recent highlights](https://ranshiju.github.io/Ran-ASKS/)
 
-Explore science posters, academic talks, bilingual CVs and illustrated articles, with concise notes on the ASKS functions used.
+Explore recent ASKS creations and the capabilities behind them. Select a preview to see the complete work.
 
-[![Selected ASKS works: a science-poster detail, an academic slide and a popular-science illustration](docs/assets/gallery-preview.png)](https://ranshiju.github.io/Ran-ASKS/)
+<table>
+<tr>
+<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/presentation-assets/index.html"><img src="gallery/works/presentation-assets/cover.webp" width="280" alt="PPT Asset Library"></a></td>
+<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/layer-edelstein-academic-talk/index.html"><img src="gallery/works/layer-edelstein-academic-talk/cover.webp" width="280" alt="Layer Edelstein Effect"></a></td>
+<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/asks-introduction/index.html"><img src="gallery/works/asks-introduction/cover.webp" width="280" alt="Introducing ASKS"></a></td>
+</tr>
+<tr>
+<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/presentation-assets/index.html"><strong>PPT Asset Library</strong></a><br><sub title="Date added">2026-11-14</sub></td>
+<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/layer-edelstein-academic-talk/index.html"><strong>Layer Edelstein Effect</strong></a><br><sub title="Date added">2026-11-05</sub></td>
+<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/asks-introduction/index.html"><strong>Introducing ASKS</strong></a><br><sub title="Date added">2026-11-03</sub></td>
+</tr>
+</table>
 
 **[Browse all works →](https://ranshiju.github.io/Ran-ASKS/)**
+<!-- gallery-recent:end -->
 
 ---
 
@@ -55,42 +68,46 @@ be approximate; factual answers return to version-bound source evidence.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## What changes in v0.27.0
+## What changes in v0.28.0
 
-ASKS now expands to **Agent-Native Scientific Knowledge System**. Its guiding
-principle is **Interpret knowledge. Organize for use. Reason to solve.** The
-repository name, command names and existing source identities remain compatible.
+ASKS is **Agent-Native Scientific Knowledge System**, guided by
+**Interpret knowledge. Organize for use. Reason to solve.** This compatible
+release improves how discovered material becomes usable evidence and reusable work.
 
-This release adds explicit semantic discovery over Source passages and current
-Statement KUs, alongside lexical search, source outlines and Wiki/Graph navigation.
-Build vectors only for chosen objects; stale projections are excluded after
-source or knowledge changes. Retrieval returns reading addresses, and factual
-use still requires the underlying Raw evidence.
+Source outlines can explicitly offer complete Markdown sections within the
+existing reading budget (`--include-sections`). Empty outlines suggest same-source
+body search; empty body searches report their limits without inventing a reading
+target. API queries can opt into `run-api --citation-format refs`: the program
+expands identifiers only for retained, successfully read Raw evidence. Neither a
+valid reference nor a complete section proves that an answer preserves every condition.
 
-Selected long source ranges can now be split into bounded evidence blocks
-without truncation or another model decision. Reading-context suggestions and
-local recovery of a complete JSON value followed only by an allowed line comment
-reduce specific execution failures while preserving source and schema checks.
-They do not certify semantic correctness.
+Meeting intake now aligns domain templates and recovery, preserves explicit
+identity confirmations and tentative corrections, and avoids repeating completed
+transaction steps. Knowledge reads bind text and metadata to one file snapshot.
+Normal use includes needed reading, correction and knowledge feedback; tuning,
+comparison experiments and system changes run only when explicitly requested.
 
-The default ingestion profile remains `legacy`. Source-first/selective and the
-new vector channels are opt-in. Recent use confirmed bounded recovery and
-knowledge reuse, but API drafts still sometimes misread conditions or overstate
-findings. Overall automatic quality and net cost savings remain unverified;
-this is a compatible development release, not a 1.0 stability declaration.
+A reusable presentation-asset library supports local collection, recoloring and
+native PPTX/SVG/PNG reuse. A generic local-extension entry dispatches separately
+installed packages; private packages and working records are excluded from this
+public template. The Gallery adds an approved asset collection, recent-work
+README previews and cumulative views/visits with a stated starting date and gap
+coverage, alongside the existing seven/thirty-day statistics.
+
+The default intake remains `legacy`; Source-first/selective and vector retrieval
+remain opt-in. Source access, selective organization and use-driven refinement
+are lifecycle responsibilities, not three mandatory model passes. API semantic
+errors and overall quality/cost gains remain under evaluation. This development
+release does not declare 1.0 stability or make previously rejected experiments defaults.
 
 ### Agent-native in practice
 
-The host Agent chooses what to read and how to reason, using repository-owned
-instructions, tools and resumable work. Deterministic programs handle parsing,
-source binding, validation and transactional changes. API users retain a separate
-program-controlled loop and bounded workers; subagents remain available where
-the chosen workflow supports them. Both modes share the same storage and
-validation kernel. Agent execution does not silently fall back to an API model.
-
-The Gallery continues to offer free Cloudflare aggregate statistics and selected
-works. [Installation and supported workflows](#using-real-material) and the sections
-below explain the current macOS edition and its limits.
+The host Agent decides what to read and how to reason; shared deterministic tools
+handle source binding, validation and transactions. API users retain a separate
+program-controlled loop and bounded workers. Subagents remain available where
+the selected workflow supports them. Agent execution does not silently fall back
+to an API model. [Installation and supported workflows](#using-real-material)
+describe the maintained macOS edition and optional dependencies.
 
 Manuscript evaluation identifies the core scientific question, classifies each
 contribution and scores its importance from 1 to 10, with a separate assessment

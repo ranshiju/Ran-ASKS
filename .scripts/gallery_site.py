@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import tempfile
+from datetime import date
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
@@ -20,6 +21,8 @@ REPO = Path(__file__).resolve().parent.parent
 PUBLIC_REPO = 'https://github.com/ranshiju/Ran-ASKS'
 MARKER = '.asks-gallery-site'
 SLUG = re.compile(r'[a-z0-9]+(?:-[a-z0-9]+)*\Z')
+README_START = '<!-- gallery-recent:start -->'
+README_END = '<!-- gallery-recent:end -->'
 
 
 def esc(value: object) -> str:
@@ -102,7 +105,7 @@ def load_source(root: Path) -> tuple[dict, list[dict], dict[str, Path]]:
         if not caps or len(set(caps)) != len(caps) or not set(caps).issubset(ids):
             raise ValueError('Unknown or duplicate work capability')
         for name, digest in m['files'].items():
-            if Path(name).name != name or Path(name).suffix.lower() not in {'.md', '.png', '.jpg', '.jpeg', '.webp', '.pdf', '.pptx', '.svg'}:
+            if Path(name).name != name or Path(name).suffix.lower() not in {'.md', '.png', '.jpg', '.jpeg', '.webp', '.pdf', '.pptx', '.svg', '.zip'}:
                 raise ValueError(f'Invalid artifact filename: {name}')
             path = public(f'{base}/{name}')
             if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
@@ -196,6 +199,10 @@ def tags(work: dict, caps: dict) -> str:
 def statistics_section(metrics: dict, works: list[dict]) -> str:
     available = metrics['status'] != 'unavailable'
     cards = ''
+    total = metrics.get('cumulative') if available else None
+    for key,label in [('page_views','累计浏览量'),('visits','累计访问次数')]:
+        value = f'{total[key]:,}' if total else '—'
+        cards += f'<div class="stat-card stat-total"><span>{label}</span><strong>{value}</strong></div>'
     for days in ('7','30'):
         for key,label in [('page_views','浏览量'),('visits','访问次数')]:
             value = f'{metrics["windows"][days][key]:,}' if available else '—'
@@ -206,11 +213,17 @@ def statistics_section(metrics: dict, works: list[dict]) -> str:
         note = ('更新于 '+metrics['generated_at'].replace('T',' ').replace('Z',' UTC')+
                 ' · 按 UTC 自然日汇总，包含当日。')
         if metrics['status'] == 'stale':note += ' 最新刷新暂不可用，显示上次数据。'
-        if metrics['status'] == 'empty':note += ' 暂未收到访问数据。'
+        if metrics['status'] == 'empty':note += ' 近30天暂未收到访问数据。'
         names={w['id']:w['presentation']['name'] for w in works}
         links=''.join(f'<li><a href="works/{item["id"]}/index.html">{esc(names[item["id"]])}</a>'
                       f'<span>{item["page_views"]:,} 次浏览</span></li>' for item in metrics['popular'])
         if links:popular=f'<div class="popular-works"><h3>近30天热门作品</h3><ol>{links}</ol></div>'
+    if total:
+        note += ' 累计自 '+total['since']+' 起，含当日；更早数据未计入。'
+        if total['missing_days']:
+            note += f' 期间有 {total["missing_days"]} 天数据缺失，累计仅含已记录日期。'
+    elif available:
+        note += ' 累计统计待首次按日汇总后建立。'
     return (f'<section class="statistics wrap" id="statistics"><div class="section-heading"><div>'
             '<p class="eyebrow">GALLERY IN NUMBERS</p><h2>展厅访问</h2></div>'
             '<a class="text-link" href="privacy.html">统计口径与选择 →</a></div>'
@@ -277,6 +290,86 @@ def work_page(work: dict, catalog: dict, works: list[dict], site: dict | None = 
                  page=f'works/{work["id"]}/index.html', image=f'assets/works/{work["id"]}/{p["cover"]}')
 
 
+def recent_works(works: list[dict]) -> list[dict]:
+    """Prefer recent acquisitions across kinds; equal dates retain catalog order."""
+    for work in works:
+        value = work['selected_on']
+        if date.fromisoformat(value).isoformat() != value:
+            raise ValueError('selected_on must use YYYY-MM-DD')
+    ranked = sorted(works, key=lambda w: w['selected_on'], reverse=True)
+    selected = []; kinds = set()
+    for work in ranked:
+        if work['kind'] not in kinds:
+            selected.append(work); kinds.add(work['kind'])
+        if len(selected) == 3:
+            break
+    ids = {w['id'] for w in selected}
+    for work in ranked:
+        if len(selected) == 3:
+            break
+        if work['id'] not in ids:
+            selected.append(work); ids.add(work['id'])
+    return [w for w in ranked if w['id'] in ids]
+
+
+def readme_preview(works: list[dict], site_url: str, language: str) -> str:
+    zh = language == 'zh-CN'
+    title = 'Gallery · 近期作品精选' if zh else 'Gallery · Recent highlights'
+    introduction = ('浏览近期成果，了解 ASKS 的制作能力。点击预览查看完整作品与所用功能。'
+                    if zh else 'Explore recent ASKS creations and the capabilities behind them. Select a preview to see the complete work.')
+    rows = [f'{README_START}\n## [{title}]({site_url})\n\n{introduction}\n']
+    if works:
+        images = []; captions = []
+        for work in works:
+            p = work['presentation']; slug = work['id']
+            name = p['name'] if zh else p.get('name_en', p['name'])
+            name = text(name, 'preview name')
+            url = esc(urljoin(site_url, f'works/{slug}/index.html'))
+            image = esc(f'gallery/works/{slug}/{p["cover"]}')
+            width = 100 // len(works)
+            images.append(f'<td width="{width}%" align="center" valign="middle"><a href="{url}"><img src="{image}" width="280" alt="{esc(name)}"></a></td>')
+            label = '收录日期' if zh else 'Date added'
+            captions.append(f'<td align="center"><a href="{url}"><strong>{esc(name)}</strong></a><br><sub title="{label}">{esc(work["selected_on"])}</sub></td>')
+        rows.append('<table>\n<tr>\n' + '\n'.join(images) + '\n</tr>\n<tr>\n' + '\n'.join(captions) + '\n</tr>\n</table>\n')
+    all_works = '浏览全部作品 →' if zh else 'Browse all works →'
+    rows.append(f'**[{all_works}]({site_url})**\n{README_END}')
+    return '\n'.join(rows)
+
+
+def sync_readme_preview(root: Path, *, check: bool = False) -> dict:
+    """Sync bounded blocks locally; a check never writes or contacts the site."""
+    root = root.resolve()
+    catalog, works, _ = load_source(root)
+    site = site_settings(root, catalog)
+    if not site['url']:
+        raise ValueError('README preview requires the canonical Gallery site_url')
+    selected = recent_works(works)
+    manifest = yaml.safe_load((root / 'operations/engineering/open-source-manifest.yaml').read_text())
+    changes = []
+    # Locate the authoritative mapped assets in the source tree, or exported READMEs.
+    for name, language in [('README.md', 'en'), ('README.zh-CN.md', 'zh-CN')]:
+        mapped = manifest.get('public_assets', {}).get(name)
+        source = confined(root, mapped) if mapped else None
+        target = source if source is not None and source.is_file() else confined(root, name)
+        original = target.read_text(encoding='utf-8')
+        if original.count(README_START) != 1 or original.count(README_END) != 1:
+            raise ValueError(f'{name} must contain exactly one generated Gallery block')
+        start = original.index(README_START); end = original.index(README_END)
+        if start >= end:
+            raise ValueError(f'{name} has reversed Gallery markers')
+        rendered = original[:start] + readme_preview(selected, site['url'], language) + original[end + len(README_END):]
+        if rendered != original:
+            changes.append((target, rendered))
+    if check and changes:
+        raise ValueError('Gallery README previews are stale; run --sync-readme-preview: ' + ', '.join(p.name for p, _ in changes))
+    if not check:
+        for target, rendered in changes:
+            target.write_text(rendered, encoding='utf-8')
+    return {'status': 'current' if check or not changes else 'updated',
+            'works': [w['id'] for w in selected],
+            'changed': [p.relative_to(root).as_posix() for p, _ in changes], 'published': False}
+
+
 def build(root: Path, output: Path, *, cloudflare_token: str = '', metrics: dict | None = None) -> dict:
     root = root.resolve(); output = output.absolute()
     # Refuse overwriting source areas or arbitrary directories. Existing generated sites are replaceable.
@@ -293,6 +386,8 @@ def build(root: Path, output: Path, *, cloudflare_token: str = '', metrics: dict
     catalog, works, inputs = load_source(root)
     site = site_settings(root, catalog, cloudflare_token)
     metrics = gallery_metrics.clean_snapshot(metrics or {'schema':gallery_metrics.SCHEMA,'status':'unavailable'},set(catalog['works']))
+    if metrics.get('history',{}).get('site_url',site['url']) != site['url']:
+        raise ValueError('Analytics history belongs to a different Gallery site')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.gallery-build-', dir=output.parent) as temporary:
         staging = Path(temporary)/'site';staging.mkdir()
@@ -319,6 +414,8 @@ def build(root: Path, output: Path, *, cloudflare_token: str = '', metrics: dict
                    '启用时由 Cloudflare 处理统计请求；不记录搜索词，不使用 Cookie 或跨站个人标识。</p>'
                    '<p>页面浏览与访问次数反映趋势，不等同独立人数。当前不统计下载完成或指令复制。'
                    '直接打开 PDF、脚本拦截和采样可能影响统计范围。</p>'
+                   '<p>累计统计从标注的UTC日期起算，更早访问不推算。公开快照仅保存每日汇总数，'
+                   '重复刷新替换重叠日期；若长期未更新造成缺期，会明确标注。数据可能随统计服务修订。</p>'
                    '<p><a href="https://developers.cloudflare.com/web-analytics/about/">Cloudflare 统计说明</a></p>'
                    '<p><a href="privacy.html?analytics=off">在此浏览器停用统计</a> · '
                    '<a href="privacy.html?analytics=on">恢复允许统计</a></p>'
@@ -350,9 +447,16 @@ def main() -> None:
     parser.add_argument('--cloudflare-token',default=os.environ.get('GALLERY_CLOUDFLARE_TOKEN',''),
                         help='Public Cloudflare Web Analytics site token; empty disables collection')
     parser.add_argument('--metrics',type=Path,help='Validated aggregate snapshot from gallery_metrics.py')
+    preview = parser.add_mutually_exclusive_group()
+    preview.add_argument('--sync-readme-preview', action='store_true', help='Update only the two local README Gallery blocks; never publish')
+    preview.add_argument('--check-readme-preview', action='store_true', help='Read-only check that both README Gallery blocks are current')
     args=parser.parse_args()
-    try:result=build(REPO,args.output,cloudflare_token=args.cloudflare_token,
-                     metrics=json.loads(args.metrics.read_text()) if args.metrics else None)
+    try:
+        if args.sync_readme_preview or args.check_readme_preview:
+            result = sync_readme_preview(REPO, check=args.check_readme_preview)
+        else:
+            result=build(REPO,args.output,cloudflare_token=args.cloudflare_token,
+                         metrics=json.loads(args.metrics.read_text()) if args.metrics else None)
     except (ValueError,KeyError,TypeError,OSError) as error:parser.exit(2,f'ERROR: {error}\n')
     print(json.dumps(result,ensure_ascii=False,indent=2))
 

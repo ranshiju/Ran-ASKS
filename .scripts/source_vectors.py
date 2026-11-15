@@ -146,14 +146,14 @@ def search(query, *, repo=si.REPO, topk=5, domain="academic", source_id=""):
     result["vector_channel"] = status
     if not query.strip():
         status["status"] = "empty_query"
-        return result
+        return si.search_handoff(result)
     if len(query.encode("utf-8")) > MAX_BYTES:
         status.update(status="query_over_limit", max_query_utf8_bytes=MAX_BYTES)
-        return result
+        return si.search_handoff(result)
     db = _connection(repo)
     if db is None:
         status["status"] = "index_missing"
-        return result
+        return si.search_handoff(result)
     import embed_helper as eh
     np = eh.require_numpy()
     namespace = eh._cache_namespace()
@@ -176,7 +176,7 @@ def search(query, *, repo=si.REPO, topk=5, domain="academic", source_id=""):
     status["coverage_basis"] = "existing_lexical_segments; oversized_lines_remain_unindexed"
     if not loaded:
         status["status"] = "no_current_vectors"
-        return result
+        return si.search_handoff(result)
     started = time.perf_counter()
     try:
         q = eh.embed_cached_batch([query], request_options={"batch_size": 1, "timeout": 30, "retries": 0}, events=events)[0]
@@ -193,7 +193,7 @@ def search(query, *, repo=si.REPO, topk=5, domain="academic", source_id=""):
                     best[key] = (float(score), parents[key], {"start": row["start"], "end": row["end"]})
     except (RuntimeError, ValueError, OSError, KeyError, TypeError) as exc:
         status.update(status="query_failed", error_type=type(exc).__name__, http_status=getattr(exc, "status_code", None))
-        return result
+        return si.search_handoff(result)
     finally:
         status["query_seconds"] = round(time.perf_counter() - started, 6)
     limit = max(1, min(int(topk), 20))
@@ -235,7 +235,7 @@ def search(query, *, repo=si.REPO, topk=5, domain="academic", source_id=""):
     result["passage_preference"] = "rrf_lexical_vector"
     result["source_candidate_cap"] = None if source_id else 2
     status["status"] = "partial" if status["missing_sources"] or status["invalid_sources"] else "ready"
-    return result
+    return si.search_handoff(result)
 
 
 def main():

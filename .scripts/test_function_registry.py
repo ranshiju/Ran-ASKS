@@ -25,7 +25,7 @@ def test_registry_and_runtime_have_exact_coverage():
     data = registry.load_registry()
     assert registry.validate_registry(data) == []
     assert registry.validate_runtime(data) == []
-    assert len(data["functions"]) == 39
+    assert len(data["functions"]) == 41
     assert data["functions"]["academic.citing_papers"]["control_owners"] == ["code"]
     assert data["functions"]["academic.paper_impact"]["backends"] == ["agent"]
     assert data["functions"]["artifact.review"]["backends"] == ["agent"]

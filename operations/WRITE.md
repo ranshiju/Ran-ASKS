@@ -22,6 +22,8 @@
 - 学术简历、个人简介、项目申报辅助材料、合作交流材料、会议介绍等专业材料；
 - 用户明确指定的 Markdown、Word、PDF、PPT 文字内容或版式文档。
 
+实际制作或修改 PPT，若需要可复用局部图形，按需加载 `presentation-asset/general`，通过 `wg.py presentation-asset search/show/use/insert` 调用素材；需要整页模板仍用 `slide-library`。已有合适素材直接适配，没有合适项再创作，来源与参数保留在实例记录。
+
 明确要求逐页协作制作原生可编辑 PPT 时，在当前工作上下文内另加载 `python3 .scripts/route.py --capability presentation --capability-profile create`，其成熟度与当前可执行动作以 `operations/PRESENTATION.md` 为准；当前阶段1B已提供单页状态、整套导出与三个独立按需辅助入口，真实用户验收尚待完成。仅写 PPT 文字提纲或讲稿仍用本规范，图片/PDF 重建沿用独立重建能力。
 
 研究论文仍以 `research` 作为持续工作。Agent 真正开始起草、改写或润色论文正文时，在该工作上下文内调用 `write` 的 academic profile；讨论研究问题、核对数据和运行实验时继续保持 `research`，无需加载写作能力。

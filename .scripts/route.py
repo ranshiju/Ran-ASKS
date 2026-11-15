@@ -273,6 +273,7 @@ CAPABILITY_ROUTES = {
     "code-library": {"general": [("operations/CODE_LIBRARY.md", None)]},
     "extract-data": {"general": [("operations/EXTRACT_DATA.md", None)]},
     "slide-library": {"general": [("operations/SLIDE_LIBRARY.md", None)]},
+    "presentation-asset": {"general": [("operations/PRESENTATION_ASSET.md", None)]},
     "graph-visualize": {"general": [("operations/GRAPH_VISUALIZE.md", None)]},
     "cv": {
         "general": [
@@ -281,7 +282,7 @@ CAPABILITY_ROUTES = {
     },
     "presentation": {
         "create": [
-            ("operations/PRESENTATION.md", ["入口与成熟度", "单篇论文制作方式选择", "当前可执行动作", "创作边界", "逐页制作与确认纪律", "学术论文报告的叙事与风格", "第一页（标题页）制作流程"]),
+            ("operations/PRESENTATION.md", ["入口与成熟度", "单篇论文制作方式选择", "当前可执行动作", "创作边界", "局部素材按需制作与复用", "逐页制作与确认纪律", "学术论文报告的叙事与风格", "第一页（标题页）制作流程"]),
         ],
         "form-check": [("operations/PRESENTATION.md", ["PPT形式检查入口"])],
         "evidence-check": [("operations/PRESENTATION.md", ["PPT证据核查入口"])],

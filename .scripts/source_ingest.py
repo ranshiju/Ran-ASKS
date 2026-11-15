@@ -296,6 +296,31 @@ def reading_navigation(lines, start, end, path, *, blocks=None):
                                 "added_lines": added_lines}}
 
 
+def heading_navigation(lines, line, end, path, *, blocks):
+    """Enter a trailing heading's body instead of reading the preceding section."""
+    if any(text.strip() for text in lines[line:end]):
+        return None
+    fallback = {"reading_context": {"status": "limited", "reason": "heading_body_unavailable"}}
+    if len(lines[line-1]) <= 8000:
+        fallback.update(read_action="read_raw", read_input={"locator": f"{path}#L{line}-L{line}"})
+    block = next((block for block in blocks if block[0] > line), None)
+    if block is None or any(text.strip() for text in lines[line:block[0]-1]):
+        return fallback  # Another heading or skipped fence separates the next block.
+    _, last, kind = block
+    if kind == "unclosed_math":
+        fallback["reading_context"]["reason"] = "unclosed_display_math"
+        return fallback
+    added_lines = last-end
+    added_chars = len("\n".join(lines[end:last])) + 1
+    total_chars = len("\n".join(lines[line-1:last]))
+    if total_chars > 8000 or added_chars > 2000 or added_lines > 32:
+        fallback["reading_context"]["reason"] = "structural_context_exceeds_budget"
+        return fallback
+    return {"read_action": "read_raw", "read_input": {"locator": f"{path}#L{line}-L{last}"},
+            "reading_context": {"status": "heading_start", "added_chars": added_chars,
+                                "added_lines": added_lines}}
+
+
 def index_path(repo):
     return managed(repo, "academic/sources/index.sqlite")
 
@@ -444,6 +469,30 @@ def source_candidates(rows, *, repo, query, issues):
     return candidates
 
 
+def search_handoff(result):
+    """Derive advisory navigation from final candidates, including hybrid fallbacks."""
+    result["next"] = "read_raw" if result["candidates"] else None
+    # This top-level field is owned by the empty-result handoff, not by candidates.
+    result.pop("limitations", None)
+    if result["candidates"]:
+        return result
+    limitations = []
+    if not terms(result["query"]):
+        limitations.append("The query has no usable lexical terms; no lexical search ran.")
+    if not result["index_available"]:
+        limitations.append("The lexical index is unavailable; no lexical search ran.")
+    if result["issues"]:
+        limitations.append("Source/index validation issues may have excluded candidates; see issues.")
+    if not limitations:
+        limitations.append("No validated lexical matches in the searched index.")
+    if "vector_channel" in result:
+        limitations.append("No validated hybrid candidates; see vector_channel for coverage and failures.")
+    limitations.append("No reading target in this result. Choose further navigation from the question; "
+                        "empty retrieval does not establish absence of relevant content.")
+    result["limitations"] = limitations
+    return result
+
+
 def search(query, *, repo=REPO, topk=5, domain="academic", source_id="", retrieval="lexical"):
     import lexical_relevance as lr
     if domain not in ("academic", "public", ""):
@@ -469,12 +518,12 @@ def search(query, *, repo=REPO, topk=5, domain="academic", source_id="", retriev
     if scoped:
         result["search_scope"] = {"source_id": source_id, "parse_id": parsed_scope["parse_id"]}
     if not query_terms and not scoped:
-        return result
+        return search_handoff(result)
     conn = connect_index(repo)
     if conn is None:
         if scoped:
             result["issues"].append({"source_id": source_id, "error": "source index missing; resume to rebuild"})
-        return result
+        return search_handoff(result)
     result["index_available"] = True
     try:
         if scoped:
@@ -482,7 +531,7 @@ def search(query, *, repo=REPO, topk=5, domain="academic", source_id="", retriev
             if not indexed or indexed["parse_id"] != parsed_scope["parse_id"] or indexed["text_sha256"] != parsed_scope["text_sha256"]:
                 raise ValueError("source index missing/stale; resume to rebuild")
         if not query_terms:
-            return result
+            return search_handoff(result)
         expression = " OR ".join('"'+t.replace('"','""')+'"' for t in query_terms[:32])
         scope_sql = " AND c.source_id=?" if scoped else ""
         parameters = [expression] + ([source_id] if scoped else []) + [limit*5]
@@ -507,14 +556,53 @@ def search(query, *, repo=REPO, topk=5, domain="academic", source_id="", retriev
         result["candidates"] = result["candidates"][:limit]
     finally:
         conn.close()
+    return search_handoff(result)
+
+
+def section_navigation(lines, path):
+    """Optional whole Markdown sections; explicit hierarchy, never semantic grouping."""
+    ranges, stack, fence = {}, [], None
+    prefix, nonblank = [0], [0]
+    for n, line in enumerate(lines, 1):
+        prefix.append(prefix[-1] + len(line) + 1)
+        nonblank.append(n if line.strip() else nonblank[-1])
+        delimiter = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if delimiter:
+            if fence is None:
+                fence = delimiter[1]
+            elif delimiter[1][0] == fence[0] and len(delimiter[1]) >= len(fence) and not delimiter[2].strip():
+                fence = None
+            continue
+        if fence:
+            continue
+        heading = re.match(r"^ {0,3}(#{1,6})[ \t]+(.+?)\s*#*\s*$", line)
+        if not heading:
+            continue
+        level = len(heading[1])
+        while stack and stack[-1][1] >= level:
+            start, _ = stack.pop()
+            ranges[start] = nonblank[n-1]
+        stack.append((n, level))
+    for start, _ in stack:
+        ranges[start] = nonblank[-1]
+    result = {}
+    for start, end in ranges.items():
+        chars = prefix[end] - prefix[start-1] - 1
+        status = 'limited' if chars > 8000 else 'heading_only' if start == end else 'readable'
+        section = {'start_line': start, 'end_line': end, 'chars': chars, 'status': status}
+        if status == 'readable':
+            section.update(read_action='read_raw', read_input={'locator': f'{path}#L{start}-L{end}'})
+        result[start] = section
     return result
 
 
-def outline(source_id, *, repo=REPO, query="", start_line=1, limit=40):
+def outline(source_id, *, repo=REPO, query="", start_line=1, limit=40, include_sections=False):
     """Bound structural navigation from a current carrier, never read evidence."""
     start_line, limit = int(start_line), int(limit)
     if start_line < 1 or not 1 <= limit <= 80:
         raise ValueError("outline requires start_line >= 1 and limit between 1 and 80")
+    if not isinstance(include_sections, bool):
+        raise ValueError("include_sections must be a boolean")
     record = load_receipt(repo, source_id)
     parsed = selected_parse(record)
     if record.get("source_status") != "source_ready" or not parsed:
@@ -524,6 +612,7 @@ def outline(source_id, *, repo=REPO, query="", start_line=1, limit=40):
     lines = text.splitlines()
     pieces, _ = segments(text)
     read_blocks = reading_blocks(lines)
+    sections = section_navigation(lines, parsed["text_path"]) if include_sections else {}
     entries, fence, piece_index = [], None, 0
     needle = " ".join(query.casefold().split())
     for n, line in enumerate(lines, 1):
@@ -548,18 +637,30 @@ def outline(source_id, *, repo=REPO, query="", start_line=1, limit=40):
         start, end = n, n
         if piece_index < len(pieces) and pieces[piece_index][0] <= n:
             start, end = pieces[piece_index][:2]
+        navigation = heading_navigation(lines, n, end, parsed["text_path"], blocks=read_blocks) if heading else None
+        if navigation is None:
+            navigation = reading_navigation(lines, start, end, parsed["text_path"], blocks=read_blocks)
         entries.append({"kind": "source", "structure_kind": "heading" if heading else "caption",
                         "line": n, "title": label[:200], "title_truncated": len(label) > 200,
-                        **reading_navigation(lines, start, end, parsed["text_path"], blocks=read_blocks),
+                        **({"section": sections[n]} if heading and include_sections else {}),
+                        **navigation,
                         "locator": f"{parsed['text_path']}#L{start}-L{end}"})
         if len(entries) > limit:
             break
-    return {"schema": "source-outline-v1", "source_id": source_id, "parse_id": parsed["parse_id"],
+    result = {"schema": "source-outline-v1", "source_id": source_id, "parse_id": parsed["parse_id"],
             "query": query, "start_line": start_line, "line_count": len(lines),
             "candidates": entries[:limit], "next_start_line": entries[limit]["line"] if len(entries) > limit else None,
             "limitations": ["Only explicit Markdown headings and numbered captions; literal label filtering, not semantic search.",
                              "Locators contain the label's existing segment (or its line); tables, legends and sections may extend beyond it. Read relevant Raw to verify."],
             "next": "read_raw"}
+    if not entries:
+        result["next"] = "source_search"
+        result["limitations"].append(
+            "No matching labels in the scanned range; the body was not searched. "
+            "For a missing topic, use source_search scoped to this source.")
+        if needle:
+            result["next_input"] = {"source_id": source_id, "query": query}
+    return result
 
 
 def bundle_files(folder, source_hash):
@@ -871,6 +972,7 @@ def main(argv=None):
     p.add_argument("--query", default="")
     p.add_argument("--start-line", type=int, default=1)
     p.add_argument("--limit", type=int, default=40)
+    p.add_argument("--include-sections", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "ingest":
         if args.reuse_parse and len(args.files)!=1:
@@ -886,7 +988,8 @@ def main(argv=None):
             elif args.command == "search":
                 output = search(args.query, topk=args.topk, source_id=args.source_id, retrieval=args.retrieval)
             elif args.command == "outline":
-                output = outline(args.source_id, query=args.query, start_line=args.start_line, limit=args.limit)
+                output = outline(args.source_id, query=args.query, start_line=args.start_line, limit=args.limit,
+                                 include_sections=args.include_sections)
             else:
                 output = inspect_source(args.source_id)
         except (OSError, ValueError, KeyError, sqlite3.Error) as exc:

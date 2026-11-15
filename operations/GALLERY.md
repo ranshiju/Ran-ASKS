@@ -6,7 +6,7 @@ Gallery 是成果展示与功能发现入口。首页展示精选成品；详情
 
 本能力属于 **shared 静态内容与发布边界**，由当前宿主 Agent 选择作品、核对材料和撰写介绍，现有确定性发布器负责白名单与发布校验。没有新的 Agent/API 执行 adapter，不改变 Raw、Wiki 或 `graph.db`。
 
-- `gallery/README.md`：仓库内阅读入口与本地预览说明。仓库主 README 仅在开头给出 Gallery 入口，不嵌入作品预览。
+- `gallery/README.md`：仓库内阅读入口与本地预览说明。中英文仓库主 README 的开头展示三项近期精选预览，每项直达作品详情，另有全部作品入口。
 - `gallery/catalog.json`：展示顺序、首页推荐作品与功能分类；一件作品可以关联多个功能。
 - `gallery/site/`：无第三方前端运行依赖的样式与渐进增强脚本。
 - `gallery/site/analytics.js`：可选Cloudflare采集加载器，只在配置的生产地址运行，统计失败不影响阅读。
@@ -60,12 +60,27 @@ Gallery 是成果展示与功能发现入口。首页展示精选成品；详情
 1. 按上面的收录步骤准备真实成品，放入 `gallery/works/<slug>/`。`slug` 使用小写字母、数字和连字符；不添加占位作品。
 2. 在 `metadata.json` 的 `presentation` 中填写 `name`、`summary`、`type_label`、`format_label`、`audience`、`cover`、`preview`、`downloads`、`capability_uses`、`prompt`、`source_note`、`credit`、`boundary`。`capability_uses` 的 ID 必须与作品 `capabilities` 一致；仅描述实际贡献。
 3. 多语言或多文档作品可增加 `presentation.previews` 数组，每项包含 `file`、`label`、`document`：分别是预览图片、明确的语言/页码标签、已列入 `downloads` 的完整文档。页面逐项展示，关闭 JavaScript 也能阅读。长文档的首页预览必须标注“首页”，并链接完整 PDF。
-4. `cover`、`preview`、额外预览和下载文件必须出现在已有 `files` 哈希表中。预览使用 PNG/JPEG/WebP；下载可以指向已核验成品，站点不复制整个作品文件夹。网站页脚链接当前系统说明和更新日志，历史作品内容沿用创作时的版本背景。
+4. `cover`、`preview`、额外预览和下载文件必须出现在已有 `files` 哈希表中。预览使用 PNG/JPEG/WebP；下载可以指向已核验成品或 ZIP 素材包，站点不复制整个作品文件夹。ZIP 沿用逐文件白名单与 SHA-256 校验；构建器只复制，不解包或执行。收录者逐项核对压缩包成员、公开权限、文本/XML 元数据和来源边界，在 `gallery/local/` 保存成员清单与哈希，不能将整个本地素材目录直接打包。网站页脚链接当前系统说明和更新日志，历史作品内容沿用创作时的版本背景。
 5. 可在作品元数据顶层设置 `related_works`（作品 ID 数组），生成关联作品入口。引用必须指向同一目录中的其他作品，禁止重复、自引用或不存在的 ID；需要互相链接时分别登记。
 6. 把作品 ID 加入 `catalog.json` 的 `works`；顺序即目录顺序。`featured` 指定首页推荐作品。新功能可在 `capabilities` 添加稳定 ID、显示名称、用途和真实 `operations/` 文档路径；只展示已有作品使用的功能。作品类型选项从实际作品自动生成。
 7. 逐文件更新发布白名单，再构建并检查页面。元数据哈希变化时同步本地 provenance，保留先前记录；成品不变时无需重新导出或增加作品版本。
 
-### 构建与预览
+### GitHub README 近期作品入口
+
+双语 README 的 `gallery-recent:start/end` 标记区块由既有构建器生成。先验证 Gallery 的白名单与哈希，再按 `selected_on` 收录日期由新到旧选择最多三项，优先不同 `kind`；日期相同沿 `catalog.json` 顺序，类型不足时用其余近期作品补足。不按文件修改时间或本地文件存在推断已上线。日期须使用有效 `YYYY-MM-DD`。
+
+预览直接引用已核验的 `presentation.cover`，不另维护拼图图片；封面和标题分别链接规范 `site_url` 下的作品详情。中文使用 `presentation.name`；英文优先可选 `presentation.name_en`，未提供译名时保留原名。三列静态 HTML 表格兼容 GitHub README，不需要脚本，保留“浏览全部作品”。同源数据确保两种语言的作品集合及顺序相同。
+
+```bash
+python3 .scripts/gallery_site.py --sync-readme-preview
+python3 .scripts/gallery_site.py --check-readme-preview
+```
+
+`sync` 先检查两份文件都恰有一个合法标记区块，再只更新区块；源仓库写入 manifest 映射的公开 README 资产，导出仓库写入根 README。`check` 只读，过期返回非零，不自动改文件。新增作品、收录日期、类型、顺序、封面路径或标题变化后运行同步；正式发布前必须通过只读检查，并核对选中封面及详情存在于同一拟发布版本。封面内容原地更新时 README 引用保持，仍须验证作品哈希。
+
+这两条命令不会提交、推送、部署或修改站点。暂缓线上更新时只保存本地候选；用户授权后才将 README 和目标作品按同一次受管发布同步，避免入口指向尚未上线的作品。旧 `docs/assets/gallery-preview.png` 拼图已退出发布映射，源文件仅作历史留存。
+
+### 网站构建与预览
 
 ```bash
 python3 .scripts/gallery_site.py
@@ -100,7 +115,11 @@ GitHub仓库Actions配置如下：
 
 无采集token或本地预览不加载远程统计脚本；浏览器只在规范地址的origin和项目路径匹配时加载Cloudflare固定地址。设置`spa:false`避免搜索/筛选的history变更成为额外页面浏览。统计说明页允许使用`?analytics=off`在当前浏览器持久停用；存储不可用时至少停用当前页。恢复用`?analytics=on`。采集代码无管理密钥；服务脚本拦截不影响页面功能。
 
-统计采集与公开汇总是两个权限边界。定时任务从GraphQL读取近30个UTC自然日（含当日），只保留已发布首页/说明/作品路径，生成近7日/30日PV、Visits与前五件作品的浏览量。首页静态显示汇总和更新时间，`metrics.json`只包含经过筛选的汇总，不含账户凭据、访客IP、原始搜索或来源路径。Cloudflare采样及拦截可能使结果不完整，不能当审计计数或实际使用人数。
+统计采集与公开汇总是两个权限边界。定时任务从GraphQL读取近30个UTC自然日（含当日），只保留已发布首页/说明/作品路径，生成近7日/30日PV、Visits与前五件作品的浏览量。首页静态显示累计及窗口汇总和更新时间，`metrics.json`只包含经过筛选的公开按日汇总，不含账户凭据、访客IP、原始搜索或来源路径。Cloudflare采样及拦截可能使结果不完整，不能当审计计数或实际使用人数。
+
+累计统计使用同一`metrics.json`的站点绑定`history.days`，每个UTC日期只保留一份PV/Visits：新30日响应替换重叠日期（含当日及零值修订），更早日期继续保留，不能把多次滚动窗口直接相加。`cumulative`由已清洗的日记录重算，标注起始日期和`missing_days`；长期停更造成的缺期不能补零，页面明确说明只计已记录日期。旧格式仅有窗口总数时，从首次可取得的30日范围起算，更早访问不虚构；这不是无起点限制的建站总量。聚合按各次查询时的公开页面白名单完成，旧公开页面历史总数不暴露路径。
+
+`--reuse-published`每次先读取已有线上快照，再查询Cloudflare。旧快照不可读/非法时非零退出，阻止部署以免累计被重置；新API失败则保存原有效快照并标stale。首次独立部署可省略该选项生成初始快照，已有历史的站点不得据此绕过读取失败。没有额外数据库、收费服务或源库统计提交。
 
 汇总读取失败或凭据缺失时，尽量保留此前已发布的有效快照并标为stale；无旧数据则标unavailable并显示横线，不伪造零。只有成功API响应确实无访问时才显示零。日常刷新不回写源仓库、不修改版本或创建统计提交；若每日workflow长期未运行，页面时间仍能反映快照年龄。定时运行时间以GitHub调度为准。
 

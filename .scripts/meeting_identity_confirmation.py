@@ -94,7 +94,7 @@ def _replace_prose(text: str, mapping: dict[str, str]) -> str:
 
 
 def _people_draft(repo: Path, canonical: str, label: str, when: str,
-                  source: str, quote: str) -> dict:
+                  source: str, quote: str, *, nickname: str = "", tentative: bool = False) -> dict:
     path = _public_path(repo, canonical + ".md")
     if path.exists():
         fm, _, body = ingest_check.parse_frontmatter(path.read_text())
@@ -107,9 +107,12 @@ def _people_draft(repo: Path, canonical: str, label: str, when: str,
         fm["updated"] = when
     else:
         fm = {"title": label, "type": "people", "sources": [RAW_FACTS],
-              "source_type": "user-assertion", "date": when, "confidence": "medium",
+              "source_type": "user-assertion", "date": when, "confidence": "low" if tentative else "medium",
               "status": "current", "created": when, "updated": when}
         body = f"# {label}\n\n## Navigation\n\n{label}的会议姓名确认入口。\n\n## Content\n"
+    if nickname:
+        existing = repair.gl.parse_list_field(fm, "nickname")
+        fm["nickname"] = list(dict.fromkeys([*existing, nickname]))
     footnote = "identity-" + source.split("#", 1)[1]
     body = body.rstrip() + f"\n\n### 姓名确认 {when} {footnote[-8:]}\n\n{quote}[^{footnote}]\n\n[^{footnote}]: {source}\n"
     content = "---\n" + yaml.safe_dump(fm, allow_unicode=True, sort_keys=False) + "---\n" + body.lstrip()
@@ -128,7 +131,9 @@ def _task(repo: Path, folder: Path, manifest: dict) -> dict:
         protocol={"name": SCHEMA, "validator": "meeting_identity_confirmation.apply"},
         commands={"commit": command},
         context={"correction_count": len(manifest["corrections"]),
-                 "review": "复核已预填的局部姓名修改；移除已被本次确认取代的身份待确认表述，保留其他内容、来源限制与引用。IR、人物页和引用已机械生成。"},
+                 "shared_archive_order": "多份确认按 prepare→复核→apply 顺序推进，再准备下一份；旧快照仅可显式刷新追加部分。",
+                 "identity_certainty": "tentative 保留原称呼与待确认角色，不产生确定人物角色边；逐人 statement 为原话摘录，nickname 仅接受明确可全局复用的称呼。",
+                 "review": "复核已预填的局部姓名修改；仅明确确认的项移除身份待确认表述，tentative 保留限定。保留历史确认原话、其他内容、来源限制与引用。IR、人物页和引用已机械生成。"},
     )
     return {"status": "prepared", "schema": SCHEMA, "agent_task": task,
             "bundle": relative, "correction_count": len(manifest["corrections"]),
@@ -157,8 +162,21 @@ def prepare(transaction_id: str, input_path: Path) -> dict:
     seen, people, old_targets = set(), set(), {}
     mapping, decisions = {}, []
     for row in rows:
-        if not isinstance(row, dict) or set(row) != {"mention", "label", "canonical"} or any(not isinstance(v, str) or not v.strip() for v in row.values()):
+        required = {"mention", "label", "canonical"}
+        if (not isinstance(row, dict) or not required <= set(row)
+                or set(row) - required - {"statement", "certainty", "nickname"}
+                or any(not isinstance(v, str) or not v.strip() for v in row.values())):
             raise ValueError("each correction requires mention, label and canonical strings")
+        certainty = row.get("certainty", "confirmed")
+        if certainty not in {"confirmed", "tentative"}:
+            raise ValueError("certainty must be confirmed or tentative")
+        excerpt = row.get("statement", "")
+        if excerpt and (excerpt not in supplied["statement"] or row["label"] not in excerpt):
+            raise ValueError("person statement must be a verbatim excerpt containing the label")
+        nickname = row.get("nickname", "")
+        if nickname and (certainty != "confirmed" or nickname != row["mention"] or "/" in nickname
+                         or len(nickname) > 60 or any(c in nickname for c in "\n\r[]{}<>|")):
+            raise ValueError("nickname requires one explicit confirmed source mention")
         if len(row["label"]) > 100 or any(c in row["label"] for c in "\n\r[]{}<>|"):
             raise ValueError("label must be a plain person name")
         if not re.fullmatch(r"academic/wiki/authors/[\w-]+", row["canonical"]):
@@ -171,18 +189,31 @@ def prepare(transaction_id: str, input_path: Path) -> dict:
             raise ValueError("each correction must select one existing compiler identity decision")
         seen.update(mentions)
         people.add(row["canonical"])
-        mapping.update({mention: row["label"] for mention in mentions})
+        if certainty == "confirmed":
+            mapping.update({mention: row["label"] for mention in mentions})
         decisions.append(found[0])
         if found[0].get("canonical"):
             old = found[0]["canonical"]
             if any(item.get("canonical") == old and item["mention"] != row["mention"] for item in resolution["compiler_entity_resolutions"]):
                 raise ValueError("existing canonical identity is shared; use explicit projection repair")
-            old_targets[old] = row["canonical"]
+            if certainty == "tentative":
+                if any(old in (r.get("subject"), r.get("object")) for r in state["meeting_ir_content"]["relations"]):
+                    raise ValueError("tentative identity affects explicit relations; projection review required")
+                old_page = _public_path(repo, old + ".md")
+                old_fm, _, _ = ingest_check.parse_frontmatter(old_page.read_text())
+                if old_fm.get("title"):
+                    mapping[old_fm["title"]] = row["mention"]
+                if any(r.get("person") in {old, old.rsplit("/", 1)[-1]}
+                       for r in state["meeting_ir_content"].get("person_updates", [])):
+                    raise ValueError("tentative identity affects student projection; projection review required")
+            else:
+                old_targets[old] = row["canonical"]
     digest = hashlib.sha256(transaction_id.encode() + b"\0" + repair._json_bytes(supplied)).hexdigest()[:16]
     folder = repo / "temp/meeting-repair" / f"{transaction_id}-confirmation-{digest}"
     if (folder / "confirmation.json").exists():
         return _task(repo, folder, _json(folder / "confirmation.json"))
-    if all(d.get("status") == "resolved" and d.get("canonical") == r["canonical"] for d, r in zip(decisions, rows)):
+    if (not any(set(r) - {"mention", "label", "canonical"} for r in rows)
+            and all(d.get("status") == "resolved" and d.get("canonical") == r["canonical"] for d, r in zip(decisions, rows))):
         for row in rows:
             page = _public_path(repo, row["canonical"] + ".md")
             fm, _, _ = ingest_check.parse_frontmatter(page.read_text())
@@ -193,14 +224,22 @@ def prepare(transaction_id: str, input_path: Path) -> dict:
     facts, corrections, updates, relations = [], [], [], []
     for index, row in enumerate(rows):
         fact_id = f"fact-meeting-name-{digest}-{index + 1}"
-        quote = (f"针对会议 {state['meeting_id']}，用户确认原文提及“{row['mention']}”对应姓名“{row['label']}”。"
-                 f"用户原话（JSON 字符串）：{json.dumps(supplied['statement'], ensure_ascii=False)}")
+        tentative = row.get("certainty", "confirmed") == "tentative"
+        qualifier = "暂定（身份待确认）" if tentative else "确认"
+        quote = f"针对会议 {state['meeting_id']}，用户{qualifier}原文提及“{row['mention']}”对应姓名“{row['label']}”。"
+        if row.get("statement"):
+            quote += f"原话摘录（JSON 字符串）：{json.dumps(row['statement'], ensure_ascii=False)}"
         source = f"{RAW_FACTS}#{fact_id}"
-        facts.append(f"- [{when}] **{quote}** {{: #{fact_id}}}")
-        corrections.append({**row, "source": source, "quote": quote})
-        updates.append(_people_draft(repo, row["canonical"], row["label"], when, source, quote))
+        original = (f" 用户完整原话（JSON 字符串）：{json.dumps(supplied['statement'], ensure_ascii=False)}"
+                    if index == 0 else f" 完整原话见 {RAW_FACTS}#fact-meeting-name-{digest}-1")
+        facts.append(f"- [{when}] **{quote}{original}** {{: #{fact_id}}}")
+        corrections.append({k: row[k] for k in ("mention", "label", "canonical")} | {
+            "source": source, "quote": quote, "certainty": "tentative" if tentative else "confirmed"})
+        updates.append(_people_draft(repo, row["canonical"], row["label"], when, source, quote,
+                                     nickname=row.get("nickname", ""), tentative=tentative))
         relations.append({"page": updates[-1]["page"], "fact_id": fact_id,
-                          "subject": state["wiki_path"], "predicate": "涉及", "object": row["canonical"],
+                          "subject": state["wiki_path"] if not tentative else row["canonical"],
+                          "predicate": "涉及", "object": row["canonical"] if not tentative else quote,
                           "confidence": "[可追溯]"})
     pending = folder / "facts-pending.md"
     repair._atomic_bytes(pending, ("\n\n".join(facts) + "\n").encode())
@@ -216,7 +255,8 @@ def prepare(transaction_id: str, input_path: Path) -> dict:
         for item in ir[section]:
             for row, decision in zip(rows, decisions):
                 if item[label] in [row["mention"], *_source_mentions(row["mention"], source_text)] or (decision.get("canonical") and item[endpoint] == decision["canonical"]):
-                    item[endpoint], item[label] = row["canonical"], row["label"]
+                    tentative = row.get("certainty", "confirmed") == "tentative"
+                    item[endpoint], item[label] = ("", row["mention"]) if tentative else (row["canonical"], row["label"])
     for section, items in ir.items():
         if not isinstance(items, list):
             continue
@@ -230,11 +270,24 @@ def prepare(transaction_id: str, input_path: Path) -> dict:
     original_wiki = wiki.read_text()
     fm, _, body = ingest_check.parse_frontmatter(original_wiki)
     fm["updated"] = when
-    # Preserve source addresses and footnote definitions. The host reviews prose.
-    body = "\n".join(line if re.match(r"\s*\[\^[^]]+\]:", line) else _replace_prose(line, mapping) for line in body.splitlines())
-    note = f"\n\n### 姓名确认 {when}\n\n"
+    # Prior confirmation sections are historical assertions, not current names
+    # to rewrite. Preserve their quotations and links for the host's review.
+    lines, history_level = [], None
+    for line in body.splitlines():
+        heading = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if heading:
+            level, title = len(heading[1]), heading[2]
+            if history_level is not None and level <= history_level:
+                history_level = None
+            if title.startswith("姓名确认 "):
+                history_level = level
+        lines.append(line if history_level is not None or re.match(r"\s*\[\^[^]]+\]:", line)
+                     else _replace_prose(line, mapping))
+    body = "\n".join(lines)
+    note = f"\n\n### 姓名确认 {when} {digest[-8:]}\n\n"
     for index, row in enumerate(corrections):
-        note += f"- 原文“{row['mention']}”按用户确认记为 [[authors/{row['canonical'].split('/')[-1]}|{row['label']}]]。[^name-{digest}-{index}]\n"
+        qualifier = "按用户暂定关联（身份待确认）" if row["certainty"] == "tentative" else "按用户确认记为"
+        note += f"- 原文“{row['mention']}”{qualifier} [[{row['canonical']}|{row['label']}]]。[^name-{digest}-{index}]\n"
     note += "\n" + "\n".join(f"[^name-{digest}-{i}]: {row['source']}" for i, row in enumerate(corrections)) + "\n"
     body = body.replace("<!-- meeting-navigation:start -->", note + "\n<!-- meeting-navigation:start -->", 1) if "<!-- meeting-navigation:start -->" in body else body + note
     draft = "---\n" + yaml.safe_dump(fm, allow_unicode=True, sort_keys=False) + "---\n" + body.lstrip()
@@ -305,7 +358,10 @@ def _completed_repair(state: dict, corrections: list[dict]) -> dict | None:
             for correction in corrections:
                 matches = [row for row in resolution.get("compiler_entity_resolutions", [])
                            if row.get("mention") == correction["mention"]]
-                if len(matches) != 1 or matches[0].get("status") != "resolved" or matches[0].get("canonical") != correction["canonical"]:
+                tentative = correction.get("certainty", "confirmed") == "tentative"
+                if (len(matches) != 1 or matches[0].get("status") != ("unresolved" if tentative else "resolved")
+                        or matches[0].get("canonical") != ("" if tentative else correction["canonical"])
+                        or tentative and matches[0].get("candidate_canonical") != correction["canonical"]):
                     raise ValueError("completed correction was superseded; explicit repair required")
             # Reuse the existing evidence check: later appended facts are allowed,
             # but the cited assertion and confirmed people page must still agree.
@@ -319,6 +375,18 @@ def _completed_repair(state: dict, corrections: list[dict]) -> dict | None:
                 _write(repair.REPO / report, result)
             return {**result, "report": report}
     return None
+
+
+def refresh(transaction_id: str, bundle_path: str) -> dict:
+    """Explicit archive-only refresh; preserve the user's reviewed Wiki draft."""
+    repo = repair.REPO.resolve()
+    folder = _bundle(repo, bundle_path)
+    manifest = _json(folder / "confirmation.json")
+    if manifest.get("schema") != SCHEMA or manifest.get("transaction_id") != transaction_id:
+        raise ValueError("confirmation bundle belongs to a different meeting")
+    _preflight(repo, folder, manifest, _state(repo, transaction_id))
+    result = assertions.refresh_archive_snapshot(manifest["assertion_transaction"], repo=repo)
+    return {**_task(repo, folder, manifest), "archive_refresh_count": result["archive_refresh_count"]}
 
 
 def apply(transaction_id: str, bundle_path: str) -> dict:

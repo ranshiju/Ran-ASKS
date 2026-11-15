@@ -8,6 +8,25 @@ include:
   - gallery/site/app.js
   - gallery/site/analytics.js
   - gallery/RIGHTS.md
+  - gallery/works/presentation-assets/README.md
+  - gallery/works/presentation-assets/circular-dual-arrow.png
+  - gallery/works/presentation-assets/circular-dual-arrow.pptx
+  - gallery/works/presentation-assets/circular-dual-arrow.svg
+  - gallery/works/presentation-assets/colors.webp
+  - gallery/works/presentation-assets/cover.webp
+  - gallery/works/presentation-assets/metadata.json
+  - gallery/works/presentation-assets/presentation-assets.zip
+  - gallery/works/presentation-assets/preview.webp
+  - gallery/works/presentation-assets/quantum-inspired-computing.png
+  - gallery/works/presentation-assets/quantum-inspired-computing.pptx
+  - gallery/works/presentation-assets/quantum-inspired-computing.svg
+  - gallery/works/presentation-assets/quantum-materials-devices.png
+  - gallery/works/presentation-assets/quantum-materials-devices.pptx
+  - gallery/works/presentation-assets/quantum-materials-devices.svg
+  - gallery/works/presentation-assets/terahertz-optoelectronics.png
+  - gallery/works/presentation-assets/terahertz-optoelectronics.pptx
+  - gallery/works/presentation-assets/terahertz-optoelectronics.svg
+  - gallery/works/presentation-assets/usage.md
   - gallery/works/mpe-science-poster/README.md
   - gallery/works/mpe-science-poster/metadata.json
   - gallery/works/mpe-science-poster/cover.webp
@@ -157,7 +176,7 @@ include:
   - dsh/**
   # Generic host instructions live under operations; local memory remains excluded.
   # Includes oral-exam contracts, styles and help; private records remain excluded.
-  # Includes PRESENTATION.md and presentation-test-plan.md; no active presentation assets.
+  # Includes presentation contracts and generic asset seeds; no active user assets.
   - operations/**
   - academic/SCHEMA.md
   - admin/SCHEMA.md
@@ -168,6 +187,7 @@ include:
   - operations/engineering/engineering-handbook.md
   - operations/engineering/code-guidance.md
 exclude:
+  - slide-library/assets/**
   - gallery/local/**
   - private/**
   - "**/.DS_Store"
@@ -195,7 +215,6 @@ public_assets:
   README.zh-CN.md: operations/engineering/open-source-assets/README.zh-CN.md
   CHANGELOG.md: operations/engineering/open-source-assets/CHANGELOG.md
   THIRD_PARTY_NOTICES.md: operations/engineering/open-source-assets/THIRD_PARTY_NOTICES.md
-  docs/assets/gallery-preview.png: operations/engineering/open-source-assets/docs/assets/gallery-preview.png
   docs/assets/scientific-knowledge-compilation.png: operations/engineering/open-source-assets/docs/assets/scientific-knowledge-compilation.png
   docs/introduction/README.md: operations/engineering/open-source-assets/docs/introduction/README.md
   docs/introduction/ASKS-Chinese-Introduction-2026-09-03.md: operations/engineering/open-source-assets/docs/introduction/ASKS-Chinese-Introduction-2026-09-03.md
@@ -241,6 +260,8 @@ template_dirs:
   - slide-library/inbox
   - slide-library/templates
   - slide-library/compositions
+  # Empty user library only; generic seeds ship through operations/templates/**.
+  - slide-library/assets
 
 documentation_omissions:
   - paths: ["*.md"]

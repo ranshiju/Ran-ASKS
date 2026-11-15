@@ -1,4 +1,4 @@
-updated: '2026-11-05'
+updated: '2026-11-13'
 source: user-provided-provider-catalog
 enforced: false
 notes:
@@ -29,6 +29,15 @@ fallback:
   image_ocr: GLM-4.6V
   visual_qa: GLM-4.6V
   visual_reconstruction: GLM-4.5V
+http_429_switch:
+  from_model: GLM-5.3-FlashX
+  to_model: DeepSeek-V4.1-Flash
+  activation: explicit_user_instruction_2026_11_13
+  scope: one_same_endpoint_text_api_request_after_http_429
+  next_call: original_configured_model
+  runtime_configuration: LLM_429_FALLBACK_FROM_MODEL_and_LLM_429_FALLBACK_MODEL
+  probe_status: saved_failed_request_json_plan_succeeded_2026_11_13
+  notes: 维护者个人偏好；模型目录不执行路由。本机环境显式启用，自动429分支已离线回归；原失败请求直接发往目标模型返回有效JSON计划，未执行该计划，不证明原生工具/视觉或完整任务质量。失败及实际模型分别记账。
 presentation_artwork:
   model: GLM-5.3-FlashX
   api_profile: PRESENTATION_ARTWORK

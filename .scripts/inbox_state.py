@@ -32,7 +32,7 @@ KNOWN_STATUSES = frozenset({
     "superseded",
 })
 RESUME_TRANSITIONS = {
-    "failed": frozenset({"finalize", "graph_ready", "post_commit_projection"}),
+    "failed": frozenset({"write_wiki", "finalize", "graph_ready", "validate_graph", "post_commit_projection"}),
     "agent_required": frozenset({
         "write_wiki", "write_slots", "finalize", "propositions", "graph_ready",
         "update_graph", "validate_graph", "post_commit_projection", "finalize_tail", "bibliographic_review_required",

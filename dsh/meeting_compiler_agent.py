@@ -173,6 +173,7 @@ class MeetingCompilerAgent:
             "撤去不适用的学生档案投影不会修改原会议正文或 Raw。reason 简述修复依据，最多500字符。"
             "只使用下方实际列出的 evidence_id，人物更新的 person 精确复制学生目录 student_key。"
             "保持原记录的证据强度，不借修复扩写或推断新结论。程序会保留未列出的全部内容并重新校验。\n"
+            "evidence_candidates 只定位术语在原文中的出现，不证明该人物、动作或关系；先读对应上下文，再决定证据绑定或保留来源原称呼。\n"
             "[完整原文与程序分配的 evidence_id]\n" + source
             + "\n[已有学生候选目录]\n" + json.dumps(self.task.guidance_catalog or {}, ensure_ascii=False)
             + "\n[记录契约]\n" + json.dumps(records, ensure_ascii=False)

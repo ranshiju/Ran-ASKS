@@ -13,6 +13,23 @@ PATCH_VERSION = "meeting-ir-row-repair-v1"
 MAX_REPAIR_ROWS = 16
 
 
+def evidence_candidates(issues: list, catalog: list[dict] | None) -> list[dict]:
+    """Literal term locations for review, never automatic claim support."""
+    hints = []
+    for issue in issues[:16]:
+        match = re.search(r"contains unsupported acronym '([A-Za-z0-9_-]{1,60})'", str(issue))
+        if not match:
+            continue
+        term = match.group(1)
+        pattern = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(term) + r"(?![A-Za-z0-9_])")
+        ids = list(dict.fromkeys(row["evidence_id"] for row in catalog or []
+                                if pattern.search(row["text"])))[:3]
+        if ids:
+            hints.append({"issue": issue, "term": term, "evidence_ids": ids,
+                          "role": "literal_term_locations_only"})
+    return hints
+
+
 def _json_section(text: str, delimiter: str, next_delimiter: str | None = None):
     return json.loads(contract._strip_json_fence(contract._section(text, delimiter, next_delimiter)))
 
@@ -48,6 +65,7 @@ def inspect_output(text: str, *, source_text: str | None = None,
         return None, reason, {
             "kind": "schema", "stage": "validate_candidate", "segment": "CANDIDATE",
             "message": reason, "issues": issues,
+            "evidence_candidates": evidence_candidates(issues, evidence_catalog),
         }
     return proposal, error, diagnostic
 
@@ -114,6 +132,7 @@ def prepare_row_repair(text: str, diagnostic: dict, *, guidance_catalog: dict | 
     return {
         "schema": PATCH_VERSION,
         "base_sha256": _sha(text),
+        "evidence_candidates": diagnostic.get("evidence_candidates", []),
         "records": [{"section": section, "index": index,
                      "record_sha256": _row_sha(ir[section][index]),
                      "allow_remove": section == "relations" or (

@@ -289,7 +289,8 @@ def cmd_source_search(args):
 
 def cmd_source_outline(args):
     result = qa.execute("source_outline", {"source_id": args.source_id, "query": args.query,
-                       "start_line": str(args.start_line), "limit": str(args.limit)})
+                       "start_line": str(args.start_line), "limit": str(args.limit),
+                       "include_sections": getattr(args, "include_sections", False)})
     return envelope("source-outline", json.loads(result["text"]) if result["ok"] else None,
                     status="ok" if result["ok"] else "error", error=result.get("error", ""))
 
@@ -649,6 +650,8 @@ def cmd_library_or_graph(args):
     """Expose deterministic functions through the standard WG result envelope."""
     if args.cmd == 'slide-library':
         script, forwarded = 'slide_library.py', args.library_args
+    elif args.cmd == 'presentation-asset':
+        script, forwarded = 'presentation_asset.py', args.asset_args
     else:
         script, forwarded = 'graph_visualize.py', []
         for field in ('output','graph','node','query','radius','max_nodes','max_edges','predicates','types','dpi'):
@@ -728,6 +731,17 @@ def cmd_frontier(args):
     sources = result.get("raw_evidence", []) if isinstance(result, dict) else []
     return envelope("frontier", result, sources=sources,
                     status="empty" if isinstance(result, dict) and result.get("count") == 0 else "ok")
+
+
+def cmd_extension(args):
+    code, output, error = run_script([sys.executable, str(SCRIPTS / "local_extension.py"), *args.extension_args])
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        result = {"output": output}
+    failed = code != 0 or (isinstance(result, dict) and result.get("ok") is False)
+    return envelope("extension", result, status="error" if failed else "ok",
+                    error=(error or (result.get("error", "") if isinstance(result, dict) else "")) if failed else "")
 
 
 def cmd_functions(args):
@@ -903,6 +917,7 @@ def build_parser():
     p = sub.add_parser("source-outline", help="定位已知Source的原文章节与表图题注；目录仍需read-raw核验")
     p.add_argument("source_id"); p.add_argument("--query", default="", help="原文标签的字面子串，留空列目录")
     p.add_argument("--start-line", type=int, default=1); p.add_argument("--limit", type=int, default=40)
+    p.add_argument("--include-sections", action="store_true", help="按需附完整Markdown节边界/大小及8000字符内的可选读取入口")
     p.set_defaults(func=cmd_source_outline)
 
     p = sub.add_parser("ku-search", help="检索 Statement KU 和原生 Frontier Question")
@@ -1029,6 +1044,9 @@ def build_parser():
     p = sub.add_parser('slide-library', help='PPT模板管理与复用')
     p.add_argument('library_args', nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_library_or_graph)
+    p = sub.add_parser('presentation-asset', help='PPT局部素材制作、收藏、检索、参数化复用和原生插入')
+    p.add_argument('asset_args', nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_library_or_graph)
     p = sub.add_parser("science-exhibit", help="论文到公众科普展板：源绑定创作、局部修订与本地草稿导出")
     p.add_argument("exhibit_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_science_exhibit)
@@ -1054,6 +1072,10 @@ def build_parser():
     p = sub.add_parser('graph-visualize', parents=[graph_visualize.parser(add_help=False)],
                        help='按主题或节点生成有向知识图及来源清单')
     p.set_defaults(func=cmd_library_or_graph)
+
+    p = sub.add_parser("extension", help="已安装本地扩展：静态发现、规范定位与显式执行")
+    p.add_argument("extension_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_extension)
 
     p = sub.add_parser("functions", help="统一功能、持续工作和调用策略目录")
     functions_sub = p.add_subparsers(dest="functions_cmd", required=True)

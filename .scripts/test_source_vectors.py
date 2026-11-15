@@ -87,6 +87,66 @@ class SourceVectorTests(unittest.TestCase):
         self.assertFalse(missing['index_available'])
         self.assertTrue(missing['issues'])
 
+    def test_vector_hit_replaces_lexical_empty_handoff_for_ready_and_partial(self):
+        sid = self.fixture()
+        lexical = si.search('目标的条件', repo=self.root, source_id=sid)
+        self.assertIsNone(lexical['next'])
+        sv.build([sid], repo=self.root)
+        for scoped in (True, False):
+            if not scoped:
+                self.ingest('uncovered.md', '# Other\nother content\n')
+            result = si.search('目标的条件', repo=self.root, source_id=sid if scoped else '', retrieval='hybrid')
+            self.assertEqual(result['vector_channel']['status'], 'ready' if scoped else 'partial')
+            self.assertTrue(result['candidates'])
+            self.assertEqual(result['next'], 'read_raw')
+            self.assertNotIn('limitations', result)
+            self.assertNotIn('next_input', result)
+            self.assertTrue(all('vector' in c['retrieval_ranks'] for c in result['candidates']))
+        count = len(self.calls)
+        si.search('目标的条件', repo=self.root, source_id=sid, retrieval='hybrid')
+        self.assertEqual(len(self.calls), count)
+
+    def test_empty_hybrid_keeps_channel_diagnostics_and_does_not_build_or_retry(self):
+        sid = self.fixture()
+        for query, expected in [('', 'empty_query'), ('甲'*2401, 'query_over_limit'), ('目标', 'index_missing')]:
+            result = si.search(query, repo=self.root, source_id=sid, retrieval='hybrid')
+            self.assertIsNone(result['next'])
+            self.assertFalse(result['candidates'])
+            self.assertEqual(result['vector_channel']['status'], expected)
+            self.assertIn('vector_channel', ' '.join(result['limitations']))
+        self.assertFalse(self.calls)
+        sv.build([sid], repo=self.root)
+        with patch.object(eh, '_MODEL', 'changed'):
+            missing = si.search('目标', repo=self.root, source_id=sid, retrieval='hybrid')
+            self.assertIsNone(missing['next'])
+            self.assertEqual(missing['vector_channel']['status'], 'no_current_vectors')
+            self.assertEqual(missing['vector_channel']['missing_sources'], [sid])
+        with patch.object(eh.urllib.request, 'urlopen', side_effect=OSError('unavailable')) as provider:
+            failed = si.search('目标', repo=self.root, source_id=sid, retrieval='hybrid')
+            self.assertIsNone(failed['next'])
+            self.assertFalse(failed['candidates'])
+            self.assertEqual(failed['vector_channel']['status'], 'query_failed')
+            self.assertIn('vector_channel', ' '.join(failed['limitations']))
+            self.assertEqual(provider.call_count, 1)
+
+    def test_empty_hybrid_after_candidate_validation_preserves_integrity_issue(self):
+        sid = self.fixture()
+        sv.build([sid], repo=self.root)
+        original = eh.embed_cached_batch
+        def invalidate_after_snapshot(*args, **kwargs):
+            vectors = original(*args, **kwargs)
+            record = si.load_receipt(self.root, sid)
+            record['source_status'] = 'received'
+            si.atomic_json(self.root/'academic/sources'/f'{sid}.json', record)
+            return vectors
+        with patch.object(eh, 'embed_cached_batch', side_effect=invalidate_after_snapshot):
+            result = si.search('目标', repo=self.root, source_id=sid, retrieval='hybrid')
+        self.assertFalse(result['candidates'])
+        self.assertIsNone(result['next'])
+        self.assertTrue(result['issues'])
+        self.assertIn('validation issues', ' '.join(result['limitations']))
+        self.assertIn('vector_channel', ' '.join(result['limitations']))
+
     def test_windows_preserve_multibyte_text_without_truncation(self):
         body = '甲乙丙🙂' * 3000
         parts = list(sv.windows(body))

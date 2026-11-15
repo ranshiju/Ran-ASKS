@@ -6,6 +6,8 @@
 
 ## 责任与完成契约
 
+API任务的`executor`保留请求配置身份；提交Statement依据时，`assessor`优先记录受信任`api_usage.model`中的实际生成模型，避免429切换后仍标成原模型。历史任务未记录实际模型时沿用原executor，Agent沿用自身executor。原响应、逐次history及失败usage保持，模型名不表示内容质量认证。
+
 | 组件 | 归属 | 责任 |
 | --- | --- | --- |
 | `source_ingest.py` | shared | 原件、解析、来源索引与独立回执；不调用语义模型 |
@@ -391,6 +393,12 @@ Markdown 主记录使用 JSON-compatible YAML frontmatter 加完整正文。依�
 修订未提供或显式 null 的 content_role 保留旧值；null 的 source_question_status 视为 unspecified。
 Statement 不接受 addressed/left_open；Question 的用途固定为 research_question。
 KU、流程回执和索引均不替代 Raw；这些 SQLite 文件不保存公共图关系。
+
+`knowledge_store.read`对当前/历史Statement和原生Question一次读取文件字节，元数据、正文及
+`snapshot_sha256`均从该份字节生成。文本沿用UTF-8及通用换行语义，哈希保留原始字节语义。
+并发受管原子替换时可返回完整旧快照或新快照，不能混合内容与哈希；每次调用重新读取，无持久缓存。
+这不保证读后版本不再变化，索引陈旧检查、revision/hash冲突检查及Raw依据验证仍独立执行。
+共享Frontier文本解析器只解析输入，不认证来源或科学正确性；多对象读取不因此获得统一事务快照。
 
 更新持有对象锁，以旧 revision 和快照哈希做 compare-and-swap。先保存旧版，再原子替换当前文件，
 最后更新索引；索引失败返回 `index_pending`，主记录保留。apply 重放补索引，不再增加版本。

@@ -24,5 +24,17 @@ requirements. The root `.env.example` leaves the two text-model selections blank
 its named models for other workflows are reference examples. Embedding, visual
 processing and parsing dependencies are configured separately when needed.
 
+An optional HTTP 429 substitution is configured with
+`LLM_429_FALLBACK_FROM_MODEL` and `LLM_429_FALLBACK_MODEL`. When the exact source
+model receives HTTP 429, the text API adapter sends the same request once to the
+target model using the same endpoint and key. Only the model field changes;
+validation still applies. The substitute receives one attempt, and the next
+logical call starts with the original model again. Both settings are empty by
+default. This is separate from ordinary specialist-profile fallback:
+`allow_rate_limit_fallback=False` disables the 429 policy, while
+`allow_profile_fallback=False` disables the ordinary profile chain. Fixed-model
+experiments disable both. Request events retain each actual model, failed
+attempt and usage; missing usage remains unknown.
+
 Configuring an endpoint never grants permission to upload a source. Workflows
 that cross the remote boundary retain their explicit consent checks.

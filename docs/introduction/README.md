@@ -12,25 +12,24 @@ text coverage and rendering. Earlier releases retained the original Word layout
 and appended updates; those statements below describe their historical editions.
 The repository does not rely on GitHub's PDF previewer.
 
-## Current edition: v0.27.0 / 当前版本
+## Current edition: v0.28.0 / 当前版本
 
-The current name is **Agent-Native Scientific Knowledge System**, guided by
-**Interpret knowledge. Organize for use. Reason to solve.** The 2026-11-13
-revision updates the introduction itself, not only a final addendum. It explains
-source preservation, purpose-driven interpretation, optional Source/KU vector
-access and separate Agent/API control. Legacy remains the default intake;
-Source-first/selective remains an opt-in preview. This compatible MINOR release
-does not certify stable automatic semantics or full-cost savings.
+The name remains **Agent-Native Scientific Knowledge System**, guided by
+**Interpret knowledge. Organize for use. Reason to solve.** The 2026-11-15
+revision explains the three lifecycle responsibilities, optional whole-section
+reading and evidence-reference identifiers, reliable meeting recovery, reusable
+presentation assets and cumulative Gallery statistics with an explicit start.
+Agent/API control stays separate; legacy intake and opt-in preview boundaries
+remain unchanged. Mechanical checks do not establish stable semantic quality
+or overall cost savings.
 
-当前全称为 **Agent-Native Scientific Knowledge System（智能体原生的科学知识系统）**，
-核心观点为 **Interpret knowledge. Organize for use. Reason to solve.**
-2026年11月13日更新正文及其PDF，说明来源保留、按需理解、可选Source/KU向量访问和
-Agent/API控制分工。默认legacy保持，Source-first/selective仍为显式预览。
-本次兼容MINOR发布不代表自动语义质量或完整净收益已经稳定验收。
+2026年11月15日同步正文与同源PDF，补齐快速接入、选择性组织、使用驱动深化的职责，
+说明可选整节阅读、已读编号引用、会议恢复、素材复用及带起算日的Gallery累计统计。
+正常使用照常反哺，系统优化由明确指令触发；两种控制循环、默认legacy和预览边界保持。
+本次兼容MINOR发布不代表1.0成熟度或模型完整质量/净效率已通过验收。
 
-PDF由同一Markdown全文重新排版，已规范化并核对文本与渲染；不再在旧首页后仅追加补充。
-论文原题、实验数字、冻结产物及以下历史版本记录保留其原范围；工程版本1.0.0与
-已有论文数据产物1.0.0是不同的版本体系。
+PDF由同一Markdown重新排版、规范化并核对文本与渲染。历史论文题名、实验数字、
+冻结产物与以下版本记录保持原范围；系统版本与论文产物版本分别维护。
 
 The paper remains the academic source for the project's ideas, methodology, and
 supporting evidence. The content edition was first published with the

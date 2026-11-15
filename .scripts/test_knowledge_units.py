@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Small isolated lifecycle tests; no real model, parser or network calls."""
 import io
+import hashlib
 import json
 import socket
 import sys
@@ -52,6 +53,55 @@ class KnowledgeTests(unittest.TestCase):
         task,packet=self.prepare(); self.stage(task,[self.op(packet)])
         result=kc.apply(task["job_id"],repo=self.root)
         return result["results"]["item-1"]["id"],task
+
+    def assert_atomic_read_snapshot(self, uid):
+        before = ks.read(uid, repo=self.root)
+        path = self.root / before['path']
+        original = path.read_bytes()
+        replacement = original.replace(before['title'].encode(), b'Updated concurrent title')
+        self.assertNotEqual(original, replacement)
+        original_text, original_bytes = Path.read_text, Path.read_bytes
+        replaced = False
+        def replace_after_read(reader, current, *args, **kwargs):
+            nonlocal replaced
+            value = reader(current, *args, **kwargs)
+            if current == path and not replaced:
+                replaced = True
+                ks.atomic_text(path, replacement.decode('utf-8'))
+            return value
+        with patch.object(Path, 'read_text', lambda p, *a, **kw: replace_after_read(original_text, p, *a, **kw)), \
+                patch.object(Path, 'read_bytes', lambda p: replace_after_read(original_bytes, p)):
+            observed = ks.read(uid, repo=self.root)
+        self.assertTrue(replaced)
+        self.assertEqual(observed, before, 'One read must not mix old metadata with a newer byte hash')
+        after = ks.read(uid, repo=self.root)
+        self.assertEqual(after['title'], 'Updated concurrent title')
+        self.assertEqual(after['snapshot_sha256'], hashlib.sha256(replacement).hexdigest())
+        if uid.startswith('KU-'):
+            result = ks.search('conditional algorithm', repo=self.root, kind='statement')
+            self.assertFalse(result['candidates'])
+            self.assertTrue(any('stale KU index' in issue for issue in result['issues']))
+
+    def test_statement_read_uses_one_atomic_snapshot(self):
+        uid, _ = self.create()
+        self.assert_atomic_read_snapshot(uid)
+
+    def test_question_read_uses_one_atomic_snapshot(self):
+        task, packet = self.prepare()
+        self.stage(task, [self.op(packet, kind='question', title='Snapshot question', statement='Can condition A be relaxed?')])
+        uid = kc.apply(task['job_id'], repo=self.root)['results']['item-1']['id']
+        self.assert_atomic_read_snapshot(uid)
+
+    def test_snapshot_hash_preserves_bytes_and_newline_compatibility(self):
+        uid, _ = self.create()
+        expected = ks.read(uid, repo=self.root)
+        path = self.root / expected['path']
+        original = path.read_bytes()
+        for newline in (b'\r\n', b'\r'):
+            changed = original.replace(b'\n', newline)
+            path.write_bytes(changed)
+            actual = ks.read(uid, repo=self.root)
+            self.assertEqual(actual, {**expected, 'snapshot_sha256': hashlib.sha256(changed).hexdigest()})
 
     def host_call(self, task, action="inspect", command="read"):
         output = io.StringIO()
@@ -1889,6 +1939,24 @@ class KnowledgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "comparison knowledge changed"):
             kc.apply(task["job_id"], repo=self.root)
         self.assertEqual(ks.read(uid, repo=self.root)["revision"], 3)
+
+    def test_api_publication_records_actual_model_after_fallback(self):
+        def response(packet):
+            return {"ok": True, "model": "actual-alternate", "parsed": {"schema": kc.PROTOCOL,
+                    "operations": [self.op(packet)]}, "usage": {"total_tokens": 12},
+                    "history": [{"model": "mock", "status": "api_error", "http_status": 429, "usage": {}},
+                                {"model": "actual-alternate", "status": "ok", "usage": {"total_tokens": 12}}]}
+        self.mock_api(response)
+        for strategy in ("survey", "selective"):
+            result = ka.run(self.source["source_id"], repo=self.root, strategy=strategy)
+            self.assertEqual(result["status"], "completed", result)
+            state, _ = kc.load_job(self.root, result["job_id"])
+            self.assertTrue(state["executor"].startswith("api:mock:"))
+            unit = ks.read(result["results"]["item-1"]["id"], repo=self.root)
+            self.assertEqual({e["assessor"] for e in unit["evidence"]}, {"api:actual-alternate"})
+            self.assertEqual(result["api_usage"]["model"], "actual-alternate")
+            replay = ka.run(self.source["source_id"], repo=self.root, strategy=strategy)
+            self.assertEqual(replay["new_model_calls"], 0)
 
     def test_selective_api_direct_zero_delta_and_resume_use_one_call(self):
         call = self.mock_api(lambda p: {"ok":True,"parsed":{"schema":kc.PROTOCOL,"operations":[]},

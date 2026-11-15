@@ -31,10 +31,11 @@ import inbox_state
 import trash_util
 import ingest_common as ic
 import ingest_pipeline
+from ingest_check import STATUS_ENUM_BY_DOMAIN
 import recovery_policy as rp
 import source_fingerprints as sf
 import student_guidance_projection as sgp
-from meeting_compiler_repair import inspect_output as inspect_meeting_output
+from meeting_compiler_repair import evidence_candidates, inspect_output as inspect_meeting_output
 import wiki_locator as wl
 from meeting_compiler_contract import (
     CURRENT_ACTION_EVIDENCE,
@@ -171,14 +172,33 @@ def _fallback_meeting_title(corrected_text: str, filename: str) -> str:
 #   admin    → admin/raw/meetings/<year>/        + admin/wiki/meetings/
 #   business → business/raw/conferences/<year>/  + business/wiki/conferences/
 MEETING_DOMAINS = {
-    "academic": {"raw_sub": "conferences", "wiki_sub": "conferences", "log": "academic/wiki/log.md", "index": "academic/wiki/index.md"},
-    "admin":    {"raw_sub": "meetings",    "wiki_sub": "meetings",    "log": "admin/wiki/log.md",    "index": "admin/wiki/index.md"},
-    "business": {"raw_sub": "conferences", "wiki_sub": "conferences", "log": "business/wiki/log.md", "index": "business/wiki/index.md"},
+    "academic": {"raw_sub": "conferences", "wiki_sub": "conferences", "log": "academic/wiki/log.md", "index": "academic/wiki/index.md", "type": "conference-summary", "status": "current"},
+    "admin":    {"raw_sub": "meetings",    "wiki_sub": "meetings",    "log": "admin/wiki/log.md",    "index": "admin/wiki/index.md", "type": "meeting-summary", "status": "draft"},
+    "business": {"raw_sub": "conferences", "wiki_sub": "conferences", "log": "business/wiki/log.md", "index": "business/wiki/index.md", "type": "meeting-summary", "status": "draft"},
 }
+
+
+def meeting_domain(state: dict) -> tuple[str, dict]:
+    """One domain contract for generation, validation and final publication."""
+    path_domain = str(state.get("wiki_path") or "").split("/", 1)[0]
+    domain = state.get("subproject") or path_domain or "academic"
+    if domain not in MEETING_DOMAINS:
+        raise ValueError(f"不支持的会议来源域: {domain}")
+    cfg = MEETING_DOMAINS[domain]
+    expected = {"wiki_path": f"{domain}/wiki/{cfg['wiki_sub']}/",
+                "raw_dir": f"{domain}/raw/{cfg['raw_sub']}/"}
+    for key, prefix in expected.items():
+        if state.get(key) and not str(state[key]).startswith(prefix):
+            raise ValueError(f"会议来源域与 {key} 冲突: {domain}")
+    for key, expected_path in (("log_path", cfg["log"]), ("index_path", cfg["index"])):
+        if state.get(key) and state[key] != expected_path:
+            raise ValueError(f"会议来源域与 {key} 冲突: {domain}")
+    return domain, cfg
+
 
 def meeting_paths(subproject: str, meeting_id: str, year: str) -> dict:
     """按来源域返回会议的 raw_dir / wiki_path / log / index 路径。"""
-    cfg = MEETING_DOMAINS.get(subproject, MEETING_DOMAINS["academic"])
+    _, cfg = meeting_domain({"subproject": subproject})
     return {
         "raw_dir": f"{subproject}/raw/{cfg['raw_sub']}/{year}/{meeting_id}",
         "wiki_path": f"{subproject}/wiki/{cfg['wiki_sub']}/{meeting_id}",
@@ -190,7 +210,7 @@ def meeting_paths(subproject: str, meeting_id: str, year: str) -> dict:
 def ensure_unique_meeting_id(meeting_id: str, subproject: str = "academic") -> str:
     """冲突自动消歧：加 -2, -3..."""
     base = meeting_id
-    cfg = MEETING_DOMAINS.get(subproject, MEETING_DOMAINS["academic"])
+    _, cfg = meeting_domain({"subproject": subproject})
     wiki_dir = REPO / subproject / "wiki" / cfg["wiki_sub"]
     n = 1
     while (wiki_dir / f"{meeting_id}.md").exists():
@@ -263,8 +283,10 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
                                         meeting_id: str, date_str: str,
                                         sources_path: str, full_date: str, today: str,
                                         errors: list[str] | None = None,
-                                        student_candidates: str = "{}") -> str:
+                                        student_candidates: str = "{}",
+                                        subproject: str = "academic") -> str:
     """Build the API prompt; record meanings also feed the separate Agent task."""
+    _, domain_cfg = meeting_domain({"subproject": subproject})
     error_section = ""
     if errors:
         error_section = "\n\n[上次输出的问题（请修正）]\n" + "\n".join(f"- {e}" for e in errors)
@@ -295,8 +317,8 @@ def build_agent_meeting_wiki_slots_prompt(source_text: str, entity_candidates: s
 1. PREPROCESS 只列必要、证据明确的 exact replacements；original 必须是原文中的连续原串，replacement 不得含换行。没有可靠纠错就返回空数组。不要输出整份改写后的原文。
 2. entity_resolutions 逐项记录本轮采用的人物判断，status 只能是 resolved/unchanged/unresolved；证据不足必须 unresolved。身份与角色分别取证：人物身份匹配不证明参会或负责。未解析人物仍保留明确的参会、汇报与责任任务，person/assignee 为空串、label/person_label/assignee_label 保留原称呼，不创建或猜测全局人物身份。任务执行者未明确时 assignee、assignee_label 同为空。叙事正文同样区分不同原称呼及其来源，不把待确认身份写成同一人。
 3. Wiki 和 MEETING_IR 必须基于同一组纠错与实体判断，禁止使用相互矛盾的人名或术语。
-4. 撰写 conference-summary 类型 wiki 页面，含 frontmatter 和正文。
-5. frontmatter 必须包含: title, type: conference-summary, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: current, created（今日日期）, updated（今日日期）。
+4. 撰写 {domain_cfg['type']} 类型 wiki 页面，来源域为 {subproject}，含 frontmatter 和正文。
+5. frontmatter 必须包含: title, type: {domain_cfg['type']}, sources（值为上方给定的 sources 路径）, source_type: speech-recognition, date（值为上方给定的日期）, confidence: low, status: {domain_cfg['status']}, created（今日日期）, updated（今日日期）。type/status/sources 由程序绑定，表示本次摄入的页面约定。
 6. 正文结构: # 标题 → ## Navigation（2-4 句）→ ## Content。{WIKI_CONTENT_CONTRACT}
 7. Wiki 简写、纠错、去口语化，但忠实于原文，不编造。区分纪要记载的行为与自动会议助手的解释或推测；后者注明来源和不确定性，Wiki 与 IR 使用相同证据强度。
 8. 原文每个非空行前有程序分配的 [sNNNN] evidence_id。MEETING_IR 每个事实必须引用至少一个真实 evidence_id；不得编造路径、行号或 evidence_id。
@@ -508,6 +530,7 @@ def _compiler_request(state: dict, source_text: str, entity_candidates: dict, *,
         state["meeting_id"], date_str, sources_path, full_date, today,
         errors or None,
         json.dumps(guidance_catalog, ensure_ascii=False, sort_keys=True),
+        subproject=meeting_domain(state)[0],
     )
     context_hash = task_context_hash(
         source_text,
@@ -553,9 +576,9 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
     ir_template = meeting_ir_template()
     title = state["meeting_id"].split("-", 1)[-1]
     frontmatter = {
-        "title": title, "type": "conference-summary",
+        "title": title, "type": meeting_domain(state)[1]["type"],
         "sources": [sources_path], "source_type": "speech-recognition",
-        "date": state.get("date"), "confidence": "low", "status": "current",
+        "date": state.get("date"), "confidence": "low", "status": meeting_domain(state)[1]["status"],
         "created": datetime.now().date().isoformat(),
         "updated": datetime.now().date().isoformat(),
     }
@@ -637,6 +660,10 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
             "date_inferred": bool(state.get("date_inferred")),
             "target_source_path": sources_path,
             "context_hash": context_hash,
+            "repair_evidence_candidates": evidence_candidates(
+                [*errors, *((state.get("meeting_compiler") or {}).get("diagnostic_summary") or {}).get("issues", [])],
+                _catalog,
+            ),
             "spec_locator": "operations/INGEST.md",
         },
     )
@@ -797,6 +824,10 @@ def bind_meeting_source(markdown: str, source_path: str, *, previous_sources: tu
 
 def step_write_wiki(state: dict) -> tuple[bool, str]:
     """Run or consume the one-shot Meeting Compiler proposal."""
+    try:
+        subproject, domain_cfg = meeting_domain(state)
+    except ValueError as exc:
+        return False, str(exc)
     extract_dir = REPO / state["extract_dir"]
     extract_dir.mkdir(parents=True, exist_ok=True)
     source_path = REPO / state["source"]
@@ -811,7 +842,6 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return False, f"学生指导候选目录读取失败: {exc}"
     # 生成 meeting-id（仅首次）
-    subproject = state.get("subproject", "academic")
     if "meeting_id" not in state:
         title = ""
         m = re.search(r"^#\s+(.+)", source_text, re.M)
@@ -956,6 +986,10 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         previous_sources.append(f"{previous_paths['raw_dir']}/{state['source_filename']}")
     try:
         wiki_content = bind_meeting_source(wiki_content, correct_source, previous_sources=tuple(previous_sources))
+        # Domain metadata is owned by the intake request, not semantic generation.
+        fm, body = _meeting_frontmatter(wiki_content)
+        fm.update(type=domain_cfg["type"], status=domain_cfg["status"])
+        wiki_content = "---\n" + yaml.safe_dump(fm, allow_unicode=True, sort_keys=False) + "---\n" + body
     except ValueError as exc:
         return False, str(exc)
     meeting_ir = proposal.get("meeting_ir")
@@ -1046,8 +1080,14 @@ def step_validate_wiki(state: dict) -> list[str]:
     for field in required:
         if field not in fm:
             errors.append(f"frontmatter 缺字段: {field}")
-    if fm.get("type") != "conference-summary":
-        errors.append("type 应为 conference-summary")
+    try:
+        domain, domain_cfg = meeting_domain(state)
+        if fm.get("type") != domain_cfg["type"]:
+            errors.append(f"type 应为 {domain_cfg['type']}（域: {domain}）")
+        if "status" in fm and fm["status"] not in STATUS_ENUM_BY_DOMAIN[domain]:
+            errors.append(f"status 不适用于 {domain}: {fm['status']}")
+    except ValueError as exc:
+        errors.append(str(exc))
     if not state.get("raw_dir") or not state.get("source_filename"):
         errors.append("sources 缺少事务最终 Raw 路径，不能校验来源绑定")
     else:
@@ -1181,7 +1221,8 @@ FINALIZE_TAIL_CONFIG = {
         "\n## [" + ctx["today"] + "] ingest | ingest_meeting.py 摄入 " + ctx["doc_id"] + "\n"
         "- **来源与归档**：inbox 会议纪要经 speech_entity_resolver 纠错后落位至 `"
         + ctx["state"].get("raw_dir", "") + "/`。\n"
-        "- **来源页**：新建 `conferences/" + ctx["page_name"] + ".md`（conference-summary），" + ctx["title"] + "。\n"
+        "- **来源页**：新建 `" + meeting_domain(ctx["state"])[1]["wiki_sub"] + "/"
+        + ctx["page_name"] + ".md`（" + meeting_domain(ctx["state"])[1]["type"] + "），" + ctx["title"] + "。\n"
         "- **图谱巩固**：增量写入 " + str(ctx["edges"]) + " 条边"
         + ("，catch-all 关键词 " + str(ctx["report"].get("catch_all_keywords_added", 0)) + " 个"
            if ctx["report"].get("catch_all_keywords_added") else "") + "。\n"
@@ -1212,7 +1253,14 @@ def step_post_commit_projection(state: dict) -> tuple[bool, str]:
 
 
 def step_finalize_tail(state: dict) -> tuple[bool, str]:
-    return ic.step_finalize_tail(state, REPO, FINALIZE_TAIL_CONFIG)
+    try:
+        _, cfg = meeting_domain(state)
+    except ValueError as exc:
+        return False, str(exc)
+    config = {**FINALIZE_TAIL_CONFIG, "entry_prefix": cfg["wiki_sub"] + "/",
+              "get_log_path": lambda _state, repo: repo / cfg["log"],
+              "get_index_path": lambda _state, repo: repo / cfg["index"]}
+    return ic.step_finalize_tail(state, REPO, config)
 
 # ===== 主编排循环 =====
 
@@ -1248,6 +1296,23 @@ MEETING_SPEC = {
 
 
 def run_pipeline(state: dict) -> dict:
+    # This runs only on a new invocation, never in the failed provider loop.
+    trace = state.get("meeting_compiler") or {}
+    failure = inbox_state.classify_failure(state) or {}
+    if (state.get("status") == "failed" and not state.get("resume_from")
+            and trace.get("status") == "escalated"
+            and failure.get("category") == "api_network_transient"
+            and not state.get("graph_report")
+            and not (state.get("raw_dir") and (REPO / state["raw_dir"]).exists())):
+        if ingest_mode() == "api":
+            if not rp.consume(state, "infrastructure", RECOVERY_LIMITS,
+                              detail="explicit meeting transport resume"):
+                inbox_state.save(state["transaction_id"], state)
+                return state
+        inbox_state.transition(state, "write_wiki", reason="explicit_meeting_transport_resume",
+                               allowed_targets={"write_wiki"})
+        state["errors"] = []
+        inbox_state.save(state["transaction_id"], state)
     return ingest_pipeline.run_pipeline(state, MEETING_SPEC, progress)
 
 def main() -> None:

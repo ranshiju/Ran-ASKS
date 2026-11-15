@@ -6,6 +6,7 @@
 
 | 作品 | 形式 | 使用功能 |
 | --- | --- | --- |
+| [PPT 素材库](works/presentation-assets/README.md) | 四项素材 · PNG / SVG / PPTX / ZIP | PPT 素材制作与复用 |
 | [MPE 科普展板](works/mpe-science-poster/README.md) | A0 科普海报 | 科普展板 · 插图与图示 · 理解试读 · 版式与导出 |
 | [MPE 学术报告](works/mpe-academic-talk/README.md) | 12 页学术报告 · PPTX / PDF | 演示文稿制作 · 版式与导出 |
 | [层 Edelstein 效应学术报告](works/layer-edelstein-academic-talk/README.md) | 11 页英文学术报告 · PPTX / PDF | 演示文稿制作 · 版式与导出 |
@@ -37,9 +38,11 @@
 
 当前摄入支持一份匹配的 RIS/BibTeX 书目、长文分窗阅读及按失败触发的 API 恢复；使用方法见[摄入规范](../operations/INGEST.md)。
 
-现有 15 件精选作品，提供完整成品与下载。作品原稿、制作过程和本地来源记录不进入公开包。
+现有 16 件精选作品，提供完整成品与下载。作品原稿、制作过程和本地来源记录不进入公开包。
 
 ## 本地预览
+
+GitHub 中英文 README 的“近期作品精选”直接复用本目录的封面和元数据，最新收录优先、兼顾作品类型。新增作品后运行 `python3 .scripts/gallery_site.py --sync-readme-preview`，发布前用 `--check-readme-preview` 检查同步状态；两者均不执行线上发布。
 
 在仓库根目录运行：
 

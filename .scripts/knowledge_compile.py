@@ -939,7 +939,9 @@ def apply(job_id, *, repo=REPO):
                             claim_mode=old["claim_mode"] if attaching else op.get("claim_mode", "unknown"),
                             content_role=parsed["content_role"],
                             unresolved=list(dict.fromkeys(old.get("unresolved", [])+op.get("unresolved", []))) if attaching else op.get("unresolved", []),
-                            reason=op["reason"], assessor=state["executor"], operation_sha256=si.fingerprint(op),
+                            reason=op["reason"], assessor=("api:" + state["api_usage"]["model"]
+                                if state["executor"].startswith("api:") and state.get("api_usage", {}).get("model")
+                                else state["executor"]), operation_sha256=si.fingerprint(op),
                             skip_unchanged=attaching)
                 state["results"][op["id"]] = result
                 state.setdefault("operation_hashes", {})[op["id"]] = si.fingerprint(op)

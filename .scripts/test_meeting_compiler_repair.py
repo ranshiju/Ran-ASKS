@@ -233,12 +233,41 @@ def test_failed_patch_calls_preserve_complete_resume_base():
 
 
 def main():
+    test_term_locations_are_bounded_hints_without_changing_evidence()
     test_aggregate_independent_errors_and_patch_preserves_other_content()
     test_patch_rejects_tampering_or_expanded_scope()
     test_api_repairs_once_and_revalidates_assembled_candidate()
     test_student_projection_removal_requires_no_existing_target()
     test_failed_patch_calls_preserve_complete_resume_base()
-    print("meeting compiler row repair: 5/5 PASS")
+    print("meeting compiler row repair: 6/6 PASS")
+
+
+def test_term_locations_are_bounded_hints_without_changing_evidence():
+    text, ir, context = case()
+    ir["decisions"] = []
+    ir["relations"] = []
+    ir["person_updates"] = []
+    ir["reports"] = [{"person": "known", "person_label": "甲", "topic": "GPU计算",
+                      "evidence_ids": ["s0001"]}]
+    text = text.split(contract.MEETING_IR_DELIMITER)[0] + contract.MEETING_IR_DELIMITER + json.dumps(ir)
+    context["evidence_catalog"].extend([
+        {"evidence_id": "s0002", "line": 2, "text": "乙提到GPUS。"},
+        {"evidence_id": "s0003", "line": 3, "text": "另一位同学讨论GPU。"},
+    ])
+    _p, error, diagnostic = repair.inspect_output(text, **context)
+    assert error
+    hints = diagnostic["evidence_candidates"]
+    assert len(hints) == 1 and hints[0]["evidence_ids"] == ["s0003"]
+    assert hints[0]["role"] == "literal_term_locations_only"
+    request = repair.prepare_row_repair(text, diagnostic)
+    assert request["records"][0]["record"]["evidence_ids"] == ["s0001"]
+    assert request["evidence_candidates"] == hints
+    catalog = [{"evidence_id": f"s{i:04d}", "text": "GPU"} for i in range(10)]
+    assert len(repair.evidence_candidates(diagnostic["issues"], catalog)[0]["evidence_ids"]) == 3
+    task = MeetingCompilerTask("test", "raw", "meeting", "raw", "hash", "prompt",
+                               source_text=context["source_text"], evidence_catalog=context["evidence_catalog"])
+    prompt = MeetingCompilerAgent(task)._row_repair_prompt(request)
+    assert "不证明该人物" in prompt and "s0003" in prompt
 
 
 if __name__ == "__main__":

@@ -157,6 +157,21 @@ def test_residual_wrappers_and_unresolved_endpoints_fail_before_graph():
             raise AssertionError(f"invalid endpoint was accepted: {relation}")
 
 
+def test_meeting_pronoun_requires_a_meeting_page():
+    relation = {"subject": "本会议", "predicate": "讨论", "object": "组织调整"}
+    for domain, directory in (("admin", "meetings"), ("business", "conferences")):
+        page = f"{domain}/wiki/{directory}/review"
+        resolved = graph_ingest.normalize_page_subjects([relation], page, {"type": "meeting-summary"})
+        assert resolved == [{**relation, "subject": page}]
+        assert not kir.validate_knowledge_ir(_build(page, "meeting-summary", resolved))
+    try:
+        graph_ingest.normalize_page_subjects([relation], "admin/wiki/policies/reform", {"type": "policy"})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-meeting page accepted a meeting subject")
+
+
 def test_endpoint_guards_preserve_propositions_and_sparse_relations():
     page = "academic/wiki/papers/error-bound"
     relation = {"subject": page, "predicate": "核心创新点", "object": "误差 < 0.1 且 n > 0"}

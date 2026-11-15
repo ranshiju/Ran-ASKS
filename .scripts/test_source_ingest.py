@@ -59,6 +59,90 @@ class SourceIngestTests(unittest.TestCase):
         self.assertFalse((self.root / "cross-domain/graph.db").exists())
         self.assertFalse((self.root / "academic/wiki").exists())
 
+    def test_empty_search_has_no_read_target_and_keeps_source_scope(self):
+        sid = self.ingest()['source_id']
+        other = self.root / 'other.md'
+        other.write_text('# Other\nonlyelsewhere\n')
+        self.ingest(other)
+        before = {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()}
+        session = qo.QuerySession(query='onlyelsewhere', mode='api')
+        with patch.object(si, 'outline', side_effect=AssertionError('no automatic outline')), \
+                patch.object(si, 'resume', side_effect=AssertionError('no automatic rebuild')):
+            out = qo.execute_plan(session, [{'action': 'source_search', 'input': {
+                'source_id': sid, 'query': 'onlyelsewhere'}}])
+        result = json.loads(out['results'][0]['text'])
+        self.assertEqual(result['candidates'], [])
+        self.assertIsNone(result['next'])
+        self.assertNotIn('next_input', result)
+        self.assertEqual(result['search_scope']['source_id'], sid)
+        self.assertEqual(result['query'], 'onlyelsewhere')
+        self.assertTrue(result['index_available'])
+        self.assertFalse(result['issues'])
+        self.assertIn('No validated lexical matches', ' '.join(result['limitations']))
+        self.assertFalse(session.read_options)
+        self.assertFalse(session.read_sources)
+        self.assertFalse(session.retained_results)
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()})
+        self.assertTrue(si.search('onlyelsewhere', repo=self.root)['candidates'])
+
+    def test_empty_search_distinguishes_query_terms_and_missing_index_without_building(self):
+        sid = self.ingest()['source_id']
+        for scope in ('', sid):
+            no_terms = si.search('?!', repo=self.root, source_id=scope)
+            self.assertIsNone(no_terms['next'])
+            self.assertIn('no usable lexical terms', ' '.join(no_terms['limitations']))
+            self.assertTrue(no_terms['index_available'])
+        si.index_path(self.root).unlink()
+        for scope in ('', sid):
+            missing = si.search('tensor', repo=self.root, source_id=scope)
+            self.assertIsNone(missing['next'])
+            self.assertFalse(missing['index_available'])
+            self.assertIn('index is unavailable', ' '.join(missing['limitations']))
+            self.assertEqual(bool(missing['issues']), bool(scope))
+        self.assertFalse(si.index_path(self.root).exists())
+
+    def test_empty_search_keeps_invalid_candidates_distinct_from_no_match(self):
+        sid = self.ingest()['source_id']
+        db = si.connect_index(self.root, write=True)
+        with db:
+            db.execute("UPDATE chunks SET body='fabricated result' WHERE source_id=?", (sid,))
+        db.close()
+        for scope in ('', sid):
+            result = si.search('tensor', repo=self.root, source_id=scope)
+            self.assertIsNone(result['next'])
+            self.assertFalse(result['candidates'])
+            self.assertIn('excerpt mismatch', result['issues'][0]['error'])
+            self.assertIn('validation issues', ' '.join(result['limitations']))
+            self.assertNotIn('No validated lexical matches', ' '.join(result['limitations']))
+        db = si.connect_index(self.root, write=True)
+        with db:
+            db.execute("UPDATE sources SET parse_id='stale' WHERE source_id=?", (sid,))
+        db.close()
+        with self.assertRaisesRegex(ValueError, 'missing/stale'):
+            si.search('nohit', repo=self.root, source_id=sid)
+        global_result = si.search('tensor', repo=self.root)
+        self.assertIsNone(global_result['next'])
+        self.assertTrue(global_result['issues'])
+
+    def test_empty_search_is_shared_by_cli_dsh_and_public_api(self):
+        from dsh.tools import build_tools
+        sid = self.ingest()['source_id']
+        tool = next(t for t in build_tools() if t.name == 'source_search')
+        for retrieval in ('lexical', 'hybrid'):
+            inp = {'source_id': sid, 'query': 'unmatchedtoken', 'retrieval': retrieval}
+            expected = si.search(repo=self.root, **inp)
+            self.assertIsNone(expected['next'])
+            self.assertEqual(json.loads(qa.execute('source_search', inp)['text']), expected)
+            args = wg.build_parser().parse_args(['source-search', inp['query'], '--source-id', sid,
+                                                '--retrieval', retrieval])
+            output = io.StringIO()
+            with redirect_stdout(output): args.func(args)
+            self.assertEqual(json.loads(output.getvalue())['result'], expected)
+            dsh = json.loads(tool.execute_fn(inp))
+            self.assertIsNone(dsh['next'])
+            self.assertEqual(dsh['limitations'], expected['limitations'])
+            self.assertFalse(qa.execute('source_search', inp, subproject='private')['ok'])
+
     def test_structural_read_preserves_hit_and_reaches_condition_across_all_readers(self):
         lines = ["# Fixture"] + ["p" * 210] * 26 + ["", "$$", "anchorformula = x", "$$", "",
                  "where x is a fixed target independent of parameters. " + "q" * 1000,
@@ -144,6 +228,69 @@ class SourceIngestTests(unittest.TestCase):
         self.assertIn("1.57s", read["text"])
         self.assertEqual(before, {p: p.read_bytes() for p in (self.root / "academic").rglob("*") if p.is_file()})
 
+    def test_trailing_outline_heading_reads_its_body_through_api_without_rewriting_locator(self):
+        for padding in (0, 2):
+            lines = ['Previous-section prose.'] * (31-padding) + ['## New method'] + [''] * padding
+            heading_line = 32-padding
+            lines += ['', 'The new method uses bounded samples.', 'Its condition remains explicit.',
+                      '', '## Other method', 'Unrelated later content.']
+            self.source.write_text('\n'.join(lines))
+            ready = self.ingest()
+            before = {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()}
+            hit = si.outline(ready['source_id'], repo=self.root, query='New method')['candidates'][0]
+            self.assertTrue(hit['locator'].endswith('#L1-L32'))
+            self.assertEqual(hit['reading_context']['status'], 'heading_start')
+            self.assertTrue(hit['read_input']['locator'].endswith(f'#L{heading_line}-L35'))
+            old = qa.execute('read_raw', {'locator': hit['locator']})
+            self.assertNotIn('bounded samples', old['text'])
+            session = qo.QuerySession(query='New method', mode='api')
+            qo.execute_plan(session, [{'action': 'source_outline', 'input': {
+                'source_id': ready['source_id'], 'query': 'New method'}}])
+            self.assertFalse(session.read_sources)
+            self.assertFalse(session.retained_results)
+            ref = next(iter(session.read_options))
+            self.assertEqual(session.read_options[ref]['input'], hit['read_input'])
+            session.stage = 'evidence'
+            out = qo.execute_plan(session, [{'action': 'read_ref', 'input': {'ref': ref}}])
+            text = out['results'][0]['text']
+            self.assertIn('bounded samples', text)
+            self.assertIn('condition remains explicit', text)
+            self.assertNotIn('Previous-section prose', text)
+            self.assertNotIn('Unrelated later content', text)
+            self.assertIn(hit['read_input']['locator'], session.read_sources)
+            self.assertNotIn(hit['locator'], session.read_sources)
+            self.assertEqual(before, {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()})
+
+    def test_trailing_heading_keeps_first_formula_and_definition_complete(self):
+        lines = ['## Equation', '', '$$', 'E =', 'x', '$$', '', 'where x is fixed.',
+                 '', '## Next', 'where unrelated.']
+        nav = si.heading_navigation(lines, 1, 1, 'x.md', blocks=si.reading_blocks(lines))
+        self.assertEqual(nav['read_input']['locator'], 'x.md#L1-L8')
+        self.assertEqual(nav['reading_context']['status'], 'heading_start')
+
+    def test_trailing_heading_discloses_blocked_empty_and_unclosed_bodies(self):
+        for lines, reason in [
+                (['## Parent', '### Child', 'Child text.'], 'heading_body_unavailable'),
+                (['## Code', '```md', 'Text in code', '```', 'Later prose.'], 'heading_body_unavailable'),
+                (['## Empty', ''], 'heading_body_unavailable'),
+                (['## Broken', '$$', 'x = y', '## Next'], 'unclosed_display_math')]:
+            nav = si.heading_navigation(lines, 1, 1, 'x.md', blocks=si.reading_blocks(lines))
+            self.assertEqual(nav['read_input']['locator'], 'x.md#L1-L1')
+            self.assertEqual(nav['reading_context'], {'status': 'limited', 'reason': reason})
+
+    def test_trailing_heading_obeys_increment_and_total_read_budgets(self):
+        for lines in [['## Large', 'x'*2000], ['## Long']+['text']*33,
+                      ['# '+'t'*6200, 'b'*1900], ['# '+'t'*8000]]:
+            nav = si.heading_navigation(lines, 1, 1, 'x.md', blocks=si.reading_blocks(lines))
+            self.assertEqual(nav['reading_context']['status'], 'limited')
+            if len(lines[0]) > 8000:
+                self.assertNotIn('read_input', nav)
+            else:
+                self.assertEqual(nav['read_input']['locator'], 'x.md#L1-L1')
+        for lines, last in [(['## Limit', 'x'*1999], 2), (['## Limit']+['x']*32, 33)]:
+            nav = si.heading_navigation(lines, 1, 1, 'x.md', blocks=si.reading_blocks(lines))
+            self.assertEqual(nav['read_input']['locator'], f'x.md#L1-L{last}')
+
     def test_outline_paginates_literal_structure_ignores_fences_and_does_not_invent_matches(self):
         self.source.write_text("# Start\nOrdinary Table 5 mention\n```md\n# Forged\nTable 5: code sample\n```\n"
                                "## Results\nTable 5: values\nFigure 2: plot\n图3：说明\n")
@@ -159,6 +306,169 @@ class SourceIngestTests(unittest.TestCase):
         self.assertFalse(si.outline(sid, repo=self.root, start_line=1000)["candidates"])
         for kwargs in [{"start_line": 0}, {"limit": 0}, {"limit": 81}]:
             with self.assertRaises(ValueError): si.outline(sid, repo=self.root, **kwargs)
+
+    def test_outline_sections_follow_markdown_hierarchy_and_ignore_fenced_headings(self):
+        lines = ['# Paper', '', '## Method', 'First condition.', '', '### Detail',
+                 '```md', '# Not a section', '```', 'Second condition.', '',
+                 '## Results', 'Report.', '', '# Other', 'Final text.', '']
+        self.source.write_text('\n'.join(lines))
+        sid = self.ingest()['source_id']
+        first = si.outline(sid, repo=self.root, include_sections=True, limit=2)
+        second = si.outline(sid, repo=self.root, include_sections=True, start_line=first['next_start_line'])
+        hits = first['candidates'] + second['candidates']
+        self.assertEqual([h['title'] for h in hits], ['Paper', 'Method', 'Detail', 'Results', 'Other'])
+        for hit, expected in zip(hits, [(1, 13), (3, 10), (6, 10), (12, 13), (15, 16)]):
+            section = hit['section']
+            self.assertEqual((section['start_line'], section['end_line']), expected)
+            a, b = expected
+            self.assertEqual(section['chars'], len('\n'.join(lines[a-1:b])))
+            self.assertEqual(section['status'], 'readable')
+        filtered = si.outline(sid, repo=self.root, include_sections=True, query='Method')['candidates'][0]
+        self.assertEqual(filtered, hits[1])
+        # The following peer heading need not match the filter to bound the section.
+        self.assertNotIn('Results', qa.execute('read_raw', filtered['section']['read_input'])['text'])
+
+    def test_empty_outline_handoff_searches_same_source_only_when_selected(self):
+        self.source.write_text('# Method\nThe canonical center gives the normalization.\n')
+        sid = self.ingest()['source_id']
+        other = self.root / 'other.md'
+        other.write_text('# canonical\nAn unrelated canonical model.\n')
+        self.ingest(other)
+        before = {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()}
+        session = qo.QuerySession(query='canonical normalization', mode='api')
+        with patch.object(si, 'search', side_effect=AssertionError('outline must not search')):
+            out = qo.execute_plan(session, [{'action': 'source_outline', 'input': {
+                'source_id': sid, 'query': 'canonical'}}])
+        result = json.loads(out['results'][0]['text'])
+        self.assertEqual(result['candidates'], [])
+        self.assertEqual(result['next'], 'source_search')
+        self.assertEqual(result['next_input'], {'source_id': sid, 'query': 'canonical'})
+        self.assertFalse(session.read_options)
+        self.assertFalse(session.read_sources)
+        self.assertFalse(session.retained_results)
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()})
+        discovered = qo.execute_plan(session, [{'action': result['next'], 'input': result['next_input']}])
+        payload = json.loads(discovered['results'][0]['text'])
+        self.assertTrue(payload['candidates'])
+        self.assertEqual({c['source_id'] for c in payload['candidates']}, {sid})
+        self.assertFalse(session.read_sources)
+        session.stage = 'evidence'
+        read = qo.execute_plan(session, [{'action': 'read_ref', 'input': {'ref': next(iter(session.read_options))}}])
+        self.assertTrue(read['results'][0]['ok'])
+        self.assertIn('canonical center', read['results'][0]['text'])
+        self.assertTrue(session.read_sources)
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()})
+
+    def test_empty_outline_preserves_scan_scope_and_works_without_index(self):
+        self.source.write_text('# Method\nA canonical center in the body.\n')
+        sid = self.ingest()['source_id']
+        si.index_path(self.root).unlink()
+        before = {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()}
+        for query, start in [('  ', 100), ('Method', 2), (' CaNoNiCaL ', 1)]:
+            with patch.object(si, 'search', side_effect=AssertionError('no index access or rebuild')):
+                result = si.outline(sid, repo=self.root, query=query, start_line=start)
+            self.assertFalse(result['candidates'])
+            self.assertEqual(result['next'], 'source_search')
+            self.assertIsNone(result['next_start_line'])
+            self.assertEqual(result['start_line'], start)
+            self.assertIn('scanned range', result['limitations'][-1])
+            if query.strip():
+                self.assertEqual(result['next_input'], {'source_id': sid, 'query': query})
+            else:
+                self.assertNotIn('next_input', result)
+        self.assertFalse(si.index_path(self.root).exists())
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()})
+
+    def test_empty_outline_handoff_is_shared_by_cli_dsh_and_public_api(self):
+        from dsh.tools import build_tools
+        sid = self.ingest()['source_id']
+        inp = {'source_id': sid, 'query': 'Contraction'}
+        expected = si.outline(sid, repo=self.root, query=inp['query'])
+        self.assertEqual(expected['next'], 'source_search')
+        self.assertEqual(json.loads(qa.execute('source_outline', inp)['text']), expected)
+        args = wg.build_parser().parse_args(['source-outline', sid, '--query', inp['query']])
+        output = io.StringIO()
+        with redirect_stdout(output): args.func(args)
+        self.assertEqual(json.loads(output.getvalue())['result'], expected)
+        tool = next(t for t in build_tools() if t.name == 'source_outline')
+        dsh = json.loads(tool.execute_fn(inp))
+        self.assertEqual(dsh['next_input'], expected['next_input'])
+        self.assertEqual(dsh['next'], expected['next'])
+        self.assertFalse(qa.execute('source_outline', inp, subproject='private')['ok'])
+
+    def test_outline_whole_section_budget_and_empty_sections_offer_no_partial_reads(self):
+        self.source.write_text('# Exact\n' + 'x' * (8000-len('# Exact\n')) +
+                               '\n# Large\n' + 'x' * (8001-len('# Large\n')) +
+                               '\n# Empty\n\n# Last\n')
+        sid = self.ingest()['source_id']
+        hits = si.outline(sid, repo=self.root, include_sections=True)['candidates']
+        self.assertEqual([h['section']['status'] for h in hits],
+                         ['readable', 'limited', 'heading_only', 'heading_only'])
+        self.assertEqual(hits[0]['section']['chars'], 8000)
+        self.assertEqual(hits[1]['section']['chars'], 8001)
+        for h in hits[1:]:
+            self.assertNotIn('read_input', h['section'])
+        self.assertTrue(qa.execute('read_raw', hits[0]['section']['read_input'])['ok'])
+
+    def test_section_option_reaches_late_condition_via_shared_cli_and_api_only_when_selected(self):
+        lines = ['# Conditions'] + ['Introductory statement.'] * 34 + ['', 'The late condition is essential.',
+                  '', '# Next section', 'Other subject.']
+        self.source.write_text('\n'.join(lines))
+        sid = self.ingest()['source_id']
+        hit = si.outline(sid, repo=self.root, include_sections=True, query='Conditions')['candidates'][0]
+        self.assertNotEqual(hit['section']['read_input'], hit.get('read_input', {'locator': hit['locator']}))
+        before = {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()}
+        session = qo.QuerySession(query='What are all the conditions?', mode='api')
+        qo.execute_plan(session, [{'action': 'source_outline', 'input': {'source_id': sid, 'query': 'Conditions', 'include_sections': True}}])
+        self.assertEqual(session.read_sources, [])
+        self.assertEqual(len(session.read_options), 1)  # Existing default handles are unchanged.
+        self.assertNotEqual(next(iter(session.read_options.values()))['input'], hit['section']['read_input'])
+        session.stage = 'evidence'
+        out = qo.execute_plan(session, [{'action': hit['section']['read_action'], 'input': hit['section']['read_input']}])
+        self.assertTrue(out['results'][0]['ok'], out)
+        self.assertIn('late condition is essential', out['results'][0]['text'])
+        self.assertNotIn('Other subject', out['results'][0]['text'])
+        self.assertIn(hit['section']['read_input']['locator'], session.read_sources)
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            wg.cmd_read_raw(SimpleNamespace(locator=hit['section']['read_input']['locator']))
+        cli = json.loads(stream.getvalue())
+        self.assertTrue(cli['ok'], cli)
+        self.assertEqual(cli['result']['text'], '\n'.join(lines[:37]))
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.root/'academic').rglob('*') if p.is_file()})
+
+    def test_caption_has_no_whole_section_and_unclosed_fence_blocks_pseudo_sections(self):
+        self.source.write_text('## Real\nTable 1: values\n~~~md\n## Fake\nMore code\n')
+        sid = self.ingest()['source_id']
+        hits = si.outline(sid, repo=self.root, include_sections=True)['candidates']
+        self.assertEqual([h['title'] for h in hits], ['Real', 'Table 1: values'])
+        self.assertEqual(hits[0]['section']['end_line'], 5)
+        self.assertNotIn('section', hits[1])
+
+    def test_sections_are_opt_in_typed_and_shared_by_cli_dsh_and_api(self):
+        from dsh.tools import build_tools
+        sid = self.ingest()['source_id']
+        with patch.object(si, 'section_navigation', side_effect=AssertionError('no default section scan')):
+            default = qa.execute('source_outline', {'source_id': sid})
+            self.assertTrue(default['ok'], default)
+            self.assertNotIn('section', json.loads(default['text'])['candidates'][0])
+        for value in ['false', 1, None]:
+            self.assertFalse(qa.execute('source_outline', {'source_id': sid, 'include_sections': value})['ok'])
+        args = wg.build_parser().parse_args(['source-outline', sid, '--include-sections'])
+        output = io.StringIO()
+        with redirect_stdout(output): args.func(args)
+        cli = json.loads(output.getvalue())
+        self.assertEqual(cli['result']['candidates'][0]['section']['status'], 'readable')
+        tool = next(t for t in build_tools() if t.name == 'source_outline')
+        dsh = json.loads(tool.execute_fn({'source_id': sid, 'include_sections': True}))
+        self.assertEqual(dsh['candidates'], cli['result']['candidates'])
+        field = qo._TOOL_SCHEMAS['source_outline']['properties']['include_sections']
+        self.assertEqual(field['type'], 'boolean')
+        self.assertIs(field['default'], False)
+        session = qo.QuerySession(mode='api')
+        result = qo.execute_plan(session, [{'action': 'source_outline', 'input': {
+            'source_id': sid, 'include_sections': 'true'}}])
+        self.assertIn('INPUT_CONTRACT', result['results'][0]['error'])
 
     def test_outline_requires_bound_source_and_rejects_private_and_tampered_carriers(self):
         ready = self.ingest()

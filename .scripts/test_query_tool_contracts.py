@@ -137,6 +137,39 @@ class ContractsTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     contracts.calculate(**inputs)
 
+    def test_natural_log_exp_scientific_values(self):
+        # Independent high-precision constants, not another call to this evaluator.
+        examples = [
+            ("log(2)", "0.693147180559945309417232121458176568"),
+            ("exp(1)", "2.718281828459045235360287471352662498"),
+            ("-p*log(p)-(1-p)*log(1-p)", "0.693147180559945309417232121458176568"),
+            ("exp((a-max(a,b))/sqrt(d))/(exp((a-max(a,b))/sqrt(d))+exp((b-max(a,b))/sqrt(d)))",
+             "0.731058578630004879251159241821836274"),
+        ]
+        for expression, expected in examples:
+            with self.subTest(expression=expression):
+                out = contracts.calculate("expression", expression=expression,
+                                          variables={"p": 0.5, "a": 2002, "b": 2000, "d": 4})
+                self.assertLess(abs(Decimal(out["result"])-Decimal(expected)), Decimal("1e-32"))
+                self.assertFalse(out["fact_evidence"])
+        self.assertEqual(contracts.calculate("expression", expression="log(1)")["result"], 0)
+        self.assertEqual(contracts.calculate("expression", expression="exp(0)")["result"], 1)
+
+    def test_new_math_functions_keep_preexisting_variable_names(self):
+        out = contracts.calculate("expression", expression="log+exp+log(log)+exp(0)",
+                                  variables={"log": 1, "exp": 2})
+        self.assertEqual(out["result"], 4)
+
+    def test_log_exp_domain_arity_and_magnitude_bounds(self):
+        for expression in ["log(0)", "log(-1)", "log()", "log(2,10)", "exp()", "exp(1,2)",
+                           "log(x=2)", "exp(x=2)", "log.__call__(1)",
+                           "exp(1e100)", "exp(-1e100)", "exp(231)", "exp(-231)",
+                           "exp(exp(100))", "exp(-230)/100", "exp(230)*100"]:
+            with self.subTest(expression=expression), self.assertRaises(ValueError):
+                contracts.calculate("expression", expression=expression)
+        for expression in ["exp(230)", "exp(-230)", "log(1e100)", "log(1e-100)"]:
+            self.assertFalse(contracts.calculate("expression", expression=expression)["fact_evidence"])
+
 
 if __name__ == "__main__":
     unittest.main()

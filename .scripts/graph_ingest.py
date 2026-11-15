@@ -978,7 +978,7 @@ def normalize_page_subjects(triples, page: str, fm=None):
     is_paper = fm.get("type") == "paper-summary" or page.startswith(
         "academic/wiki/papers/"
     )
-    is_meeting = fm.get("type") == "conference-summary" or page.startswith(
+    is_meeting = fm.get("type") in {"conference-summary", "meeting-summary"} or page.startswith(
         "academic/wiki/conferences/"
     )
     allowed = set()
