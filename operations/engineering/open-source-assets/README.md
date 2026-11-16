@@ -68,12 +68,12 @@ be approximate; factual answers return to version-bound source evidence.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## Recent updates: v0.28.1
+## Recent updates: v0.28.2
 
-The Gallery image-loading patch uses a lightweight WebP for the MPE poster on
-the home and detail pages; click it to open the full-resolution original. The
-first detail preview loads immediately, while later images remain lazy-loaded.
-The compatible v0.28.0 capabilities below remain available.
+Gallery statistics now show only cumulative, 7-day and 30-day page views.
+Visits remain collected and retained in aggregate snapshots for later lookup;
+hiding them does not change the data or resolve the earlier zero-count question.
+Lightweight previews, original downloads and the earlier capabilities below remain available.
 
 ASKS is **Agent-Native Scientific Knowledge System**, guided by
 **Interpret knowledge. Organize for use. Reason to solve.** This compatible

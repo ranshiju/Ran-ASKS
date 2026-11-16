@@ -1,5 +1,5 @@
 # Ran-ASKS
-> 当前 main 版本: v0.28.1
+> 当前 main 版本: v0.28.2
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -66,10 +66,11 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
 
-## 近期更新：v0.28.1
+## 近期更新：v0.28.2
 
-本次修复 Gallery 图片加载：MPE 海报在首页与详情页使用轻量 WebP 预览，点击仍可
-打开高清原图；详情首图立即加载，其余图片延迟加载。下列 v0.28.0 的兼容改进继续保留。
+Gallery 首页仅显示累计、近7天和近30天浏览量。访问次数继续采集并保留在汇总记录中，
+今后仍可查询；隐藏展示不改变数据，也不代表此前零值原因已经查明。
+轻量预览、原始成品下载及下列既有能力继续保留。
 
 ASKS 的全称为 **Agent-Native Scientific Knowledge System（智能体原生的科学知识系统）**。
 核心观点是 **Interpret knowledge. Organize for use. Reason to solve.**

@@ -7,6 +7,21 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-11-16
+
+### Version decision / 版本判断
+
+- PATCH: Limit Gallery cards to page views while preserving Visits collection and retained aggregates
+- PATCH（中文）：Gallery仅展示浏览量，保留访问次数采集及已有汇总数据
+
+### Highlights
+
+- Show only cumulative, 7-day and 30-day page views in the Gallery; retain Visits collection, aggregate history and later lookup without changing the statistics schema.
+
+### 主要更新
+
+- Gallery仅展示累计、近7天和近30天浏览量；保留Visits采集、汇总历史和后续查询能力，不改变统计数据格式。
+
 ## [0.28.1] - 2026-11-15
 
 ### Version decision / 版本判断
@@ -924,5 +939,7 @@ manifests and checksums.
 
 [0.28.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.28.1...HEAD
 [0.28.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.1
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.28.2...HEAD
+[0.28.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.2

@@ -200,15 +200,12 @@ def tags(work: dict, caps: dict) -> str:
 
 def statistics_section(metrics: dict, works: list[dict]) -> str:
     available = metrics['status'] != 'unavailable'
-    cards = ''
     total = metrics.get('cumulative') if available else None
-    for key,label in [('page_views','累计浏览量'),('visits','累计访问次数')]:
-        value = f'{total[key]:,}' if total else '—'
-        cards += f'<div class="stat-card stat-total"><span>{label}</span><strong>{value}</strong></div>'
+    value = f'{total["page_views"]:,}' if total else '—'
+    cards = f'<div class="stat-card stat-total"><span>累计浏览量</span><strong>{value}</strong></div>'
     for days in ('7','30'):
-        for key,label in [('page_views','浏览量'),('visits','访问次数')]:
-            value = f'{metrics["windows"][days][key]:,}' if available else '—'
-            cards += f'<div class="stat-card"><span>近{days}天{label}</span><strong>{value}</strong></div>'
+        value = f'{metrics["windows"][days]["page_views"]:,}' if available else '—'
+        cards += f'<div class="stat-card"><span>近{days}天浏览量</span><strong>{value}</strong></div>'
     note = '统计尚未就绪，待取得汇总数据后显示。'
     popular = ''
     if available:
@@ -230,7 +227,7 @@ def statistics_section(metrics: dict, works: list[dict]) -> str:
             '<p class="eyebrow">GALLERY IN NUMBERS</p><h2>展厅访问</h2></div>'
             '<a class="text-link" href="privacy.html">统计口径与选择 →</a></div>'
             f'<div class="stats-grid">{cards}</div><p class="stats-note">{esc(note)}</p>{popular}'
-            '<p class="stats-note">访问次数不等于独立人数；脚本拦截与采样会影响统计。数据每日更新。</p></section>')
+            '<p class="stats-note">浏览量不等于独立人数；脚本拦截与采样会影响统计。数据每日更新。</p></section>')
 
 
 def index_page(catalog: dict, works: list[dict], site: dict | None = None, metrics: dict | None = None) -> str:
@@ -416,7 +413,9 @@ def build(root: Path, output: Path, *, cloudflare_token: str = '', metrics: dict
         privacy = (f'<section class="wrap prose"><h1>访问统计说明</h1><p>{status}</p>'
                    '<p>统计只用于公开 Gallery 的展示改进，不接入你的知识库或任务内容。'
                    '启用时由 Cloudflare 处理统计请求；不记录搜索词，不使用 Cookie 或跨站个人标识。</p>'
-                   '<p>页面浏览与访问次数反映趋势，不等同独立人数。当前不统计下载完成或指令复制。'
+                   '<p>首页只展示累计、近7天和近30天浏览量，不等同独立人数。'
+                   '访问次数仍由统计服务采集并保留汇总，可按服务的数据保留范围另行查询。'
+                   '当前不统计下载完成或指令复制。'
                    '直接打开 PDF、脚本拦截和采样可能影响统计范围。</p>'
                    '<p>累计统计从标注的UTC日期起算，更早访问不推算。公开快照仅保存每日汇总数，'
                    '重复刷新替换重叠日期；若长期未更新造成缺期，会明确标注。数据可能随统计服务修订。</p>'

@@ -12,7 +12,17 @@ text coverage and rendering. Earlier releases retained the original Word layout
 and appended updates; those statements below describe their historical editions.
 The repository does not rely on GitHub's PDF previewer.
 
-## Current edition: v0.28.1 / 当前版本
+## Current edition: v0.28.2 / 当前版本
+
+The 2026-11-16 v0.28.2 PATCH displays only cumulative, 7-day and 30-day
+page views on the Gallery. Visits collection and retained daily aggregates
+remain available for later inspection within the provider's retention limits
+or the saved snapshot's coverage. The zero-Visits diagnosis remains unresolved;
+this is a display change, synchronized in the introduction and PDF.
+
+2026年11月16日的v0.28.2仅调整Gallery展示：首页保留三项浏览量，Visits继续采集、
+保存，可在服务保留范围或已保存汇总的覆盖范围内查询。此前零值原因仍未查明；
+正文/PDF同步这一口径，以下保留此前更新范围。
 
 The v0.28.1 PATCH separates lightweight Gallery display previews from original
 image links, reduces MPE poster transfer size on the home/detail pages and loads

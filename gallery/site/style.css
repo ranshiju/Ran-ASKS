@@ -17,7 +17,7 @@
 
 /* Public aggregate statistics use the same quiet exhibition palette. */
 .statistics{padding-top:1rem;padding-bottom:3rem;border-bottom:1px solid var(--line,#d9dfd7)}
-.stats-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1rem}
+.stats-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}
 .stat-card{padding:1.3rem;background:#eef2eb;border:1px solid #dce3d9;border-radius:4px}
 .stat-card span{display:block;font-size:.85rem;color:#51635c}
 .stat-card strong{display:block;margin-top:.5rem;font:500 2rem Georgia,serif;color:#203c3a}
@@ -26,4 +26,4 @@
 .popular-works{margin-top:1.4rem}.popular-works h3{font-size:1rem}
 .popular-works ol{padding-left:1.3rem}.popular-works li{padding:.4rem 0}
 .popular-works li span{margin-left:1rem;font-size:.8rem;color:#67756d}
-@media(max-width:1100px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-card{padding:1rem}}
+@media(max-width:700px){.stats-grid{grid-template-columns:1fr}.stat-card{padding:1rem}}
