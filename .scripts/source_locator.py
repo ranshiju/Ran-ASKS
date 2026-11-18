@@ -34,6 +34,16 @@ FACT_PREDICATES = {
 }
 NAV_PREDICATE_PREFIXES = ("主要研究", "紧密相关于", "涉及", "应用于", "基于", "贡献于", "探索")
 
+def split_source_lines(text: str) -> list[str]:
+    """Canonical L coordinates, preserving the existing locator convention.
+
+    Python splitlines recognizes CRLF, FF, VT and Unicode separators. A final
+    line terminator is not an additional source line. Never rewrite the source.
+    Use split('\\n') only on already joined locator slices to retain empty ends.
+    """
+    return text.splitlines()
+
+
 def split_locator(value):
     match = LOCATOR_RE.match(str(value or "").strip())
     if not match:
@@ -419,7 +429,7 @@ def locator_status(locator, target):
         return "present" if table_locator_text(text, locator) is not None else "missing"
     if locator == "全篇":
         return "present"
-    lines = text.splitlines()
+    lines = split_source_lines(text)
     requested = line_range(locator)
     if requested:
         start, end = requested
@@ -469,7 +479,7 @@ def read_locator_text(target, locator):
     requested = line_range(locator)
     if requested:
         start, end = requested
-        lines = text.splitlines()
+        lines = split_source_lines(text)
         if end > len(lines):
             return None
         return "\n".join(lines[start - 1:end])
@@ -500,6 +510,54 @@ def read_locator_text(target, locator):
     next_heading = re.search(rf"^#{{1,{level}}}\s+", text[start:], re.M)
     end = start + (next_heading.start() if next_heading else len(text[start:]))
     return text[start:end]
+
+
+def bounded_text_excerpt(target, locator, max_chars=1000, *, prefer_abstract=False):
+    """Project a selected text slice onto actual lines; callers enforce read scope.
+
+    A line address identifies where the excerpt occurs, not that its entire last
+    line was read. No semantic relevance or entailment is inferred here.
+    """
+    target = Path(target)
+    if target.suffix.lower() not in {".md", ".txt"} or max_chars < 1:
+        return None
+    selected = read_locator_text(target, locator)
+    if not selected or not selected.strip():
+        return None
+    text = "\n".join(split_source_lines(target.read_text(encoding="utf-8", errors="replace")))
+    selected = "\n".join(selected.splitlines())
+    requested = line_range(locator)
+    if requested:
+        offset = sum(len(line) + 1 for line in text.splitlines()[:requested[0] - 1])
+        if text[offset:offset + len(selected)] != selected:
+            return None
+    elif not locator or locator == "全篇":
+        if selected != text:
+            return None
+        offset = 0
+    else:
+        offset = text.find(selected)
+        if offset < 0 or text.find(selected, offset + 1) >= 0:
+            return None
+    if prefer_abstract and (not locator or locator == "全篇"):
+        abstract = re.search(r"^#{1,6}\s+Abstract\s*$\n(.*?)(?=^#{1,6}\s+|\Z)",
+                             selected, re.M | re.I | re.S)
+        if abstract:
+            offset += abstract.start(1)
+            selected = abstract.group(1)
+    offset += len(selected) - len(selected.lstrip())
+    selected = selected.strip()
+    if not selected:
+        return None
+    excerpt = selected[:max_chars].rstrip()
+    start = text.count("\n", 0, offset) + 1
+    end = text.count("\n", 0, offset + len(excerpt) - 1) + 1
+    return {
+        "locator": f"L{start}" if start == end else f"L{start}-L{end}",
+        "excerpt": excerpt,
+        "excerpt_only": True,
+        "truncated": len(selected) > max_chars,
+    }
 
 
 def evidence_targets(target, locator):

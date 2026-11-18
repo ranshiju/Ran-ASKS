@@ -491,8 +491,15 @@ def add_item(value: str | Path, *, title: str, item_type: str | None = None,
 
 
 def _find_record(root: Path, kind: str, record_id: str) -> tuple[dict, str, Path]:
+    prefix = "ITEM-" if kind == "item" else "MEM-"
+    if (not record_id.startswith(prefix) or any(char not in
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for char in record_id)):
+        raise WorkspaceError("非法记录 ID")
     directory = "items" if kind == "item" else "memories"
     path = store_dir(root) / directory / f"{record_id}.md"
+    if (store_dir(root).is_symlink() or path.parent.is_symlink() or path.is_symlink()
+            or not _inside(path.resolve(), root.resolve())):
+        raise WorkspaceError("记录路径越界")
     if not path.is_file():
         raise WorkspaceError(f"{kind} 不存在: {record_id}")
     metadata, body = read_markdown_record(path)
@@ -900,6 +907,165 @@ def _memory_effective(metadata: dict, today: str | None = None) -> bool:
     return (not valid_from or valid_from <= current) and (not valid_to or current <= valid_to)
 
 
+def item_log(value: str | Path, item_id: str, content: str) -> dict:
+    """Append a decision-bearing event to the authoritative item body."""
+    if not content.strip():
+        raise WorkspaceError("关键日志不能为空")
+    root = require_workspace(value)
+    _metadata, body, _path = _find_record(root, "item", item_id)
+    heading = "## 关键历史"
+    entry = f"\n\n### {now_iso()} 记录\n\n{content.strip()}\n"
+    # Insert at the end of this section, even if another section follows it.
+    start = body.find(heading + "\n")
+    if start < 0:
+        body = body.rstrip() + "\n\n" + heading + entry
+    else:
+        end = body.find("\n## ", start + len(heading))
+        end = len(body) if end < 0 else end
+        body = body[:end].rstrip() + entry + body[end:]
+    return update_item(root, item_id, {"content": body})
+
+
+def workspace_context(value: str | Path, *, item: str = "", query: str = "",
+                      item_limit: int = 3, memory_limit: int = 3,
+                      max_chars: int = 8000) -> dict:
+    """Bounded local discovery, followed by authoritative rereads; never repairs."""
+    if bool(item) == bool(query):
+        raise WorkspaceError("指定且仅指定 --item 或 --query")
+    if not (1 <= item_limit <= 20 and 0 <= memory_limit <= 20 and 2000 <= max_chars <= 50000):
+        raise WorkspaceError("item-limit 1..20，memory-limit 0..20，max-chars 2000..50000")
+    if len(item or query) > 256 or not (item or query).strip():
+        raise WorkspaceError("选择词必须为 1..256 字符的非空文本")
+    root = require_workspace(value)
+    index = store_dir(root) / "index.sqlite"
+    rebuild_hint = f"请运行 workspace_state.py rebuild '{workspace_ref(root)}'"
+    if not index.is_file() or index.is_symlink() or store_dir(root).is_symlink():
+        raise WorkspaceError(f"索引缺失或不安全；{rebuild_hint}")
+
+    def read_candidate(row: sqlite3.Row, kind: str) -> dict:
+        metadata, body, path = _find_record(root, kind, row["id"])
+        if (_hash_record(metadata, body) != _hash_record(json.loads(row["metadata_json"]), row["body"])
+                or tuple(row) != _record_row(metadata, body, path, root)):
+            raise WorkspaceError(f"索引与权威记录不一致: {row['id']}；{rebuild_hint}")
+        return {"metadata": metadata, "source": repo_relative(path), "body": body,
+                "body_chars": len(body), "body_truncated": False}
+
+    try:
+        conn = sqlite3.connect(index.resolve().as_uri() + "?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        with conn:
+            index_meta = dict(conn.execute("SELECT key, value FROM metadata").fetchall())
+            if (index_meta.get("schema_version") != INDEX_SCHEMA_VERSION
+                    or index_meta.get("workspace") != workspace_ref(root)):
+                raise WorkspaceError(f"索引版本或工作区不匹配；{rebuild_hint}")
+            if item:
+                rows = conn.execute("""SELECT * FROM items WHERE id=? OR EXISTS
+                    (SELECT 1 FROM json_each(items.tags_json) WHERE value=?)
+                    ORDER BY id LIMIT 2""", (item, item)).fetchall()
+                if len(rows) > 1:
+                    raise WorkspaceError("事项别名不唯一，请使用 ITEM-ID")
+                extra_items = False
+            else:
+                # Literal substring matching: %, _ and backslash are not wildcards.
+                literal = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                pattern = "%" + literal + "%"
+                rows = conn.execute(r"""SELECT * FROM items
+                    WHERE title LIKE ? ESCAPE '\' OR tags_json LIKE ? ESCAPE '\'
+                       OR body LIKE ? ESCAPE '\'
+                    ORDER BY updated_at DESC, id LIMIT ?""",
+                    (pattern, pattern, pattern, item_limit + 1)).fetchall()
+                extra_items = len(rows) > item_limit
+                rows = rows[:item_limit]
+            items = [read_candidate(row, "item") for row in rows]
+            scopes = {workspace_ref(root)}
+            for record in items:
+                scopes.add(record["metadata"]["id"])
+                scopes.update(record["metadata"]["tags"])
+            # applies_to is exact item/tag/workspace membership, not a path glob.
+            # Empty applies_to means local workspace-wide. No descendant traversal.
+            today = date.today().isoformat()
+            memory_rows = conn.execute("""SELECT * FROM memories WHERE state='active'
+                AND (COALESCE(json_extract(metadata_json,'$.valid_from'),'')=''
+                     OR substr(json_extract(metadata_json,'$.valid_from'),1,10)<=?)
+                AND (COALESCE(json_extract(metadata_json,'$.valid_to'),'')=''
+                     OR substr(json_extract(metadata_json,'$.valid_to'),1,10)>=?)
+                AND (json_array_length(json_extract(metadata_json,'$.applies_to'))=0
+                     OR EXISTS (SELECT 1 FROM json_each(memories.metadata_json,'$.applies_to')
+                         WHERE value IN (SELECT value FROM json_each(?))))
+                ORDER BY updated_at DESC, id LIMIT ?""",
+                (today, today, json.dumps(sorted(scopes)), memory_limit + 1)).fetchall() if items else []
+            extra_memories = len(memory_rows) > memory_limit
+            memories = [read_candidate(row, "memory") for row in memory_rows[:memory_limit]]
+    except (sqlite3.Error, ValueError, OSError) as exc:
+        raise WorkspaceError(f"上下文读取失败: {exc}；{rebuild_hint}") from exc
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+    result = {"schema": "workspace-context-v1", "workspace": workspace_ref(root),
+              "selector": {"item": item, "query": query}, "items": items, "memories": memories,
+              "more_items": extra_items, "more_memories": extra_memories,
+              "omitted_for_budget": {"items": 0, "memories": 0},
+              "max_chars": max_chars,
+              "discovery": "local index candidates; selected Markdown verified; no global completeness claim",
+              "read_more": "item/memory get <workspace> <id>; doctor/rebuild if index may be stale"}
+
+    def size() -> int:
+        return len(json.dumps(result, ensure_ascii=False, indent=2)) + 1
+
+    # Fit complete metadata first, then share the remaining body budget across
+    # retained records. Removing a record must release space for useful text.
+    originals = {record["metadata"]["id"]: record["body"] for record in items + memories}
+    for record in items + memories:
+        record["body"] = ""
+        record["body_truncated"] = bool(originals[record["metadata"]["id"]])
+    while size() > max_chars:
+        if memories:
+            memories.pop()
+            result["omitted_for_budget"]["memories"] += 1
+        elif len(items) > 1:
+            items.pop()
+            result["omitted_for_budget"]["items"] += 1
+        else:
+            raise WorkspaceError("预算不足以完整保留事项元数据，请提高 --max-chars")
+
+    records = items + memories
+    marker = "\n[…正文省略；按 source 读取完整记录…]\n"
+    for position, record in enumerate(records):
+        original = originals[record["metadata"]["id"]]
+        # Unused allowance from short records carries forward. Serialized size,
+        # including escaped characters, is the budget authority.
+        ceiling = size() + (max_chars - size()) // (len(records) - position)
+        record["body"] = original
+        record["body_truncated"] = False
+        if size() <= ceiling:
+            continue
+        low, high = 0, len(original) - 1
+        while low < high:
+            keep = (low + high + 1) // 2
+            if keep == len(original):
+                excerpt = original
+            else:
+                head = (keep + 1) // 2
+                tail = keep // 2
+                excerpt = original[:head] + marker + (original[-tail:] if tail else "")
+            record["body"] = excerpt
+            record["body_truncated"] = keep < len(original)
+            if size() <= ceiling:
+                low = keep
+            else:
+                high = keep - 1
+        if low == len(original):
+            record["body"] = original
+        elif low:
+            tail = low // 2
+            record["body"] = original[:(low + 1) // 2] + marker + (original[-tail:] if tail else "")
+        else:
+            record["body"] = ""
+        record["body_truncated"] = low < len(original)
+    return result
+
+
 def recall_text(value: str | Path, *, memory_limit: int = 10) -> str:
     root = require_workspace(value)
     config = load_workspace_config(root)
@@ -1278,6 +1444,18 @@ def build_parser() -> argparse.ArgumentParser:
     recall.add_argument("workspace")
     recall.set_defaults(run=lambda args: print(recall_text(args.workspace), end=""))
 
+    context = sub.add_parser("context", help="有界召回事项与适用有效记忆")
+    context.add_argument("workspace")
+    selector = context.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--item", default="")
+    selector.add_argument("--query", default="")
+    context.add_argument("--item-limit", type=int, default=3)
+    context.add_argument("--memory-limit", type=int, default=3)
+    context.add_argument("--max-chars", type=int, default=8000)
+    context.set_defaults(run=lambda args: _json(workspace_context(
+        args.workspace, item=args.item, query=args.query, item_limit=args.item_limit,
+        memory_limit=args.memory_limit, max_chars=args.max_chars)))
+
     status = sub.add_parser("status", help="返回当前工作区摘要")
     status.add_argument("workspace")
     status.set_defaults(run=lambda args: _json(workspace_summary(require_workspace(args.workspace))))
@@ -1349,6 +1527,11 @@ def build_parser() -> argparse.ArgumentParser:
             changes["content"] = args.content
         _json(update_item(args.workspace, args.item_id, changes, clear=args.clear))
     item_update.set_defaults(run=run_item_update)
+
+    log = item_sub.add_parser("log", help="追加有决策价值的关键历史，不改变当前状态")
+    log.add_argument("workspace"); log.add_argument("item_id")
+    log.add_argument("--content", default=""); log.add_argument("--stdin", action="store_true")
+    log.set_defaults(run=lambda args: _json(item_log(args.workspace, args.item_id, _content(args, required=True))))
 
     item_list = item_sub.add_parser("list")
     item_list.add_argument("workspace"); item_list.add_argument("--state", default="")

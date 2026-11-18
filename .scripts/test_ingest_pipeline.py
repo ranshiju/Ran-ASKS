@@ -1099,6 +1099,7 @@ def test_sparse_proposition_links_exact_concepts_without_atom_nodes():
         graph_ingest.gl.insert_aliases(conn, "SC-1", ["SC"])
         graph_ingest.gl.insert_aliases(conn, "SC-2", ["SC"])
         triples = [
+            {"subject": "page", "predicate": "研究基础", "object": "矩阵乘积态matrix product state(MPS)"},
             {"subject": "page", "predicate": "核心方法",
              "object": "注意力神经张量网络attention neural tensor network(ANTN)"},
             {"subject": "page", "predicate": "核心创新点",
@@ -2307,7 +2308,8 @@ def test_resume_reconciles_parent_batch_before_maintenance():
     }
     fake.run_post_ingest_maintenance = lambda results, session_id: calls.append(
         (results, session_id)
-    ) or {"status": "completed", "receipt_path": "temp/batch-receipt.json"}
+    ) or {"status": "completed", "receipt_path": "temp/batch-receipt.json",
+          "trigger_files": [ic.maintenance_trigger(item) for item in results]}
     fake.compact_maintenance = lambda envelope: {
         "status": envelope["status"], "receipt_path": envelope["receipt_path"]
     }
@@ -2348,6 +2350,7 @@ def test_resume_reconciles_parent_batch_before_maintenance():
             failed_report = {**updated, "maintenance": {
                 "status": "error", "receipt_path": "temp/batch-receipt.json",
                 "publication": {"status": "error"},
+                "trigger_files": updated["maintenance"]["trigger_files"],
             }}
             fake._write_json_atomic(report_path, failed_report)
             publications = []

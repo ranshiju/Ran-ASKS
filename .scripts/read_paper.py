@@ -13,9 +13,12 @@
   section 名支持模糊匹配(大小写/编号前缀/中英文等价)。
 """
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
+
+from source_locator import split_source_lines
 
 # ===== 模糊匹配:section 名 → (正则, 权重) =====
 # 权重用于在同名多个标题中选最优：主结果 > 实验段，正文段 > 附录段。
@@ -62,7 +65,7 @@ def normalize_heading_for_match(title):
 def parse_sections(paper_path):
     """解析 paper.md 的二至六级 section，返回原始行号范围。"""
     text = Path(paper_path).read_text(encoding="utf-8")
-    lines = text.split('\n')
+    lines = split_source_lines(text)
     sections = []
     current_title = None
     current_start = None
@@ -84,6 +87,60 @@ def parse_sections(paper_path):
         sections.insert(0, ("__preamble__", 0, pre_end))
 
     return sections, lines
+
+
+def section_outline(paper_path, *, source_path=None, max_chars=3000, offset=0):
+    """Bounded structural navigation, not a claim that sections were read."""
+    sections, lines = parse_sections(paper_path)
+    headings = [(title, start, end) for title, start, end in sections if title != "__preamble__"]
+    # Letter subsections C./D./I./V. are also Roman numerals. Only the
+    # consecutive I, II, III... sequence identifies major Roman headings.
+    roman = []
+    roman_values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+    for item in headings:
+        match = re.match(r"^([IVXLCDM]+)\.\s+", item[0])
+        if match:
+            values = [roman_values[c] for c in match.group(1)]
+            number = sum(-v if i + 1 < len(values) and v < values[i + 1] else v
+                         for i, v in enumerate(values))
+            if number == len(roman) + 1:
+                roman.append(item)
+    selection = "all_headings"
+    if len(roman) >= 2:
+        boundaries = [item for item in headings if re.match(
+            r"^(?:references|bibliography|acknowledg(?:e)?ments?|appendix)\b", item[0], re.I)]
+        headings = sorted(roman + boundaries, key=lambda item: item[1])
+        selection = "roman_major_headings"
+    elif headings:
+        levels = {start: len(re.match(r"^#+", lines[start]).group()) for _title, start, _end in headings}
+        headings = [item for item in headings if levels[item[1]] == min(levels.values())]
+        numeric = [item for item in headings if re.match(r"^\d+(?:[.)]\s+|\s+)", item[0])]
+        if len(numeric) >= 2:
+            headings = numeric
+            selection = "numbered_major_headings"
+        else:
+            selection = "shallowest_markdown_headings"
+    if offset < 0 or max_chars < 512:
+        raise ValueError("outline requires offset >= 0 and max_chars >= 512")
+    source = str(source_path or paper_path)
+    result = {"source": source, "selection": selection, "navigation_only": True,
+              "total_headings": len(headings), "sections": [], "next_offset": None}
+    for index in range(offset, len(headings)):
+        title, start, _end = headings[index]
+        end = headings[index + 1][1] if index + 1 < len(headings) else len(lines)
+        item = {"title": title[:120], "title_truncated": len(title) > 120,
+                "locator": f"{source}#L{start + 1}-L{end}"}
+        result["sections"].append(item)
+        result["next_offset"] = index + 1 if index + 1 < len(headings) else None
+        if len(json.dumps(result, ensure_ascii=False)) > max_chars:
+            result["sections"].pop()
+            if not result["sections"]:
+                raise ValueError("one outline entry exceeds budget; shorten source path or increase max_chars")
+            result["next_offset"] = index
+            break
+    if len(json.dumps(result, ensure_ascii=False)) > max_chars:
+        raise ValueError("outline metadata exceeds budget; shorten source path or increase max_chars")
+    return result
 
 
 def section_match_score(requested, title):
@@ -294,6 +351,9 @@ def main():
     parser.add_argument("--source-lines", action="store_true")
     parser.add_argument("--source-path", help="Raw handle 基址；不改变实际读取路径")
     parser.add_argument("--full", action="store_true")
+    parser.add_argument("--outline", action="store_true", help="有界目录JSON，仅导航，未读正文")
+    parser.add_argument("--outline-offset", type=int, default=0)
+    parser.add_argument("--outline-max-chars", type=int, default=3000)
     parser.add_argument("--start-line", type=int)
     parser.add_argument("--end-line", type=int)
     args = parser.parse_intermixed_args()
@@ -304,8 +364,18 @@ def main():
         print(f"ERROR: 文件不存在: {paper_path}", file=sys.stderr)
         sys.exit(1)
 
+    if args.outline:
+        if args.full or args.start_line is not None or args.end_line is not None:
+            parser.error("--outline cannot be combined with full text ranges")
+        try:
+            result = section_outline(paper_path, source_path=args.source_path,
+                                     max_chars=args.outline_max_chars, offset=args.outline_offset)
+        except ValueError as error:
+            parser.error(str(error))
+        print(json.dumps(result, ensure_ascii=False))
+        return
     if args.full:
-        lines = Path(paper_path).read_text(encoding="utf-8").split('\n')
+        lines = split_source_lines(Path(paper_path).read_text(encoding="utf-8"))
         start = args.start_line if args.start_line is not None else 1
         end = args.end_line if args.end_line is not None else len(lines)
         if not 1 <= start <= end <= len(lines):
@@ -344,7 +414,7 @@ def main():
             tag = f"头部截取({cap}/{len(full)})" if len(full) > cap else f"全文({len(output)})"
             print(f"[read_paper] 未命中 {len(misses)}, 本文无 section 标题, {tag}, ≈{len(output)//3} tokens", file=sys.stderr)
             if args.source_lines:
-                print(_render_ranges(output.split('\n'), [(0, len(output.split('\n')) - 1)],
+                print(_render_ranges(split_source_lines(output), [(0, len(split_source_lines(output)) - 1)],
                                      str(args.source_path or paper_path)))
             else:
                 print(output)

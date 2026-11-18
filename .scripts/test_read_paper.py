@@ -235,6 +235,73 @@ def test_abstract_handles_do_not_add_trailing_blank_evidence():
         paper.unlink()
 
 
+
+def test_source_handles_roundtrip_control_line_separators():
+    import source_locator
+    paper = _paper("# Title\r\nfront\fform feed\vvertical\n## Conclusions\r\nactual conclusion\n")
+    try:
+        hits, misses, _ = module.extract_sections(paper, ["conclusions"], source_lines=True)
+        assert not misses
+        output = hits[0][2]
+        full = subprocess.run([sys.executable, str(SCRIPT), str(paper), "--full", "--source-lines"],
+                              capture_output=True, text=True, check=True).stdout
+        for rendered in (output, full):
+            for line in rendered.splitlines():
+                if not line:
+                    continue
+                match = re.fullmatch(r"<(.+)#(L\d+)> (.*)", line)
+                assert match, line
+                assert source_locator.read_locator_text(paper, match.group(2)) == match.group(3), line
+        assert f"<{paper}#L6> actual conclusion" in output
+    finally:
+        paper.unlink()
+
+
+def test_outline_exposes_major_themes_and_bounded_continuation():
+    import json
+    import source_locator
+    paper = _paper("# Review\nlead\fboundary\n" + "".join(
+        f"## {roman}. {title}\nIntro {title}.\n## A. Details\nDetailed evidence.\n## C. More\nThird detail.\n## D. Limits\nLimits.\n"
+        for roman, title in [("I", "Design"), ("II", "Noise"), ("III", "Control"), ("IV", "Readout")]
+    ))
+    try:
+        offset = 0
+        titles = []
+        while True:
+            output = subprocess.run([
+                sys.executable, str(SCRIPT), str(paper), "--outline", "--outline-max-chars", "512",
+                "--outline-offset", str(offset)], capture_output=True, text=True, check=True).stdout
+            assert len(output.rstrip()) <= 512
+            result = json.loads(output)
+            assert result["navigation_only"] and result["selection"] == "roman_major_headings"
+            for item in result["sections"]:
+                title = item["title"]
+                titles.append(title)
+                selected = source_locator.read_locator_text(paper, item["locator"].split("#", 1)[1])
+                assert selected.startswith("## " + title + "\n")
+                assert "Detailed evidence" in selected
+            if result["next_offset"] is None:
+                break
+            assert result["next_offset"] > offset
+            offset = result["next_offset"]
+        assert titles == ["I. Design", "II. Noise", "III. Control", "IV. Readout"]
+    finally:
+        paper.unlink()
+
+
+def test_headerless_source_handles_roundtrip_control_separators():
+    import source_locator
+    paper = _paper("Title\r\nfirst\fsecond\vthird\n")
+    try:
+        result = subprocess.run([sys.executable, str(SCRIPT), str(paper), "Method", "--source-lines"],
+                                capture_output=True, text=True, check=True)
+        for line in result.stdout.splitlines():
+            matched = re.fullmatch(r"<(.+)#(L\d+)> (.*)", line)
+            assert matched, line
+            assert source_locator.read_locator_text(paper, matched.group(2)) == matched.group(3)
+    finally:
+        paper.unlink()
+
 def main():
     for name, test in sorted(globals().items()):
         if name.startswith("test_") and callable(test):

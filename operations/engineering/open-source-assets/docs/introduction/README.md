@@ -12,7 +12,19 @@ text coverage and rendering. Earlier releases retained the original Word layout
 and appended updates; those statements below describe their historical editions.
 The repository does not rely on GitHub's PDF previewer.
 
-## Current edition: v0.28.2 / 当前版本
+## Current edition: v0.29.0 / 当前版本
+
+The 2026-11-18 compatible MINOR release adds engineering work contexts with
+bounded item/memory recovery and managed key-history updates. It also improves
+paper/meeting handoffs, source-line consistency, structural navigation and
+maintenance coverage. The current Markdown and PDF explain these behaviors;
+progress, structural checks, real-use quality and overall cost remain separate
+claims. Actual workspace instances are excluded from the public template.
+
+2026年11月18日的v0.29.0兼容新增修复与优化工作上下文、有界事项/记忆接续和受管
+关键日志，同时改进论文/会议交接、行坐标一致性、结构导航及维护覆盖。正文/PDF同步
+解释工作方式；实际项目实例不公开，结构通过不等于语义质量与总体净收益已经证明。
+以下保留此前版本的范围记录。
 
 The 2026-11-16 v0.28.2 PATCH displays only cumulative, 7-day and 30-day
 page views on the Gallery. Visits collection and retained daily aggregates

@@ -42,7 +42,7 @@ Wiki或建图。默认仍为legacy，Source-first默认skip、知识供料默认
 
 节点以 `nodes.path` 作为稳定 ID，配首选 `title`、多对多 `aliases` 和主导航 `description`；`node_glosses` 逐来源保存局部说明与 Raw locator，后续摄入不盲目覆盖主描述。API 后端的 DSH 按任务注册受 guard 约束的功能工具；例如 `node_resolve` 用名称信号和 label/semantic 双视图做受限身份解析，`semantic_search` 只做相关召回。裸 embedding、阈值选择和 merge 写操作留在确定性内核。
 
-建设 Agent 读取工程文件时采用独立的按需 locator，不混用 Raw/Wiki 证据语义：Markdown heading path、YAML JSON Pointer、Python qualified symbol 和显式行段均由代码精确截取。读取失败、歧义或超预算时直接拒绝，不回退全文；不为此维护索引或 companion。功能性任务只调用封装函数，工程 locator 不进入通用 query/DSH 工具面。具体调用见 `code-guidance.md` 的 `engineering_locator.py` 段。
+建设 Agent 读取工程文件时采用独立的按需 locator，不混用 Raw/Wiki 证据语义：Markdown heading path、YAML JSON Pointer、Python qualified symbol 和显式行段均由代码精确截取。读取失败、歧义或超预算时直接拒绝，不回退全文；不为此维护索引或 companion。功能性任务只调用封装函数，工程 locator 不进入通用 query/DSH 工具面。具体调用见 `code-guidance.md` 的 `engineering_locator.py` 段。 论文原文L坐标由source_locator的split_source_lines共享，reader/Agent分批与消费端一致；长文目录仅提供导航。论文初始、旧任务和API失败接管共享内容协议，API书目/预算与范围锁保持，精确操作见调用指南2.1c.3。
 
 运行时明确区分持续工作与有边界的功能。`workspace`、`research`、`frontier`、`oral_exam` 是跨调用持续存在的用户持续工作；摄入、查询、写作、检查、同步、PPT 制作等是一次有边界的执行后产生结果、产物或受管状态更新的功能。Route task、按需 capability、`wg.py`、DSH、CLI、固定 pipeline 和 API worker 是这些功能面向不同调用者与后端的绑定，不是彼此独立的功能目录。`operations/config/function-registry.yaml` 统一管理 canonical function ID、调用策略和绑定；工程元图继续只管理组件责任、影响关系和验证。
 
@@ -198,6 +198,7 @@ Hub 是 keyword、proposition、People page 等普通节点的可重叠动态群
 |---|---|
 | 红线、任务识别、启动纪律 | `AGENTS.md` |
 | 任务分发和建设原则 | `operations/shared-conventions.md`、`.scripts/route.py` |
+| 修复原因、覆盖与历史接续 | `operations/engineering/repair-log.md`；受管工程工作区用 `workspace context` 恢复当前事项、关键历史与适用记忆 |
 | 摄入细节 | `operations/INGEST.md` + 对应 `<domain>/SCHEMA.md` |
 | 图表结构与写边 | `.scripts/graph_lib.py`、`.scripts/graph_ingest.py` |
 | Hub 细节 | `operations/HUB.md`、`hub_semantics.py`；`direction_matcher.py`/`cluster_keywords.py`/`hub_split.py` 仅 legacy 兼容 |

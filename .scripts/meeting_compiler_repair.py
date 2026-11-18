@@ -31,7 +31,12 @@ def evidence_candidates(issues: list, catalog: list[dict] | None) -> list[dict]:
 
 
 def _json_section(text: str, delimiter: str, next_delimiter: str | None = None):
-    return json.loads(contract._strip_json_fence(contract._section(text, delimiter, next_delimiter)))
+    section = contract._section(text, delimiter, next_delimiter)
+    if delimiter == contract.MEETING_IR_DELIMITER:
+        section, _normalizations = contract.meeting_ir_json_text(section)
+    else:
+        section = contract._strip_json_fence(section)
+    return json.loads(section)
 
 
 def inspect_output(text: str, *, source_text: str | None = None,
@@ -66,6 +71,8 @@ def inspect_output(text: str, *, source_text: str | None = None,
             "kind": "schema", "stage": "validate_candidate", "segment": "CANDIDATE",
             "message": reason, "issues": issues,
             "evidence_candidates": evidence_candidates(issues, evidence_catalog),
+            **({"normalizations": diagnostic["normalizations"]}
+               if diagnostic.get("normalizations") else {}),
         }
     return proposal, error, diagnostic
 

@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Native Scientific Knowledge System
-> Current main version: v0.28.2
+> Current main version: v0.29.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -69,7 +69,22 @@ be approximate; factual answers return to version-bound source evidence.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## Recent updates: v0.28.2
+## Recent updates: v0.29.0
+
+Repair and optimization work now has a repository-owned engineering workspace:
+current issues, key attempts, scoped memories and evidence remain available across
+Agent sessions. `workspace context` retrieves bounded current records and effective
+memories; `item log` appends decision-bearing history through the managed update path.
+Progress, regression checks, real-use quality and overall cost are recorded separately.
+See [Workspace](operations/WORKSPACE.md) and [Repair and optimization](operations/engineering/repair-log.md).
+
+Paper and meeting intake provide executable host handoffs, preserve recovery budgets
+and expose the content protocol across initial, fallback and resume paths. Paper
+reading shares the consumer's source-line convention and offers bounded structural
+outlines. Citation support, local identity context and maintenance coverage are made
+explicit; structural checks do not certify semantic accuracy or net cost savings.
+
+The following capabilities from earlier releases remain available.
 
 Gallery statistics now show only cumulative, 7-day and 30-day page views.
 Visits remain collected and retained in aggregate snapshots for later lookup;

@@ -544,7 +544,8 @@ def _compiler_request(state: dict, source_text: str, entity_candidates: dict, *,
 
 
 def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates: dict,
-                               output_path: Path, errors: list[str]) -> dict:
+                               output_path: Path, errors: list[str], *,
+                               handoff_reason: str | None = None) -> dict:
     """Expose the shared Meeting Compiler contract without an Agent prompt."""
     sources_path = f"{state['raw_dir']}/{state['source_filename']}"
     guidance_catalog = sgp.load_candidate_catalog(state, REPO)
@@ -573,6 +574,21 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
             "name": "student_guidance_candidates", "path": guidance_path,
             "role": "exact_existing_student_record_catalog", "read": "full",
         })
+    compiler_trace = dict(state.get("meeting_compiler") or {})
+    if handoff_reason:
+        attempts = state.get("meeting_compiler_attempts") or []
+        latest = attempts[-1] if attempts else {}
+        artifact_ref = latest.get("output_artifact")
+        if artifact_ref:
+            artifact = REPO / artifact_ref
+            expected = REPO / state["extract_dir"] / f"compiler-attempt-{len(attempts)}.json"
+            if (artifact.resolve() == expected.resolve() and artifact.is_file()
+                    and hashlib.sha256(artifact.read_bytes()).hexdigest() == latest.get("artifact_sha256")):
+                inputs.append({
+                    "name": "failed_compiler_output", "path": artifact_ref,
+                    "role": "untrusted_candidate_and_diagnostics_not_fact_source",
+                    "sha256": latest["artifact_sha256"],
+                })
     ir_template = meeting_ir_template()
     title = state["meeting_id"].split("-", 1)[-1]
     frontmatter = {
@@ -660,6 +676,9 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
             "date_inferred": bool(state.get("date_inferred")),
             "target_source_path": sources_path,
             "context_hash": context_hash,
+            **({"handoff_reason": handoff_reason,
+                "compiler_diagnostic": compiler_trace.get("diagnostic_summary", {})}
+               if handoff_reason else {}),
             "repair_evidence_candidates": evidence_candidates(
                 [*errors, *((state.get("meeting_compiler") or {}).get("diagnostic_summary") or {}).get("issues", [])],
                 _catalog,
@@ -667,13 +686,17 @@ def prepare_meeting_agent_task(state: dict, source_text: str, entity_candidates:
             "spec_locator": "operations/INGEST.md",
         },
     )
-    state["meeting_compiler"] = {
+    state["meeting_compiler"] = ({**compiler_trace,
+        "protocol_version": MEETING_COMPILER_PROTOCOL,
+        "status": "agent_required", "reason": handoff_reason,
+        "context_hash": context_hash,
+    } if handoff_reason else {
         "protocol_version": MEETING_COMPILER_PROTOCOL,
         "status": "prepared",
         "reason": "current_agent_task",
         "context_hash": context_hash,
         "model_calls": 0,
-    }
+    })
     return task
 
 
@@ -732,6 +755,8 @@ def _compiler_diagnostic_summary(diagnostic: dict) -> dict:
         )
     if truncated:
         summary["truncated"] = True
+    if "MEETING_IR.exact_closing_marker" in diagnostic.get("normalizations", []):
+        summary["normalizations"] = ["MEETING_IR.exact_closing_marker"]
     return summary
 
 
@@ -774,21 +799,13 @@ def step_prepare_unified_handoff(state: dict, errors: list[str],
     entity_candidates, candidate_error = _load_entity_candidates(state)
     if candidate_error:
         return False, candidate_error
-    prompt, context_hash = _compiler_request(
-        state, source_text, entity_candidates, host_agent=True, extra_errors=errors,
-    )
     agent_output = REPO / state["extract_dir"] / "agent-meeting-compiler.txt"
     state["_awaiting_agent_wiki_slots"] = True
-    state["agent_prompt"] = prompt
-    state["agent_write_to"] = str(agent_output.relative_to(REPO))
     state["compiler_errors"] = list(dict.fromkeys(str(error) for error in errors))
-    state["meeting_compiler"] = {
-        "protocol_version": MEETING_COMPILER_PROTOCOL,
-        "status": "agent_required",
-        "reason": handoff_reason,
-        "context_hash": context_hash,
-    }
-    state["agent_required"] = True
+    prepare_meeting_agent_task(
+        state, source_text, entity_candidates, agent_output,
+        state["compiler_errors"], handoff_reason=handoff_reason,
+    )
     return True, ""
 
 
@@ -892,6 +909,7 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
             "reason": "host_agent_output_validated",
             "context_hash": context_hash,
             "model_calls": 0,
+            "diagnostic_summary": _compiler_diagnostic_summary(diagnostic),
         }
     else:
         input_hash = task_context_hash(
@@ -922,10 +940,11 @@ def step_write_wiki(state: dict) -> tuple[bool, str]:
         except OSError as exc:
             return False, f"Meeting Compiler 产出暂存失败: {exc}"
         if result.status == "agent_required":
-            state["_awaiting_agent_wiki_slots"] = True
-            state["agent_required"] = True
-            state["agent_prompt"] = result.prompt
-            state["agent_write_to"] = str(agent_output.relative_to(REPO))
+            prepared, error = step_prepare_unified_handoff(
+                state, [result.reason], "host_agent_required",
+            )
+            if not prepared:
+                return False, error
             return False, "需要宿主 Agent 接管 Meeting Compiler 任务"
         if result.status != "compiled" or result.proposal is None:
             if result.status == "rejected":

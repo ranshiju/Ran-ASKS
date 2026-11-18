@@ -64,6 +64,10 @@ Query 回答中不应将会议纪要作为唯一权威来源，引用需注明"�
 
 建设前先用 `.scripts/engineering_graph.py impact <节点> --verify` 查询工程元图影响面及最小回归集；对高风险脚本先用 `.scripts/engineering_graph.py contract <节点>` 读取前置、可写、禁止和成功后验证。该结果是最小充分起点，不替代对实际命中规范/实现的阅读。元图未覆盖节点或输出与实现不符时，必须显式报告并补充检查，不得把未覆盖误作无影响。
 
+## 修复日志
+
+重要缺陷、跨入口契约或重复返工按[修复日志规范](engineering/repair-log.md)在当前建设工作区维护问题记录。受管工程工作区优先用workspace context定向恢复事项及有效记忆；发现、修复和验证时经item update/log接续原问题，当前判断与关键变更分开，证据链接既有报告。规范和模板可移植，实际记录沿用项目/记忆/私有边界；不在常规使用任务中自动展开建设或加载全库日志。
+
 ## 建设交付的工程文档维护
 
 使用任务不自动更新工程文档。建设任务落地后，必须检查 `operations/engineering/engineering-handbook.md`、`operations/engineering/code-guidance.md`、`operations/engineering/graph.yaml` 及受影响的专项规范；实现与回归通过后，由 Agent 自主同步实际受影响的文档，不等待另一次提醒，也不扩写无关章节。用户明确要求“同步工程文档”时，按当前实现做定向对账并立即修正漂移。工程手册与代码指南分别承担工程全景与脚本调用指导，使下一位 LLM 无需依赖对话历史，仍能掌握当前工程的真理源、流程、脚本职责、数据边界和操作禁令。

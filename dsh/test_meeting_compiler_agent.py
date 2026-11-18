@@ -301,7 +301,34 @@ def test_retry_messages_inject_output_and_use_error_specific_scope():
     assert calls[-1][1]["allow_profile_fallback"] is True
 
 
+def test_exact_ir_closing_marker_is_bounded_and_keeps_schema_gate():
+    base = _output()
+    prefix, ir = base.split("<<<MEETING_IR>>>\n")
+    expected = parse_proposal_detailed(base)[0]
+    for body in [ir, "```json\n" + ir + "```\n"]:
+        output = prefix + "<<<MEETING_IR>>>\n" + body + "<<</MEETING_IR>>> \n"
+        proposal, error, diagnostic = parse_proposal_detailed(output)
+        assert proposal == expected and not error
+        assert diagnostic == {"normalizations": ["MEETING_IR.exact_closing_marker"]}
+        result = MeetingCompilerAgent(_task(), lambda *a, **kw: {"ok": True, "text": output}).run()
+        assert result.status == "compiled" and result.model_calls == 1
+        assert result.diagnostic == diagnostic and result.response_text == output
+    for suffix in ["{}", "extra prose", "<<</WIKI>>>", "<<</MEETING_IR>>> extra",
+                   "<<</MEETING_IR>>>\n<<</MEETING_IR>>>", "{}\n<<</MEETING_IR>>>",
+                   "extra prose\n<<</MEETING_IR>>>"]:
+        proposal, error, diagnostic = parse_proposal_detailed(base + suffix)
+        assert proposal is None and diagnostic["kind"] == "json_syntax", suffix
+    assert parse_proposal_detailed(base.rstrip()[:-1] + "\n<<</MEETING_IR>>>")[0] is None
+    for bad in ["{}", "[]", ir.replace('"person_updates": []', '"person_updates": "bad"')]:
+        proposal, error, diagnostic = parse_proposal_detailed(prefix + "<<<MEETING_IR>>>\n" + bad + "\n<<</MEETING_IR>>>")
+        assert proposal is None and diagnostic["kind"] == "schema"
+    # A marker inside a JSON string is data, not an envelope boundary.
+    embedded = base.replace("测试议题", "测试议题 <<</MEETING_IR>>>")
+    assert parse_proposal_detailed(embedded)[0] is not None
+
+
 def main():
+    test_exact_ir_closing_marker_is_bounded_and_keeps_schema_gate()
     test_noop_replacements_require_original_source_and_preserve_real_edits()
     test_noop_acceptance_does_not_hide_empty_relation_endpoints()
     test_preprocess_diagnostics_identify_fields_without_changing_acceptance()

@@ -514,26 +514,27 @@ def _as_locator(source: str) -> str:
     return f"{base}#{locator}"
 
 
-def _raw_excerpt(locator: str, limit: int = 1000) -> str:
+def _raw_evidence(locator: str, limit: int = 1000) -> dict | None:
     raw, _, loc = locator.partition("#")
     path = REPO / raw
     if not path.is_file() or path.suffix.lower() not in {".md", ".txt"}:
-        return ""
+        return None
     try:
         with qa.query_scope("public"):
             qa.check_path_scope(path)
             binding = sl.companion_binding_for_target(path)
             if binding and binding["status"] == "invalid":
-                return ""
-            text = sl.read_locator_text(path, loc)
+                return None
+            item = sl.bounded_text_excerpt(path, loc, limit, prefer_abstract=True)
     except (OSError, ValueError):
-        return ""
-    if not text:
-        return ""
-    if loc and loc != "全篇":
-        return text.strip()[:limit]
-    abstract = re.search(r"^#{1,6}\s+Abstract\s*$\n(.*?)(?=^#{1,6}\s+|\Z)", text, re.M | re.I | re.S)
-    return (abstract.group(1).strip() if abstract else text.strip())[:limit]
+        return None
+    if item:
+        return {**item, "locator": f"{raw}#{item['locator']}", "requested_locator": locator}
+    return None
+
+
+def _raw_excerpt(locator: str, limit: int = 1000) -> str:
+    return (_raw_evidence(locator, limit) or {}).get("excerpt", "")
 
 
 def question_source_locators(record: dict) -> list[str]:
@@ -613,13 +614,16 @@ def build_kb_packet(
     evidence = []
     for locator in raw_locators:
         limit = 4000 if locator in priority_locators else 1000
-        excerpt = _raw_excerpt(locator, limit=limit)
-        if excerpt:
-            evidence.append({"locator": locator, "excerpt": excerpt})
-            if len(excerpt) >= limit:
+        item = _raw_evidence(locator, limit=limit)
+        if item:
+            if any(old["locator"] == item["locator"] and old["excerpt"] == item["excerpt"]
+                   for old in evidence):
+                continue
+            evidence.append(item)
+            if item["truncated"]:
                 evidence_issues.append({
                     "locator": locator,
-                    "reason": f"片段达到 {limit} 字符预算，可能截断；不能据此断言来源缺少内容",
+                    "reason": f"片段被 {limit} 字符预算截断；实际地址末行也可能未读完，不能据此断言来源缺少内容",
                 })
         else:
             evidence_issues.append({"locator": locator, "reason": "未取得可用 Raw 片段；不进入引用白名单"})
@@ -670,6 +674,7 @@ canonical_question, kb_state(no_evidence/no_answer_found/partial/conflicting/ans
 residual_gaps(字符串数组), value_reason, academic(布尔), specific(布尔),
 recommended_disposition(new_thread/merge/resolved/parked/reject), duplicate_target(无则空字符串)。
 规则：已有重复 Question 优先 merge；已充分回答且无残余缺口用 resolved；只有具体、有价值且有残余缺口才 new_thread（兼容字段，表示同页转 triaged）；宁少勿多。
+未命中限于本次检索/已读片段；片段不足不能推出全库不存在或整篇无关。residual_gaps 写仍需取得的证据。
 
 知识库证据包：
 {compact}"""
@@ -715,7 +720,8 @@ def _agent_semantic_task(kind: str, packet: dict, *, transaction_id: str = "",
         protocol={
             "name": f"frontier-{kind}-v1",
             "fields": fields,
-            "evidence_boundary": "supported claims may cite only packet anchors.raw",
+            "evidence_boundary": "supported claims may cite only packet anchors.raw and only what the provided excerpts support; excerpt_only/truncated are reading limits, not whole-source coverage",
+            "negative_scope": "no match means only not found in this search/read packet; do not infer whole-library absence or whole-source irrelevance from excerpts; gaps describe evidence still needed",
             "validator": f"frontier.{kind}_schema",
             **({
                 "optional_fields": {"change": {"kind": sorted(ANSWER_CHANGES), "reason": "string"}},
@@ -789,6 +795,8 @@ def answer_prompt(packet: dict) -> str:
         "evidence": [{
             "locator": item.get("locator", ""),
             "excerpt": str(item.get("excerpt", "")),
+            "excerpt_only": item.get("excerpt_only", True),
+            "truncated": item.get("truncated"),
         } for item in (packet.get("raw_evidence") or [])[:5]],
         "allowed_raw_locators": [item.get("locator", "")
                                  for item in (packet.get("raw_evidence") or [])[:5]],
@@ -801,7 +809,9 @@ supported_claims([{{claim,evidence:[Raw locator]}}]), derived_claims(字符串�
 residual_gaps(字符串数组), coverage_note；可附 change={{kind,reason}}，kind 为
 initial/unchanged/supplemented/strengthened/qualified/contradicted/uncertain/not_assessed。
 规则：每条 supported_claim 必须引用证据包中已有 Raw locator；推导只能进入 derived_claims；
-来源中的开放问题表述本身不是答案；无命中只表示本库覆盖不足，不能说科学界尚未解决。
+来源中的开放问题表述本身不是答案；未命中只表述为“本次检索/已读片段未找到”，不推出全库不存在或科学界尚未解决。
+excerpt_only/truncated 标明实际阅读范围，行地址末行也可能只读到前缀；仅据片段作判断，不据此宣称整篇无关。
+residual_gaps 写仍需取得的证据；supported_claims 保留可直接支持回答的事实，不将候选排除理由写成来源事实。
 说明本次实际证据与适用范围。previous_answer 只是待比较的旧解释，不是事实证据；
 比较新旧依据及条件后说明变化理由，不能从新文献到达自动推出反驳；无法判断可用 uncertain。
 
@@ -870,6 +880,7 @@ def answer_evidence_scope(packet: dict, answer: dict) -> dict:
         "provided_excerpts": [{
             "locator": item.get("locator", ""),
             "sha256": hashlib.sha256(str(item.get("excerpt", "")).encode("utf-8")).hexdigest(),
+            **{key: item[key] for key in ("requested_locator", "excerpt_only", "truncated") if key in item},
         } for item in packet.get("raw_evidence", [])],
         "cited_raw_locators": sorted({loc for claim in answer["supported_claims"] for loc in claim["evidence"]}),
     }

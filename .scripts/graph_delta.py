@@ -675,6 +675,66 @@ def run_query_probes(conn, delta: GraphDelta, attach_plan: dict) -> dict:
     }
 
 
+def probe_persisted_boundary(conn, report: dict) -> dict:
+    """Recheck a committed boundary against live edges, with no draft overlay.
+
+    Keep semantic ambiguity until all old candidates converge through current
+    identity aliases. A freshly created local node alone is not a resolution.
+    Metadata and Hub membership can be replaced by managed updates, so those
+    endpoints are taken from current page edges instead of the original plan.
+    """
+    page = str((report.get("subgraph") or {}).get("page") or "")
+    if not page or not gl.node_exists(conn, page):
+        raise ValueError("已提交页面在当前图中不存在")
+    indexes = gl.build_name_index(conn)
+
+    def candidates(name):
+        values = _exact_candidates(name, *indexes)
+        if gl.node_exists(conn, name) and name not in values:
+            values.append(name)
+        return sorted(set(values))
+
+    decisions = (report.get("attach_plan") or {}).get("decisions") or []
+    if not decisions:
+        raise ValueError("缺少原边界身份计划，不能重建当前验收")
+    boundaries = []
+    ambiguous = []
+    for decision in decisions:
+        mention = str(decision.get("mention") or "")
+        target = str(decision.get("target") or mention)
+        if decision.get("metadata_kind") or "/wiki/hubs/" in target:
+            continue
+        resolved = candidates(target)
+        if not resolved:
+            resolved = candidates(mention)
+        uncertain = len(resolved) != 1
+        if decision.get("action") == "keep_local_ambiguous":
+            old_candidates = decision.get("candidates") or []
+            # Missing historical candidates cannot establish identity either.
+            uncertain = uncertain or not old_candidates
+            for old in old_candidates:
+                uncertain = uncertain or candidates(old) != resolved
+        if uncertain:
+            ambiguous.append(mention)
+        hops = (_reachable_within(conn, resolved[0], page, {}, depth=2)
+                if len(resolved) == 1 else None)
+        boundaries.append({"mention": mention, "targets": resolved, "hops_to_wiki": hops})
+    # Current page adjacency includes current metadata and current Hub routes.
+    for row in conn.execute(
+        "SELECT subject,object FROM edges WHERE subject=? OR object=?", (page, page)
+    ):
+        target = row["object"] if row["subject"] == page else row["subject"]
+        if not any(target in b["targets"] for b in boundaries):
+            boundaries.append({"mention": target, "targets": [target], "hops_to_wiki": 1})
+    reachable = sum(item["hops_to_wiki"] is not None for item in boundaries)
+    return {
+        "basis": "persisted_graph", "page": page,
+        "boundary_total": len(boundaries), "boundary_reachable_within_2": reachable,
+        "ambiguous_mentions": len(ambiguous), "ambiguous": ambiguous,
+        "boundary_results": boundaries,
+    }
+
+
 def inspect_delta(conn, delta: GraphDelta, attach_plan: dict | None = None) -> dict:
     attach_plan = attach_plan or plan_attachment(conn, delta)
     probes = run_query_probes(conn, delta, attach_plan)

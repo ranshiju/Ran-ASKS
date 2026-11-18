@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -19,15 +20,32 @@ PROPOSITION_OBJECT_PREDICATES = {"核心创新点", "局限性", "未来展望",
 TASK_OBJECT_PREDICATES = {"待办"}
 DEICTIC_PAGE_ENDPOINTS = {"本会议", "本论文", "本文", "本文件", "本文档", "$meeting"}
 
+# Only explicit, paired math notation protects pipes. Unmarked extra columns
+# remain errors; this is lexical parsing, not formula or identity inference.
+_INLINE_MATH = re.compile(
+    r"(?<!\\)\$(?:\\.|[^$\n])+?(?<!\\)\$"
+    r"|\\\([^\n]*?\\\)"
+    r"|⟨[^⟨⟩\n]+⟩"
+    r"|[|∣][^|∣⟨⟩$\n]+⟩"
+)
+
 
 def parse_semantic_triple_line(line: str) -> list[str] | None:
     text = line.strip()
     if text.startswith(("- ", "* ", "+ ")):
         text = text[2:].lstrip()
     text = text.replace("｜", "|")
-    if text.startswith("<") and text.endswith(">") and text.count("|") == 2:
-        text = text[1:-1].strip()
-    parts = [part.strip() for part in text.split("|")]
+    masked = list(text)
+    for match in _INLINE_MATH.finditer(text):
+        for index in range(*match.span()):
+            masked[index] = " "
+    separators = [index for index, char in enumerate(masked) if char == "|"]
+    if len(separators) != 2:
+        return None
+    left, right = separators
+    parts = [text[:left].strip(), text[left + 1:right].strip(), text[right + 1:].strip()]
+    if text.startswith("<") and text.endswith(">"):
+        parts[0], parts[-1] = parts[0][1:].strip(), parts[-1][:-1].strip()
     return parts if len(parts) == 3 and all(parts) else None
 
 

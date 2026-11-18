@@ -1063,6 +1063,35 @@ def test_legacy_scope_plan_uses_member_descriptions_without_writing_scope():
         assert hs.read_hub_scope(hub) == ""
 
 
+def test_redistribution_resolution_requires_current_canonical_family_and_capacity():
+    conn = make_db()
+    with TempRepo() as root:
+        parent = "academic/wiki/hubs/parent"
+        child = "academic/wiki/hubs/child"
+        hs.create_hub(conn, path=parent, title="父方向",
+                      scope="研究量子多体系统的结构、表示和数值计算方法。", agent_confirmed=True)
+        hs.create_hub(conn, path=child, parent=parent, title="子方向",
+                      scope="研究量子多体系统的张量网络表示和变分计算方法。", agent_confirmed=True)
+        candidate = {"hub": parent, "children": [child], "limit": 999,
+                     "resolution": {"status": "applied"}}
+        for i in range(hs.HUB_MEMBER_LIMIT + 1):
+            conn.execute("INSERT INTO edges(subject,predicate,object,confidence,source,is_sr) "
+                         "VALUES(?, ?, ?, '推断', '', 0)",
+                         (f"m{i}", hs.MEMBERSHIP_PREDICATE, parent))
+        conn.commit()
+        with patch.object(hs, "_embed", side_effect=AssertionError("read only")):
+            assert hs.completed_redistribution_resolution(conn, candidate) is None
+            conn.execute("DELETE FROM edges WHERE subject='m0'")
+            result = hs.completed_redistribution_resolution(conn, candidate)
+            assert result["status"] == "resolved"
+            assert result["basis"] == "canonical_family_no_longer_overloaded"
+            assert result["remaining_parent"] == hs.HUB_MEMBER_LIMIT
+            assert hs.completed_redistribution_resolution(
+                conn, {**candidate, "children": ["academic/wiki/hubs/missing"]}) is None
+            conn.execute("UPDATE nodes SET description='mismatch' WHERE path=?", (child,))
+            assert hs.completed_redistribution_resolution(conn, candidate) is None
+
+
 def test_blood_relation_traces_direction_edges():
     conn = make_db()
     with TempRepo() as root:
@@ -1475,6 +1504,32 @@ def test_split_batch_preparation_runs_after_membership_apply():
         result = hs.refresh_after_ingest(conn, "academic/wiki/papers/example", affected_nodes=[])
     assert result["membership_apply"]["applied"]
     assert [item["hub"] for item in result["splits"]] == ["left", "right"]
+
+
+def test_profile_evidence_budget_and_public_source_boundary():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "academic/raw/example.md"
+        source.parent.mkdir(parents=True)
+        source.write_text("# Title\n" + "x" * 2500 + "\n" + "y" * 2500 + "\nLast.\n")
+        refs = [f"academic/raw/example.md#L{n}" for n in (2, 3, 4)]
+        result = hs.profile_evidence({"raw_citations": [refs[0], *refs]}, root=root)
+        assert len(result["raw_evidence"]) == 2
+        assert sum(len(x["excerpt"]) for x in result["raw_evidence"]) == 4000
+        assert all(x["truncated"] for x in result["raw_evidence"])
+        assert result["omitted_citations"] == [refs[2]]
+        private = root / "private/raw/secret.md"
+        private.parent.mkdir(parents=True)
+        private.write_text("secret")
+        source.unlink()
+        source.symlink_to(private)
+        denied = hs.profile_evidence({"raw_citations": [refs[0], "private/raw/secret.md#L1",
+                                                        "academic/raw/missing.md#L1"]}, root=root)
+        assert not denied["raw_evidence"] and len(denied["evidence_issues"]) == 3
+        source.unlink()
+        source.write_text("Public fact.")
+        with patch.object(hs.sl, "companion_binding_for_target", return_value={"status": "invalid"}):
+            assert not hs.profile_evidence({"raw_citations": ["academic/raw/example.md#L1"]}, root=root)["raw_evidence"]
 
 
 def main():

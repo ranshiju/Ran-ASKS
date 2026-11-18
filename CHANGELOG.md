@@ -7,6 +7,25 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-18
+
+### Version decision / 版本判断
+
+- MINOR: Add compatible engineering work contexts with bounded recovery and improve evidence-backed ingestion handoffs
+- MINOR（中文）：兼容新增工程工作上下文与有界接续，并改进有证据支持的摄入交接
+
+### Highlights
+
+- Add resumable engineering workspaces for repairs, optimizations and observations, with bounded item/context discovery, scoped effective memories and managed key-history logging.
+- Improve paper and meeting recovery handoffs, shared source-line coordinates, structural reading outlines and citation-support guidance while preserving Agent/API control and recovery budgets.
+- Tighten local identity resolution and maintenance coverage, reuse source abbreviation evidence, and reduce redundant handoff payloads and engineering guidance reads. Keep semantic quality and overall cost claims separate from structural validation.
+
+### 主要更新
+
+- 新增可接续的修复、优化与观察工作区，支持有界事项/上下文发现、适用有效记忆及受管关键日志。
+- 改进论文与会议恢复交接、共享原文行坐标、结构选读目录和引用支持指引，保留Agent/API控制边界及恢复预算。
+- 改进局部身份解析与维护覆盖，复用来源缩写证据，减少重复交接数据与工程规范读取；语义质量、总体成本和结构验证分别表述。
+
 ## [0.28.2] - 2026-11-16
 
 ### Version decision / 版本判断
@@ -941,5 +960,7 @@ manifests and checksums.
 
 [0.28.1]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.1
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.28.2...HEAD
 [0.28.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.2
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.29.0

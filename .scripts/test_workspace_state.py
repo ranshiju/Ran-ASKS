@@ -235,6 +235,165 @@ def test_agent_and_api_profiles_share_schema_without_crossing_adapters():
                 sys.modules["llm_structured"] = old_module
 
 
+def test_engineering_context_scopes_effective_memories_and_exact_alias():
+    with isolated_repo() as root:
+        state.init_workspace("eng", profile="engineering")
+        saved = state.add_item("eng", title="坐标修复", item_type="repair", state="done",
+                               outcome="回归通过；净收益未测", content="当前结论与证据", tags=["FIX-demo", "coords"])
+        state.add_memory("eng", title="匹配", kind="lesson", content="往返验证", applies_to=["coords"], evidence=["report.md"])
+        state.add_memory("eng", title="不适用", kind="lesson", content="不应读取", applies_to=["other"])
+        state.add_memory("eng", title="未来", kind="lesson", content="未来经验", valid_from="2999-01-01")
+        state.add_memory("eng", title="过去", kind="lesson", content="过期经验", valid_to="2000-01-01")
+        old = state.add_memory("eng", title="旧记忆", kind="decision", content="旧结论")
+        state.add_memory("eng", title="替代", kind="decision", content="新结论", supersedes=old["id"])
+        expired = state.add_memory("eng", title="撤销", kind="lesson", content="撤销结论")
+        state.expire_memory("eng", expired["id"])
+        state.init_workspace("eng/child", profile="engineering")
+        state.add_item("eng/child", title="坐标子项", item_type="repair")
+        state.add_memory("eng/child", title="子秘密", kind="lesson", content="隔离")
+        state.init_workspace("other", profile="engineering")
+        state.add_memory("other", title="外部秘密", kind="lesson", content="隔离")
+        result = state.workspace_context("eng", item="FIX-demo")
+        assert result["items"][0]["metadata"]["id"] == saved["id"]
+        assert result["items"][0]["metadata"]["outcome"].endswith("净收益未测")
+        assert {r["metadata"]["title"] for r in result["memories"]} == {"匹配", "替代"}
+        queried = state.workspace_context("eng", query="坐标")
+        assert len(queried["items"]) == 1
+        assert state.workspace_context("eng", query="%_")["items"] == []
+        state.add_item("eng", title="重名", item_type="observation", tags=["FIX-demo"])
+        try:
+            state.workspace_context("eng", item="FIX-demo")
+            raise AssertionError("ambiguous alias accepted")
+        except state.WorkspaceError as exc:
+            assert "不唯一" in str(exc)
+
+
+def test_context_stale_missing_and_injected_index_fail_without_writes():
+    with isolated_repo() as root:
+        state.init_workspace("eng", profile="engineering")
+        saved = state.add_item("eng", title="坐标", item_type="repair", content="原始正文")
+        project = root / "projects/eng"
+        path = project / ".workspace/items" / (saved["id"] + ".md")
+        path.write_text(path.read_text() + "\n新证据\n", encoding="utf-8")
+        index = project / ".workspace/index.sqlite"
+        before = index.read_bytes()
+        try:
+            state.workspace_context("eng", item=saved["id"])
+            raise AssertionError("stale index accepted")
+        except state.WorkspaceError as exc:
+            assert "rebuild" in str(exc)
+        assert index.read_bytes() == before
+        state.rebuild("eng")
+        with sqlite3.connect(index) as conn:
+            conn.execute("UPDATE items SET source_path='../outside.md'")
+        try:
+            state.workspace_context("eng", item=saved["id"])
+            raise AssertionError("injected path accepted")
+        except state.WorkspaceError as exc:
+            assert "rebuild" in str(exc)
+        state.rebuild("eng")
+        with sqlite3.connect(index) as conn:
+            conn.execute("UPDATE items SET id='ITEM-../../outside'")
+        try:
+            state.workspace_context("eng", query="坐标")
+            raise AssertionError("injected id accepted")
+        except state.WorkspaceError as exc:
+            assert "非法记录" in str(exc)
+        index.unlink()
+        try:
+            state.workspace_context("eng", item=saved["id"])
+            raise AssertionError("missing index accepted")
+        except state.WorkspaceError as exc:
+            assert "rebuild" in str(exc)
+        assert not index.exists()
+
+
+def test_context_json_budget_reports_omissions_without_truncating_action():
+    with isolated_repo():
+        state.init_workspace("eng", profile="engineering")
+        for i in range(5):
+            state.add_item("eng", title=f"预算{i}", item_type="optimization", state="active",
+                           next_action="保留完整行动", content="首段" + 'x"\\\n' * 5000 + "尾部关键历史")
+        for i in range(5):
+            state.add_memory("eng", title=f"经验{i}", kind="lesson", content="长内容" * 5000)
+        result = state.workspace_context("eng", query="预算", max_chars=2500)
+        assert len(json.dumps(result, ensure_ascii=False, indent=2)) + 1 <= 2500
+        assert result["more_items"] and result["more_memories"]
+        assert result["omitted_for_budget"]["memories"] > 0
+        assert result["items"][0]["body_truncated"]
+        assert result["items"][0]["metadata"]["next_action"] == "保留完整行动"
+        full = state.workspace_context("eng", query="预算", max_chars=50000, item_limit=1, memory_limit=0)
+        assert "尾部关键历史" in full["items"][0]["body"]
+
+
+def test_context_reuses_budget_after_omitting_records():
+    with isolated_repo():
+        state.init_workspace("eng", profile="engineering")
+        for i in range(3):
+            state.add_item("eng", title=f"预算检查{i}", item_type="repair",
+                           content="当前结论：根因与边界已经核验。\n" * 40)
+            state.add_memory("eng", title=f"经验{i}", kind="lesson", content="经验及不适用范围。" * 100)
+        result = state.workspace_context("eng", query="预算检查", max_chars=2500)
+        assert result["omitted_for_budget"]["memories"] > 0
+        assert all("当前结论" in record["body"] and "边界" in record["body"]
+                   for record in result["items"])
+        assert len(json.dumps(result, ensure_ascii=False, indent=2)) + 1 <= 2500
+        # A complete short body should fit without the truncation marker overhead.
+        short = state.add_item("eng", title="短正文", item_type="repair", content="简短结论")
+        result = state.workspace_context("eng", item=short["id"], memory_limit=0, max_chars=2000)
+        assert result["items"][0]["body"].strip() == "简短结论"
+        assert not result["items"][0]["body_truncated"]
+
+
+def test_engineering_cli_cross_process_resume():
+    import os
+    import subprocess
+    scripts = Path(__file__).resolve().parent
+    with tempfile.TemporaryDirectory() as directory:
+        projects = Path(directory) / "projects"
+        projects.mkdir()
+        env = dict(os.environ, WIKIGRAPH_PROJECTS_DIR=str(projects))
+        def call(script, *args, content=None):
+            result = subprocess.run([sys.executable, str(scripts / script), *args],
+                                    input=content, capture_output=True, text=True, env=env, check=True)
+            return json.loads(result.stdout)
+        call("workspace_state.py", "init", "engineering", "--profile", "engineering")
+        saved = call("workspace_state.py", "item", "add", "engineering", "--type", "repair",
+                     "--title", "跨进程接续", "--tags", "FIX-portable", "--state", "active",
+                     "--next-action", "验证恢复", "--stdin", content="## 关键历史\n\n原始依据\n")
+        call("workspace_state.py", "memory", "add", "engineering", "--title", "局部经验",
+             "--kind", "lesson", "--applies-to", "FIX-portable", "--content", "适用范围及理由")
+        call("workspace_state.py", "item", "log", "engineering", saved["id"], "--stdin", content="新进程追加验证")
+        envelope = call("wg.py", "workspace", "context", "engineering", "--item", "FIX-portable")
+        assert envelope["ok"]
+        context = envelope["result"]["output"]
+        assert context["items"][0]["metadata"]["next_action"] == "验证恢复"
+        assert "新进程追加验证" in context["items"][0]["body"]
+        assert context["memories"][0]["metadata"]["title"] == "局部经验"
+        assert call("workspace_state.py", "doctor", "engineering")["ok"]
+
+
+def test_item_log_retains_state_and_appends_audited_key_history():
+    with isolated_repo() as root:
+        state.init_workspace("eng", profile="engineering")
+        saved = state.add_item("eng", title="修复", item_type="repair", state="done", outcome="已实现，效果未测",
+                               content="## 关键历史\n\n旧尝试\n\n## 验证\n\n原验证\n")
+        state.item_log("eng", saved["id"], "复现不同入口；不撤销原结论。")
+        result = state.workspace_context("eng", item=saved["id"])["items"][0]
+        assert result["metadata"]["state"] == "done"
+        assert result["metadata"]["outcome"] == "已实现，效果未测"
+        assert result["body"].index("旧尝试") < result["body"].index("复现不同入口") < result["body"].index("## 验证")
+        event = json.loads((root / "projects/eng/.workspace/events.jsonl").read_text().splitlines()[-1])
+        assert event["action"] == "item.update"
+        assert state.doctor("eng")["ok"]
+        for bad_id in ("../secret", "ITEM-../../secret"):
+            try:
+                state.item_log("eng", bad_id, "禁止越界")
+                raise AssertionError("unsafe id accepted")
+            except state.WorkspaceError:
+                pass
+
+
 def main():
     tests = [value for name, value in sorted(globals().items())
              if name.startswith("test_") and callable(value)]

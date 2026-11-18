@@ -25,6 +25,26 @@ import lexical_relevance as lr
 
 
 class ReadSizeGuidanceTests(unittest.TestCase):
+    def test_bounded_excerpt_tracks_actual_abstract_and_partial_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "source.md"
+            path.write_text("# Title\nAuthors\n## Abstract\n" + "x" * 30 + "\n## Results\nOther fact.\n")
+            item = sl.bounded_text_excerpt(path, "全篇", 12, prefer_abstract=True)
+            self.assertEqual(item["locator"], "L4")
+            self.assertEqual(item["excerpt"], "x" * 12)
+            self.assertTrue(item["truncated"])
+            self.assertTrue(item["excerpt_only"])
+            self.assertIsNone(sl.bounded_text_excerpt(path, "L999"))
+            self.assertIsNone(sl.bounded_text_excerpt(path, "Missing"))
+            self.assertIsNone(sl.bounded_text_excerpt(path, "L1", 0))
+
+    def test_bounded_excerpt_repeated_text_uses_explicit_line_not_first_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "source.md"
+            path.write_text("# First\nsame\n# Second\nsame\n")
+            self.assertEqual(sl.bounded_text_excerpt(path, "L4")["locator"], "L4")
+            self.assertIsNone(sl.bounded_text_excerpt(path, "Second"))
+
     def test_suggestions_partition_only_requested_whole_lines(self):
         lines = ["一二三", "", "alpha", "ββ", "last", ""]
         text = "\n".join(lines)

@@ -263,5 +263,5 @@ class MeetingCompilerAgent:
         return MeetingCompilerResult(
             "compiled", "proposal_ready", proposal=proposal,
             elapsed_sec=elapsed, model_calls=model_calls, models=models, response_text=response_text,
-            assembled_output=assembled, repair_request=repair_request or {},
+            assembled_output=assembled, repair_request=repair_request or {}, diagnostic=diagnostic,
         )

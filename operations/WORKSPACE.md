@@ -32,6 +32,7 @@ profile 定义事项类型、记忆类型和画像字段，不定义某个具体
 
 - `generic`：通用持续工作。
 - `research`：科研项目。
+- `engineering`：修复、优化和有明确后续行动的观察事项（repair/optimization/observation），记忆使用decision/lesson/context。
 - `role_work`：行政、管理、协调与治理职责；具体 domain 可用 `academic_administration` 等值细分。
 - `writing`：有持续迭代周期的写作项目。
 
@@ -75,6 +76,9 @@ profile 定义事项类型、记忆类型和画像字段，不定义某个具体
 # 初始化，可使用 projects/ 下的嵌套路径
 python3 .scripts/workspace_state.py init '<path>' --profile role_work --domain academic_administration
 
+# 修复与优化使用独立工程工作区
+python3 .scripts/workspace_state.py init '<path>/engineering' --profile engineering --domain engineering
+
 # 接续、检查与重建
 python3 .scripts/workspace_state.py recall '<path>'
 python3 .scripts/workspace_state.py doctor '<path>'
@@ -100,6 +104,22 @@ python3 .scripts/workspace_state.py profile '<path>' --refresh
 ```
 
 同一能力也由 `python3 .scripts/wg.py workspace ...` 提供统一 JSON envelope。旧 `research_memory.py`、`wg.py recall` 和 `wg.py remember` 保留为 `.research-memory` 兼容入口；不自动迁移或重写既有研究记忆。
+
+## 有界任务上下文与关键历史
+
+```bash
+python3 .scripts/wg.py workspace context '<path>' --item '<ITEM-ID或唯一精确FIX标签>'
+python3 .scripts/wg.py workspace context '<path>' --query '组件或症状' --max-chars 8000
+python3 .scripts/workspace_state.py item log '<path>' <ITEM-ID> --stdin
+```
+
+`context` 是shared只读投影，不调用模型、不递归子工作区、不修复数据。按ITEM-ID或唯一精确标签定位；query对标题/标签/正文作字面子串候选检索，按更新时间和ID排序，不代表语义搜索。默认最多3个事项、3条记忆、8000字符JSON（workspace子命令结果，wg外层envelope另计）；上限20/20/50000，最低预算2000。先容纳完整元数据，必要时移除低优先级记录，再将剩余预算分配给保留记录的正文；短正文未用完的额度供后续记录使用。返回完整事项元数据、证据入口及有界正文；正文首尾截取、结果上限和预算省略均显式标记。完整正文经source或item/memory get补读，预算不足以保留首事项元数据时明确报错。
+
+SQLite仅用于发现候选，必须已有索引且以只读方式打开；选中记录回读当前Markdown并比对索引内容。缺失/损坏/陈旧选中记录显式失败并提示rebuild，不默默沿用旧状态。没有候选不等于工作区绝无记录：直接编辑Markdown、增加未索引文件或变更适用性后，先doctor/rebuild；完整性检查仍由doctor负责。
+
+有效记忆须为active且在日期区间内；`applies_to`为空表示当前工作区通用，否则精确匹配选中事项ID、标签或当前工作区相对projects路径，不作路径前缀/通配符推断。不自动跨工作区召回，不将任意自然语言范围当成已匹配。无事项命中不召回记忆；记忆超过限额时可提高memory-limit或用memory get定向补读。该规则仅用于context，不改变旧recall和研究记忆接口。
+
+`item log`将关键理由、尝试和失败追加到权威事项的“关键历史”段，并通过原update接口校验、审计和更新投影。它不改变state、outcome或next_action；判断或行动改变时还需item update，不能靠日志末尾暗改当前状态。记录只读时不能执行其中的历史命令。
 
 ## 维护节奏
 

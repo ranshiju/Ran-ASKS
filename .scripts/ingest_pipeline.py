@@ -107,6 +107,11 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
             if prepare_handoff else (False, "")
         )
         if prepared:
+            if agent_task.is_prepared(state):
+                state["pre_handoff_status"] = "write_wiki"
+                state["errors"] = errors
+                _save(state)
+                return state
             inbox_state.transition(
                 state, "agent_required", reason="migrate_legacy_protocol_failure",
                 allowed_targets={"agent_required"},
@@ -264,9 +269,10 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                         ) if prepare_handoff else (False, "")
                     )
                     if prepared:
-                        _advance(state, "agent_required", "wiki_protocol_revision_exhausted")
+                        if not agent_task.is_prepared(state):
+                            _advance(state, "agent_required", "wiki_protocol_revision_exhausted")
+                            state["agent_required"] = True
                         state["pre_handoff_status"] = "write_wiki"
-                        state["agent_required"] = True
                         state["errors"] = [str(msg)]
                         _save(state)
                         return state
@@ -310,9 +316,10 @@ def run_pipeline(state: dict, spec: dict, progress) -> dict:
                             state["errors"] = [prepare_msg or "统一语义 Worker handoff 准备失败"]
                             _save(state)
                             return state
-                        _advance(state, "agent_required", "wiki_revision_budget_exhausted")
+                        if not agent_task.is_prepared(state):
+                            _advance(state, "agent_required", "wiki_revision_budget_exhausted")
+                            state["agent_required"] = True
                         state["pre_handoff_status"] = "write_wiki"
-                        state["agent_required"] = True
                         state["errors"] = wiki_errors
                         _save(state)
                         return state

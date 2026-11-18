@@ -552,12 +552,16 @@ def test_exhausted_revision_handoff_uses_full_protocol_without_inline_source():
         )
         assert ok, error
         assert state["_awaiting_agent_wiki_slots"] is True
-        assert state["agent_write_to"].endswith("agent-meeting-compiler.txt")
-        assert "<<<PREPROCESS>>>" in state["agent_prompt"]
-        assert "<<<WIKI>>>" in state["agent_prompt"]
-        assert "<<<MEETING_IR>>>" in state["agent_prompt"]
-        assert "任老师讨论知事库。" not in state["agent_prompt"]
-        assert state["source"] in state["agent_prompt"]
+        task = state["agent_task"]
+        assert state["status"] == "prepared"
+        assert task["outputs"][0]["path"].endswith("agent-meeting-compiler.txt")
+        assert all(marker in task["protocol"]["template"] for marker in ["<<<PREPROCESS>>>", "<<<WIKI>>>", "<<<MEETING_IR>>>"])
+        assert "agent_prompt" not in state and "agent_write_to" not in state
+        assert task["inputs"][0]["path"] == state["source"]
+        assert task["commands"]["resume"] == f"python3 .scripts/ingest_meeting.py --resume {state['transaction_id']}"
+        view = meeting.inbox_state.operation_view(state, REPO)
+        assert view["next_action"] == "write_outputs" and view["allowed_actions"] == ["resume"]
+        assert task["issues"] == ["缺少 ## Content 段"]
         assert state["meeting_compiler"]["reason"] == "wiki_revision_budget_exhausted"
     finally:
         shutil.rmtree(work)
@@ -1001,10 +1005,39 @@ def test_real_worker_protocol_retry_stops_before_commit():
             result = meeting.ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
         assert len(calls) == 2
         assert calls[1]["messages"][2]["content"] == failed
-        assert result["status"] == "agent_required"
+        assert result["status"] == "prepared"
         assert len(result["meeting_compiler_attempts"]) == 2
         assert not result.get("wiki_content") and not result.get("slots_content")
         assert not (work / "wiki.md").exists() and not (work / "corrected.txt").exists()
+        attempts = json.dumps(result["meeting_compiler_attempts"], sort_keys=True)
+        recovery = json.dumps(result["recovery"], sort_keys=True)
+        task = result["agent_task"]
+        failed_input = next(row for row in task["inputs"] if row["name"] == "failed_compiler_output")
+        assert failed_input["path"].endswith("compiler-attempt-2.json")
+        assert task["context"]["compiler_diagnostic"]["message"] == "Extra data"
+        assert result["meeting_compiler"]["model_calls"] == 1
+        # Missing output stays prepared without another model call or budget change.
+        with patch.object(meeting.ingest_pipeline, "_save"), patch.object(meeting, "run_api_meeting_compiler", side_effect=AssertionError("no API after handoff")):
+            meeting.ingest_pipeline.run_pipeline(state, spec, lambda *a, **kw: None)
+            assert state["status"] == "prepared"
+            (REPO / task["outputs"][0]["path"]).write_text(_output() + "\n<<</MEETING_IR>>>")
+            class ReachedValidation(Exception):
+                pass
+            def validated(current):
+                assert current["agent_task"]["status"] == "consumed"
+                assert current["transaction_id"] == task["transaction_id"]
+                raise ReachedValidation
+            spec["steps"]["validate_wiki"] = validated
+            try:
+                meeting.ingest_pipeline.run_pipeline(state, spec, lambda *a, **kw: None)
+            except ReachedValidation:
+                pass
+            else:
+                raise AssertionError("resume must consume output through the original validator")
+        assert state["agent_task"]["status"] == "consumed"
+        assert json.dumps(state["meeting_compiler_attempts"], sort_keys=True) == attempts
+        assert json.dumps(state["recovery"], sort_keys=True) == recovery
+        assert state["meeting_compiler"]["diagnostic_summary"]["normalizations"] == ["MEETING_IR.exact_closing_marker"]
     finally:
         shutil.rmtree(work)
 
@@ -1068,7 +1101,7 @@ def test_invalid_record_patch_exhausts_existing_revision_budget_without_commit()
                 patch.object(meeting.ingest_pipeline, "_save"):
             result = meeting.ingest_pipeline.run_pipeline(state, spec, lambda *args, **kwargs: None)
         assert len(calls) == 2 and "[修复请求]" in calls[1]
-        assert result["status"] == "agent_required"
+        assert result["status"] == "prepared"
         assert len(result["meeting_compiler_attempts"]) == 2
         saved = json.loads((work / "compiler-attempt-2.json").read_text())
         assert saved["response_text"] == "{}" and saved["assembled_output"] == failed
@@ -1559,7 +1592,42 @@ def test_graph_validation_resume_does_not_replay_committed_steps():
     assert calls == ["validate", "validate"]
 
 
+def test_structured_handoff_survives_wiki_budget_and_legacy_migration():
+    for mode in ("wiki", "legacy"):
+        work = _workspace()
+        try:
+            state = _state(work)
+            with patch.object(meeting, "ingest_mode", return_value="agent"):
+                meeting.step_write_wiki(state)
+            state.pop("agent_task")
+            state.pop("_awaiting_agent_wiki_slots")
+            state["status"] = "failed" if mode == "legacy" else "write_wiki"
+            state["errors"] = ["invalid meeting IR JSON"] if mode == "legacy" else []
+            state["backend"] = "api"
+            state["meeting_compiler_attempts"] = [{"output_artifact": str((work / "compiler-attempt-1.json").relative_to(REPO)),
+                                                   "artifact_sha256": "missing"}]
+            result = SimpleNamespace(status="compiled", reason="proposal_ready", proposal=_proposal(),
+                                     trace=lambda: {"status": "compiled"})
+            spec = {"script_name": "ingest_meeting.py", "unified_semantic_worker": True,
+                    "recovery_limits": dict(meeting.RECOVERY_LIMITS, wiki_revision=0),
+                    "steps": {"write_wiki": meeting.step_write_wiki,
+                              "prepare_unified_handoff": meeting.step_prepare_unified_handoff,
+                              "validate_wiki": lambda current: ["缺少 ## Content 段"]}}
+            with patch.object(meeting, "ingest_mode", return_value="api"), \
+                    patch.object(meeting, "run_api_meeting_compiler", return_value=result) as runner, \
+                    patch.object(meeting.ingest_pipeline, "_save"):
+                meeting.ingest_pipeline.run_pipeline(state, spec, lambda *a, **kw: None)
+            assert runner.call_count == (0 if mode == "legacy" else 1)
+            assert state["status"] == "prepared" and state["pre_handoff_status"] == "write_wiki"
+            assert state["backend"] == "api" and "agent_required" not in state
+            assert not any(row["name"] == "failed_compiler_output" for row in state["agent_task"]["inputs"])
+        finally:
+            shutil.rmtree(work)
+
+
 def main():
+    test_structured_handoff_survives_wiki_budget_and_legacy_migration()
+    test_invalid_record_patch_exhausts_existing_revision_budget_without_commit()
     test_domain_contract_is_shared_by_generation_validation_and_publication()
     test_explicit_transport_resume_is_bounded_and_keeps_semantic_budget()
     test_transport_resume_can_complete_without_losing_failed_attempt()

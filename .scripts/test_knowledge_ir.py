@@ -15,6 +15,26 @@ import ingest_common
 import knowledge_ir as kir
 
 
+def test_math_pipes_preserve_fields_and_reject_extra_columns():
+    cases = [
+        ("本论文|核心创新点|核 κ=⟨ϕ(x)|ϕ(y)⟩", ["本论文", "核心创新点", "核 κ=⟨ϕ(x)|ϕ(y)⟩"]),
+        ("量子映射|对应|U(x)|0⟩=|ϕ(x)⟩", ["量子映射", "对应", "U(x)|0⟩=|ϕ(x)⟩"]),
+        ("量子映射|对应|U(x)∣0⟩=∣ϕ(x)⟩", ["量子映射", "对应", "U(x)∣0⟩=∣ϕ(x)⟩"]),
+        ("态 |ψ⟩|对应|向量", ["态 |ψ⟩", "对应", "向量"]),
+        (r"$|x|$|对应|范数 $|x-y|$", ["$|x|$", "对应", "范数 $|x-y|$"]),
+        (r"态 \( |x\rangle \)|对应|向量", [r"态 \( |x\rangle \)", "对应", "向量"]),
+    ]
+    for line, expected in cases:
+        assert kir.parse_semantic_triple_line(line) == expected, line
+        text = "三元组:\n" + line
+        relations = graph_ingest.parse_semantic_text(text, "academic/wiki/papers/math", {})[0]
+        expected_subject = "academic/wiki/papers/math" if expected[0] == "本论文" else expected[0]
+        assert relations[0]["subject"] == expected_subject
+        assert relations[0]["object"] == expected[2]
+    for line in ["甲|对应|乙|额外", "甲|对应|$未闭合 |x|", "甲|对应|⟨x|y", "甲|对应|乙|0⟩|额外"]:
+        assert kir.parse_semantic_triple_line(line) is None, line
+
+
 def _build(page: str, wiki_type: str, relations: list[dict], deterministic: int = 0):
     return kir.build_knowledge_ir(
         page,

@@ -177,7 +177,8 @@ def test_api_handoff_print_result_preserves_validation_diagnostics():
         module.print_result(state)
     payload = json.loads(output.getvalue())
     assert payload["errors"] == state["errors"]
-    assert payload["next_action"] == state["next_action"]
+    assert payload["next_action"].endswith("--agent-workspace api-schema-diagnostic")
+    assert payload["next_actions"]["check"].endswith("--agent-check api-schema-diagnostic")
     assert payload["retryable"] is False
     assert payload["workflow_status"] == "awaiting_agent"
     assert payload["committed"] is False
@@ -368,6 +369,11 @@ def _assert_workspace_bibliography_resume(initial_status, review_status, decisio
         original_repo = module.REPO
         try:
             module.REPO = root
+            if review_status == "ok":
+                state["agent_workspace"]["repair_scope"] = "wiki"
+                state["bibliographic_review"]["decision"] = {"old": "locked"}
+                with patch.object(module.inbox_state, "save"), patch.object(module, "read_agent_workspace", return_value={}):
+                    module.explicit_agent_workspace_reopen(state)
             assert module.resume_agent_workspace(state)
         finally:
             module.REPO = original_repo
@@ -387,6 +393,10 @@ def _assert_workspace_bibliography_resume(initial_status, review_status, decisio
 
 def test_resume_agent_workspace_materializes_review_and_combined_output_once():
     _assert_workspace_bibliography_resume("agent_required", "agent_required")
+
+
+def test_explicit_scope_reopen_revalidates_changed_bibliography():
+    _assert_workspace_bibliography_resume("agent_required", "ok")
 
 
 def test_resume_bibliographic_review_required_workspace_uses_existing_gates():
@@ -805,7 +815,7 @@ def test_agent_reading_batches_include_handles_and_preserve_complete_coverage():
             assert all(batch["required_output_chars"] <= 200 and not batch["over_budget"] for batch in batches)
             covered = [number for batch in batches
                        for number in range(batch["start_line"], batch["end_line"] + 1)]
-            assert covered == list(range(1, len(text.split('\n')) + 1))
+            assert covered == list(range(1, len(text.splitlines()) + 1))
             paper.write_text("x" * 1000, encoding="utf-8")
             oversized = module._agent_reading_contract(paper)["primary"]["batches"]
             assert len(oversized) == 1 and oversized[0]["over_budget"] is True
@@ -2955,8 +2965,9 @@ def test_completed_resume_refreshes_only_derived_quality_warnings():
             module.inbox_state.save = original_save
     assert result["quality_status"] == "degraded"
     assert [warning["issue"] for warning in result["quality_warnings"]] == [
-        "graph_navigation_ambiguous",
+        "graph_navigation_ambiguous", "graph_quality_check_unavailable",
     ]
+    assert not (root / "cross-domain/graph.db").exists()
     assert saved and saved[-1][0] == "completed-refresh"
 
 
@@ -6720,7 +6731,8 @@ def test_api_bibliography_template_and_prompt_match_schema_and_actual_handles():
         "sources:\n  - academic/raw/references/example/paper.md\n", {}, context_diagnostics=context,
     )
     assert "<academic/raw/references/example/paper.md#L2> Evidence." in prompt
-    assert "[^r1]: academic/raw/references/example/paper.md#L1" in prompt
+    assert "[^r1]: academic/raw/references/example/paper.md#L1" not in prompt
+    assert "引用集合须覆盖整段的每项主张" in prompt
     assert "引用上下文已有 [^rN] handle" not in prompt
     assert '"doc_type": "paper|document|ambiguous"' not in prompt
     assert '"candidate_id": "title-01"' not in prompt
@@ -7439,6 +7451,107 @@ def test_api_validation_history_distinguishes_repaired_artifacts_and_legacy_unkn
             assert "workspace_sha256" not in legacy["telemetry"]["api_ingest"]["validation_history"][0]
 
 
+
+def test_bibliographic_author_variation_is_not_reported_as_omission():
+    md = "# Stable Paper\n\nAlice M. Example and Bob Builder\n"
+    result = module.bibliographic_quality_warnings(
+        {"title": "Stable Paper", "authors": ["Alice Example", "Bob Builder"]}, md)
+    assert [w["issue"] for w in result] == ["bibliographic_author_names_differ"]
+    missing = module.bibliographic_quality_warnings(
+        {"title": "Stable Paper", "authors": ["Alice M. Example"]}, md)
+    assert [w["issue"] for w in missing] == ["bibliographic_authors_incomplete"]
+
+
+def test_venue_candidates_reject_affiliations_preserve_publication_lines():
+    blocks = [{"text": "Dartmouth College, Department of Computer Science\nScience", "evidence": "block1"},
+              {"text": "Department of Cell Biology", "evidence": "block2"},
+              {"text": "Journal of the National Cancer Institute", "evidence": "block3"}]
+    values = [v["value"] for v in module._layout_venue_candidates(blocks)]
+    assert values == ["Science", "Journal of the National Cancer Institute"], values
+    assert module._layout_venue_candidates([{"text": "Science Department", "evidence": "x"}]) == []
+
+
+def test_locked_bibliography_change_is_rejected_before_mutation():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "paper.md").write_text("# Paper")
+        (root / "out.txt").write_text('<<<BIBLIOGRAPHIC>>>\n{}\n<<<WIKI>>>\n# Changed\n<<<SLOTS>>>\n三元组:\n')
+        state = {"status": "agent_required", "extract_dir": ".", "transaction_id": "scope",
+                 "bibliographic_review": {"status": "ok", "decision": {"locked": True}},
+                 "agent_workspace": {"protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                                     "repair_scope": "wiki", "output_path": "out.txt",
+                                     "paper_md_sha256": module._file_sha256(root / "paper.md")}}
+        with patch.object(module, "REPO", root), patch.object(module.inbox_state, "transition") as advance:
+            assert not module.resume_agent_workspace(state)
+            advance.assert_not_called()
+        assert "BIBLIOGRAPHIC" in state["errors"][0]
+        assert "--agent-reopen" in state["errors"][0]
+        assert state["status"] == "agent_required"
+
+
+def test_landed_hash_drift_stops_run_one_before_commit():
+    state = {"status": "graph_ready", "transaction_id": "landed-drift"}
+    with patch.object(module, "refresh_agent_workspace_handoff", return_value=False), \
+         patch.object(module, "agent_workspace_hash_errors", return_value=["changed workspace"]), \
+         patch.object(module.inbox_state, "save"), \
+         patch.object(module, "run_commit", side_effect=AssertionError("must not commit")):
+        result = module.run_one(state, True)
+    assert result["status"] == "graph_ready"
+    assert result["resume_blocked"] == "landed_artifact_changed"
+
+
+def test_explicit_reopen_preserves_input_baseline_and_old_decision():
+    state = {"status": "agent_required", "transaction_id": "scope",
+             "bibliographic_review": {"status": "ok", "decision": {"locked": True}},
+             "agent_workspace": {"protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                                 "repair_scope": "wiki", "paper_md_sha256": "original",
+                                 "validation_receipt": {"old": True}}}
+    with patch.object(module.inbox_state, "save") as save, patch.object(module, "read_agent_workspace", return_value={"read": True}):
+        assert module.explicit_agent_workspace_reopen(state) == {"read": True}
+        save.assert_called_once()
+    assert state["status"] == "agent_required"
+    assert state["agent_workspace"]["repair_scope"] == "all"
+    assert state["agent_workspace"]["paper_md_sha256"] == "original"
+    assert "validation_receipt" not in state["agent_workspace"]
+    assert state["bibliographic_review"]["decision"] == {"locked": True}
+    assert state["workspace_refresh_history"][-1]["previous_bibliographic_decision"] == {"locked": True}
+
+
+def test_landed_workspace_read_check_and_reopen_never_reopen_draft():
+    for stage in ("graph_ready", "update_graph", "validate_graph", "finalize_tail", "completed", "failed"):
+        state = {"status": stage, "transaction_id": "landed", "pipeline_script": ".scripts/ingest_paper.py"}
+        if stage == "failed":
+            state["resume_from"] = "graph_ready"
+        before = json.dumps(state)
+        for action in (module.read_agent_workspace, module.check_agent_workspace,
+                       module.explicit_agent_workspace_reopen):
+            with patch.object(module, "resume_agent_workspace", side_effect=AssertionError("must not materialize")):
+                result = action(state)
+            assert result["validation"] == "not_applicable"
+            assert "resume" in result["next_actions"]
+            assert "check" not in result["next_actions"]
+            assert result["outputs"] == []
+        # check telemetry is allowed, but the pipeline stage is not reopened.
+        assert state["status"] == stage
+        module.reopen_agent_workspace(state, "hash", ["changed"])
+        assert state["status"] == stage
+        assert state["resume_blocked"] == "landed_artifact_changed"
+
+
+def test_api_handoff_telemetry_is_bounded_and_source_unchanged():
+    import copy
+    state = {"transaction_id": "range-test", "telemetry": {"api_ingest": {
+        "evidence_context": {"mode": "full", "selected_raw_ranges": [{"start_line": i, "end_line": i} for i in range(100)]}
+    }}}
+    before = copy.deepcopy(state)
+    result = module._api_telemetry_payload(state)
+    context = result["evidence_context"]
+    assert "selected_raw_ranges" not in context
+    assert context["selected_raw_range_count"] == 100
+    assert context["selected_raw_ranges_ref"]["path"].endswith("range-test.json")
+    assert state == before
+
+
 def main():
     import graph_lib as gl
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
@@ -7488,6 +7601,109 @@ def test_api_wiki_patch_rejects_source_drift_before_write():
         assert not success and "来源" in message
         assert (extract / "wiki.md").read_text() == wiki
         assert state["wiki_content"] == wiki and state["slots_content"] == "locked slots"
+
+
+def test_workspace_handoff_upgrades_api_and_legacy_without_mutating_state():
+    import copy
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        extract = root / "temp/handoff"
+        extract.mkdir(parents=True)
+        (extract / "paper.md").write_text("# Paper\nfront\fsecond\vthird\n## Conclusions\nSupported.\n")
+        (extract / "agent-skeleton.md").write_text("# Skeleton")
+        (extract / "bibliographic-candidates.json").write_text('{"fields": {}}')
+        for backend in ("agent", "api"):
+            for existing in (False, True):
+                state = {
+                    "transaction_id": "handoff", "status": "agent_required",
+                    "extract_dir": "temp/handoff", "errors": ["invalid triple"],
+                    "agent_workspace": {
+                        "protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                        "execution_backend": backend, "repair_scope": "slots",
+                        "output_path": "temp/handoff/agent-workspace.txt",
+                    },
+                    "bibliographic_review": {"status": "ok", "decision": {"locked": True}},
+                    "attempts": {"semantic_revision": 2},
+                }
+                if existing:
+                    state["agent_task"] = module.agent_task.make_task(
+                        kind="ingest_paper", transaction_id="handoff",
+                        inputs=[{"name": "paper", "path": "temp/handoff/paper.md"}],
+                        outputs=[{"name": "workspace", "path": "temp/handoff/agent-workspace.txt"}],
+                        protocol={"name": module.AGENT_WORKSPACE_PROTOCOL},
+                        issues=[module._agent_repair_issue("workspace", "invalid triple")],
+                        commands={"resume": "legacy command"},
+                    )
+                before = copy.deepcopy(state)
+                with patch.object(module, "REPO", root):
+                    task = module.read_agent_workspace(state)
+                assert state == before, "read must not mutate locked state or budgets"
+                assert task["protocol"]["wiki"]["claim_rules"] == list(module.PAPER_WIKI_CLAIM_RULES)
+                assert task["protocol"]["semantics"]["format"]["section_headers"] == ["三元组:", "概念说明:"]
+                assert task["protocol"]["repair_scope"] == "slots"
+                assert task["protocol"]["bibliography"]["locked"] is True
+                expected = module.BIBLIOGRAPHIC_DECISION_PROTOCOL if backend == "api" else module.AGENT_BIBLIOGRAPHIC_PROTOCOL
+                assert task["protocol"]["bibliography"]["contract"] == expected
+                assert task["protocol"]["bibliography"]["template"]["protocol_version"] == expected
+                assert task["execution_backend"] == backend
+                assert task["issues"][0]["scope"] == "slots"
+                assert {"read", "check", "commit"} <= set(task["control"]["allowed_actions"])
+                assert task["commands"]["read"].endswith("--agent-workspace handoff")
+                assert all("bibliographic-candidates" not in item["path"] for item in task["inputs"])
+                # Explicit widening exposes API candidates, while Agent keeps direct evidence.
+                state["agent_workspace"]["repair_scope"] = "all"
+                with patch.object(module, "REPO", root):
+                    wide = module.read_agent_workspace(state)
+                assert not wide["protocol"]["bibliography"]["locked"]
+                assert any("bibliographic-candidates" in item["path"] for item in wide["inputs"]) == (backend == "api")
+
+
+def test_agent_reading_batches_roundtrip_source_coordinates():
+    import shlex
+    import subprocess
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        paper = root / "paper.md"
+        paper.write_text("# Title\r\nalpha\fform\vvertical\n## End\nConclusion.\n")
+        with patch.object(module, "REPO", root), patch.object(module, "AGENT_READING_BATCH_MAX_CHARS", 65):
+            contract = module._agent_reading_contract(paper)
+        seen = []
+        for batch in contract["primary"]["batches"]:
+            args = shlex.split(batch["command"])
+            args[1] = str(Path(__file__).with_name("read_paper.py"))
+            output = subprocess.run(args, cwd=root, check=True, text=True, capture_output=True).stdout
+            for line in output.splitlines():
+                match = __import__("re").fullmatch(r"<paper.md#L(\d+)> (.*)", line)
+                assert match
+                n = int(match.group(1));seen.append(n)
+                assert module.sl.read_locator_text(paper, f"L{n}") == match.group(2)
+        assert seen == list(range(1, len(paper.read_text().splitlines()) + 1))
+
+
+def test_api_workspace_handoff_actions_survive_single_batch_and_inbox():
+    import io
+    import contextlib
+    import ingest_inbox
+    state = {
+        "transaction_id": "api-actions", "status": "agent_required", "source": "inbox/paper.pdf",
+        "execution_backend": "api", "errors": ["slots invalid"],
+        "next_action": "repair_api_workspace_then_resume",
+        "agent_workspace": {"protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                            "execution_backend": "api"},
+    }
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        module.print_result(state)
+    single = json.loads(output.getvalue())
+    batch = module._batch_item_payload(state)
+    items = [single, batch, ingest_inbox._result_entry("inbox/paper.pdf", "paper", single),
+             *ingest_inbox._map_paper_batch_results({"items": [batch]})]
+    assert len(items) == 4
+    for item in items:
+        assert item["next_action"].endswith("--agent-workspace api-actions")
+        assert item["next_actions"]["read"] == item["next_action"]
+        assert item["next_actions"]["commit"].endswith("--agent-commit api-actions")
+        assert item["execution_backend"] == "api"
 
 if __name__ == "__main__":
     raise SystemExit(main())

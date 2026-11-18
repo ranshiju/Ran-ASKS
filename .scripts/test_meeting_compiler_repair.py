@@ -232,14 +232,31 @@ def test_failed_patch_calls_preserve_complete_resume_base():
         assert result.response_text == "partial patch"
 
 
+def test_closed_ir_still_collects_errors_and_supports_hash_bound_row_repair():
+    text, original, context = case()
+    text += "\n<<</MEETING_IR>>>"
+    proposal, error, diagnostic = repair.inspect_output(text, **context)
+    assert proposal is None and diagnostic["stage"] == "validate_candidate"
+    assert diagnostic["normalizations"] == ["MEETING_IR.exact_closing_marker"]
+    assert any("decisions[0].evidence_ids" in issue for issue in diagnostic["issues"])
+    request = repair.prepare_row_repair(text, diagnostic)
+    assert len(request["records"]) == 4
+    merged = repair.apply_row_repair(text, request, json.dumps(patch_for(request)))
+    proposal, error, diagnostic = repair.inspect_output(merged, **context)
+    assert proposal is not None, (error, diagnostic)
+    assert proposal["meeting_ir"]["attendees"] == original["attendees"]
+    assert merged.split(contract.MEETING_IR_DELIMITER)[0] == text.split(contract.MEETING_IR_DELIMITER)[0]
+
+
 def main():
+    test_closed_ir_still_collects_errors_and_supports_hash_bound_row_repair()
     test_term_locations_are_bounded_hints_without_changing_evidence()
     test_aggregate_independent_errors_and_patch_preserves_other_content()
     test_patch_rejects_tampering_or_expanded_scope()
     test_api_repairs_once_and_revalidates_assembled_candidate()
     test_student_projection_removal_requires_no_existing_target()
     test_failed_patch_calls_preserve_complete_resume_base()
-    print("meeting compiler row repair: 6/6 PASS")
+    print("meeting compiler row repair: 7/7 PASS")
 
 
 def test_term_locations_are_bounded_hints_without_changing_evidence():

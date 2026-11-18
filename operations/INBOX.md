@@ -67,7 +67,7 @@
 
 Hub 的 `backlog_count/split_backlog_count` 是未达到创建或稳定分裂门槛的观察候选数，不是等待 Agent 执行的任务数；只有达标候选及 `actions` 才是待审交接。`hubs.status=no_action` 时不能把观察计数表述为待审分裂，也不为清零而强行拆分；用户明确要求检查时，可按 `split-plan` 展示 `no_split` 及原因，保持原闸与成员不变。
 
-首次摄入与直接 resume 使用共享报告发布入口，把维护回执及报告地址关联到本批所有已完成事务。历史报告缺少关联，或 Hub 分裂成功后回执尚未闭合时，运行 `python3 .scripts/ingest_inbox.py --reconcile-maintenance-report cross-domain/ingest-reports/<report>.json`：仅重建指定报告的关联、重放已有方向裁决，并只读核验分裂父 Hub 的 canonical 直接子 Hub、既有 split Scope history 与原候选成员迁移。每个原簇须完整迁入不同子 Hub，且不再保留父 membership，才标记对应 handoff 已应用并更新 split_count；已有子 Hub、手写 resolution 或数量变化本身不能证明完成。不重新摄入、不调用模型、不写 Raw 或图。独立质量告警和其他待审动作继续保留，缺图或无可验证候选时保留待审。
+首次摄入与直接 resume 使用共享报告发布入口，把维护回执及报告地址关联到本批所有已完成事务。历史报告缺少关联，或 Hub 分裂成功后回执尚未闭合时，运行 `python3 .scripts/ingest_inbox.py --reconcile-maintenance-report cross-domain/ingest-reports/<report>.json`：仅重建指定报告的关联、重放已有方向裁决，并只读核验分裂父 Hub 的 canonical 直接子 Hub、既有 split Scope history 与原候选成员迁移。每个原簇须完整迁入不同子 Hub，且不再保留父 membership，才标记对应 handoff 已应用并更新 split_count；已有子 Hub、手写 resolution 或数量变化本身不能证明完成。不重新摄入、不调用模型、不写 Raw 或图。 重分配待办通过当前 canonical 父/直接子 family、原候选子 Hub 仍存在及父成员数不超过配置上限核验后标记 `resolved/canonical_family_no_longer_overloaded`；它证明当前容量问题闭合，不冒充历史迁移执行回执。独立质量告警和其他待审动作继续保留，缺图或无可验证候选时保留待审。
 
 维护语义以共享回执为准，事务仅持有同步快照。发布先在报告写 `maintenance.publication.status=pending` 检查点，再同步本批事务，最后标为 `completed`；方向闭环同步全部关联事务而非仅当前论文。I/O 失败单独返回 `maintenance.status=error`、`publication`、`retryable` 与 `next_action`，文件 `completed` 和失败计数不变。已落检查点可用上述 reconcile 命令继续，直接 resume 遇到 publication pending/error 也只重试发布，不重跑全局维护；检查点尚未落盘时明确返回 `report_persisted=false`，须先恢复报告持久化条件，不假称存在可恢复报告。
 
@@ -108,7 +108,9 @@ Hub 的 `backlog_count/split_backlog_count` 是未达到创建或稳定分裂门
 
 **全论文批量**：`ingest_paper.py --inbox` 保持 graph_ready 两阶段屏障。quiet 模式的 prepare 最多并发 2 项，以重叠 MinerU/LLM 等待；所有 live graph preflight/commit 由 `graph_ingest` 的数据库级跨进程 writer lock 串行，逐篇保持独立原子事务。Agent resume 会按 transaction ID 回填原 batch 报告，最后一个 item 完成后用全批完整 `graph_report` 统一闭合维护；同源重复的旧未提交事务只能经 `inbox_state.py --supersede ... --by ...` 留痕关闭。单篇、batch item 与统一紧凑摘要均使用 `ingest-result-v1`；退出码 0 只表示调用产出了合法结果，`terminal=true` 表示工作流已闭合，`committed=true` 只表示所有 item 都真实完成知识提交，精确重复不得冒充提交。混合批次的实际提交数量读取 `counts.committed`。batch `counts` 由 item 四态派生并校验守恒，完整报告是可审计投影，不是第二套事务状态。
 
-**回执读取与交付**：首次进程 yield 后直接长等待，`running` 按 runtime 回执的建议间隔低频检查（默认 60 秒），`attention`/非零退出定向诊断，`done` 停止检查。只提取状态、`degraded`、逐项当前/历史告警数、maintenance 与 next_action，再按问题定向取证。共享维护发布在写 pending 检查点前从调和后的逐项质量重算 `degraded`；紧凑摘要也从逐项当前质量派生该数，并显式返回 `quality_warning_count` 和 `quality_warning_history_count`（含零值）。历史告警保留审计，不计入当前降级；独立未解决告警继续保留。`wiki_path` 可能是无 `.md` 的图 locator，实际文件优先使用 `verification_receipt.artifacts.wiki_path.path`，不要把逻辑地址直接交给文件读取工具。文件提交、维护执行、实际建页/归属动作和待办分别报告，Hub 扫描计数不等于本次新增待办。
+**回执读取与交付**：宿主调用可使用 `--output-view agent`（包括 `--run --resume` 与 `--reconcile-maintenance-report`），仅省略与 canonical `items` 完全相同的 `files` 副本；默认 `compat`、持久报告、质量计数、维护动作和完整 Agent task 不变。首次进程 yield 后直接长等待，`running` 按 runtime 回执的建议间隔低频检查（默认 60 秒），`attention`/非零退出定向诊断，`done` 停止检查。只提取状态、`degraded`、逐项当前/历史告警数、maintenance 与 next_action，再按问题定向取证。共享维护发布在写 pending 检查点前从调和后的逐项质量重算 `degraded`；紧凑摘要也从逐项当前质量派生该数，并显式返回 `quality_warning_count` 和 `quality_warning_history_count`（含零值）。历史告警保留审计，不计入当前降级；独立未解决告警继续保留。`wiki_path` 可能是无 `.md` 的图 locator，实际文件优先使用 `verification_receipt.artifacts.wiki_path.path`，不要把逻辑地址直接交给文件读取工具。文件提交、维护执行、实际建页/归属动作和待办分别报告，Hub 扫描计数不等于本次新增待办。
+
+**覆盖与低开销交接（shared，2026-11-17）**：混合批次仍有可接续项时全局维护返回 deferred，最后完成项再统一收尾。旧维护回执的 `trigger_files` 绑定已完成事务及其 Hub 图输入摘要哈希；恢复时覆盖不足重新进入原维护入口，覆盖不变的发布失败只重试发布。无绑定的历史回执不能仅凭 completed/agent_required 状态复用。新 inbox 导致延期时同步父报告及共享回执，保留旧待审动作；延期原因及数量透传紧凑回执。已有方向裁决仍从当前事务读取，避免重生成已决待办。缩写候选保留 t-SNE/iPEPS/CV-IQP 等完整词面，历史碎片从记录的原端点重算，不直接注册成概念。入口 stderr 提示正在处理的文件，并在已有事务时给运行状态地址；stdout 保持结构化终态。论文交接中的已读区间明细留在事务中，回执仅给计数和字段引用，语义任务的输入、输出、当前问题与后续命令保持。
 
 只读取得真实文件路径时，`wg.py task status` 的工作流视图位于外层 envelope 的 `result`：
 

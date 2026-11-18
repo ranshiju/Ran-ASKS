@@ -33,7 +33,7 @@ status: active
 
 Scope 保持单段 20–300 字，不写成员清单、论文结论或临时分类结果。
 
-Scope 的语义来源是 Hub 内代表性成员的 profile：keyword 使用 `title + description`，proposition 使用 canonical statement，People 使用 `## 人物画像`。主 Agent 综合代表成员、必要的图结构信号及父 Hub Scope 写成稳定定义；不得把全体成员文本直接拼接或让 API LLM 摘要生成 canonical Scope。每次 create、define、split、merge 的 Scope 写入都在 `hub_scope_history` 保存当时的成员 profile 快照、相关 Hub 及前后 Scope，供生命周期审计；该记录是导航定义来源，不是事实证据。legacy Hub 尚无 `聚类于` membership 时，`legacy-scope-plan` 给出的代表论文必须由 `define-scope --evidence-node <page>` 显式传入，不能以空 evidence history 代替。
+Scope 的语义来源是 Hub 内代表性成员的 profile：keyword 使用 `title + description`，proposition 使用 canonical statement，People 使用 `## 人物画像`。主 Agent 综合代表成员、必要的图结构信号及父 Hub Scope 写成稳定定义；不得把全体成员文本直接拼接或让 API LLM 摘要生成 canonical Scope。每次 create、define、split、merge 的 Scope 写入都在 `hub_scope_history` 保存当时的成员 profile 快照、相关 Hub 及前后 Scope，供生命周期审计；该记录是导航定义来源，不是事实证据。legacy Hub 尚无 `聚类于` membership 时，`legacy-scope-plan` 给出的代表论文必须由 `define-scope --evidence-node <page>` 显式传入，不能以空 evidence history 代替。 用户明确授权的历史修复中，若旧论文缺少方向 profile 或旧成员边已不存在，可由 Agent 定向核验现存概念/命题节点及其 Raw 来源，用同一 `--evidence-node` 接口保存快照，并在修复记录说明选择依据。旧 title、seeds、关键词列表只用于定位，不能作为事实证明或直接恢复 membership；归属由后续受管重分配计算。
 
 ## 参与节点与 profile
 
@@ -128,7 +128,7 @@ create、define-scope、split、merge 与 batch-create 的 apply 共享同一生
 - 已有子 Hub 的超限父 Hub 写入 `temp/hub-auto-redistribute/<session>.json`。handoff 列出 canonical Scope readiness、blockers 及受控命令；任一子 Hub 缺正式 Scope 时先用 `define-scope --agent-confirmed` 定义，随后才允许 `redistribute --agent-confirmed`。
 - 论文 canonical Scope 路由达到 floor 但 margin 不足时写入 `temp/hub-route-review/<session>.json`，只保留 canonical 候选和 `route-apply` 命令模板交主 Agent判断，不自动写方向边。
 - membership 先汇总并去重 profile、Scope 与 prototype 文本，再单次进入 embedding cache；provider 可按 batch 上限分块，但禁止逐节点串行请求 API。维护超过 120 秒返回可重试 `deferred`，不得改变文件摄入终态。
-- `redistribute` 在一次 Agent 确认下执行有界单调迭代；新子 Hub 成员形成 prototype 后可继续吸收残留父成员，直到无新增迁移或父 Hub降到上限。任一轮 embedding 不可用则整次回滚。
+- `redistribute` 在一次 Agent 确认下执行有界单调迭代；新子 Hub 成员形成 prototype 后可继续吸收残留父成员，直到无新增迁移或父 Hub降到上限。任一轮 embedding 不可用则整次回滚。 成功后运行原批 `ingest_inbox.py --reconcile-maintenance-report <report>`；只读确认 canonical family 和当前容量后消费重分配待办，不额外计算 embedding，也不把当前容量恢复声称为分裂完成。
 - 紧凑摄入结果保留文件摄入终态，并另带有界的 `hub_maintenance` 交接摘要；维护候选不得把已完成文件改报为失败或 `agent_required`。
 
 不达标候选只计入 backlog，不向用户报告。canonical 定义仍只由主 Agent 确认，API LLM 不参与 Hub 生命周期决策。

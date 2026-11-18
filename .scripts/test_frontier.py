@@ -341,9 +341,10 @@ def test_question_source_survives_recall_miss_and_evidence_budget():
             "Different wording", root, recall_fn=recall, relations_fn=relations,
             source_locators=[source_loc, source_loc],
         )
-        assert result["raw_evidence"][0] == {
-            "locator": source_loc, "excerpt": "Direct source observation.\nOpen question.",
-        }
+        assert result["raw_evidence"][0]["locator"] == source_loc
+        assert result["raw_evidence"][0]["excerpt"] == "Direct source observation.\nOpen question."
+        assert result["raw_evidence"][0]["excerpt_only"] is True
+        assert result["raw_evidence"][0]["truncated"] is False
         assert len(result["raw_evidence"]) == 5
         assert result["anchors"]["raw"] == [item["locator"] for item in result["raw_evidence"]]
         assert len(set(result["anchors"]["raw"])) == 5
@@ -1166,6 +1167,39 @@ def test_capture_known_source_mention_does_not_duplicate_normalized_question():
             assert len(frontier.load_records(root)) == len(first["captured"])
         finally:
             shutil.rmtree(TEMP_REPO_AREA)
+
+
+def test_packet_narrows_whole_source_and_exposes_partial_read_to_both_backends():
+    with tempfile.TemporaryDirectory(dir=REPO / "temp") as directory:
+        root = Path(directory)
+        source = root / "raw" / "source.md"
+        source.parent.mkdir()
+        source.write_text("# Title\nAuthors\n## Abstract\n" + "Evidence " * 200 + "\n## Results\nNot read.\n")
+        whole = source.relative_to(REPO).as_posix() + "#全篇"
+        result = frontier.build_kb_packet(
+            "Question", root,
+            recall_fn=lambda *_: (json.dumps({"candidates": [{"path": "academic/wiki/papers/example"}]}), 0),
+            relations_fn=lambda *_: (json.dumps({"edges": [{"source": whole}]}), 0),
+        )
+        item = result["raw_evidence"][0]
+        assert item["locator"] == whole.replace("#全篇", "#L4")
+        assert item["truncated"] and item["excerpt_only"]
+        assert len(item["excerpt"]) <= 1000
+        assert whole not in result["anchors"]["raw"]
+        assert "不推出全库不存在" in frontier.answer_prompt(result)
+        assert "未命中限于本次检索/已读片段" in frontier.assessment_prompt(result)
+        with patch.object(frontier, "REPO", root):
+            task = frontier._agent_semantic_task("answer", result)["agent_task"]
+        assert "whole-library absence" in task["protocol"]["negative_scope"]
+        record = frontier.new_question("Question", "user_question", result)
+        # Address narrowing is enforced by the existing shared apply boundary.
+        try:
+            frontier.apply_answer(root, record, result, good_answer(
+                supported_claims=[{"claim": "Unseen whole-source claim", "evidence": [whole]}]))
+        except ValueError as exc:
+            assert "Raw locator" in str(exc)
+        else:
+            raise AssertionError("whole source must not be an allowed excerpt citation")
 
 
 def main():

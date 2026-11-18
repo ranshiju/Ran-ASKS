@@ -21,7 +21,8 @@
   python3 extract_abbreviations.py <wiki-page> --apply   # 写入 frontmatter
   python3 extract_abbreviations.py --batch               # 批量回补所有 academic 论文页
 """
-import re, sys, argparse, os, glob, subprocess
+import re, sys, argparse, os, glob
+import graph_lib as gl
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -76,24 +77,46 @@ SKIP_SECTION_RE = re.compile(
 
 
 def find_raw(page_path):
-    """从 wiki 页 frontmatter sources 找 raw 文件实际路径。"""
-    txt = Path(page_path).read_text(encoding='utf-8')
-    m = re.match(r'^---\n(.*?)\n---', txt, re.S)
-    if not m: return None
-    fm = m.group(1)
-    sm = re.search(r'^sources:\s*\n((?:  - .+\n)+)', fm, re.M)
-    if not sm: return None
-    src_line = sm.group(1).strip().split('\n')[0].replace('  - ','').strip()
-    candidates = [src_line, src_line.replace('raw/', 'academic/raw/'),
-                  _REPO / src_line, _REPO / src_line.replace('raw/', 'academic/raw/')]
-    for c in candidates:
-        if isinstance(c, str): c = Path(c)
-        if c.exists(): return str(c)
-    slug = Path(page_path).stem
-    r = subprocess.run(['find', str(_REPO), '-name', 'paper.md', '-path', f'*{slug}*'],
-                       capture_output=True, text=True)
-    paths = [p for p in r.stdout.strip().split('\n') if p]
-    return paths[0] if paths else None
+    """Resolve one declared textual Raw source; never discover by filename."""
+    root = _REPO.resolve()
+    page = Path(page_path)
+    if not page.is_absolute():
+        page = root / page
+    try:
+        page_relative = page.resolve().relative_to(root)
+        fm = gl.read_frontmatter(page)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(fm, dict):
+        return None
+    sources = fm.get("sources") or []
+    if isinstance(sources, str):
+        sources = [sources]
+    if not isinstance(sources, list):
+        return None
+    domain = page_relative.parts[0] if page_relative.parts else ""
+    found = set()
+    for source in sources:
+        if not isinstance(source, str) or "://" in source:
+            continue
+        reference = source.split("#", 1)[0].strip()
+        candidates = [root / reference]
+        if reference.startswith("raw/"):
+            candidates.append(root / domain / reference)
+        for candidate in candidates:
+            try:
+                target = candidate.resolve()
+                relative = target.relative_to(root)
+                if (len(relative.parts) < 3 or relative.parts[1] != "raw"
+                        or relative.parts[0] not in {"academic", "admin", "teaching", "business", "cross-domain", "private"}
+                        or target.suffix.lower() not in {".md", ".txt"}
+                        or (relative.parts[0] == "private") != (domain == "private")):
+                    continue
+                if target.is_file():
+                    found.add(target)
+            except (OSError, ValueError):
+                continue
+    return str(next(iter(found))) if len(found) == 1 else None
 
 
 def locate_key_sections(raw_text):
@@ -127,60 +150,52 @@ def locate_key_sections(raw_text):
 
 
 def extract_from_segments(segments):
-    """从关键段文本提取缩写配对。返回 [(abbr, full), ...]"""
+    """Extract repeated, initials-verified pairs; conflicting definitions abstain."""
     pairs = {}
-    for seg in segments:
-        # 模式1: Full Name (ABBR) — 允许首字母大写词(如 Higher-Order),用末尾 N 实义词验证首字母
-        p1 = re.findall(r'([A-Za-z][a-z]{1,}(?:[-\s]+[A-Za-z]?[a-z]{1,}){1,5})\s*\(([A-Z][A-Z0-9-]{1,7})\)', seg)
-        for full, abbr in p1:
-            abbr = abbr.upper()
-            if abbr in STOPWORDS or len(abbr) < 2: continue
-            words = full.split()
-            n = len(abbr)
-            content_words = [w for w in words if w.lower() not in FUNCTION_WORDS]
-            tail = content_words[-n:] if len(content_words) >= n else content_words
-            initials = ''.join(part[0] for w in tail for part in w.split('-') if part)
-            if initials.upper() == abbr:
-                full_str = ' '.join(tail).title()
-                fixed, raw_form = fix_typo(full_str)
-                pairs[abbr] = (fixed, raw_form)
-        # 模式2: ABBR (full name) — 同样允许首字母大写词
-        p2 = re.findall(r'\b([A-Z]{2,8})\s*\(([A-Za-z][a-z]{1,}(?:[-\s]+[A-Za-z]?[a-z]{1,}){1,5})\)', seg)
-        for abbr, full in p2:
-            abbr = abbr.upper()
-            if abbr in STOPWORDS: continue
-            words = full.split()
-            n = len(abbr)
-            content_words = [w for w in words if w.lower() not in FUNCTION_WORDS]
-            tail = content_words[-n:] if len(content_words) >= n else content_words
-            initials = ''.join(part[0] for w in tail for part in w.split('-') if part)
-            if initials.upper() == abbr:
-                full_str = ' '.join(tail).title()
-                fixed, raw_form = fix_typo(full_str)
-                pairs[abbr] = (fixed, raw_form)
-        # 模式3(中文): 中文全称（ABBR）
-        p3 = re.findall(r'([\u4e00-\u9fa5]{2,12})[（(]([A-Z][A-Z0-9-]{1,7})[）)]', seg)
-        for cn_full, abbr in p3:
-            abbr = abbr.upper()
-            if abbr in STOPWORDS: continue
-            if abbr not in pairs:
-                fixed, raw_form = fix_typo(cn_full)
-                pairs[abbr] = (fixed, raw_form)
-    
-    # 噪音过滤: 扫描段内总出现≥2次(重要方法缩写会反复用)
-    all_scan_text = ' '.join(segments)
-    filtered = {}
-    for abbr, full in pairs.items():
-        total = len(re.findall(rf'\b{re.escape(abbr)}\b', all_scan_text))
-        if total >= 2:
-            filtered[abbr] = full
-    return sorted(filtered.items())
+    conflicts = set()
+    abbreviation = r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*"
+    full_name = r"[A-Za-z][a-z]{1,}(?:[-\s]+[A-Za-z]?[a-z]{1,}){1,5}"
+
+    def record(abbr, full):
+        fixed, raw_form = fix_typo(full)
+        previous = pairs.get(abbr)
+        if previous and previous[0].casefold() != fixed.casefold():
+            conflicts.add(abbr)
+        pairs[abbr] = (fixed, raw_form)
+
+    def verify(full, abbr):
+        if abbr in STOPWORDS or not 2 <= len(abbr) <= 8:
+            return
+        letters = abbr.replace("-", "")
+        words = [word for word in full.split() if word.lower() not in FUNCTION_WORDS]
+        tail = words[-len(letters):]
+        initials = ''.join(part[0] for word in tail for part in word.split('-') if part)
+        if initials.upper() == letters:
+            record(abbr, ' '.join(tail).title())
+
+    for segment in segments:
+        for full, abbr in re.findall(rf'({full_name})\s*\(({abbreviation})\)', segment):
+            verify(full, abbr)
+        for abbr, full in re.findall(
+            rf'(?<![A-Za-z0-9-])({abbreviation})\s*\(({full_name})\)', segment,
+        ):
+            verify(full, abbr)
+        for full, abbr in re.findall(rf'([\u4e00-\u9fa5]{{2,12}})[（(]({abbreviation})[）)]', segment):
+            if abbr not in STOPWORDS and 2 <= len(abbr) <= 8:
+                record(abbr, full)
+
+    scanned = ' '.join(segments)
+    return sorted((abbr, full) for abbr, full in pairs.items()
+                  if abbr not in conflicts and len(re.findall(
+                      rf'(?<![A-Za-z0-9-]){re.escape(abbr)}(?![A-Za-z0-9-])', scanned,
+                  )) >= 2)
+
 
 def extract_for_page(page_path):
     raw_path = find_raw(page_path)
     if not raw_path or not os.path.exists(raw_path):
         return [], None
-    raw = open(raw_path, encoding='utf-8', errors='ignore').read()
+    raw = Path(raw_path).read_text(encoding='utf-8', errors='ignore')
     segments = locate_key_sections(raw)
     return extract_from_segments(segments), raw_path
 
@@ -244,6 +259,9 @@ def main():
         suffix = f"  (原文拼作 {raw},已纠正)" if raw else ""
         print(f"  {a}: {full}{suffix}")
     if args.apply:
+        if not pairs:
+            print("未取得可核验的缩写定义；保留已有 abbreviations。", file=sys.stderr)
+            raise SystemExit(2)
         apply_to_page(args.page, pairs)
         print(f"已写入 {args.page}")
 

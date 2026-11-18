@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -27,12 +28,104 @@ TIMEOUT = 8
 CROSSREF = "https://api.crossref.org/works"
 ARXIV = "https://export.arxiv.org/api/query"
 SEMANTIC_SCHOLAR = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
-SEMANTIC_SCHOLAR_FIELDS = "title,authors,year,venue,publicationVenue,externalIds,publicationTypes,publicationDate"
+SEMANTIC_SCHOLAR_FIELDS = "title,authors,year,venue,publicationVenue,externalIds,publicationTypes,publicationDate,openAccessPdf"
 MAX_BULK_RESULTS = 100
 DOI_RE = re.compile(r"10\.\d{4,9}/[^\s<>\"?#]+", re.I)
 ARXIV_RE = re.compile(r"(?:\d{4}\.\d{4,5}|[a-z][a-z.-]+/\d{7})(?:v\d+)?", re.I)
 _ARXIV_LOCK = threading.Lock()
 _ARXIV_LAST_REQUEST = 0.0
+NEURIPS_HOSTS = {"papers.nips.cc", "proceedings.neurips.cc"}
+
+
+def neurips_url(url: str, *, kind: str = "abstract") -> bool:
+    parsed = urllib.parse.urlsplit(url)
+    patterns = {
+        "abstract": r"/paper(?:_files/paper)?/\d{4}/hash/[0-9a-f]{32}-Abstract\.html",
+        "bib": r"/paper(?:_files/paper)?/\d+-/bibtex",
+        "bib_file": r"/paper(?:_files/paper)?/\d{4}/file/[0-9a-f]{32}-Bibtex\.bib",
+        "pdf": r"/paper(?:_files/paper)?/\d{4}/file/[0-9a-f]{32}-Paper\.pdf",
+    }
+    return (parsed.scheme == "https" and parsed.netloc in NEURIPS_HOSTS
+            and not parsed.query and not parsed.fragment
+            and bool(re.fullmatch(patterns[kind], parsed.path)))
+
+
+class _BibliographyLinks(HTMLParser):
+    def __init__(self, page):
+        super().__init__()
+        self.page, self.links = page, set()
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            url = urllib.parse.urljoin(self.page, dict(attrs).get("href", ""))
+            if neurips_url(url, kind="bib"):
+                # NeurIPS's export entry redirects to this paper's hash-bound
+                # file. Use its canonical file route without following HTTP
+                # redirects or spending an uncounted fifth request.
+                self.links.add(self.page.replace("/hash/", "/file/").replace(
+                    "-Abstract.html", "-Bibtex.bib"))
+            elif neurips_url(url, kind="bib_file"):
+                self.links.add(url)
+
+
+def _neurips_links(page: str, body: str) -> list[str]:
+    parser = _BibliographyLinks(page)
+    parser.feed(body)
+    return sorted(parser.links)
+
+
+def _neurips_discovery(responses: list[dict], md_text: str) -> list[str]:
+    """Index candidates discover official pages; they do not certify versions."""
+    pages = set()
+    for response in responses:
+        if not response["url"].startswith(SEMANTIC_SCHOLAR):
+            continue
+        try:
+            records = json.loads(response["body"]).get("data", [])
+            if not isinstance(records, list) or len(records) > MAX_BULK_RESULTS:
+                continue
+            for record in records:
+                authors = [clean(a.get("name")) for a in record.get("authors", [])]
+                if not authors or not _identity_matches(clean(record.get("title")), [a.split()[-1] for a in authors if a], frontmatter(md_text)):
+                    continue
+                url = (record.get("openAccessPdf") or {}).get("url", "")
+                if neurips_url(url, kind="pdf"):
+                    url = url.replace("/file/", "/hash/").replace("-Paper.pdf", "-Abstract.html")
+                if neurips_url(url):
+                    pages.add(url)
+        except (ValueError, TypeError, AttributeError, IndexError):
+            continue
+    return sorted(pages)
+
+
+def _neurips_records(responses: list[dict], md_text: str) -> dict:
+    import bibliography_sidecar as bs
+    discovered = _neurips_discovery(responses, md_text)
+    if len(discovered) != 1:
+        return {}
+    bodies = {r["url"]: r["body"] for r in responses}
+    page = discovered[0]
+    links = _neurips_links(page, bodies.get(page, ""))
+    if len(links) != 1 or links[0] not in bodies:
+        return {}
+    try:
+        entries = bs.parse_bib(bodies[links[0]])
+        if len(entries) != 1:
+            return {}
+        record = bs.canonical(entries[0], "bib")
+        if (not record or record["publication_type"] != "proceedings-article"
+                or normalized(record["venue"]) != "advances in neural information processing systems"
+                or record["year"] not in urllib.parse.urlsplit(page).path.split("/")
+                or not _identity_matches(record["title"], record["_families"], frontmatter(md_text))):
+            return {}
+        record.pop("_families", None)
+        record.update({"metadata_provider": "neurips_bibtex", "origin_verified": True,
+                       "publication_status_basis": "official_proceedings_bibtex",
+                       "year_basis": "official_proceedings_year",
+                       "record_url": links[0]})
+        return {"neurips:" + page: record}
+    except (ValueError, TypeError, KeyError):
+        return {}
 
 
 def digest(value: str) -> str:
@@ -72,7 +165,8 @@ def allowed_url(url: str) -> bool:
                 (parsed.netloc == "api.crossref.org" and (
                     parsed.path == "/works" or parsed.path.startswith("/works/")))
                 or (parsed.netloc == "export.arxiv.org" and parsed.path == "/api/query")
-                or (parsed.netloc == "api.semanticscholar.org" and parsed.path == "/graph/v1/paper/search/bulk")))
+                or (parsed.netloc == "api.semanticscholar.org" and parsed.path == "/graph/v1/paper/search/bulk")
+                or neurips_url(url) or neurips_url(url, kind="bib_file")))
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -92,7 +186,7 @@ def fetch(url: str) -> str:
             _ARXIV_LAST_REQUEST = time.monotonic()
     request = urllib.request.Request(url, headers={
         "User-Agent": "WikiGraph-bibliography/1.0 (public metadata lookup)",
-        "Accept": "application/json, application/atom+xml",
+        "Accept": "application/json, application/atom+xml, text/html, application/x-bibtex, text/plain",
     })
     with urllib.request.build_opener(_NoRedirect).open(request, timeout=TIMEOUT) as response:
         body = response.read(MAX_BYTES + 1)
@@ -288,6 +382,7 @@ def replay(receipt: dict, md_text: str, artifact_root: Path | None = None) -> di
             matched.update(provider_matches)
         except (ValueError, TypeError, KeyError, IndexError, AttributeError):
             continue
+    matched.update(_neurips_records(responses, md_text))
     if len(matched) != 1:
         return None
     result = next(iter(matched.values()))
@@ -385,6 +480,13 @@ def resolve(md_text: str, candidates: dict, cache_path: Path, *, fetcher=None) -
         request(SEMANTIC_SCHOLAR + "?" + urllib.parse.urlencode({
             "query": query, "fields": SEMANTIC_SCHOLAR_FIELDS,
         }))
+    if not replay(receipt, md_text) and receipt["request_count"] <= MAX_REQUESTS - 2:
+        pages = _neurips_discovery(receipt["responses"], md_text)
+        if len(pages) == 1:
+            page_body = request(pages[0])
+            links = _neurips_links(pages[0], page_body)
+            if len(links) == 1:
+                request(links[0])
     result = replay(receipt, md_text)
     receipt["status"] = "verified_published" if result else "unresolved"
     receipt["elapsed_seconds"] = round(time.monotonic() - started, 3)

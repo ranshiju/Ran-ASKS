@@ -2114,6 +2114,34 @@ def _reconcile_parent_batch_report(repo: Path, state: dict):
     return None
 
 
+def maintenance_trigger(item: dict) -> dict:
+    """Bind the existing trigger receipt to the graph input actually inspected."""
+    trigger = {key: item.get(key) for key in ("file", "status", "transaction_id")
+               if item.get(key) is not None}
+    if item.get("status") == "completed" and isinstance(item.get("graph_report"), dict):
+        graph = item["graph_report"]
+        scope = {key: graph.get(key) for key in (
+            "hub_dynamics", "hub_scope_route", "hub_scope_route_current",
+        )}
+        trigger["graph_scope_sha256"] = hashlib.sha256(
+            json.dumps(scope, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+    return trigger
+
+
+def maintenance_covers_results(maintenance: dict, results: list[dict]) -> bool:
+    """Reuse only a receipt covering every currently committed transaction."""
+    completed = [item for item in results if item.get("status") == "completed"]
+    covered = {item.get("transaction_id"): item.get("graph_scope_sha256")
+               for item in maintenance.get("trigger_files", [])
+               if item.get("status") == "completed" and item.get("transaction_id")}
+    return bool(completed) and all(
+        item.get("transaction_id") and covered.get(item["transaction_id"]) is not None
+        and covered[item["transaction_id"]] == maintenance_trigger(item).get("graph_scope_sha256")
+        for item in completed
+    )
+
+
 def run_resume_post_maintenance(state: dict) -> dict | None:
     """Run the unified inbox tail after a successful direct resume."""
     if state.get("status") != "completed":
@@ -2133,7 +2161,7 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
     ] if inbox.is_dir() else []
     parent_batch = _reconcile_parent_batch_report(repo, state)
     if pending:
-        return {
+        deferred = {
             "status": "deferred",
             "reason": "pending_inbox_files",
             "pending_count": len(pending),
@@ -2142,6 +2170,29 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
             "errors": [],
             "components": {},
         }
+        if parent_batch:
+            # Preserve the prior review work, but publish the actual deferred
+            # state. A task-local snapshot must not leave its parent report
+            # claiming that the previous maintenance still covers this batch.
+            from ingest_inbox import _write_json_atomic, compact_maintenance, publish_maintenance_report
+            report_path, report = parent_batch
+            existing = report.get("maintenance") or {}
+            receipt_rel = str(existing.get("receipt_path") or "")
+            try:
+                if receipt_rel:
+                    receipt_path = (repo / receipt_rel).resolve()
+                    receipt_path.relative_to((repo / "temp/inbox-maintenance").resolve())
+                    report["maintenance"] = {**existing, **{
+                        key: deferred[key] for key in ("status", "reason", "pending_count")
+                    }}
+                    _write_json_atomic(receipt_path, report["maintenance"])
+                    publish_maintenance_report(report_path, report)
+                    return compact_maintenance(report["maintenance"])
+            except (OSError, ValueError) as exc:
+                return {**deferred, "status": "error", "retryable": isinstance(exc, OSError),
+                        "errors": [f"deferred maintenance publication failed: {exc}"],
+                        "report_path": str(report_path.relative_to(repo))}
+        return deferred
     try:
         from ingest_inbox import (
             compact_maintenance, publish_maintenance_report, run_post_ingest_maintenance,
@@ -2163,8 +2214,9 @@ def run_resume_post_maintenance(state: dict) -> dict | None:
                     "report_path": str(report_path.relative_to(repo)),
                 }
             existing = report.get("maintenance") or {}
-            if (existing.get("publication", {}).get("status") in {"pending", "error"}
-                    or existing.get("status") not in {"skipped", "deferred", "error", ""}):
+            if (maintenance_covers_results(existing, report["files"]) and
+                    (existing.get("publication", {}).get("status") in {"pending", "error"}
+                     or existing.get("status") not in {"skipped", "deferred", "error", ""})):
                 publish_maintenance_report(report_path, report)
                 compact = compact_maintenance(report["maintenance"])
                 compact["report_path"] = str(report_path.relative_to(repo))

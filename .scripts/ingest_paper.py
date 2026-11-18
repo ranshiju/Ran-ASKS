@@ -14,12 +14,14 @@ warning 走 3.6b 局部修复。各阶段独立重试，最多 3 次。
 from __future__ import annotations
 
 import argparse
+import knowledge_ir as kir
 import copy
 import hashlib
 import json
 import os
 import re
 import shlex
+import sqlite3
 import subprocess
 import sys
 import time
@@ -91,8 +93,8 @@ WIKI_DELIMITER = "<<<WIKI>>>"
 SLOTS_DELIMITER = "<<<SLOTS>>>"
 BIBLIOGRAPHIC_DELIMITER = "<<<BIBLIOGRAPHIC>>>"
 AGENT_WORKSPACE_PROTOCOL = "paper-agent-workspace-v1"
-AGENT_WORKSPACE_TASK_VERSION = "paper-agent-workspace-task-v6"
-AGENT_READING_CONTRACT_VERSION = "agent-paper-reading-v3"
+AGENT_WORKSPACE_TASK_VERSION = "paper-agent-workspace-task-v8"
+AGENT_READING_CONTRACT_VERSION = "agent-paper-reading-v4"
 AGENT_BIBLIOGRAPHIC_PROTOCOL = "evidence-bibliography-v1"
 AGENT_FULL_TEXT_MAX_CHARS = 40_000
 AGENT_READING_BATCH_MAX_CHARS = 18_000
@@ -101,13 +103,14 @@ BIBLIOGRAPHIC_VALIDATOR_VERSION = "bibliographic-review-validator-v4"
 WIKI_VALIDATOR_VERSION = "paper-wiki-validator-v2"
 SEMANTIC_VALIDATOR_VERSION = "paper-semantic-validator-v3"
 GRAPH_PREFLIGHT_VALIDATOR_VERSION = "graph-plan-preflight-v2"
-BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v10"
+BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v11"
 API_WORKSPACE_OPERATION = "ingest_paper_workspace"
 PAPER_CLAIM_QUALIFICATION_RULES = (
     "保留原文的作者归属、推测/预期/已证语气、否定和适用条件；来源明确的猜想与不确定结论有价值，按其原有贡献、限制或展望角色保留完整命题，不升级为已证事实。",
     "论断强度写在正文或 proposition 中，不把或许/应该/大概拼接为新谓词；应该可能表示规范要求，大概可能表示数值近似，须按原文语义表达。摄入模型没有把握或原文无依据的关系应留待核实或省略，不能靠添加可能来补救。",
 )
 PAPER_WIKI_CLAIM_RULES = (
+    "先核验原文支持再选择脚注：引用集合须覆盖整段的每项主张，依据分散时增加多个脚注或拆句；研究方向引用对象、问题和方法的正文证据，作者行只支持作者身份。",
     "定义、等式、定理和性能结论逐项回溯来源，保留对应对象、符号、条件与比较基准。",
     "同文出现的不同映射、算子或近似量分别核验；只陈述所引原文实际给出的性质，证据不足时缩减或删去。",
     "结构、脚注与 Graph 校验通过不替代来源事实核对。",
@@ -216,6 +219,7 @@ def agent_paper_semantic_protocol() -> dict:
             "section_headers": ["三元组:", "概念说明:"],
             "header_layout": "each header on its own line",
             "triple_line": "主体 | 谓词 | 客体",
+            "math_pipes": "公式使用成对 $...$、\\(...\\) 或 Unicode bra-ket 定界；定界内竖线是内容，定界外恰好两个字段分隔符",
             "gloss_line": "概念名 | 一句文档局部说明",
         },
         "example": (
@@ -1288,6 +1292,15 @@ def _layout_venue_candidates(blocks: list[dict], doi: str = "", year: str = "") 
     )
     for block in blocks:
         for line in str(block["text"]).splitlines():
+            # A publication-shaped word inside an affiliation is not a venue.
+            # Keep separate publication lines in a mixed layout block.
+            affiliation = AFFILIATION_HINT_RE.search(line)
+            publication_prefix = re.search(
+                r"\b(?:Journal|Proceedings|Findings|Transactions|published\s+in)\b",
+                line[:affiliation.start()] if affiliation else "", re.I,
+            )
+            if (affiliation and not publication_prefix) or "@" in line:
+                continue
             for pattern in patterns:
                 match = re.search(pattern, line.strip(), re.I)
                 if not match:
@@ -1813,10 +1826,13 @@ def bibliographic_quality_warnings(bibliography: dict, md_text: str) -> list[dic
         if not any(_author_covers_title_fragment(item, author) for item in selected_authors)
     ]
     if missing_authors:
+        fewer_authors = len(selected_authors) < len(expected_authors)
         warnings.append({
-            "issue": "bibliographic_authors_incomplete",
+            "issue": ("bibliographic_authors_incomplete" if fewer_authors
+                      else "bibliographic_author_names_differ"),
             "detail": (
-                f"locked authors omit {len(missing_authors)} names from the title author block: "
+                (f"locked authors omit {len(missing_authors)} names from the title author block: "
+                 if fewer_authors else "author spellings differ from the title author block; compare source versions: ")
                 + ", ".join(missing_authors[:5])
             ),
         })
@@ -4432,11 +4448,6 @@ def build_api_paper_workspace_prompt(
     raw_source = source_match.group(1).strip() if source_match else "RAW"
     paper_context = _api_paper_context(md_text, paper_md_path, raw_source,
                                        context_diagnostics if context_diagnostics is not None else {})
-    first_handle = re.search(r"^<([^>\n]+#L\d+)>[ \t]", paper_context, re.M)
-    citation_example = (
-        f"引用格式示例（仅展示格式，不替代事实证据）：陈述。[^r1]\n[^r1]: {first_handle.group(1)}"
-        if first_handle else "未提供可用 Raw handle 时不得编造引用，须报告未决。"
-    )
     title_view, evidence_view = _paper_md_review_view(md_text)
     error_section = ""
     if errors:
@@ -4488,7 +4499,6 @@ JSON 必须严格填写以下已通过 schema 的未决模板，不增删 key；
 4. 输入 handle 是 <{raw_source}#Lx>，不是已有脚注。自行分配 [^rN]，在事实段落或事实列表项末尾引用；Sources 定义严格为单独一行 [^rN]: {raw_source}#Lx，地址逐字复制输入实际提供的 handle，去掉尖括号。不得自造行号或使用 #全篇。
 5. 保持程序已填 frontmatter 字段；只填写带 LLM 注释的字段并删除注释。
 6. {" ".join(PAPER_WIKI_CLAIM_RULES)}
-{citation_example}
 
 [C. 语义槽]
 {build_paper_semantic_contract()}
@@ -4573,6 +4583,35 @@ def materialize_bibliographic_pages(pdf_path: Path, output_path: Path) -> bool:
     return True
 
 
+def _agent_workspace_commands(transaction_id: str) -> dict:
+    return {
+        action: f"python3 .scripts/ingest_paper.py --agent-{option} {transaction_id}"
+        for action, option in (("read", "workspace"), ("check", "check"),
+                               ("commit", "commit"), ("refresh", "refresh"))
+    }
+
+
+def _agent_workspace_content_protocol(raw_source: str, skeleton: str = "") -> dict:
+    """One content contract for initial, legacy and API-to-host workspaces."""
+    return {
+        "task_version": AGENT_WORKSPACE_TASK_VERSION,
+        "wiki": {
+            **({"base": skeleton} if skeleton else {}),
+            "required_sections": ["Navigation", "研究方向定位", "Content", "Sources"],
+            "evidence": "Raw line footnotes bound to paper.md",
+            "evidence_format": {
+                "reference": "[^r1]",
+                "definition": f"[^r1]: {raw_source}#L1-L3",
+                "locator": "raw/path.md#Lx[-Ly]",
+                "line_policy": "use actual source line numbers; example numbers are placeholders",
+            },
+            "claim_rules": list(PAPER_WIKI_CLAIM_RULES),
+        },
+        "semantics": agent_paper_semantic_protocol(),
+        "validators": _agent_versions()["validators"],
+    }
+
+
 def _agent_reading_contract(paper_md: Path, workspace: dict | None = None) -> dict:
     """Describe how the host Agent should read one extracted paper."""
     workspace = workspace or {}
@@ -4596,8 +4635,9 @@ def _agent_reading_contract(paper_md: Path, workspace: dict | None = None) -> di
     batches = []
     if mode == "full":
         first_line = 1
+        line_number = 0
         output_chars = 0
-        for line_number, line in enumerate(source_text.split('\n'), 1):
+        for line_number, line in enumerate(sl.split_source_lines(source_text), 1):
             cost = len(f"<{source_base}#L{line_number}> {line}\n")
             if output_chars and output_chars + cost > AGENT_READING_BATCH_MAX_CHARS:
                 batches.append({"start_line": first_line, "end_line": line_number - 1,
@@ -4605,8 +4645,9 @@ def _agent_reading_contract(paper_md: Path, workspace: dict | None = None) -> di
                 first_line = line_number
                 output_chars = 0
             output_chars += cost
-        batches.append({"start_line": first_line, "end_line": line_number,
-                        "required_output_chars": output_chars})
+        if line_number:
+            batches.append({"start_line": first_line, "end_line": line_number,
+                            "required_output_chars": output_chars})
         for batch in batches:
             batch["command"] = " ".join(command_prefix + [
                 "--full", "--start-line", str(batch["start_line"]),
@@ -4622,7 +4663,7 @@ def _agent_reading_contract(paper_md: Path, workspace: dict | None = None) -> di
         if not hits and not any(line.lstrip().startswith("## ") for line in source_text.splitlines()):
             sizes[AGENT_READING_SECTIONS[0]] = sum(
                 len(f"<{source_base}#L{number}> {line}\n")
-                for number, line in enumerate(source_text[:9000].split('\n'), 1)
+                for number, line in enumerate(sl.split_source_lines(source_text[:9000]), 1)
             )
         selected = []
         output_chars = 0
@@ -4640,8 +4681,18 @@ def _agent_reading_contract(paper_md: Path, workspace: dict | None = None) -> di
             batch["command"] = " ".join(command_prefix + [shlex.quote(section) for section in batch["sections"]])
     for batch in batches:
         batch["over_budget"] = batch["required_output_chars"] > AGENT_READING_BATCH_MAX_CHARS
-    section_command = batches[0]["command"]
+    section_command = batches[0]["command"] if batches else " ".join(command_prefix + ["--full"])
+    outline = {}
+    if mode == "adaptive_sections" and paper_md.is_file():
+        import read_paper
+        outline = read_paper.section_outline(paper_md, source_path=source_base)
+        outline["command"] = " ".join(command_prefix + ["--outline"])
+        if outline["next_offset"] is not None:
+            outline["next_command"] = " ".join(command_prefix + [
+                "--outline", "--outline-offset", str(outline["next_offset"]),
+            ])
     return {
+        **({"outline": outline} if outline else {}),
         "version": AGENT_READING_CONTRACT_VERSION,
         "mode": mode,
         "source_character_count": source_chars,
@@ -4653,6 +4704,7 @@ def _agent_reading_contract(paper_md: Path, workspace: dict | None = None) -> di
             "source_lines": "original_file_lines_preserved_across_discontinuous_ranges",
             "completion": "read_every_primary_batch; oversized_batches_require_original_line_windows_or_larger_output_budget_not_truncation",
             "reports": "read_status_diagnostics_and_next_actions_before_detail",
+            "coverage": "For reviews or non-IMRaD papers, use the structural outline and author-stated themes to choose source ranges; alias hits alone do not prove coverage. Outline entries are unread navigation, not evidence.",
         },
         "primary": (
             {"action": "read_full", "path": relative_path,
@@ -4843,6 +4895,15 @@ def _api_telemetry_payload(state: dict) -> dict:
     telemetry = copy.deepcopy(((state.get("telemetry") or {}).get("api_ingest") or {}))
     telemetry.pop("validation_history", None)
     if telemetry:
+        context = telemetry.get("evidence_context")
+        if isinstance(context, dict):
+            ranges = context.pop("selected_raw_ranges", None)
+            if ranges is not None:
+                context["selected_raw_range_count"] = len(ranges)
+                context["selected_raw_ranges_ref"] = {
+                    "path": f"temp/inbox-state/{state.get('transaction_id', '')}.json",
+                    "field": "telemetry.api_ingest.evidence_context.selected_raw_ranges",
+                }
         telemetry["final_warnings"] = list(state.get("quality_warnings") or [])
     return telemetry
 
@@ -5044,19 +5105,7 @@ def prepare_agent_workspace_handoff(state: dict, review_result: dict, paper_md: 
                 ),
             },
             **({"relationship": relationship_protocol} if relationship_protocol else {}),
-            "wiki": {
-                "base": str(skeleton_path.relative_to(REPO)),
-                "required_sections": ["Navigation", "研究方向定位", "Content", "Sources"],
-                "evidence": "Raw line footnotes bound to paper.md",
-                "evidence_format": {
-                    "reference": "[^r1]",
-                    "definition": f"[^r1]: {raw_placeholder}#L1-L3",
-                    "locator": "raw/path.md#Lx[-Ly]",
-                    "line_policy": "use actual source line numbers; example numbers are placeholders",
-                },
-                "claim_rules": list(PAPER_WIKI_CLAIM_RULES),
-            },
-            "semantics": agent_paper_semantic_protocol(),
+            **_agent_workspace_content_protocol(raw_placeholder, str(skeleton_path.relative_to(REPO))),
             "reading_strategy": reading,
             "existing_knowledge_lookup": _agent_knowledge_lookup_contract(),
             "validators": _agent_versions()["validators"],
@@ -5279,7 +5328,7 @@ def execute_api_paper_workspace(
         state["agent_write_to"] = str(output_path.relative_to(REPO))
         state["execution_backend"] = "api"
         state["retryable"] = False
-        state["next_action"] = "repair_api_workspace_then_resume"
+        state["next_action"] = _agent_workspace_commands(str(state["transaction_id"]))["read"]
         return False, "API 自动恢复已耗尽，需宿主 Agent 修正合并 workspace 暂存产物"
     if not result.get("ok"):
         return False, f"API 合并 workspace 调用失败: {result.get('error', 'unknown')}"
@@ -5619,6 +5668,10 @@ def resume_agent_workspace(
     workspace = state.get("agent_workspace") or {}
     if (state.get("status") not in {"prepared", "agent_required", "bibliographic_review_required"}
             or workspace.get("protocol_version") != AGENT_WORKSPACE_PROTOCOL):
+        state["errors"] = [
+            f"workspace 校验不适用于当前阶段 {state.get('status', '')}；"
+            "请读取 --agent-workspace 返回的阶段适用动作"
+        ]
         return False
     paper_md = REPO / state["extract_dir"] / "paper.md"
     output_path = REPO / str(workspace.get("output_path") or "")
@@ -5654,6 +5707,13 @@ def resume_agent_workspace(
         and (state.get("bibliographic_review") or {}).get("status") == "ok"
     )
     if reuse_locked_bibliography:
+        locked = (state.get("bibliographic_review") or {}).get("decision")
+        if not locked or canonicalize_agent_bibliographic_decision(decision) != canonicalize_agent_bibliographic_decision(locked):
+            state["errors"] = [
+                f"repair_scope={repair_scope} 只允许局部修复，BIBLIOGRAPHIC 与锁定裁决不同或缺少基线；"
+                "保留锁定书目段，或用 --agent-reopen 显式重开全部未落位产物后重新校验"
+            ]
+            return False
         inbox_state.transition(
             state, "write_wiki", reason=f"reuse_locked_bibliography_for_{repair_scope}_repair",
         )
@@ -5821,10 +5881,72 @@ def _agent_versions() -> dict:
     }
 
 
+def _landed_workspace_handoff(state: dict) -> dict | None:
+    """Already published artifacts belong to resume/update, not draft check."""
+    stage = str(state.get("status") or "")
+    effective_stage = str(state.get("resume_from") or "") if stage == "failed" else stage
+    if effective_stage not in {"graph_ready", "update_graph", "validate_graph", "finalize_tail", "completed"}:
+        return None
+    transaction_id = str(state.get("transaction_id") or "")
+    actions = {"resume": _resume_cmd(state)}
+    if stage == "completed":
+        actions["wiki_update_rules"] = (
+            "python3 .scripts/route.py --task ingest --subproject academic "
+            "--mode update --content paper --source-kind ordinary"
+        )
+        actions["bibliography_update_help"] = "python3 .scripts/bibliography_update.py --help"
+    return {
+        "status": agent_public_workflow_status(state),
+        "workflow_status": agent_public_workflow_status(state),
+        "internal_status": stage, "transaction_id": transaction_id,
+        "validation": "not_applicable", "outputs": [],
+        "artifacts": {"raw": state.get("raw_dir", ""), "wiki": state.get("wiki_path", "")},
+        "diagnostics": [
+            "内容已落位；旧 workspace 不再接受修改。未完成事务先按原 resume 接续；"
+            "完成后局部改稿走 ingest update，书目增补走 bibliography_update。"
+        ],
+        "next_actions": actions,
+    }
+
+
+def explicit_agent_workspace_reopen(state: dict) -> dict:
+    """Explicitly widen an unsubmitted repair through the existing gates."""
+    landed = _landed_workspace_handoff(state)
+    if landed is not None:
+        return landed
+    if state.get("status") not in {"prepared", "agent_required", "bibliographic_review_required"}:
+        return {"status": "failed", "errors": ["只能重开未落位的待修订 workspace"]}
+    workspace = state.get("agent_workspace") or {}
+    if workspace.get("protocol_version") != AGENT_WORKSPACE_PROTOCOL:
+        return {"status": "failed", "errors": ["事务没有 paper-agent-workspace-v1"]}
+    # Stay in the current allowed state; this is an explicit scope change, not
+    # a backdoor status transition. Input hashes are checked again on submit.
+    previous = workspace.get("repair_scope", "all")
+    workspace.update({"repair_scope": "all", "status": "awaiting_output"})
+    state.setdefault("bibliographic_review", {})["status"] = "prepared"
+    for key in ("validation_receipt", "validated_hashes", "output_sha256"):
+        workspace.pop(key, None)
+    state.setdefault("workspace_refresh_history", []).append({
+        "reason": "explicit_repair_scope_reopen", "from_scope": previous,
+        "to_scope": "all", "at": datetime.now().isoformat(timespec="seconds"),
+        "previous_bibliographic_decision": copy.deepcopy(
+            (state.get("bibliographic_review") or {}).get("decision")),
+    })
+    state["errors"] = []
+    if isinstance(state.get("agent_task"), dict):
+        state["agent_task"]["issues"] = []
+    state.pop("graph_preflight", None)
+    inbox_state.save(state["transaction_id"], state)
+    return read_agent_workspace(state)
+
+
 def read_agent_workspace(state: dict) -> dict:
     """Return the typed, read-only Agent workspace envelope."""
     workspace = state.get("agent_workspace") or {}
     transaction_id = str(state.get("transaction_id") or "")
+    landed = _landed_workspace_handoff(state)
+    if landed is not None:
+        return landed
     if workspace.get("protocol_version") != AGENT_WORKSPACE_PROTOCOL:
         return {
             "status": "failed", "workflow_status": "failed",
@@ -5837,28 +5959,17 @@ def read_agent_workspace(state: dict) -> dict:
     bibliographic_pages_path = REPO / state["extract_dir"] / "first-two-pages.txt"
     output_path = str(workspace.get("output_path") or "")
     workflow_status = agent_public_workflow_status(state)
-    next_actions = {
-        "check": f"python3 .scripts/ingest_paper.py --agent-check {transaction_id}",
-        "commit": f"python3 .scripts/ingest_paper.py --agent-commit {transaction_id}",
-    }
-    if (workspace.get("candidate_provider_contract")
-            != BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION):
-        next_actions["refresh"] = (
-            f"python3 .scripts/ingest_paper.py --agent-refresh {transaction_id}"
-        )
+    next_actions = _agent_workspace_commands(transaction_id)
     if (state.get("agent_task") or {}).get("schema") == agent_task.SCHEMA_VERSION:
-        task = agent_task.payload(state)
-        protocol = dict(task.get("protocol") or {})
-        protocol.setdefault("reading_strategy", reading)
-        protocol.setdefault("existing_knowledge_lookup", _agent_knowledge_lookup_contract())
-        task["protocol"] = protocol
+        task = copy.deepcopy(agent_task.payload(state))
     else:
-        fallback_inputs = [{
-            "name": "source_pdf_first_two_pages",
-            "path": str((REPO / state["extract_dir"] / "paper.pdf").relative_to(REPO)),
-            "role": "authoritative_near_source_bibliographic_evidence",
-            "read": "pages:1-2",
-        }]
+        fallback_inputs = []
+        pdf_path = paper_path.with_suffix(".pdf")
+        if pdf_path.is_file():
+            fallback_inputs.append({
+                "name": "source_pdf_first_two_pages", "path": str(pdf_path.relative_to(REPO)),
+                "role": "authoritative_near_source_bibliographic_evidence", "read": "pages:1-2",
+            })
         if bibliographic_pages_path.is_file():
             fallback_inputs.append({
                 "name": "bibliographic_first_two_pages",
@@ -5890,11 +6001,69 @@ def read_agent_workspace(state: dict) -> dict:
                 "existing_knowledge_lookup": _agent_knowledge_lookup_contract(),
             },
             issues=[
-                _agent_repair_issue("workspace", error)
+                _agent_repair_issue(workspace.get("repair_scope", "all"), error)
                 for error in state.get("errors", [])
             ],
             commands=next_actions,
         )
+    # Complete old tasks at read time without rewriting state or changing the
+    # bibliography schema chosen by the original execution backend.
+    protocol = dict(task.get("protocol") or {})
+    skeleton = str((protocol.get("wiki") or {}).get("base") or "")
+    if not skeleton and (paper_path.parent / "agent-skeleton.md").is_file():
+        skeleton = str((paper_path.parent / "agent-skeleton.md").relative_to(REPO))
+    protocol.update(_agent_workspace_content_protocol(
+        str(workspace.get("raw_source_placeholder") or paper_path.relative_to(REPO)), skeleton,
+    ))
+    protocol["reading_strategy"] = reading
+    protocol["existing_knowledge_lookup"] = _agent_knowledge_lookup_contract()
+    scope = str(workspace.get("repair_scope") or "all")
+    backend = str(workspace.get("execution_backend") or "agent")
+    bibliography_contract = workspace.get("bibliography_contract") or (
+        BIBLIOGRAPHIC_DECISION_PROTOCOL if backend == "api" else AGENT_BIBLIOGRAPHIC_PROTOCOL
+    )
+    protocol.setdefault("bibliography", {
+        "contract": bibliography_contract,
+        "template": (api_bibliographic_decision_template()
+                     if bibliography_contract == BIBLIOGRAPHIC_DECISION_PROTOCOL
+                     else agent_bibliographic_decision_template()),
+    })
+    if protocol["bibliography"].get("contract") != bibliography_contract:
+        protocol["bibliography"]["template"] = (
+            api_bibliographic_decision_template() if bibliography_contract == BIBLIOGRAPHIC_DECISION_PROTOCOL
+            else agent_bibliographic_decision_template()
+        )
+    protocol["bibliography"]["contract"] = bibliography_contract
+    protocol["repair_scope"] = scope
+    protocol["bibliography"]["locked"] = scope in {"wiki", "slots"}
+    protocol["repair_policy"] = (
+        "Edit only the declared repair_scope in the existing output; preserve locked sections. "
+        "Use next_actions.reopen_all for a necessary wider change, then check and commit."
+    )
+    task["protocol"] = protocol
+    task["commands"] = dict(next_actions)
+    task["control"] = agent_task.make_task(
+        kind=task["kind"], transaction_id=transaction_id,
+        inputs=task["inputs"], outputs=task["outputs"], protocol=protocol,
+        commands=next_actions,
+    )["control"]
+    task["execution_backend"] = backend
+    # Reuse staged evidence; absent historical artifacts are not advertised.
+    input_paths = {item["path"] for item in task["inputs"]}
+    for filename, role in (("agent-skeleton.md", "wiki_structure"),
+                           ("bibliographic-candidates.json", "bibliographic_candidates")):
+        path = paper_path.parent / filename
+        relative = str(path.relative_to(REPO))
+        if (path.is_file() and relative not in input_paths
+                and (filename != "bibliographic-candidates.json" or (backend == "api" and scope == "all"))):
+            task["inputs"].append({"name": filename, "path": relative, "role": role, "read": "full"})
+    if state.get("errors") and not task.get("issues"):
+        task["issues"] = [_agent_repair_issue(scope, error) for error in state["errors"]]
+    if scope in {"wiki", "slots"}:
+        for issue in task.get("issues", []):
+            if isinstance(issue, dict) and issue.get("scope") == "all" and issue.get("stage") == "workspace":
+                issue.update(scope=scope, action=_agent_repair_scope(scope)[1])
+    next_actions["reopen_all"] = f"python3 .scripts/ingest_paper.py --agent-reopen {transaction_id}"
     task.update({
         "workflow_status": workflow_status,
         "internal_status": state.get("status", ""),
@@ -5924,6 +6093,7 @@ def read_agent_workspace(state: dict) -> dict:
         "agent_telemetry": _agent_telemetry_payload(state),
         "api_telemetry": _api_telemetry_payload(state),
         "next_actions": next_actions,
+        "repair_scope": workspace.get("repair_scope", "all"),
     })
     return task
 
@@ -6111,6 +6281,12 @@ def record_agent_workspace_validation(state: dict, graph_preflight=None) -> None
 
 def reopen_agent_workspace(state: dict, stage: str, errors: list[str]) -> None:
     """Reopen only the invalid workspace artifact and preserve validated inputs."""
+    if _landed_workspace_handoff(state) is not None:
+        state["errors"] = list(errors) + [
+            "已落位产物不能重开旧 workspace；恢复已校验产物后 resume，内容修订走归档更新入口"
+        ]
+        state["resume_blocked"] = "landed_artifact_changed"
+        return
     workspace = state.get("agent_workspace") or {}
     if workspace.get("protocol_version") != AGENT_WORKSPACE_PROTOCOL:
         return
@@ -6138,41 +6314,15 @@ def reopen_agent_workspace(state: dict, stage: str, errors: list[str]) -> None:
         scopes = telemetry.setdefault("repair_scopes", [])
         if issue_scope not in scopes:
             scopes.append(issue_scope)
-    if (execution_backend == "agent"
-            and (state.get("agent_task") or {}).get("schema") != agent_task.SCHEMA_VERSION):
-        paper_path = str(Path(state.get("extract_dir", "")) / "paper.md")
-        state["agent_task"] = agent_task.make_task(
-            kind="ingest_paper",
-            transaction_id=state.get("transaction_id", "legacy-agent-workspace"),
-            inputs=[{
-                "name": "paper_text", "path": paper_path,
-                "role": "authoritative_extracted_source", "read": reading["mode"],
-            }],
-            outputs=[{
-                "name": "paper_workspace", "path": str(workspace.get("output_path") or ""),
-                "format": AGENT_WORKSPACE_PROTOCOL,
-            }],
-            protocol={
-                "name": AGENT_WORKSPACE_PROTOCOL,
-                "order": ["BIBLIOGRAPHIC", "WIKI", "SLOTS"],
-                "delimiters": {
-                    "bibliography": BIBLIOGRAPHIC_DELIMITER,
-                    "wiki": WIKI_DELIMITER,
-                    "semantics": SLOTS_DELIMITER,
-                },
-                "reading_strategy": reading,
-                "existing_knowledge_lookup": _agent_knowledge_lookup_contract(),
-            },
-            issues=[_agent_repair_issue(stage, error) for error in errors],
-            commands={"resume": _resume_cmd(state)},
-        )
     review = state.get("bibliographic_review") or {}
     if repair_scope == "all":
         review["status"] = "prepared"
     state["bibliographic_review"] = review
     state["pre_handoff_status"] = "extract"
     issues = [_agent_repair_issue(stage, error) for error in errors]
+    state["errors"] = errors
     if execution_backend == "agent":
+        state["agent_task"] = read_agent_workspace(state)
         agent_task.reopen(state, issues)
     else:
         state["status"] = "agent_required"
@@ -6782,7 +6932,7 @@ def normalize_slots(text: str) -> str:
         if re.match(r"^.+[:：]\s*$", stripped) and "|" not in stripped:
             current_section = stripped.rstrip(":：").strip()
         if "|" in stripped:
-            parts = [part.strip() for part in stripped.split("|")]
+            parts = kir.parse_semantic_triple_line(stripped) or []
             if len(parts) == 3 and current_section != "概念说明":
                 normalized_predicate = normalize_predicate(parts[1], DEFAULT_CONFIG)
                 if normalized_predicate != parts[1]:
@@ -6810,7 +6960,7 @@ def normalize_slots(text: str) -> str:
     has_section = any(re.match(r"^三元组[:：]\s*$", line) for line in result)
     bare_triples = [
         line for line in result
-        if len(parts := [part.strip() for part in line.split("|", 2)]) == 3
+        if (parts := kir.parse_semantic_triple_line(line)) is not None
         and all(parts)
     ]
     if not has_section and result and len(bare_triples) == len(result):
@@ -7315,7 +7465,9 @@ def step_finalize(state: dict) -> tuple[bool, str]:
 
 def _record_graph_quality_warnings(state: dict) -> None:
     graph_delta = ((state.get("graph_report") or {}).get("graph_delta") or {})
-    probes = graph_delta.get("query_probes") or {}
+    current = state.get("current_graph_quality") or {}
+    probes = (current.get("query_probes") if current.get("status") == "checked"
+              else graph_delta.get("query_probes")) or {}
     subgraph = graph_delta.get("subgraph") or {}
     generated_issues = {
         "graph_navigation_incomplete",
@@ -7376,15 +7528,50 @@ def _refresh_completed_derived_quality(state: dict) -> bool:
         "quality_status": state.get("quality_status"),
         "quality_warnings": state.get("quality_warnings", []),
         "quality_warning_history": state.get("quality_warning_history", []),
+        "current_graph_quality": state.get("current_graph_quality"),
     }, ensure_ascii=False, sort_keys=True)
+    import graph_delta as gd
+    import graph_lib as gl
+    db_path = REPO / ("private/graph.db" if str(state.get("wiki_path", "")).startswith("private/")
+                      else "cross-domain/graph.db")
+    try:
+        gl.validate_graph_target(state.get("wiki_path"), db_path)
+        conn = gl.connect(db_path, read_only=True)
+        try:
+            probes = gd.probe_persisted_boundary(conn, (state.get("graph_report") or {}).get("graph_delta") or {})
+        finally:
+            conn.close()
+        state["current_graph_quality"] = {"status": "checked", "query_probes": probes}
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        state["current_graph_quality"] = {"status": "unavailable", "reason": str(exc)}
+    # A managed bibliography update may supersede the original ingest review.
+    # Use current Source for this check only; do not rewrite its historical state.
+    current_state = dict(state)
+    source_path = raw_path / "source.yaml"
+    if source_path.is_file():
+        source = yaml.safe_load(source_path.read_text(encoding="utf-8")) or {}
+        if isinstance(source.get("bibliographic"), dict):
+            current_state["bibliographic_meta"] = source["bibliographic"]
     _record_bibliographic_quality_warnings(
-        state, paper_md.read_text(encoding="utf-8"),
+        current_state, paper_md.read_text(encoding="utf-8"),
     )
+    for key in ("quality_warnings", "quality_warning_history", "quality_status"):
+        if key in current_state:
+            state[key] = current_state[key]
     _record_graph_quality_warnings(state)
+    state["quality_warnings"] = [w for w in state.get("quality_warnings", [])
+                                 if w.get("issue") != "graph_quality_check_unavailable"]
+    if state["current_graph_quality"]["status"] == "unavailable":
+        state["quality_warnings"].append({
+            "issue": "graph_quality_check_unavailable",
+            "detail": state["current_graph_quality"]["reason"],
+        })
+    _sync_quality_status(state)
     after = json.dumps({
         "quality_status": state.get("quality_status"),
         "quality_warnings": state.get("quality_warnings", []),
         "quality_warning_history": state.get("quality_warning_history", []),
+        "current_graph_quality": state.get("current_graph_quality"),
     }, ensure_ascii=False, sort_keys=True)
     if before != after:
         inbox_state.save(state["transaction_id"], state)
@@ -7541,6 +7728,8 @@ def run_prepare(state: dict) -> dict:
             reopen_agent_workspace(state, "hash", workspace_errors)
             inbox_state.save(state["transaction_id"], state)
             return state
+        if state.get("resume_blocked") == "landed_artifact_changed":
+            state.pop("resume_blocked", None)
         validation_errors = ic.validate_before_commit(
             state, step_validate_semantics, NON_BLOCKING_ISSUES,
             _record_semantic_quality_warnings,
@@ -7931,8 +8120,12 @@ def _batch_item_payload(state: dict) -> dict:
         "api_telemetry": _api_telemetry_payload(state),
     }
     if agent_task.is_prepared(state):
-        payload["agent_task"] = agent_task.payload(state)
+        payload["agent_task"] = read_agent_workspace(state)
         payload["workflow_status"] = agent_public_workflow_status(state)
+    elif (state.get("status") == "agent_required"
+          and (state.get("agent_workspace") or {}).get("protocol_version") == AGENT_WORKSPACE_PROTOCOL):
+        payload["next_actions"] = _agent_workspace_commands(str(state["transaction_id"]))
+        payload["next_action"] = payload["next_actions"]["read"]
     return inbox_state.output_payload(state, payload)
 
 
@@ -8020,6 +8213,9 @@ def run_inbox_batch(verbose: bool) -> int:
 
 def _check_agent_workspace_once(state: dict) -> dict:
     """Run all pre-commit Agent artifact gates without final Raw/Graph writes."""
+    landed = _landed_workspace_handoff(state)
+    if landed is not None:
+        return landed
     working = copy.deepcopy(state)
     transaction_id = state.get("transaction_id")
     diagnostics = []
@@ -8168,6 +8364,9 @@ def _check_agent_workspace_once(state: dict) -> dict:
 @ic.timed_ingest_step
 def check_agent_workspace(state: dict) -> dict:
     """Run the dry-run checks without changing hash-bound input artifacts."""
+    landed = _landed_workspace_handoff(state)
+    if landed is not None:
+        return landed
     extract_dir = REPO / str(state.get("extract_dir") or "")
     protected = [
         extract_dir / "source.yaml",
@@ -8206,6 +8405,7 @@ def main() -> None:
     source_group.add_argument("--agent-check", help="校验单次 Agent workspace，不落位、不写图")
     source_group.add_argument("--agent-commit", help="复验并提交已完成的 Agent workspace")
     source_group.add_argument("--agent-refresh", help="归档旧输出并刷新候选提供器已升级的未提交 Agent workspace")
+    source_group.add_argument("--agent-reopen", help="显式将未落位 workspace 重开为 all 范围，重新校验书目、Wiki和语义")
     source_group.add_argument("--validate", help="对事务跑全量语义校验并输出 warning（不跑 pipeline，供修正后自检）")
     source_group.add_argument("--raw", help="兼容入口：转交 re_ingest.py --raw 编译已归档论文；局部 Wiki 修订走 ingest update")
     parser.add_argument("--verbose", action="store_true", help="进度打印到 stdout（调试/建设/审计用；默认写日志文件）")
@@ -8262,6 +8462,12 @@ def main() -> None:
             }, ensure_ascii=False, indent=2))
             return
         print(json.dumps(explicit_agent_workspace_refresh(state), ensure_ascii=False, indent=2))
+        return
+    elif args.agent_reopen:
+        state = inbox_state.load(args.agent_reopen)
+        if not state:
+            raise SystemExit(f"ERROR: 事务不存在: {args.agent_reopen}")
+        print(json.dumps(explicit_agent_workspace_reopen(state), ensure_ascii=False, indent=2))
         return
     elif args.raw:
         # Archived papers already have a workspace-aware owner with version
@@ -8377,7 +8583,7 @@ def run_one(state: dict, verbose: bool) -> dict:
         _mark_graph_failure(result)
         return result
     state = _run_phase(state, verbose, run_prepare)
-    if state["status"] == "graph_ready":
+    if state["status"] == "graph_ready" and not state.get("resume_blocked"):
         state = _run_phase(state, verbose, run_commit)
     _mark_graph_failure(state)
     return state
@@ -8402,6 +8608,7 @@ def print_result(state: dict) -> None:
             "quality_status": state.get("quality_status") or _sync_quality_status(state),
             "quality_warnings": state.get("quality_warnings", []),
             "quality_warning_history": state.get("quality_warning_history", []),
+            "current_graph_quality": state.get("current_graph_quality", {}),
             "transaction_id": state["transaction_id"],
             "execution_backend": (
                 (state.get("agent_workspace") or {}).get("execution_backend")
@@ -8479,6 +8686,8 @@ def print_result(state: dict) -> None:
             if key in state:
                 payload[key] = state[key]
         if workspace_agent:
+            payload["next_actions"] = _agent_workspace_commands(str(state["transaction_id"]))
+            payload["next_action"] = payload["next_actions"]["read"]
             payload["workspace_protocol"] = AGENT_WORKSPACE_PROTOCOL
             payload["workflow_status"] = "awaiting_agent"
             payload["workspace_tools"] = {

@@ -19,6 +19,34 @@ assert spec.loader is not None
 spec.loader.exec_module(module)
 
 
+def test_agent_output_view_preserves_handoffs_and_compatibility():
+    item = {"file": "paper.pdf", "status": "prepared", "transaction_id": "txn",
+            "agent_task": {"schema": "agent-task-v1", "inputs": [{"path": "raw.md"}],
+                           "commands": {"check": "managed check txn"}}}
+    payload = {"schema": "ingest-result-v1", "status": "prepared", "committed": False,
+               "items": [item], "files": [dict(item)], "report_path": "report.json",
+               "maintenance": {"status": "deferred", "reason": "pending_inbox_files"}}
+    assert module._output_view(payload, "compat") == payload
+    projected = module._output_view(payload, "agent")
+    assert "files" not in projected and "files" in payload
+    assert projected == {k: v for k, v in payload.items() if k != "files"}
+    distinct = {**payload, "files": [{**item, "extra_diagnostic": "retain"}]}
+    assert module._output_view(distinct, "agent") == distinct
+    for value in [{"status": "validation_error", "errors": ["bad input"]},
+                  {"schema": "other", "items": [], "files": []},
+                  {"schema": "ingest-result-v1", "files": []}]:
+        assert module._output_view(value, "agent") == value
+    for selected in ([], ["--output-view", "agent"]):
+        stdout = io.StringIO()
+        with patch.object(sys, "argv", ["ingest_inbox.py", "--reconcile-maintenance-report",
+                                        "cross-domain/ingest-reports/test.json", *selected]), \
+                patch.object(module, "reconcile_maintenance_report", return_value=payload), \
+                contextlib.redirect_stdout(stdout):
+            module.main()
+        result = json.loads(stdout.getvalue())
+        assert result == (projected if selected else payload)
+
+
 def test_result_refs_can_describe_transactions_outside_inbox_state():
     state = {"status": "failed", "transaction_id": "external-plan"}
     default = module.inbox_state.output_payload(state, {})
@@ -1549,6 +1577,42 @@ def test_abbreviation_decisions_require_exact_pending_tokens_and_atomic_todo():
         assert not todo.with_name(todo.name + ".tmp").exists()
 
 
+def test_abbreviation_decisions_accept_extracted_tokens_and_reject_malformed_batch():
+    import sqlite3
+    import resolve_abbreviations as resolver
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    resolver.gl.init_schema(conn)
+    try:
+        tokens = ["CMA-ES", "CV-IQP", "t-SNE", "iPEPS", "BERTScore", "MPS"]
+        entries = [{"token": token, "page": "academic/wiki/papers/example",
+                    "field": "object", "object": token} for token in tokens]
+        assert resolver._extract_abbr_tokens(" ".join(tokens)) == tokens
+        report = resolver.apply_decisions(conn, [
+            {"token": token, "resolution_kind": "alias_to_full_name",
+             "full_name": "Full name for " + token} for token in tokens
+        ], entries)
+        assert report["status"] == "completed", report
+        assert {item["token"] for item in report["applied"]} == set(tokens)
+        indexes = resolver.gl.build_name_index(conn)
+        for token in tokens:
+            resolved, ambiguous = resolver.gl.resolve_bare_name(token, *indexes)
+            assert resolved and not ambiguous
+
+        before = conn.total_changes
+        for token in ["CMA--ES", "CMA-", "-CMA", "CMA ES", "CMA/ES", "CMA;ES"]:
+            report = resolver.apply_decisions(conn, [
+                {"token": "MPS", "resolution_kind": "canonical_name"},
+                {"token": token, "resolution_kind": "canonical_name"},
+            ], entries + [{"token": token}])
+            assert report["status"] == "validation_error", (token, report)
+            assert any("invalid token" in item for item in report["errors"])
+        assert conn.total_changes == before
+    finally:
+        conn.close()
+
+
 def test_abbreviation_decisions_close_only_matching_maintenance_action():
     spec = importlib.util.spec_from_file_location(
         "resolve_abbreviations_receipt_test", Path(__file__).parent / "resolve_abbreviations.py"
@@ -1591,8 +1655,19 @@ def test_abbreviation_decisions_close_only_matching_maintenance_action():
             updated = json.loads(receipt_path.read_text(encoding="utf-8"))
             assert summary["remaining_tokens"] == 0
             assert updated["components"]["abbreviations"]["status"] == "completed"
+            assert updated["components"]["abbreviations"]["warning_count"] == 0
             assert updated["status"] == "agent_required"
             assert updated["actions"] == [{"component": "hubs", "next_action": "agent_review"}]
+            # Report reconciliation can also close a finished Hub handoff.
+            import ingest_inbox as publisher
+            receipt["report_path"] = "cross-domain/ingest-reports/session.json"
+            with patch.object(publisher, "reconcile_maintenance_report", return_value={
+                "maintenance": {"status": "completed", "publication": {"status": "completed"}},
+            }):
+                refreshed = resolver._close_maintenance_receipt(
+                    path, receipt, tokens, {"applied": [{"token": "QA"}]}, [],
+                )
+            assert refreshed["status"] == "completed"
     finally:
         resolver.REPO = old_repo
 
@@ -1802,7 +1877,10 @@ def test_initial_maintenance_publication_and_historical_reconciliation(historica
             assert json.loads(report_path.read_text())["maintenance"]["actions"] == receipt["actions"]
 
 
-def test_split_handoff_reconciliation(preserve_pending=False, interrupt_receipt=False):
+def test_split_handoff_reconciliation(preserve_pending=False, interrupt_receipt=False, redistribution=False):
+    count_key = "redistribution_count" if redistribution else "split_count"
+    file_key = "redistribution_candidates_file" if redistribution else "split_candidates_file"
+    resolved_status = "resolved" if redistribution else "applied"
     import inbox_state
     import hub_semantics
     with tempfile.TemporaryDirectory() as temporary:
@@ -1839,23 +1917,28 @@ def test_split_handoff_reconciliation(preserve_pending=False, interrupt_receipt=
             conn.commit()
             conn.close()
             graph_before = graph_path.read_bytes()
-            split_rel = "temp/hub-auto-split/initial.json"
+            split_rel = ("temp/hub-auto-redistribute/initial.json" if redistribution
+                         else "temp/hub-auto-split/initial.json")
             receipt_rel = "temp/inbox-maintenance/initial.json"
             report_path = root / "cross-domain/ingest-reports/initial.json"
             candidates = [{"hub": parent, "clusters": [{"members": members} for members in groups]}]
+            if redistribution:
+                candidates = [{"hub": parent, "children": [
+                    f"academic/wiki/hubs/child-{index}" for index in range(len(groups))]}]
             if preserve_pending:
                 candidates.append({
-                    "hub": "academic/wiki/hubs/unprocessed", "clusters": candidates[0]["clusters"],
+                    "hub": "academic/wiki/hubs/unprocessed", "clusters": [{"members": members} for members in groups],
                     "resolution": {"status": "applied"},
                 })
             module._write_json_atomic(root / split_rel, candidates)
             receipt = {
                 "status": "agent_required", "receipt_path": receipt_rel, "errors": [],
-                "actions": [{"component": "hubs", "split_candidates_file": split_rel}],
+                "actions": [{"component": "hubs", file_key: split_rel}],
                 "components": {"hubs": {
-                    "status": "agent_required", "split_candidates_file": split_rel,
-                    "split_count": len(candidates), "eligible_count": 0,
-                    "redistribution_count": 0, "route_review_count": int(preserve_pending),
+                    "status": "agent_required", file_key: split_rel,
+                    count_key: len(candidates), "eligible_count": 0,
+                    ("split_count" if redistribution else "redistribution_count"): 0,
+                    "route_review_count": int(preserve_pending),
                 }},
             }
             if preserve_pending:
@@ -1876,7 +1959,7 @@ def test_split_handoff_reconciliation(preserve_pending=False, interrupt_receipt=
             original_write = module._write_json_atomic
             if interrupt_receipt:
                 def interrupted_write(path, value):
-                    if path == root / receipt_rel and value["components"]["hubs"]["split_count"] == 0:
+                    if path == root / receipt_rel and value["components"]["hubs"][count_key] == 0:
                         raise OSError("receipt write interrupted")
                     return original_write(path, value)
                 with patch.object(module, "_write_json_atomic", side_effect=interrupted_write):
@@ -1884,15 +1967,15 @@ def test_split_handoff_reconciliation(preserve_pending=False, interrupt_receipt=
                 assert interrupted["completed"] == 2 and interrupted["failed"] == 0
                 assert interrupted["maintenance"]["status"] == "error"
                 assert interrupted["maintenance"]["retryable"] is True
-                assert json.loads((root / split_rel).read_text())[0]["resolution"]["status"] == "applied"
-                assert json.loads((root / receipt_rel).read_text())["components"]["hubs"]["split_count"] == 1
+                assert json.loads((root / split_rel).read_text())[0]["resolution"]["status"] == resolved_status
+                assert json.loads((root / receipt_rel).read_text())["components"]["hubs"][count_key] == 1
             summary = module.reconcile_maintenance_report(report_path)
             expected = "agent_required" if preserve_pending else "completed"
             assert summary["completed"] == 2 and summary["failed"] == 0
             assert summary["maintenance"]["status"] == expected
             repaired = json.loads(report_path.read_text())
             hubs = repaired["maintenance"]["components"]["hubs"]
-            assert hubs["split_count"] == int(preserve_pending)
+            assert hubs[count_key] == int(preserve_pending)
             assert hubs["route_review_count"] == int(preserve_pending)
             assert repaired["degraded"] == 2
             if preserve_pending:
@@ -1904,7 +1987,7 @@ def test_split_handoff_reconciliation(preserve_pending=False, interrupt_receipt=
                 assert state["status"] == "completed"
                 assert state["quality_warnings"] == item["quality_warnings"]
                 assert state["maintenance"]["status"] == expected
-                assert state["maintenance"]["components"]["hubs"]["split_count"] == int(preserve_pending)
+                assert state["maintenance"]["components"]["hubs"][count_key] == int(preserve_pending)
             module.reconcile_maintenance_report(report_path)
             assert json.loads(report_path.read_text()) == repaired
             assert graph_path.read_bytes() == graph_before
@@ -2150,8 +2233,103 @@ def test_maintenance_recovers_quality_omitted_from_legacy_completed_output():
                 assert compact["files"][0]["quality_warning_history_count"] == 1
 
 
+def test_partial_batch_defers_all_maintenance():
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory, patch.object(module, "REPO", Path(directory)), \
+            patch.object(module, "_auto_resolve_abbreviations") as abbr, \
+            patch.object(module, "_auto_create_hubs") as hubs:
+        result = module.run_post_ingest_maintenance([
+            {"ok": True, "status": "completed", "transaction_id": "first", "graph_report": {"hub_dynamics": {"affected_nodes": []}}},
+            {"ok": True, "status": "agent_required", "transaction_id": "second"},
+        ], "partial")
+        assert result["status"] == "deferred" and result["reason"] == "pending_batch_items"
+        abbr.assert_not_called()
+        hubs.assert_not_called()
+
+
+def test_maintenance_coverage_tracks_completed_transactions():
+    import ingest_common as ic
+    items = [{"transaction_id": "first", "status": "completed", "graph_report": {}}, {"transaction_id": "second", "status": "completed", "graph_report": {}}]
+    old = {"trigger_files": [{"transaction_id": "first", "status": "completed"}, {"transaction_id": "second", "status": "agent_required"}]}
+    assert not ic.maintenance_covers_results(old, items)
+    assert ic.maintenance_covers_results({"trigger_files": [ic.maintenance_trigger(item) for item in items]}, items)
+    changed = [dict(items[0], graph_report={"hub_scope_route": {"decision": "candidates"}}), items[1]]
+    assert not ic.maintenance_covers_results({"trigger_files": [ic.maintenance_trigger(item) for item in items]}, changed)
+    assert not ic.maintenance_covers_results({}, items)
+
+
+def test_abbreviation_tokens_keep_hyphenated_terms_and_context():
+    import graph_ingest as gi
+    import resolve_abbreviations as ra
+    assert gi.BARE_ABBREVIATION_TOKEN_RE.findall("参数化t-SNEparametric t-SNE") == ["t-SNE", "t-SNE"]
+    assert gi.BARE_ABBREVIATION_TOKEN_RE.findall("CV-IQP与t-SNE及MLP") == ["CV-IQP", "t-SNE", "MLP"]
+    assert gi.BARE_ABBREVIATION_TOKEN_RE.findall("iPEPS BERTScore LoRA") == ["iPEPS", "BERTScore"]
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "todo.jsonl"
+        path.write_text(json.dumps({"token": "SNEparametric", "object": "参数化t-SNEparametric t-SNE", "context": "参数化t-SNEparametric t-SNE", "page": "paper", "field": "object"}) + "\n")
+        entries, errors = ra._read_todo(path)
+        assert not errors and {item["token"] for item in entries} == {"t-SNE"}
+
+
+def test_resume_replaces_uncovered_receipt_and_reuses_covered_publication():
+    from unittest.mock import patch
+    import ingest_common as ic
+    items = [{"transaction_id": key, "status": "completed", "graph_report": {}}
+             for key in ["first", "second"]]
+    report = {"session_id": "mixed", "files": items, "maintenance": {
+        "status": "agent_required", "publication": {"status": "completed"},
+        "trigger_files": [ic.maintenance_trigger(items[0])],
+    }}
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        path = root / "cross-domain/ingest-reports/test.json"
+        state = {"status": "completed", "repo": str(root), "transaction_id": "second"}
+        covered = {"status": "agent_required", "trigger_files": [ic.maintenance_trigger(i) for i in items]}
+        with patch.dict(sys.modules, {"ingest_inbox": module}), \
+                patch.object(ic, "_reconcile_parent_batch_report", return_value=(path, report)), \
+                patch.object(module, "run_post_ingest_maintenance", return_value=covered) as run, \
+                patch.object(module, "publish_maintenance_report", return_value=True) as publish:
+            ic.run_resume_post_maintenance(state)
+            run.assert_called_once_with(items, "mixed")
+            assert report["maintenance"] == covered
+            report["maintenance"]["publication"] = {"status": "error"}
+            ic.run_resume_post_maintenance(state)
+            assert run.call_count == 1 and publish.call_count == 2
+
+
+def test_pending_inbox_publishes_deferred_parent_without_scanning():
+    from unittest.mock import patch
+    import ingest_common as ic
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "inbox").mkdir()
+        (root / "inbox/new.txt").write_text("new source")
+        path = root / "cross-domain/ingest-reports/parent.json"
+        report = {"files": [], "maintenance": {
+            "status": "agent_required", "receipt_path": "temp/inbox-maintenance/old.json",
+            "actions": [{"component": "abbreviations"}], "components": {},
+        }}
+        with patch.dict(sys.modules, {"ingest_inbox": module}), \
+                patch.object(ic, "_reconcile_parent_batch_report", return_value=(path, report)), \
+                patch.object(module, "run_post_ingest_maintenance") as run, \
+                patch.object(module, "publish_maintenance_report", return_value=True) as publish:
+            result = ic.run_resume_post_maintenance({"status": "completed", "repo": str(root)})
+            assert result["status"] == "deferred"
+            assert result["reason"] == "pending_inbox_files" and result["pending_count"] == 1
+            assert report["maintenance"]["actions"] == [{"component": "abbreviations"}]
+            assert json.loads((root / report["maintenance"]["receipt_path"]).read_text())["status"] == "deferred"
+            run.assert_not_called()
+            publish.assert_called_once()
+
+
 def main():
+    test_pending_inbox_publishes_deferred_parent_without_scanning()
+    test_resume_replaces_uncovered_receipt_and_reuses_covered_publication()
+    test_partial_batch_defers_all_maintenance()
+    test_maintenance_coverage_tracks_completed_transactions()
+    test_abbreviation_tokens_keep_hyphenated_terms_and_context()
     test_result_refs_can_describe_transactions_outside_inbox_state()
+    test_agent_output_view_preserves_handoffs_and_compatibility()
     test_maintenance_recovers_quality_omitted_from_legacy_completed_output()
     test_result_entry_preserves_top_level_agent_task()
     test_extract_last_json_ignores_domain_status()
@@ -2196,12 +2374,16 @@ def main():
     test_people_maintenance_surfaces_validation_failure()
     test_maintenance_rejects_incomplete_completed_result_envelope()
     test_abbreviation_decisions_require_exact_pending_tokens_and_atomic_todo()
+    test_abbreviation_decisions_accept_extracted_tokens_and_reject_malformed_batch()
     test_abbreviation_decisions_close_only_matching_maintenance_action()
     test_abbreviation_decisions_cli_closes_linked_maintenance_receipt()
     test_initial_maintenance_publication_and_historical_reconciliation()
     test_initial_maintenance_publication_and_historical_reconciliation(historical=False)
     test_initial_maintenance_publication_and_historical_reconciliation(historical=False, interrupt_publication=True)
     test_split_handoff_reconciliation()
+    test_split_handoff_reconciliation(redistribution=True)
+    test_split_handoff_reconciliation(preserve_pending=True, redistribution=True)
+    test_split_handoff_reconciliation(interrupt_receipt=True, redistribution=True)
     test_split_handoff_reconciliation(preserve_pending=True)
     test_split_handoff_reconciliation(interrupt_receipt=True)
     test_maintenance_publication_rejects_mismatched_state_before_writing()

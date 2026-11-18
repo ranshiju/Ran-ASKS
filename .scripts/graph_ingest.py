@@ -284,7 +284,9 @@ def has_predicate_structure(text):
 KW_PREDICATES = {"研究基础", "核心方法", "核心创新点", "局限性", "未来展望", "研究关键词"}
 MEETING_KW_PREDICATES = {"讨论", "涉及", "汇报", "规划", "决策"}  # 会议 keyword 谓词
 ADMIN_KW_PREDICATES = {"涉及", "讨论", "形成决策", "推动", "申请事项", "适用对象"}  # 行政 keyword 谓词
-BARE_ABBREVIATION_TOKEN_RE = re.compile(r"(?<![a-z])[A-Z]{2,}[A-Za-z0-9]*")
+BARE_ABBREVIATION_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:(?:[a-z]+-?|[A-Z]{2,}-)[A-Z]{2,}[0-9]*(?:-[A-Z]{2,}[0-9]*)*|[A-Z]{2,}[A-Za-z0-9]*)"
+)
 
 def is_bare_abbreviation(obj):
     """keyword 裸缩写规则:含英文缩写(≥2连续大写字母)且无括号释义 → 裸缩写。
@@ -1188,7 +1190,7 @@ def parse_semantic_sections(text):
 
     semantic_triple_count = sum(
         1 for item in sections.get("三元组", [])
-        if len(parts := [x.strip() for x in item.split("|", 2)]) == 3
+        if (parts := kir.parse_semantic_triple_line(item)) is not None
         and all(parts)
     )
     concept_gloss_count = sum(
@@ -1230,7 +1232,7 @@ def parse_semantic_text(text, page_path, fm=None):
         nav_preds, kw_preds = _DOMAIN_PREDICATES[domain]
         # 域内合法页面类型(用于校验 type 字段，但不阻断解析)
         for item in sections.get("三元组", []):
-            parts = [x.strip() for x in item.split("|", 2)]
+            parts = kir.parse_semantic_triple_line(item) or []
             if len(parts) == 3 and all(parts):
                 subject, predicate, object_name = parts
                 # 主体代词替换: admin/business 用"本文件"，teaching 用"本文档"
@@ -1273,7 +1275,7 @@ def parse_semantic_text(text, page_path, fm=None):
                     triples.append({"subject": person, "predicate": "待办", "object": task})
         # 三元组: 主体|谓词|客体 (统一格式，同论文)
         for item in sections.get("三元组", []):
-            parts = [x.strip() for x in item.split("|", 2)]
+            parts = kir.parse_semantic_triple_line(item) or []
             if len(parts) != 3 or not all(parts):
                 continue
             subj, pred, obj = parts
@@ -1316,7 +1318,7 @@ def parse_semantic_text(text, page_path, fm=None):
 
     # 三元组: 主体|谓词|客体 (统一段位,含论文→核心词/核心词→核心词/论文→方向)
     for item in sections.get("三元组", []):
-        parts = [x.strip() for x in item.split("|", 2)]
+        parts = kir.parse_semantic_triple_line(item) or []
         if len(parts) != 3 or not all(parts):
             continue
         subj, pred, obj = parts
@@ -2215,7 +2217,7 @@ def _existing_concept_surface_index(conn):
     return {
         surface: next(iter(paths))
         for surface, paths in surfaces.items()
-        if len(paths) == 1
+        if len(paths) == 1 and not BARE_ABBREVIATION_TOKEN_RE.fullmatch(surface)
     }
 
 
@@ -2224,11 +2226,17 @@ def _sparse_proposition_targets(
 ):
     """确定性找 proposition 的概念目标，不创建新节点、不返回歧义候选。"""
     targets = set()
+    local_surfaces = {}
     for name, node_path in confirmed_concepts.items():
         surfaces = [name, *gl.decompose_name_to_aliases(name)]
-        if any(_surface_occurs(prop_text, surface, surface_patterns=surface_patterns) for surface in surfaces):
-            targets.add(node_path)
+        for surface in surfaces:
+            local_surfaces.setdefault(surface, set()).add(node_path)
+    for surface, paths in local_surfaces.items():
+        if len(paths) == 1 and _surface_occurs(prop_text, surface, surface_patterns=surface_patterns):
+            targets.update(paths)
     for surface, node_path in existing_surfaces.items():
+        if BARE_ABBREVIATION_TOKEN_RE.fullmatch(surface):
+            continue
         if _surface_occurs(prop_text, surface, surface_patterns=surface_patterns):
             targets.add(node_path)
     return targets
@@ -2309,21 +2317,16 @@ def add_knowledge_edges(
                 kid = gl.extract_keyword_id(name)
                 if kid:
                     concept_map[name] = kid
-    # abbr_map：图里已有 keyword 的纯缩写 alias → node_path，供命题 path 把裸缩写替换为 keyword id。
-    # 排除 concept_map 的 kid（避免全名→kid→node_path 回环）；仅指向 keyword 节点的纯缩写 alias。
-    concept_kids = set(concept_map.values())
-    abbr_map = {}
-    for alias, paths in alias_idx.items():
-        if not re.fullmatch(r"[A-Z]{2,}[A-Za-z0-9]*", alias):
-            continue
-        if alias in concept_kids or len(paths) != 1:
-            continue
-        node_path = paths[0]
-        _r = conn.execute(
-            "SELECT type, entity_subtype FROM nodes WHERE path=?", (node_path,)
-        ).fetchone()
-        if _r and _r["type"] == "entity" and _r["entity_subtype"] == "keyword":
-            abbr_map[alias] = node_path
+    # A global unique acronym is not source-local identity evidence. Only
+    # abbreviations explicitly supplied by concepts in this proposal may shorten
+    # proposition IDs. Full existing names remain available for sparse links.
+    local_abbreviations = {}
+    for name, node_path in concept_map.items():
+        for alias in gl.decompose_name_to_aliases(name):
+            if BARE_ABBREVIATION_TOKEN_RE.fullmatch(alias):
+                local_abbreviations.setdefault(alias, set()).add(node_path)
+    abbr_map = {alias: next(iter(paths)) for alias, paths in local_abbreviations.items()
+                if len(paths) == 1}
     # 本批新建 keyword 节点（全名→path），供第二层传递包含扫描
     new_keywords = {}
     propositions = []  # (prop_path,完整 prop_text)

@@ -23,6 +23,20 @@ profiles:
           values: [planning, execution, review, maintenance, paused, unknown]
         active_questions: {type: string_list}
 
+  engineering:
+    label: 修复与优化
+    item_types: [repair, optimization, observation]
+    memory_kinds: [decision, lesson, context]
+    profile_schema:
+      required: [summary, keywords, stage, active_questions]
+      fields:
+        summary: {type: string}
+        keywords: {type: string_list}
+        stage:
+          type: enum
+          values: [planning, execution, review, maintenance, paused, unknown]
+        active_questions: {type: string_list}
+
   research:
     label: 科研工作
     item_types: [question, experiment, analysis, manuscript, milestone]

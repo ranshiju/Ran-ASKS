@@ -101,7 +101,9 @@ def _read_todo(path: Path) -> tuple[list[dict], list[str]]:
         if _is_page_identity_entry(value):
             continue
         target = _occurrence_target(value)
-        token_source = str(value.get("token") or value.get("value") or target)
+        # Re-tokenize the recorded endpoint, not an old regex fragment. The
+        # persisted context remains the authority for this mechanical migration.
+        token_source = str(target or value.get("context") or value.get("value") or value.get("token") or "")
         tokens = _extract_abbr_tokens(token_source)
         if not tokens:
             errors.append(f"line {line_number}: no abbreviation token")
@@ -190,6 +192,7 @@ def _close_maintenance_receipt(receipt_path: Path, receipt: dict,
         "remaining": len(remaining_review),
         "remaining_tokens": len(remaining_tokens),
         "remaining_occurrences": len(remaining_review),
+        "warning_count": len(remaining_tokens),
         "applied_decisions": report.get("applied", []),
     })
     if not remaining_tokens:
@@ -211,16 +214,18 @@ def _close_maintenance_receipt(receipt_path: Path, receipt: dict,
     receipt["updated_at"] = datetime.now().isoformat(timespec="seconds")
     _write_json_atomic(receipt_path, receipt)
     publication = {}
+    current_status = receipt["status"]
     report_rel = str(receipt.get("report_path") or "").strip()
     if report_rel:
         try:
             import ingest_inbox
             compact = ingest_inbox.reconcile_maintenance_report(REPO / report_rel)
             publication = (compact.get("maintenance") or {}).get("publication") or {}
+            current_status = (compact.get("maintenance") or {}).get("status", current_status)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             publication = {"status": "error", "error": str(exc)}
     return {
-        "status": receipt["status"],
+        "status": current_status,
         "receipt_path": str(receipt_path.relative_to(REPO.resolve())),
         "remaining_tokens": len(remaining_tokens),
         "remaining_occurrences": len(remaining_review),
@@ -458,7 +463,7 @@ def apply_decisions(conn, decisions: list[dict], todo_entries: list[dict]) -> di
         token = str(decision.get("token", "")).strip()
         kind = str(decision.get("resolution_kind", "")).strip()
         full_name = str(decision.get("full_name", "")).strip()
-        if not re.fullmatch(r"[A-Z]{2,}[A-Za-z0-9]*", token):
+        if not gi.BARE_ABBREVIATION_TOKEN_RE.fullmatch(token):
             errors.append(f"decision {index}: invalid token")
         if kind not in RESOLUTION_KINDS:
             errors.append(f"decision {index}: invalid resolution_kind")

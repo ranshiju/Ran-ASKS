@@ -77,6 +77,18 @@ nodes:
     path: operations/shared-conventions.md
     kind: spec
     role: build-conventions
+  repair_log:
+    path: operations/engineering/repair-log.md
+    kind: spec
+    role: shared-problem-centered-repair-history-evidence-and-bounded-discovery-contract
+  engineering_work_template:
+    path: operations/engineering/templates/engineering-item.md
+    kind: spec
+    role: portable-repair-optimization-observation-item-body-with-evidence-and-key-history
+  repair_record_template:
+    path: operations/engineering/templates/repair-record.md
+    kind: spec
+    role: portable-repair-record-template-with-separate-implementation-validation-and-effect
   ingest:
     path: operations/INGEST.md
     kind: spec
@@ -660,7 +672,7 @@ nodes:
   resolve_abbreviations:
     path: .scripts/resolve_abbreviations.py
     kind: implementation
-    role: field-aware-occurrence-abbreviation-resolution-with-exact-registered-person-identity-and-agent-confirmed-typed-batch-apply
+    role: field-aware-occurrence-abbreviation-resolution-with-shared-token-validation-exact-registered-person-identity-and-agent-confirmed-typed-batch-apply
   query_graph:
     path: .scripts/query_graph.py
     kind: implementation
@@ -1277,7 +1289,7 @@ nodes:
   external_bibliography:
     path: .scripts/external_bibliography.py
     kind: implementation
-    role: shared-free-formal-publication-first-bounded-crossref-arxiv-and-doi-less-conference-resolution-with-source-bound-offline-replay
+    role: shared-bounded-crossref-arxiv-conference-and-official-neurips-bibtex-resolution-with-source-bound-offline-replay
   external_bibliography_test:
     path: .scripts/test_external_bibliography.py
     kind: test
@@ -1473,7 +1485,11 @@ nodes:
   extract_abbreviations:
     path: .scripts/extract_abbreviations.py
     kind: implementation
-    role: abbreviation-pair-extraction-from-raw
+    role: source-bound-yaml-raw-abbreviation-extraction-with-hyphen-normalized-initials-and-conflict-abstention
+  extract_abbreviations_test:
+    path: .scripts/test_extract_abbreviations.py
+    kind: test
+    role: source-bound-abbreviation-discovery-auto-resolution-and-no-scan-regression
   inbox_source_policy:
     path: .scripts/inbox_source_policy.py
     kind: implementation
@@ -1617,7 +1633,7 @@ nodes:
   read_paper:
     path: .scripts/read_paper.py
     kind: implementation
-    role: paper-md-directed-excerpt-reader-with-original-line-handles-and-budgeted-batch-reading
+    role: paper-md-directed-excerpt-reader-with-shared-source-lines-bounded-outline-and-budgeted-batch-reading
   read_paper_test:
     path: .scripts/test_read_paper.py
     kind: test
@@ -1667,6 +1683,12 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - extract_abbreviations
+  - uses
+  - graph_lib
+- - extract_abbreviations
+  - tested_by
+  - extract_abbreviations_test
 - - wg
   - uses
   - local_extension
@@ -1928,6 +1950,9 @@ edges:
 - - bibliography_sidecar
   - documented_by
   - guidance
+- - ingest_paper
+  - uses
+  - graph_delta
 - - ingest_paper
   - uses
   - external_bibliography
@@ -3005,6 +3030,21 @@ edges:
 - - conventions
   - specifies
   - route
+- - conventions
+  - specifies
+  - repair_log
+- - repair_log
+  - specifies
+  - route
+- - repair_log
+  - specifies
+  - repair_record_template
+- - repair_log
+  - uses
+  - workspace_state
+- - repair_log
+  - specifies
+  - engineering_work_template
 - - ingest
   - specifies
   - graph_ingest
@@ -3263,6 +3303,9 @@ edges:
 - - hub_semantics
   - uses
   - wiki_locator
+- - hub_semantics
+  - uses
+  - source_locator
 - - hub_semantics
   - uses
   - graph_lib
@@ -3947,6 +3990,12 @@ edges:
 - - ingest_paper
   - uses
   - read_paper
+- - read_paper
+  - uses
+  - source_locator
+- - ingest_paper
+  - uses
+  - source_locator
 - - predicate_governance
   - tested_by
   - predicate_governance_test
@@ -4788,6 +4837,8 @@ capabilities:
     - engineering_locator
     optional:
     - conventions
+    - repair_log
+    - repair_record_template
     - guidance
     - handbook
     - engineering_todo
@@ -4814,6 +4865,7 @@ capabilities:
     - 只有根因位于当前系统边界外，或问题确认属于兼容性、迁移或历史数据修复时，才采用局部特判、兜底或事后补偿；须限定适用范围和退出条件，并验证不会掩盖其他错误。
     - 工程图只负责定位影响，工程文档只在当前判断需要时按 locator 读取。先运行 impact <target> --verify，再从推荐 locator 获取最小充分信息，不把总提示词当工程手册。
     - 完成实现、针对性回归和受影响文档同步；涉及模型后端时确认实际 backend，标记 shared、agent-only 或 api-only，并保持共享契约跨后端一致。
+    - 修复重要缺陷或同类问题复现时，按 operations/engineering/repair-log.md 定向查当前工作区问题记录，接续原因、覆盖和验证；详细证据链接已有报告。
   lint:
     entry: route
     required:
@@ -5331,6 +5383,9 @@ verification:
   route:
   - python3 .scripts/engineering_graph.py validate
   - python3 .scripts/test_prompt_audit.py
+  repair_log:
+  - python3 .scripts/engineering_graph.py validate
+  - python3 .scripts/test_prompt_audit.py
   research_project:
   - python3 .scripts/research_project.py validate VEEF
   - python3 .scripts/engineering_graph.py validate
@@ -5654,6 +5709,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   external_bibliography:
     preconditions:
+    - shared NeurIPS正式BibTeX只沿已匹配候选的官方PDF/Abstract地址与页面实际导出入口获取；入口按同篇year/hash规范化为官方Bibtex.bib文件，避免HTTP重定向；固定HTTPS主机/路径、原4次预算、响应大小和禁止重定向保持；离线重放核验页面链接、BibTeX身份/年份及正式venue，出版方来源已核验不等于PDF正文版本一致
     - shared free Semantic Scholar bulk fallback only within the existing four-request budget; accept DOI-less conference records only with exact source identity, Conference type, conference venue, DBLP conf key and valid year; preserve indexed author abbreviations and year precision, reject repository or ambiguous records
     - shared bibliography candidates exclude reference-list and explicitly cited arXiv identifiers with audit reasons; own headers and identifiers without source counterevidence remain eligible; cache telemetry separates current requests/time from original fetch cost
     - shared deterministic free Crossref/arXiv lookup; new PDF transactions default external-first, legacy transactions retain policy, re-ingest only replays archived receipts
@@ -6325,6 +6381,9 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   workspace_state:
     preconditions:
+    - engineering profile复用items/memories/events与既有状态门；repair/optimization/observation的实现/验证/效果分别写正文，不由done推断语义或净收益
+    - shared context按本工作区item ID/唯一精确标签或关键词从现有只读索引定位有界候选，回读校验Markdown后投影；有效记忆按适用范围匹配，不递归子工作区，不加载Raw或调用模型；缺索引/所选记录漂移显式要求rebuild，索引未命中不证明不存在
+    - context预算约束返回JSON本体并显式报告截断/遗漏；item log经原update将关键尝试理由追加正文和审计，只有事项文件维护当前结论，索引和旧入口不双写状态
     - 目标路径必须解析到 projects/ 内已存在的工作区，允许嵌套子工作区；初始化时目标目录须已存在或由命令创建
     - 分类迁移通过 projects/.path-migrations.json 显式登记旧前缀到新前缀；共享 project_paths 只在旧根缺失时重定位，拒绝重叠规则、链式规则、路径穿越和符号链接，不猜测同名项目、不改历史快照；消费方继续核验原哈希。
     - profile 与字段 schema 来自 workspace-profiles.yaml；状态转换和记忆时效规则在任何入口写入前由共享 validator 校验
@@ -6357,6 +6416,9 @@ script_contracts:
     - python3 .scripts/test_open_source_release.py
   ingest_inbox:
     preconditions:
+    - shared CLI --output-view agent 仅删除与canonical items逐字段相同的重复files；默认compat、持久报告与agent-task内容不变，恢复和对账均支持同一投影
+    - shared 混合批次仍有可接续项时延后全局维护；旧回执只覆盖其 trigger_files 中已完成事务，后完成项不可仅靠 publication 同步冒充已维护
+    - shared 缩写候选保留小写前缀/大写连字符复合名及普通混合大小写缩写，旧待办从原端点上下文重新切词，不能让历史碎片变成新概念
     - shared source-first agent/api forwards explicit focus unchanged to the existing knowledge adapter; legacy/skip/none reject nonempty focus before writes, and task identity/replay remain owned by knowledge_compile
     - shared source-first preserves source_ready independently of requested knowledge completion; file and resume receipts expose knowledge_status/run/error, requested knowledge failure returns nonzero and wg ok=false while prepared/partial stay resumable; no implicit API retry or host takeover
     - shared 紧凑质量告警保留 issue/detail/mention/reason，每字段最多 240 字符、最多展示 5 项；当前和历史总数仍按完整记录计算，不因摘要裁剪隐去人物称呼与未决原因
@@ -6399,7 +6461,7 @@ script_contracts:
     - shared 维护发布先在报告写 pending 检查点，再同步事务，最后写 completed 发布状态；中途 I/O 失败保留可重试 publication error 和原文件终态，--reconcile-maintenance-report 从共享回执继续，不重跑摄入或全局维护
     - shared 维护调和当前质量后、发布检查点前，从逐文件结果重算 degraded 计数；紧凑输出同样以逐文件当前质量派生 degraded，不把 quality_warning_history 当未解决告警；逐项摘要显式返回当前与历史告警数，零值也保留
     - 实际摄入前在 stderr 报告生效 backend；紧凑 stdout 保留 backend、质量告警总数及最多 5 条有界摘要，不为查看降级原因要求 Agent 输出完整图报告
-    - --reconcile-maintenance-report 仅修复显式指定的受管历史报告关联，重放事务中已有的方向裁决，并以 canonical 子 Hub、既有 split Scope history 与原候选成员迁移结果核验已完成分裂；只消费已验证的匹配 handoff，保留未完成动作与质量告警，不调用模型、不重摄入、不写 Raw 或图，不产生新语义裁决
+    - --reconcile-maintenance-report 仅修复显式指定的受管历史报告关联，重放事务中已有的方向裁决，并以 canonical 子 Hub、既有 split Scope history 与原候选成员迁移结果核验已完成分裂；重分配仅在原候选子 Hub 仍为当前 canonical family 且父 Hub 当前成员数不超过配置上限时标记 resolved/no_longer_overloaded（不冒充已执行迁移）；只消费已验证的匹配 handoff，保留未完成动作与质量告警，不调用模型、不重摄入、不写 Raw 或图，不产生新语义裁决
     - 报告单独统计 awaiting_agent 与 duplicates；failed 只统计真实失败，agent_required 不得触发失败退出码
     - batch terminal 表示工作流闭合；顶层 committed 仅在所有 item 均真实 committed 时为 true，duplicate_found 只计入 duplicates 且不得冒充知识提交
     writes:
@@ -6759,6 +6821,8 @@ script_contracts:
     - python3 .scripts/test_long_document_plan.py
   source_locator:
     preconditions:
+    - shared split_source_lines 统一原文L行坐标为既有str.splitlines语义（含CRLF/FF/VT）；reader、Agent分批和locator消费共用，不修改Raw，不把末尾换行另计空行；已归一的片段分批仍保留其空行
+    - shared bounded_text_excerpt 只读受控调用方指定的Markdown/txt精确片段，返回实际行范围与截断信息；不把摘要/字符前缀标为全篇已读，不根据词义判断证据支持。调用方负责域和companion绑定校验，无法唯一映射坐标时显式拒绝摘录
     - read_size_guidance is a pure projection of an already validated selected excerpt and the caller character limit; explicit line locators receive at most eight combined readable subranges/oversized-line records, with any unplanned remainder disclosed. It returns no source text, does not read files or infer semantic blocks, and does not invent line addresses for heading/page/table locators
     - 查询取证区分 citation source 与 read target；同 stem 唯一原件可作为引用来源，受管 Markdown companion 可作为实际读取载体，二者不得混为事实来源
     - 二进制原件存在受管同 stem Markdown companion 时优先读取 companion；引用来源始终保留原件。只有 companion 缺失时，PDF 原生 page locator 才作为兼容回退
@@ -6826,6 +6890,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   knowledge_ir:
     preconditions:
+    - shared semantic triple parser 只将明确成对数学定界外的两个竖线视为字段边界，字段内容逐字保留；无定界的多余字段与残缺公式不猜测恢复
     - 所有 paper/meeting/document 类型在进入 GraphDelta 前统一编译为 knowledge-ir-v1；类型 prompt 与语义槽格式可不同
     - IR document.profile 由 Wiki frontmatter/path 确定性推导，不由 LLM 自报；relation 保留 canonical 标记、metadata kind、confidence 与 source locator
     - 直接 --knowledge-ir 输入只作为不可信语义提案；page/profile 在打开数据库前绑定已落盘 Wiki，确定性 origin、Raw 结构边、canonical/metadata/source 字段均由程序重编译
@@ -6848,6 +6913,8 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   graph_ingest:
     preconditions:
+    - shared 命题 path 与派生包含边只使用本页已确认概念的短缩写；全局唯一短缩写不是局部身份依据，既有完整 title/alias 仍可供精确导航，不新增模型判断
+    - shared 三元组严格按数学定界外的两个竖线分字段；成对美元/TeX 内联公式和 Unicode bra-ket 内的竖线保持原文，额外字段或不完整定界不猜测，Agent/API 共用解析与校验
     - shared people 的显式 nickname 经 graph_lib 层1别名提取进入原受管 writer；仅供明确全局别名，不从姓名确认正文推断，speech resolver 排除一词多人的歧义 alias
     - shared Agent/API 语义解析可恢复缺失的概念说明分区，仅限显式三元组区的完整三列前缀加连续双字段说明后缀；说明名称须逐字且唯一覆盖前文论文概念谓词已声明的全部概念，描述须有句内标点且超过合法谓词长度。额外概念、占位值、残缺或交错关系、多竖线及已有概念说明标题均不猜测；恢复只调整内存分区，原文不改，semantic_slot_diagnostics 记录规则和原行号，原校验/IR/提交继续执行
     - shared 实时摄入不因端点名称长度、标点或“基于/表示”等触发词产生 descriptive_phrase 警告或猜测 proposition；命题由明确关系角色及同批该角色的端点声明确定，审计与 writer 同步传播。保留原文字、证据、别名、引用残片/重复/歧义检查；不要求全文逐句结构化，不新增模型调用。旧形态启发式仅服务历史指标兼容，不作为实时验收依据
@@ -6883,7 +6950,7 @@ script_contracts:
     - 内存 GraphDelta 的子图健康报告、主图 attach plan 与 query-oriented probes 随命令 JSON 返回；不新增永久子图库
     - knowledge-ir-v1 与绑定其 hash 的 graph-plan-v1 写入事务临时目录并在命令 JSON 返回摘要
     - 版本/补充材料/翻译等 Raw 结构边由 --raw-relationship-json 确定性编译进 IR/plan，并与 GraphDelta 共用外层 SQLite commit
-    - 完整 proposition 节点，以及 proposition→包含→concept 的稀疏程序派生边；候选仅来自本页已确认概念和主图唯一精确 title/alias
+    - 完整 proposition 节点，以及 proposition→包含→concept 的稀疏程序派生边；候选仅来自本页已确认概念和主图唯一精确完整 title/alias；短缩写必须具有本页确认概念支持
     - bare_abbreviation 检查 keyword concept 规范名称与自由边的真实概念端点；审计复用 writer 的端点角色判定，完整 proposition/task 正文（包括会议决策与待办）、结构性派生边、确定性书目端点与 canonical page path subject 不触发重复或内部标识 warning
     forbidden:
     - 常规使用 init
@@ -6937,6 +7004,7 @@ script_contracts:
     - python3 .scripts/test_graph_delta.py
   graph_delta:
     preconditions:
+    - shared persisted边界探测只读已提交图；旧歧义只有候选经别名收敛到唯一身份才关闭；不使用拟写入overlay认证当前可达性，不调用embedding，不改历史报告
     - shared 文档级身份解析批量预取仅覆盖原解析器实际请求的 query/description 向量；精确匹配、distinct、类型过滤与阈值不变，批量失败退回原解析路径，不写事实图
     - Wiki page、Raw 文档包候选与受限 triples 已由摄入管线提供；GraphDelta 仅是内存事务对象
     - shared Agent/API attach plan 在唯一名称快路径与语义解析前统一检查端点类型；普通概念 surface mention 只匹配 entity，纯引用标题匹配 page/entity，纯人物角色匹配 people/page/entity；人物角色由共享 Knowledge IR 与 writer 一致判定，显式 canonical ID 保留原解析边界
@@ -6984,6 +7052,7 @@ script_contracts:
     - python3 .scripts/test_graph_delta.py
   hub_semantics:
     preconditions:
+    - shared profile_evidence 为inbox低间隔交接读取最多3条去重公共academic Raw引用，总计4000字符；复用source_locator的真实范围与截断披露，拒绝越界/失效绑定，保留原profile和待核验地址，不改变路由阈值或自动裁决
     - shared 模块导入和非数值读取兼容 Core 安装；向量计算按需加载 NumPy，缺包给出安装提示。既有 provider 不可用时的显式降级与写入保护不变。
     - shared read_paper_profile 的可选 text 参数复用 caller 已读取并校验范围的文本；沿用同一 Wiki section/citation 解析器，不重复访问页面、不新增缓存或改变默认文件读取契约。
     - Hub canonical 语义来自 Hub 页唯一的
@@ -7003,7 +7072,7 @@ script_contracts:
     - canonical Hub 路由因 margin 不足时写独立 route-review handoff；redistribution handoff 必须逐个标明子 Hub canonical Scope readiness 与 blockers，未就绪时不得自动重分配
     - route-apply 只接受 route 当前 canonical candidates 中的 active research-direction Hub，必须显式 agent-confirmed；替换该论文既有 `主要研究` 路由边，并以 `研究方向定位` locator 记录 evidence、普通 origin 与 agent-confirmed origin；传入 transaction-id 时同步写 route_corrections、当前路由快照与派生 quality_status，并消费对应 route-review handoff、同步 maintenance 回执与摄入报告；无其他待审动作时 maintenance 转为 completed
     - page → 主要研究 → hub 是 graph schema 声明的 protected edge；route-apply 是唯一受管 writer，写入后必须满足 protected edge validator，embedding 不可用或当前 canonical candidates 为空时保持未归类而不创建 manual route
-    - define-scope 只为既有 active Hub 写经 validate_scope 验证的 canonical Scope，可同步 Agent 确认的 title；legacy Hub 无 membership 时必须用 --evidence-node 显式传入 legacy-scope-plan 的代表节点；只更新 Hub Wiki frontmatter/Scope 与对应 nodes title/description/status
+    - define-scope 只为既有 active Hub 写经 validate_scope 验证的 canonical Scope，可同步 Agent 确认的 title；legacy Hub 无 membership 时用 --evidence-node 显式传入 legacy-scope-plan 代表节点；用户授权的历史修复若该计划无可用 profile，可定向核验现存概念/命题与 Raw 来源后显式传入证据节点并保存选择依据，不将历史 seeds 或关键词列表直接恢复成 membership；只更新 Hub Wiki frontmatter/Scope 与对应 nodes title/description/status
     - redistribute 只接受 canonical 父 Hub，且所有直接子 Hub 均为 active canonical；在单次 Agent 确认下做有界单调迭代，只重算当前 `普通节点 → 聚类于 → 父 Hub` 成员在父/直接子 family 内的 membership，保留无关 Hub membership；embedding 不可用时整次回滚，无子 Hub 达标的成员保留父 Hub
     - 仅显式 agent-confirmed lifecycle apply 写 Hub Wiki、nodes.description、parent/retired/alias 结构
     - create、define、split、merge 与批量 create 的 Hub Wiki 文件必须原子替换，并与 SQLite SAVEPOINT 组成可补偿提交边界；任一步异常时恢复修改前文件并回滚本次图变更
@@ -7071,6 +7140,19 @@ script_contracts:
     - 猜测参数后对全库重建
     verify:
     - 从 operations/INGEST.md 复制本轮指定收尾命令
+  extract_abbreviations:
+    preconditions:
+    - shared 从现有 YAML frontmatter sources 确定唯一受管文本 Raw，允许旧 domain-relative raw 路径与行号片段，不按 slug 或文件名扫描仓库
+    - shared 公共页面不得访问 private Raw；路径解析后仍在仓库受管 Raw 内，缺失、多义、远程或越界来源返回空
+    - 英文缩写全称匹配以去除连字符的首字母串比较，保留原 token；仍有停用词和重复出现过滤，冲突定义弃权
+    writes:
+    - 默认提取只读；显式 --apply 沿用原 Wiki frontmatter abbreviations 写入
+    forbidden:
+    - 从未声明来源、全库 find 或同名文件猜事实来源
+    - 显式 --apply 在缺失可核验定义时清空已有 abbreviations；此时非零退出且文件保持
+    - 删除原缩写连字符作为概念身份或用最后一次定义覆盖冲突
+    verify:
+    - python3 .scripts/test_extract_abbreviations.py
   extractor:
     preconditions:
     - PDF 已归档为 raw 实体副本
@@ -7148,6 +7230,7 @@ script_contracts:
     - python3 .scripts/test_query_graph_temporal.py
   ingest_pipeline:
     preconditions:
+    - shared unified handoff hook 若返回 prepared 的 agent-task-v1，管道保留结构化任务状态和原恢复点，立即交还宿主；不覆盖成旧式 agent_required，不重置恢复预算；旧式 hook 仍兼容
     - shared step spans 逐次追加耗时、状态和异常结果；恢复和重试保留所有尝试，不把子步骤累计时间冒充端到端墙钟时间，也不改变任何 validator、控制循环或提交边界
     - shared 语义校验每次先从 semantic_path 读取当前暂存文本并同步 slots_content，再执行领域职责校验；resume 不信任旧缓存，不要求 Agent 手改事务 JSON，缺失/非法文件仍阻断
     - 所有来源清理延后到 validate_completion 通过且 completed 状态持久化之后；清理失败保留 cleanup_pending 并可通过 completed resume 只重试清理，不重写 Wiki/图或重复收尾
@@ -7175,6 +7258,7 @@ script_contracts:
     - python3 .scripts/test_ingest_admin.py
   ingest_common:
     preconditions:
+    - shared resume 复用维护回执前核对 completed 事务及 Hub 图输入摘要哈希；覆盖不足进入原统一维护，覆盖不变的 publication 故障只重试发布，不丢弃既有方向裁决；新 inbox 导致延期时同步父报告及共享回执，保留旧待审动作
     - shared 论文缩减上下文按有界证据段组保留公式、邻接定义和限制，子节可完整容纳时整体选择；总预算与原始行号不变，候选选择不构成语义完整性证明
     - shared resume 对单文件和多文件原批次使用同一对账入口，保留首次文件结果快照并刷新当前事务状态；历史回执只供审计，不作为事实源
     - API 长论文证据包在既有总预算内优先保留正文明确概率、充分条件与局限语句的完整原始行，仍绑定原始行号；首段摘要能在单节预算内完整保留时不因平均分配而丢掉整行；匹配只是补读候选，不证明条件完整或语义蕴含，不扩大预算或增加模型调用
@@ -7334,7 +7418,7 @@ script_contracts:
     - shared 有证据目录时检查 topics/reports/relations 中的新增大写缩写须在该项引用的原文中出现；无依据的全称扩写保留原称呼，不因双语格式偏好补造名称，常规摄入与受管修复共用此门
     - API adapter 与当前 Agent 产物共同使用 meeting-compiler-v3 delimiter、context hash、parser、preprocess schema、evidence-bound typed MEETING_IR/person_updates 与非级联 replacement 规则；v2 会议 IR 和 v1 slots 只解析在途兼容产物
     - MEETING_IR 空模板、Agent 顶层字段清单与 validator 共用 MEETING_IR_RECORD_FIELDS；模板包含固定 protocol_version，不自动补齐非法实际产物
-    - shared 的 parse_proposal_detailed 返回 proposal、兼容错误摘要与结构化诊断；JSON 位置相对去除外围空白及标准 fence 后的 PREPROCESS，保留严格解析，不吞掉尾部结束标签
+    - shared 的 parse_proposal_detailed 返回 proposal、兼容错误摘要与结构化诊断；PREPROCESS 保留严格 JSON 解析；shared MEETING_IR 允许完整 JSON 对象后一个精确 <<</MEETING_IR>>> 及空白，先去该外壳再去标准 fence，并记录有界 normalizations；重复/错误标记、第二对象、任意尾文和截断仍拒绝，原 schema/evidence 校验不变，行修复复用同一解析
     writes: []
     forbidden:
     - 导入 dsh 或 llm_structured、调用模型、写暂存/最终文件，或因 backend 改变协议解析与机械校验
@@ -7346,8 +7430,15 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   ingest_paper:
     preconditions:
+    - shared论文任务内容协议在初始prepare、read和legacy reopen复用；API失败接管保留candidate-id-v2及锁定范围，结构化read返回Wiki/semantic规则、实际scope和可执行read/check/commit。单项/batch/inbox交接给出read入口，不用不可执行符号串作为恢复命令
+    - agent-only长文阅读提供有界原始标题目录与精确行范围，截断显式；IMRaD别名命中不证明主题覆盖，语义执行者按目录与证据缺口选择补读，不新增模型轮次或改变API选片权重
+    - shared Wiki claim_rules 要求引用覆盖整段主张，跨段依据使用多个脚注或拆句；API格式说明不绑定首个真实handle到虚拟事实，程序仅校验地址，语义执行者核验支持关系；无新增模型轮次
+    - shared workspace/commit 回执只返回 API 已读区间计数和原事务 field 引用，完整区间遥测保存在 state，不影响输入输出协议或后续动作
+    - shared --agent-reopen显式重开未落位待修订任务为all范围，保留输入哈希与旧裁决审计，重新通过原书目/Wiki/slots门；已落位返回resume/update，不扩大agent-task通用命令枚举
+    - shared 论文可靠性：机构语境不作为期刊候选；局部修复中锁定书目改变须显式拒绝；已落位workspace交接原事务resume及既有更新入口，禁止重跑归档
+    - shared completed质量刷新只读当前图边界并与历史探测分开；图不可用保留原告警并明示；当前书目取受管Source，历史裁决不覆盖独立更新
     - shared unsubmitted local bibliography conflicts can resume in the same transaction after source text, PDF and staged bundle hashes are reverified; corrected sidecars clear only obsolete local conflict flags and reuse verified extraction, frozen external receipts and workspace states are not reopened by this path
-    - shared bibliographic-candidate-provider-v10 排除 References and Notes、作者形态数字引文及明确他引 arXiv，逐条留存 excluded_identifiers 原因与来源行；保留本篇 header、无原文反证元数据及原 workspace 版本刷新规则；外部回执恢复遥测分开本次 execution 与原始 source_fetch
+    - shared bibliographic-candidate-provider-v11 排除 References and Notes、作者形态数字引文及明确他引 arXiv，逐条留存 excluded_identifiers 原因与来源行；保留本篇 header、无原文反证元数据及原 workspace 版本刷新规则；外部回执恢复遥测分开本次 execution 与原始 source_fetch
     - shared 新 PDF 事务先经 external_bibliography 免费正式发表查询；成功使用独立可离线复验回执并跳过两种 backend 的书目生成，未决才进入下述本地证据协议；旧在途事务和无已归档回执的 re-ingest 不隐式联网
     - shared Markdown 年份候选仅取前部发表语境、有效 arXiv 月份，拒绝正文任意四位数字；API 作者目录按完全相同姓名分组展示全部候选 ID 与证据，不据此断言人物同一或放宽 proposed 冲突门
     - api-only 校验历史绑定实际 workspace 与 Wiki/slots 内容哈希，首产物校验与各阶段首次校验分列；旧历史不追填未知哈希，不把修复后通过冒充初稿通过
@@ -7361,10 +7452,10 @@ script_contracts:
     - API candidate-id-v2 及旧 Agent 兼容协议共享字段级 schema 诊断；authors 候选经原文核验可完整覆盖时优先有序候选 ID，proposed 项严格使用 value/evidence，错误键不得静默转换；既有 evidence-bibliography-v1 Agent 契约保持独立
     - CLI --raw 是 shared 兼容入口，以参数列表转交 re_ingest.py --raw 并原样继承 backend、输出与退出码；复用其版本保护、统一 workspace 和 clean commit，不再创建独立 from_raw 编译任务；--force 仅在直接调用 re_ingest 时显式给出
     - inbox 学术 PDF；paper.md 生成后，Agent/API 共用 paper-agent-workspace-v1 外层产物协议，一次产出书目裁决、Wiki 与语义槽；Agent 书目段使用 evidence-bibliography-v1 直接提取并逐字段绑定 source/locator/quote，API adapter 保留 candidate-id-v2，二者编译为同一规范化 review 后再共享 validator、IR、Graph preflight 与提交
-    - Agent backend 的宿主控制循环独立使用 agent-paper-reading-v2：短文直接全文读取，长文按单节命令渐进读取关键章节，再按 section miss、证据定位或跨章节依赖回读原 paper.md；该策略不改变 API adapter 的上下文裁剪与调用预算
+    - Agent backend 的宿主控制循环独立使用 agent-paper-reading-v4：短文按原始行窗口读完全文，长文批量读取已知关键章节并提供有界结构目录，再按 section miss、证据定位或跨章节依赖回读原 paper.md；该策略不改变 API adapter 的上下文裁剪与调用预算
     - Agent task 可选暴露 node_semantics 的现有 concept/Hub 查询 argv 模板；查询只读 live graph，候选仅帮助复用与导航，节点身份仍须经 resolve 与共享 validator 确认
     - Agent task 的版本化 semantic protocol 必须直接暴露与共享 validator 一致的论文主语谓词分区：论文到 concept 只用研究基础/核心方法/对比方法，论文到 proposition 只用核心创新点/局限性/未来展望，主要研究、方向标签及作者/期刊等机械元数据明确排除；不得只暴露会误导宿主 Agent 的全量已登记谓词列表
-    - paper-agent-workspace-task-v6 的 Agent handoff 直接声明语义槽独立行标题、pipe 字段格式与可解析示例、Raw 脚注示例及空书目字段的 ambiguous 状态；title/venue 按已有 shared validator 归一空白后验证连续值，PDF 普通换行不截短完整题名，缺字或跨无关布局块仍保留未决；Agent/API 的 Wiki 要求共享对象、条件和符号逐项回溯规则，不新增模型调用或把结构 PASS 当作事实正确证明
+    - paper-agent-workspace-task-v8 的 Agent handoff 直接声明语义槽独立行标题、pipe 字段格式与可解析示例、Raw 脚注示例及空书目字段的 ambiguous 状态；title/venue 按已有 shared validator 归一空白后验证连续值，PDF 普通换行不截短完整题名，缺字或跨无关布局块仍保留未决；Agent/API 的 Wiki 要求共享对象、条件和符号逐项回溯规则，不新增模型调用或把结构 PASS 当作事实正确证明
     - Agent validator issue 必须给出 stage、workspace scope、error 与局部 action；Agent 遥测记录源字符数、读取策略、check 次数、首轮/末轮校验结果、修复 scope 与最终 warning，并在原事务 telemetry.agent_ingest.check_history 保留逐轮 validator issues、warnings 与版本；常规返回省略历史明细，不记录或评价宿主推理内容
     - Agent 书目 task 由共享 schema 常量列出合法枚举，schema 错误逐字段定位；读取契约提供一次性协议与分节读取策略，commit 只返回有界验收摘要及完整 state/report 地址，不重复展开 Graph 计划和回执哈希
     - 3.1 在读取 PDF 标题前先查询源文件 SHA-256；精确命中直接 duplicate_found，不调用 MinerU/LLM；MinerU 与书目锁定后再以 normalized text/title+authors+year/DOI/arXiv 做二次去重屏障
@@ -7504,7 +7595,7 @@ script_contracts:
     - shared Wiki/修复校验按目标域限定 academic=conference-summary、admin/business=meeting-summary；两种会议类型的本会议主体都经 Graph 归一为当前页，其他页面不放宽指代边界
     - 直接入口与统一 inbox 入口均先查询公共 Raw 指纹索引；只有二进制 SHA-256 精确命中可直接返回 duplicate_found，同日、同标题或既有 Raw/Wiki 目录不足以确认重复，不得丢弃不同字节的会议分段来源
     - Meeting Compiler 初次调用返回当前 PREPROCESS/WIKI/MEETING_IR 协议；MEETING_IR 的人物、议题、汇报、决策、待办、扩展关系与学生指导更新均引用程序分配的 Raw evidence_id，API 与 agent handoff/resume 共用同一协议
-    - API Meeting Compiler 返回 rejected/协议解析错误时必须保存失败 trace，并在原事务生成 prompt/write_to 后进入 agent_required；不得新建事务或把错误归类为不可恢复 unknown_failure
+    - API Meeting Compiler 返回 rejected/协议解析错误时保存失败 trace，既有修订预算耗尽后在原事务复用 agent-task-v1 交给宿主；manifest 提供输入/输出、字段诊断、仍存在且 hash 绑定的末次失败产物及完整 resume 命令，不复制长 prompt、不重置 backend/尝试/恢复预算；不得新建事务或把协议错误归类为不可恢复 unknown_failure
     - YYYY-MM-DD 与 YYYYMMDD 文件名保留显式年份并验证日历合法性；不得将年份前缀误读为 MMDD；仅有 MMDD 或无有效日期时允许用摄入年分区，但 state 与 Wiki frontmatter 必须标记 date_inferred，禁止把推断年份伪装成 raw 明示事实
     - Meeting Compiler META 的非空 title 在落位前生成最终 meeting-id 并重算 raw/wiki 路径；sources 由程序回填最终路径，重试时保持 canonical ID 稳定
     - 会议 sources 按 YAML 结构回填为唯一最终 Raw 来源，覆盖标量、行内列表与多行列表；Wiki validator 必须检查与事务 raw_dir/source_filename 精确一致，缺失或错位不得进入落位
@@ -7659,6 +7750,7 @@ script_contracts:
     - python3 .scripts/engineering_graph.py validate
   frontier:
     preconditions:
+    - shared 自动证据包将摘要/前缀投影为实际Raw行范围，携带requested_locator、excerpt_only与truncated，按实际范围去重；Agent/API均将未命中限定于本次已检索/已读片段，不推广为全库不存在或整篇无关。历史显式packet兼容，实际范围写入新回答evidence_scope
     - parse_record_text shares the existing safe YAML parser with file-based parse_record; it parses caller-supplied text with a diagnostic source label and performs no IO or provenance certification. knowledge_store supplies text from its single byte snapshot; the file entry retains its existing behavior
     - shared Markdown frontmatter 读取优先使用 PyYAML CSafeLoader，不可用时回退 SafeLoader；仅替换安全 YAML 解析实现，不缓存记录、不缩减扫描、不改变 schema、实时快照检查或索引重建
     - api-only capture-paper 对独立问题的模型回答最多三路并行；证据包与原回答快照在主线程准备，回答仍逐项经原 apply_answer 验证并串行写页/重建索引，全部完成后才返回；Agent 不启用并行模型工作

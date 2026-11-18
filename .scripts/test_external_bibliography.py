@@ -58,6 +58,69 @@ class BibliographyTests(unittest.TestCase):
             return body({"items": []})
         return self.resolve(fetch, {**SEEDS, "doi": [], "arxiv_id": []})
 
+    def neurips(self, *, bib_title=TITLE, html_link=True, pdf_url=None, years="2022", budget_seeds=None):
+        page = "https://papers.nips.cc/paper_files/paper/2022/hash/" + "a" * 32 + "-Abstract.html"
+        bib_url = page.replace("/hash/", "/file/").replace("-Abstract.html", "-Bibtex.bib")
+        pdf = page.replace("/hash/", "/file/").replace("-Abstract.html", "-Paper.pdf")
+        candidate = {**CONFERENCE, "publicationTypes": ["JournalArticle"],
+                     "externalIds": {"DOI": "10.48550/arXiv.2201.12345"},
+                     "openAccessPdf": {"url": pdf_url or pdf}}
+        bibliography = ('@inproceedings{demo, title={' + bib_title + '}, author={Smith, Alice and Jones, Bob}, '
+                        'year={' + years + '}, booktitle={Advances in Neural Information Processing Systems}, pages={1--9}}')
+        urls = []
+        def fetch(url):
+            urls.append(url)
+            if url.startswith(eb.SEMANTIC_SCHOLAR):
+                return json.dumps({"total": 1, "data": [candidate]})
+            if url == page:
+                return '<a href="/paper_files/paper/1234-/bibtex">Bibtex</a>' if html_link else '<h1>No export</h1>'
+            if url == bib_url:
+                return bibliography
+            return body({"items": []})
+        result = self.resolve(fetch, budget_seeds or {"title": [TITLE], "doi": [], "arxiv_id": []})
+        return result, urls
+
+    def test_neurips_follows_official_export_and_replays_offline(self):
+        result, urls = self.neurips()
+        self.assertEqual(len(urls), 4)
+        bib = result["bibliographic"]
+        self.assertEqual(bib["metadata_provider"], "neurips_bibtex")
+        self.assertTrue(bib["origin_verified"])
+        self.assertEqual(bib["source_content_version"], "not_verified")
+        self.assertEqual(bib["pages"], "1--9")
+        self.assertEqual(eb.replay(result["receipt"], MD)["title"], TITLE)
+        replayed = self.resolve(lambda url: self.fail("cache must not fetch"), {"title": [TITLE], "doi": [], "arxiv_id": []})
+        self.assertTrue(replayed["cache_hit"])
+
+    def test_neurips_identity_and_year_mismatch_rejected(self):
+        result, _ = self.neurips(bib_title="An entirely unrelated paper")
+        self.assertIsNone(result["bibliographic"])
+        self.cache.unlink()
+        result, _ = self.neurips(years="2021")
+        self.assertIsNone(result["bibliographic"])
+
+    def test_neurips_no_link_no_guess_and_external_host_refused(self):
+        result, urls = self.neurips(html_link=False)
+        self.assertIsNone(result["bibliographic"])
+        self.assertEqual(len(urls), 3)
+        self.cache.unlink()
+        result, urls = self.neurips(pdf_url="https://attacker.example/paper.pdf")
+        self.assertIsNone(result["bibliographic"])
+        self.assertEqual(len(urls), 2)
+        self.assertFalse(eb.allowed_url("https://papers.nips.cc.evil/paper/123-/bibtex"))
+        self.assertFalse(eb.allowed_url("https://papers.nips.cc/paper/123-/bibtex?redirect=evil"))
+
+    def test_neurips_requires_archived_page_export_chain(self):
+        result, _ = self.neurips()
+        receipt = result["receipt"]
+        receipt["responses"] = [r for r in receipt["responses"] if not eb.neurips_url(r["url"])]
+        self.assertIsNone(eb.replay(receipt, MD))
+
+    def test_neurips_preserves_total_request_budget(self):
+        result, urls = self.neurips(budget_seeds={"title": [TITLE], "doi": [], "arxiv_id": ["2101.12345"]})
+        self.assertLessEqual(len(urls), eb.MAX_REQUESTS)
+        self.assertFalse(any(eb.neurips_url(u) for u in urls))
+
     def test_formal_doi_and_date_precision(self):
         result = self.resolve()
         bib = result["bibliographic"]

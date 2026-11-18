@@ -178,7 +178,7 @@ def traversal_families(profile="", families=None, contract=None):
 # 管道版本号：影响 wiki/图边输出的建设变更才 bump。
 # 纯改名/重构不 bump；skeleton 模板/建边逻辑/prompt 调整等影响已入库内容的 bump。
 # re_ingest --outdated 据此判断哪些论文需重新摄入。
-CURRENT_PIPELINE_VERSION = 18
+CURRENT_PIPELINE_VERSION = 19
 
 RAW_DOCUMENT_SUFFIXES = {
     ".md", ".txt", ".pdf", ".doc", ".docx", ".ppt", ".pptx",
@@ -1057,7 +1057,11 @@ def extract_descriptive_id(text, concept_map, abbr_map=None):
     out = text
     for key, val in pairs:
         if key in out:
-            out = out.replace(key, val)
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .+_\-/]*", key):
+                out = re.sub(rf"(?<![A-Za-z0-9]){re.escape(key)}(?![A-Za-z0-9])",
+                             lambda _match: val, out)
+            else:
+                out = out.replace(key, val)
     return out
 
 

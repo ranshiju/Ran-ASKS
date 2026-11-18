@@ -1167,6 +1167,44 @@ def test_batched_document_attachment_is_identical_to_individual_resolution():
         conn.close()
 
 
+
+def test_persisted_probe_requires_actual_merge_and_actual_edges():
+    conn = make_db()
+    page = "academic/wiki/papers/demo"
+    for name in (page, "Old Name", "Canonical", "Disconnected"):
+        add_node(conn, name)
+    conn.execute("INSERT INTO edges(subject,predicate,object,confidence) VALUES(?,?,?,?)", (page, "核心方法", "Old Name", "可追溯"))
+    report = {"subgraph": {"page": page}, "attach_plan": {"decisions": [
+        {"mention": "Old Name", "target": "Old Name", "action": "keep_local_ambiguous", "candidates": ["Canonical"]},
+        {"mention": "Disconnected", "target": "Disconnected", "action": "create_local"}]}}
+    first = gd.probe_persisted_boundary(conn, report)
+    assert first["ambiguous_mentions"] == 1
+    assert first["boundary_reachable_within_2"] == 1
+    conn.execute("UPDATE edges SET object='Canonical' WHERE object='Old Name'")
+    conn.execute("DELETE FROM nodes WHERE path='Old Name'")
+    gl.insert_aliases(conn, "Canonical", ["Old Name"])
+    merged = gd.probe_persisted_boundary(conn, report)
+    assert merged["ambiguous_mentions"] == 0
+    assert merged["boundary_reachable_within_2"] == 1  # no proposed overlay to disconnected
+    assert report["attach_plan"]["decisions"][0]["action"] == "keep_local_ambiguous"
+    conn.close()
+
+
+def test_persisted_probe_uses_current_hub_and_preserves_missing_identity():
+    conn = make_db()
+    page, old, new = "academic/wiki/papers/demo", "academic/wiki/hubs/old", "academic/wiki/hubs/new"
+    for name in (page, old, new):
+        add_node(conn, name)
+    conn.execute("INSERT INTO edges(subject,predicate,object,confidence) VALUES(?,?,?,?)", (page, "属于", new, "可追溯"))
+    report = {"subgraph": {"page": page}, "attach_plan": {"decisions": [
+        {"mention": old, "target": old, "action": "reuse_canonical_id"},
+        {"mention": "Missing", "target": "Missing", "action": "create_local"}]}}
+    result = gd.probe_persisted_boundary(conn, report)
+    assert result["ambiguous_mentions"] == 1
+    assert [r["mention"] for r in result["boundary_results"]] == ["Missing", new]
+    conn.close()
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

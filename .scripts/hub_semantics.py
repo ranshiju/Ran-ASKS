@@ -26,6 +26,7 @@ import yaml
 from embed_helper import require_numpy
 import graph_lib as gl
 import wiki_locator as wl
+import source_locator as sl
 
 
 REPO = gl.REPO
@@ -261,6 +262,39 @@ def _section_body(path: str | Path, heading: str, *, text: str | None = None) ->
     text = " ".join(lines)
     text = re.sub(r"\[\^[A-Za-z0-9_-]+\]", "", text).strip()
     return text, section
+
+
+def profile_evidence(profile: dict, *, root: Path | None = None) -> dict:
+    """Bounded public Raw context for a route handoff, never a route decision."""
+    root = (root or REPO).resolve()
+    evidence, issues = [], []
+    citations = list(dict.fromkeys(profile.get("raw_citations") or []))
+    remaining = 4000
+    for citation in citations[:3]:
+        raw, fragment = sl.split_locator(citation)
+        target = (root / raw).resolve()
+        try:
+            relative = target.relative_to(root).as_posix()
+            if not relative.startswith("academic/raw/") or not fragment:
+                raise ValueError("requires public academic Raw with locator")
+            if not target.is_file():
+                raise ValueError("source missing")
+            binding = sl.companion_binding_for_target(target)
+            if binding and binding["status"] == "invalid":
+                raise ValueError("invalid companion binding")
+            item = sl.bounded_text_excerpt(target, fragment, min(2000, remaining))
+            if not item:
+                raise ValueError("unreadable or unmappable locator")
+            evidence.append({**item, "locator": f"{relative}#{item['locator']}",
+                             "requested_locator": citation})
+            remaining -= len(item["excerpt"])
+        except (OSError, ValueError) as exc:
+            issues.append({"locator": citation, "reason": str(exc)})
+        if remaining <= 0:
+            break
+    return {"raw_evidence": evidence, "evidence_issues": issues,
+            "omitted_citations": citations[len(evidence) + len(issues):],
+            "coverage": "仅所示Raw片段；truncated可能含未读完的末行。先核验其是否支持方向句，再比较候选Scope；不足时按地址补读。"}
 
 
 def read_paper_profile(path: str | Path, *, text: str | None = None) -> DirectionProfile | None:
@@ -687,6 +721,42 @@ def completed_split_resolution(conn, candidate: dict) -> dict | None:
     return {
         "status": "applied", "parent": parent, "children": matched,
         "basis": "canonical_split_history_and_membership",
+    }
+
+
+def completed_redistribution_resolution(conn, candidate: dict) -> dict | None:
+    """Verify current overload closure; do not attest a historical migration."""
+    parent = candidate.get("hub")
+    original_children = candidate.get("children")
+    if not isinstance(parent, str) or not parent.startswith("academic/wiki/hubs/"):
+        return None
+    if not isinstance(original_children, list) or not original_children or not all(
+        isinstance(child, str) and child.startswith("academic/wiki/hubs/")
+        for child in original_children
+    ):
+        return None
+    children = get_child_hubs(conn, parent)
+    if not set(original_children).issubset(children):
+        return None
+    for path in [parent, *children]:
+        row = conn.execute(
+            "SELECT type,status,description FROM nodes WHERE path=?", (path,),
+        ).fetchone()
+        scope = read_hub_scope(path)
+        fm = _frontmatter(path)
+        if (row is None or row["type"] != "hub"
+                or row["status"] in {"retired", "archived"}
+                or fm.get("status") in {"retired", "archived"}
+                or (path != parent and fm.get("parent") != parent)
+                or validate_scope(scope) or row["description"] != scope):
+            return None
+    count = _hub_member_count(conn, parent)
+    if count > HUB_MEMBER_LIMIT:
+        return None
+    return {
+        "status": "resolved", "parent": parent, "children": sorted(children),
+        "basis": "canonical_family_no_longer_overloaded",
+        "remaining_parent": count, "limit": HUB_MEMBER_LIMIT,
     }
 
 

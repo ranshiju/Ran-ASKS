@@ -343,6 +343,17 @@ def validate_meeting_ir(value, evidence_ids: set[str] | None = None, *,
     return errors
 
 
+def meeting_ir_json_text(text: str) -> tuple[str, list[str]]:
+    """Normalize only the optional exact IR envelope, never arbitrary trailing data."""
+    text = text.strip()
+    closing = "<<</MEETING_IR>>>"
+    normalizations = []
+    if text.endswith(closing):
+        text = text[:-len(closing)].rstrip()
+        normalizations.append("MEETING_IR.exact_closing_marker")
+    return _strip_json_fence(text), normalizations
+
+
 def parse_proposal(text: str) -> tuple[dict | None, str]:
     proposal, error, _diagnostic = parse_proposal_detailed(text)
     return proposal, error
@@ -400,12 +411,14 @@ def parse_proposal_detailed(text: str) -> tuple[dict | None, str, dict]:
         proposal["protocol_version"] = LEGACY_PROTOCOL_VERSION
         proposal["semantic_slots"] = semantics
         return proposal, "", {}
-    ir_text = _strip_json_fence(semantics)
+    ir_text, normalizations = meeting_ir_json_text(semantics)
+    normalization_diagnostic = {"normalizations": normalizations} if normalizations else {}
     try:
         meeting_ir = json.loads(ir_text)
     except json.JSONDecodeError as exc:
         excerpt_start = max(0, exc.pos - 100)
         return None, "invalid meeting IR JSON", {
+            **normalization_diagnostic,
             "kind": "json_syntax", "stage": "parse_meeting_ir", "segment": "MEETING_IR",
             "error_type": type(exc).__name__, "message": exc.msg,
             "line": exc.lineno, "column": exc.colno, "position": exc.pos,
@@ -427,9 +440,9 @@ def parse_proposal_detailed(text: str) -> tuple[dict | None, str, dict]:
         error = f"invalid {version or PROTOCOL_VERSION} meeting IR"
         return None, error, {"kind": "schema", "stage": "validate_meeting_ir",
                              "segment": "MEETING_IR", "message": error,
-                             "issues": ir_errors}
+                             "issues": ir_errors, **normalization_diagnostic}
     proposal["meeting_ir"] = meeting_ir
-    return proposal, "", {}
+    return proposal, "", normalization_diagnostic
 
 
 def apply_transcript_replacements(source_text: str, replacements: list[dict]) -> str:

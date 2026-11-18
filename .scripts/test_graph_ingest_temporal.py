@@ -664,6 +664,26 @@ def test_sparse_surface_reuse_preserves_boundaries_and_confirmed_candidates():
         ) == expected
 
 
+def test_global_acronym_does_not_bind_a_local_proposition():
+    conn = make_db()
+    gl.ensure_node(conn, "page", "Page", "page")
+    gl.ensure_node(conn, "random-circuit", "随机SWAP电路random SWAP circuit", "entity", entity_subtype="keyword")
+    gl.insert_aliases(conn, "random-circuit", ["SWAP", "random SWAP circuit"])
+    claim = "用 SWAP test 估计内积"
+    module.add_knowledge_edges(conn, "page", [{"subject": "page", "predicate": "核心创新点", "object": claim}])
+    node = conn.execute("SELECT path,title FROM nodes WHERE entity_subtype='proposition'").fetchone()
+    assert node["path"] == claim and node["title"] == claim
+    assert not conn.execute("SELECT 1 FROM edges WHERE subject=? AND predicate='包含' AND object='random-circuit'", (claim,)).fetchone()
+    # Full names remain useful; explicit local concepts supply their own abbreviations.
+    surfaces = module._existing_concept_surface_index(conn)
+    assert "SWAP" not in surfaces
+    assert module._sparse_proposition_targets("random SWAP circuit", {}, surfaces) == {"random-circuit"}
+    assert module._sparse_proposition_targets("MPS", {"矩阵乘积态matrix product state(MPS)": "mps"}, {}) == {"mps"}
+    assert module._sparse_proposition_targets("ABC", {"Alpha Beta Code(ABC)": "a", "Another Basic Code(ABC)": "b"}, {"ABC": "c"}) == set()
+    assert gl.extract_descriptive_id("SWAPtest and SWAP test", {}, {"SWAP": "confirmed"}) == "SWAPtest and confirmed test"
+    conn.close()
+
+
 def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
     for test in tests:

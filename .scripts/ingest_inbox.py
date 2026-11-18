@@ -823,7 +823,7 @@ def _map_paper_batch_results(parsed: dict) -> list[dict]:
             else:
                 entry["reason"] = str(errors)
             for key in (
-                "transaction_id", "retryable", "next_action", "resume_from",
+                "transaction_id", "retryable", "next_action", "next_actions", "resume_from",
                 "failure_signature", "bibliographic_review", "agent_task", "write_to",
                 "workspace_worker", "execution_backend", "failure_disposition",
             ):
@@ -879,7 +879,7 @@ def _result_entry(file_name: str, file_type: str, parsed: dict, content: str = "
         entry = {"file": file_name, "type": file_type, "ok": False,
                  "status": status, "reason": reason}
         for key in (
-            "transaction_id", "errors", "retryable", "next_action", "resume_from",
+            "transaction_id", "errors", "retryable", "next_action", "next_actions", "resume_from",
             "failure_signature", "bibliographic_review", "agent_task", "write_to",
             "failure_disposition", "workflow_status", "internal_status",
             "workspace_worker", "execution_backend",
@@ -1424,6 +1424,7 @@ def _hub_affected_nodes(results: list[dict]) -> list[str]:
 
 def _hub_route_reviews(results: list[dict]) -> list[dict]:
     """Extract low-margin canonical routes for strong-agent review."""
+    from hub_semantics import profile_evidence
     reviews = []
     for item in results:
         graph_report = item.get("graph_report") or {}
@@ -1455,6 +1456,7 @@ def _hub_route_reviews(results: list[dict]) -> list[dict]:
             "top_score": route.get("top_score"),
             "margin": route.get("margin"),
             "profile": route.get("profile", {}),
+            **profile_evidence(route.get("profile") or {}, root=REPO),
             "canonical_candidates": canonical,
             "apply_command_template": (
                 "python3 .scripts/hub_semantics.py route-apply "
@@ -1571,7 +1573,7 @@ def compact_maintenance(envelope: dict) -> dict:
         "actions": envelope.get("actions", [])[:10],
         "errors": [str(error)[:300] for error in envelope.get("errors", [])[:10]],
     }
-    for key in ("publication", "retryable", "next_action", "report_path"):
+    for key in ("publication", "retryable", "next_action", "report_path", "reason", "pending_count"):
         if key in envelope:
             compact[key] = envelope[key]
     components = {}
@@ -1643,6 +1645,19 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
         except Exception as exc:
             envelope["status"] = "error"
             envelope["errors"].append(f"maintenance receipt write failed: {exc}")
+        return envelope
+
+    pending = [item for item in results if item.get("status") not in {
+        "completed", "duplicate_found", "failed", "skipped",
+    }]
+    if pending:
+        envelope = {
+            "status": "deferred", "reason": "pending_batch_items",
+            "pending_count": len(pending), "session_id": session_id,
+            "receipt_path": str(receipt_path.relative_to(REPO)),
+            "actions": [], "errors": [], "components": {},
+        }
+        _write_json_atomic(receipt_path, envelope)
         return envelope
 
     invalid_results = []
@@ -1751,11 +1766,7 @@ def run_post_ingest_maintenance(results: list[dict], session_id: str) -> dict:
         ),
         "session_id": session_id,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "trigger_files": [
-            {key: item.get(key) for key in ("file", "status", "transaction_id")
-             if item.get(key) is not None}
-            for item in results
-        ],
+        "trigger_files": [ic.maintenance_trigger(item) for item in results],
         "actions": actions,
         "errors": errors,
         "receipt_path": str(receipt_path.relative_to(REPO)),
@@ -1889,11 +1900,20 @@ def publish_maintenance_report(report_path: Path, report: dict, *,
 
 def _reconcile_split_handoffs(maintenance: dict) -> bool:
     import hub_semantics
+    return _reconcile_hub_candidate_handoffs(
+        maintenance, "split", hub_semantics.completed_split_resolution,
+    )
+
+
+def _reconcile_hub_candidate_handoffs(maintenance: dict, kind: str, resolve) -> bool:
+    import hub_semantics
     hubs = (maintenance.get("components") or {}).get("hubs") or {}
-    if not hubs.get("split_count"):
+    count_key = f"{kind}_count"
+    if not hubs.get(count_key):
         return False
     split_path = hub_semantics._managed_artifact(
-        str(hubs.get("split_candidates_file") or ""), "temp/hub-auto-split",
+        str(hubs.get(f"{kind}_candidates_file") or ""),
+        "temp/hub-auto-split" if kind == "split" else "temp/hub-auto-redistribute",
     )
     if split_path is None or not split_path.is_file():
         return False
@@ -1910,7 +1930,7 @@ def _reconcile_split_handoffs(maintenance: dict) -> bool:
     conn = hub_semantics.gl.connect(graph_path, read_only=True)
     try:
         for candidate in candidates:
-            resolution = hub_semantics.completed_split_resolution(conn, candidate)
+            resolution = resolve(conn, candidate)
             if resolution is None:
                 remaining += 1
             else:
@@ -1921,8 +1941,8 @@ def _reconcile_split_handoffs(maintenance: dict) -> bool:
         conn.close()
     if changed:
         _write_json_atomic(split_path, candidates)
-    if remaining != hubs.get("split_count"):
-        hubs["split_count"] = remaining
+    if remaining != hubs.get(count_key):
+        hubs[count_key] = remaining
         changed = True
     if changed:
         hub_semantics._finish_hub_route_action(maintenance, int(hubs.get("route_review_count") or 0))
@@ -1957,7 +1977,12 @@ def reconcile_maintenance_report(report_path: Path) -> dict:
         inbox_state.save(item["transaction_id"], state)
     repaired = json.loads(report_path.read_text(encoding="utf-8"))
     try:
-        if _reconcile_split_handoffs(repaired.get("maintenance") or {}):
+        maintenance = repaired.get("maintenance") or {}
+        split_changed = _reconcile_split_handoffs(maintenance)
+        redistribution_changed = _reconcile_hub_candidate_handoffs(
+            maintenance, "redistribution", hub_semantics.completed_redistribution_resolution,
+        )
+        if split_changed or redistribution_changed:
             receipt_path = hub_semantics._managed_artifact(
                 str(repaired["maintenance"].get("receipt_path") or ""), "temp/inbox-maintenance",
             )
@@ -1967,7 +1992,7 @@ def reconcile_maintenance_report(report_path: Path) -> dict:
         maintenance = repaired.get("maintenance") or {}
         repaired["maintenance"] = {
             **maintenance, "status": "error", "retryable": isinstance(exc, OSError),
-            "errors": [*maintenance.get("errors", []), f"split handoff reconciliation failed: {exc}"],
+            "errors": [*maintenance.get("errors", []), f"Hub handoff reconciliation failed: {exc}"],
             "next_action": "reconcile_maintenance_report",
             "publication": {"status": "error", "report_persisted": True},
         }
@@ -2117,8 +2142,19 @@ def run_source_profile(args):
     return result
 
 
+def _output_view(payload: dict, view: str = "compat") -> dict:
+    """Drop only an exact duplicate list at the CLI presentation boundary."""
+    if (view == "agent" and payload.get("schema") == "ingest-result-v1"
+            and isinstance(payload.get("items"), list)
+            and payload.get("files") == payload["items"]):
+        return {key: value for key, value in payload.items() if key != "files"}
+    return payload
+
+
 def main():
     ap = argparse.ArgumentParser(description="inbox 统一摄入入口：确定性分流 + 双后端语义复核")
+    ap.add_argument("--output-view", choices=("compat", "agent"), default="compat",
+                    help="agent 仅省略与 items 完全相同的 files 副本；持久报告保持完整")
     ap.add_argument("--stdin", action="store_true", help="从 stdin 原样保存 UTF-8 文档正文后摄入")
     ap.add_argument("--keep-source", action="store_true", help="复制对话附件摄入；原件永久保留，包括 inbox 内原件")
     ap.add_argument("--file", help="指定单个文件（不扫描 inbox 全部）")
@@ -2155,7 +2191,7 @@ def main():
             result = run_source_profile(args)
         except Exception as exc:
             result = {"profile": "source-first", "status": "failed", "error": str(exc)[:700]}
-        print(json.dumps(result, ensure_ascii=False))
+        print(json.dumps(_output_view(result, args.output_view), ensure_ascii=False))
         if (result.get("status") not in {"source_ready", "dry_run"}
                 or result.get("error") or result.get("knowledge_error")):
             raise SystemExit(1)
@@ -2187,7 +2223,7 @@ def main():
             "transaction_id": args.resume,
         }
         result = inbox_state.output_payload(state, result)
-        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        print(json.dumps(_output_view(result, args.output_view), ensure_ascii=False, separators=(",", ":")))
         if result.get("status") in {"failed", "validation_error", "backend_mismatch"}:
             raise SystemExit(1)
         return
@@ -2224,7 +2260,7 @@ def main():
         except (OSError, ValueError) as exc:
             print(json.dumps({"status": "validation_error", "errors": [str(exc)]}, ensure_ascii=False))
             raise SystemExit(1)
-        print(json.dumps(result, ensure_ascii=False))
+        print(json.dumps(_output_view(result, args.output_view), ensure_ascii=False))
         return
     if args.document_type and (args.subproject != "academic" or not (args.file or args.import_file or args.stdin)):
         ap.error("--document-type 仅用于单文件 academic 文档")
@@ -2409,7 +2445,7 @@ def main():
             "intake": intake_receipt,
             "total": len(files),
         })
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(_output_view(result, args.output_view), ensure_ascii=False, indent=2))
         return
 
     if not args.run:
@@ -2628,6 +2664,11 @@ def main():
                 continue
             source_kind = classification_details.get(rel, {}).get("source_kind", "ordinary")
             resume_state = resume_matches.get(rel)
+            runtime_ref = (f"temp/inbox-state/{resume_state['transaction_id']}.status.md"
+                           if resume_state else "")
+            print(f"ingest file={rel} phase=processing" +
+                  (f" runtime_status_ref={runtime_ref}" if runtime_ref else ""),
+                  file=sys.stderr, flush=True)
             if backend == "api":
                 assert loop is not None
                 if resume_state:
@@ -2674,6 +2715,10 @@ def main():
             result_entry = _result_entry(f.name, ftype, parsed, content)
             if resume_state:
                 result_entry["resumed_transaction"] = resume_state["transaction_id"]
+            print(f"ingest file={rel} status={result_entry.get('status', 'unknown')}" +
+                  (f" runtime_status_ref={result_entry['runtime_status_ref']}"
+                   if result_entry.get("runtime_status_ref") else ""),
+                  file=sys.stderr, flush=True)
             results.append(result_entry)
             audit("ingest/result", {
                 "file": rel, "status": results[-1]["status"],
@@ -2726,7 +2771,7 @@ def main():
     }
     publish_maintenance_report(report_path, report)
     compact = _compact_summary(report, report_path)
-    print(json.dumps(compact, ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(_output_view(compact, args.output_view), ensure_ascii=False, separators=(",", ":")))
     if report["failed"]:
         sys.exit(1)
 

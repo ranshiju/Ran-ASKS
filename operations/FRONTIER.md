@@ -53,13 +53,13 @@ Question/Trajectory 内的原子条目类型包括 `partial_answer`、`candidate
 5. 形成规范问题、已有知识、残余缺口、价值理由和事实锚点；
 6. 写入或复用 Question Page，并在本库内做一次有界回答尝试；只有通过准入门才成为 `triaged`，`active` 必须由用户审查确认。
 
-`kb_state` 枚举：`unassessed/no_evidence/no_answer_found/partial/conflicting/answered`。`scientific_state` 枚举：`unverified/likely_open/partially_resolved/contested/likely_resolved/resolved`。知识库没有命中只能说明本库覆盖不足，不能证明科学问题仍开放。
+`kb_state` 枚举：`unassessed/no_evidence/no_answer_found/partial/conflicting/answered`。`scientific_state` 枚举：`unverified/likely_open/partially_resolved/contested/likely_resolved/resolved`。没有命中只表示本次检索/已读片段未找到足够证据，不能推出全库未摄入或科学问题仍开放。`residual_gaps` 描述仍需取得的证据；候选排除理由不是由 Raw 支持的科学事实。
 
 库内回答按 Graph → Wiki → Raw locator 构造紧凑证据包；`supported_claim` 必须引用包内 Raw locator，推导只能标为 `derived`。Question 的事实锚点只固化问题来源和实际被支持结论引用的 Raw，低相关召回候选不转成 `fact_links`。回答失败或模型不可用时保持 `answer_status: pending`，不阻断事实摄入，也不产生摄入告警。
 
 自动回答/刷新已有问题时，先把 `source_locator` 与 `source_mentions` 中去重后的最多 3 个问题来源放入证据地址队列，再并入通常的 Wiki/Graph 召回；不依赖来源论文重新进入文字搜索前列，也不把旧答案累计引用自动当成本轮证据。保留最多 8 个候选地址、5 个有效摘录；问题自身来源摘录最多 4000 字符，一般召回摘录最多 1000 字符，达到预算时在 `evidence_issues` 披露可能截断。API prompt 保留已选摘录，不再二次截断为头部 420 字符；引用白名单与实际送入模型的摘录对应。显式提供证据包时只使用该包，不额外加入来源。来源优先读取不代表它更正确，作者提出的问题本身也不是问题的答案。
 
-精确行号范围与章节片段通过共享 `source_locator` 读取，不能在同一精确地址下返回论文开头或摘要。公共域路径与 companion 绑定沿现有能力检查；失效来源地址不降级冒充已读证据。`evidence_issues` 在证据包中披露未取得片段的地址，自动构造的支持结论白名单只含实际取得摘录的地址。传统 `#全篇` 导航来源仍只提供有限摘要/开头预览，不表示已读全文；需要方法、结果或条件时仍按具体缺口下钻。Agent 读取任务包，API adapter 在原回答调用中收到压缩证据与读取问题，不新增调用。
+精确行号范围与章节片段通过共享 `source_locator.bounded_text_excerpt` 读取，不能在同一精确地址下返回论文开头或摘要。公共域路径与 companion 绑定沿现有能力检查；失效来源地址不降级冒充已读证据。`evidence_issues` 披露未取得片段的地址。传统 `#全篇` 导航来源仍只提供有限摘要/开头预览，但自动包白名单改为摘录的实际行范围，保留 `requested_locator` 供追踪；`excerpt_only` 与 `truncated` 明示阅读限制，实际地址末行也可能未读完，不能据此断言整篇无关。无法唯一映射真实行号的片段不进入白名单；精确行读取在重复正文出现时仍使用指定行位置。相同实际地址和摘录去重，预算保持。Agent任务与API原回答调用均携带范围约束，显式旧包兼容，不新增调用。
 
 ### 3.1 阶段性回答与证据变化
 
