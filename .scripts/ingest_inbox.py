@@ -1593,6 +1593,14 @@ def compact_maintenance(envelope: dict) -> dict:
             key: value for key, value in summary.items()
             if key in allowed and value is not None
         }
+        if name == "hubs":
+            # These legacy backlog names count observations below the action
+            # thresholds. Keep their meaning visible in the bounded handoff.
+            if any(key in components[name] for key in ("backlog_count", "split_backlog_count")):
+                components[name]["backlog_kind"] = "observation_only"
+            if summary.get("status") == "no_action":
+                for key in ("eligible_count", "split_count", "redistribution_count", "route_review_count"):
+                    components[name].setdefault(key, 0)
         auto_built = summary.get("auto_built")
         if name == "people" and isinstance(auto_built, dict):
             components[name]["auto_built"] = {

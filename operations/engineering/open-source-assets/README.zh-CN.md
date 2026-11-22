@@ -9,13 +9,13 @@
 
 <table>
 <tr>
+<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/mixt-academic-talk/index.html"><img src="gallery/works/mixt-academic-talk/cover.webp" width="280" alt="MixT 学术报告"></a></td>
 <td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/presentation-assets/index.html"><img src="gallery/works/presentation-assets/cover.webp" width="280" alt="PPT 素材库"></a></td>
-<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/layer-edelstein-academic-talk/index.html"><img src="gallery/works/layer-edelstein-academic-talk/cover.webp" width="280" alt="层 Edelstein 效应学术报告"></a></td>
 <td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/asks-introduction/index.html"><img src="gallery/works/asks-introduction/cover.webp" width="280" alt="ASKS 总介绍"></a></td>
 </tr>
 <tr>
+<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/mixt-academic-talk/index.html"><strong>MixT 学术报告</strong></a><br><sub title="收录日期">2026-11-22</sub></td>
 <td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/presentation-assets/index.html"><strong>PPT 素材库</strong></a><br><sub title="收录日期">2026-11-14</sub></td>
-<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/layer-edelstein-academic-talk/index.html"><strong>层 Edelstein 效应学术报告</strong></a><br><sub title="收录日期">2026-11-05</sub></td>
 <td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/asks-introduction/index.html"><strong>ASKS 总介绍</strong></a><br><sub title="收录日期">2026-11-03</sub></td>
 </tr>
 </table>
@@ -65,7 +65,22 @@ Markdown 版是默认在线阅读入口。PDF 保留用于下载和打印，不�
 *保留的来源被编译为互补的 Wiki 与图结构界面。这些界面为后续工作提供导航，
 而事实使用最终返回到具有明确地址的来源证据。*
 
-## 近期更新：v0.29.0
+## 近期更新：v0.30.0
+
+新增离线共享入口 `wg.py author-works`，联合注册作者身份、作者关系及来源支持的元数据，
+返回覆盖范围、重复候选与逐项依据，并可复算已审阅分类。候选数不自动等于作者发表总数。
+使用方式见[作者成果检索与统计](operations/AUTHOR_WORKS.md)。
+
+论文到PPT优先沿论文论证主线组织内容，识别关键引文缺口，先检索slide library和已有报告，
+再适配布局。封面围绕科学记忆点选择配图，公式、具体实例、引文和阅读顺序有明确检查要求。
+[MixT的24页中文报告](gallery/works/mixt-academic-talk/README.md)加入Gallery，提供完整PDF、
+可编辑PPTX及6张代表页预览。
+
+论文提取失败可在同一未提交事务内，校验原件及解析包后继续；作者书目证据与Frontier问题
+提取适配更多来源布局，导航名称保留必要限定。这些是兼容新增与修复，Agent/API控制及
+来源证据边界保持。
+
+### 既有能力：v0.29.0
 
 修复与优化新增仓库内工程工作区：当前事项、关键尝试、适用记忆与证据可以跨会话接续。
 `workspace context` 有界读取当前事项和有效记忆，`item log` 经受管更新追加关键历史；

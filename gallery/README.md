@@ -6,6 +6,7 @@
 
 | 作品 | 形式 | 使用功能 |
 | --- | --- | --- |
+| [MixT 学术报告](works/mixt-academic-talk/README.md) | 24页中文学术报告 · PPTX / PDF | 演示文稿制作 · 模板复用 · 插图与图示 · 版式与导出 |
 | [PPT 素材库](works/presentation-assets/README.md) | 四项素材 · PNG / SVG / PPTX / ZIP | PPT 素材制作与复用 |
 | [MPE 科普展板](works/mpe-science-poster/README.md) | A0 科普海报 | 科普展板 · 插图与图示 · 理解试读 · 版式与导出 |
 | [MPE 学术报告](works/mpe-academic-talk/README.md) | 12 页学术报告 · PPTX / PDF | 演示文稿制作 · 版式与导出 |
@@ -38,7 +39,7 @@
 
 当前摄入支持一份匹配的 RIS/BibTeX 书目、长文分窗阅读及按失败触发的 API 恢复；使用方法见[摄入规范](../operations/INGEST.md)。
 
-现有 16 件精选作品，提供完整成品与下载。作品原稿、制作过程和本地来源记录不进入公开包。
+现有 17 件精选作品，提供完整成品与下载。作品原稿、制作过程和本地来源记录不进入公开包。
 
 ## 本地预览
 

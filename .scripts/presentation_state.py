@@ -609,7 +609,7 @@ class Store:
         value = state['slides'][sid].get(kind)
         if value is None:
             value = ({'schema': SCHEMA, 'slide_id': sid, 'title': '', 'body': [''], 'notes': '', 'sources': []}
-                     if kind == 'content' else {'schema': SCHEMA, 'slide_id': sid, 'layout_id': 'title',
+                     if kind == 'content' else {'schema': SCHEMA, 'slide_id': sid, 'layout_id': '',
                                                'layout_version': '1', 'image_source': None})
         request = {'schema': SCHEMA, 'expected_revision': state['session']['revision_id'],
                    'op': 'set-' + kind, 'slide_id': sid, 'payload': value}
@@ -620,11 +620,18 @@ class Store:
         inputs = [{'name': 'committed_plan', 'path': rel(self.root / 'revisions' / state['session']['revision_id'] / 'deck_plan.json')}]
         if kind == 'design':
             inputs.append({'name': 'approved_content', 'path': rel(self.root / 'revisions' / state['session']['revision_id'] / f'slides/{sid}/content.json')})
+        protocol = {'name': SCHEMA, 'document': 'operations/PRESENTATION.md',
+                    'section': '阶段1A 命令与数据协议', 'operation': 'set-' + kind}
+        issues = [{'message': 'Host Agent proposes content/design; do not fabricate user confirmation'}]
+        if kind == 'design':
+            protocol['design_guidance'] = {
+                'document': 'operations/PRESENTATION.md', 'section': '模板发现与页面设计选择'}
+            if not value['layout_id']:
+                issues.append({'message': 'Layout not selected: choose an expressive design before filling layout_id. '
+                               'This compiler accepts title/image_text/flow, not native template PPTX imports.'})
         task = make_task(kind='presentation_' + kind, transaction_id=directory.name, inputs=inputs,
                          outputs=[{'name': 'candidate_request', 'path': rel(directory / 'request.json')}],
-                         protocol={'name': SCHEMA, 'document': 'operations/PRESENTATION.md',
-                                   'section': '阶段1A 命令与数据协议', 'operation': 'set-' + kind},
-                         issues=[{'message': 'Host Agent proposes content/design; do not fabricate user confirmation'}],
+                         protocol=protocol, issues=issues,
                          commands={'check': command.format('check'), 'commit': command.format('commit'),
                                    'resume': f'python3 .scripts/presentation_state.py status --store {shlex.quote(rel(self.root))}'})
         _write(directory / 'task.json', json_bytes(task))

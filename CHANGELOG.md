@@ -7,6 +7,25 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-22
+
+### Version decision / 版本判断
+
+- MINOR: Add compatible source-backed author-work inventory and improve reusable academic presentation workflows
+- MINOR（中文）：兼容新增有来源支持的作者成果检索，并完善可复用学术报告制作流程
+
+### Highlights
+
+- Add offline, source-backed author-work inventory and optional recounting of reviewed classifications, with explicit coverage and duplicate handling.
+- Improve paper-to-PPT planning, essential-citation recovery, template reuse, scientific cover design and readable formula/example layouts. Add the 24-slide MixT report to Gallery with PPTX, PDF and representative previews.
+- Resume same-source, uncommitted paper extraction failures using validated parse bundles; improve author evidence handling, scoped-name navigation and Frontier question selection without changing Agent/API control boundaries.
+
+### 主要更新
+
+- 新增离线、可回溯来源的作者成果检索及已审阅分类复算，明确覆盖范围与重复版本处理。
+- 完善论文到PPT的主线规划、关键引文接续、模板复用、科学封面及公式实例排版；Gallery新增24页MixT报告，提供PPTX、PDF与代表页预览。
+- 论文提取失败支持校验同源未提交事务与解析包后接续；改进作者证据、限定名称导航和Frontier问题选择，保持Agent/API控制边界。
+
 ## [0.29.0] - 2026-11-18
 
 ### Version decision / 版本判断
@@ -962,5 +981,7 @@ manifests and checksums.
 
 [0.28.2]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.28.2
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.29.0...HEAD
 [0.29.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.29.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.30.0

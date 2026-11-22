@@ -9,13 +9,13 @@ Explore recent ASKS creations and the capabilities behind them. Select a preview
 
 <table>
 <tr>
+<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/mixt-academic-talk/index.html"><img src="gallery/works/mixt-academic-talk/cover.webp" width="280" alt="MixT: Tensor-Structured Compression for Efficient LLMs"></a></td>
 <td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/presentation-assets/index.html"><img src="gallery/works/presentation-assets/cover.webp" width="280" alt="PPT Asset Library"></a></td>
-<td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/layer-edelstein-academic-talk/index.html"><img src="gallery/works/layer-edelstein-academic-talk/cover.webp" width="280" alt="Layer Edelstein Effect"></a></td>
 <td width="33%" align="center" valign="middle"><a href="https://ranshiju.github.io/Ran-ASKS/works/asks-introduction/index.html"><img src="gallery/works/asks-introduction/cover.webp" width="280" alt="Introducing ASKS"></a></td>
 </tr>
 <tr>
+<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/mixt-academic-talk/index.html"><strong>MixT: Tensor-Structured Compression for Efficient LLMs</strong></a><br><sub title="Date added">2026-11-22</sub></td>
 <td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/presentation-assets/index.html"><strong>PPT Asset Library</strong></a><br><sub title="Date added">2026-11-14</sub></td>
-<td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/layer-edelstein-academic-talk/index.html"><strong>Layer Edelstein Effect</strong></a><br><sub title="Date added">2026-11-05</sub></td>
 <td align="center"><a href="https://ranshiju.github.io/Ran-ASKS/works/asks-introduction/index.html"><strong>Introducing ASKS</strong></a><br><sub title="Date added">2026-11-03</sub></td>
 </tr>
 </table>
@@ -68,7 +68,27 @@ be approximate; factual answers return to version-bound source evidence.
 These surfaces guide later work while factual use returns to source-addressed
 evidence.*
 
-## Recent updates: v0.29.0
+## Recent updates: v0.30.0
+
+Author-work inventory now has a shared, offline `wg.py author-works` entry point.
+It combines registered author identities, author links and source-backed metadata,
+reports coverage and duplicate candidates, and can recount a reviewed classification.
+Candidate counts are not automatically claimed as an author's publication total.
+See [Author works](operations/AUTHOR_WORKS.md).
+
+Paper-to-PPT work follows the paper's argument, identifies essential citation gaps,
+and reuses slide-library components or existing reports before adapting layouts.
+Cover design connects a scientific memory cue with appropriately sourced imagery;
+formulas, examples, citations and reading order receive explicit attention.
+[MixT's 24-slide report](gallery/works/mixt-academic-talk/README.md) is now in the
+Gallery with PDF, editable PPTX and six representative previews.
+
+Paper extraction can resume an uncommitted failure with the same source and validated
+parse bundle. Bibliographic author evidence and Frontier question extraction handle
+more source layouts, while scoped names keep their qualifiers during navigation.
+These are compatible additions and fixes; existing Agent/API and evidence boundaries remain.
+
+### Previously available: v0.29.0
 
 Repair and optimization work now has a repository-owned engineering workspace:
 current issues, key attempts, scoped memories and evidence remain available across

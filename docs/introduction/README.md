@@ -12,7 +12,20 @@ text coverage and rendering. Earlier releases retained the original Word layout
 and appended updates; those statements below describe their historical editions.
 The repository does not rely on GitHub's PDF previewer.
 
-## Current edition: v0.29.0 / 当前版本
+## Current edition: v0.30.0 / 当前版本
+
+The 2026-11-22 compatible MINOR release adds offline author-work inventory and
+reviewed recounting, strengthens paper-to-PPT narrative, citation and cover design,
+and exhibits the 24-slide MixT report. Same-source extraction recovery and source
+identity fixes preserve the existing control and evidence boundaries. This edition's
+Markdown and PDF describe those changes; individual results do not establish universal
+quality or cost improvements. Private author inventories and project records stay local.
+
+2026年11月22日的v0.30.0兼容新增作者成果检索与已审阅分类复算，完善论文到PPT的
+叙事、引文、模板与封面制作，并加入MixT报告Gallery作品。论文解析接续和身份导航
+修复保持原有边界；正文与PDF同步更新，个人成果清单与制作记录不公开。
+
+## Previous edition: v0.29.0 / 历史版本
 
 The 2026-11-18 compatible MINOR release adds engineering work contexts with
 bounded item/memory recovery and managed key-history updates. It also improves

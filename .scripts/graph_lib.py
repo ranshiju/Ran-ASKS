@@ -178,7 +178,7 @@ def traversal_families(profile="", families=None, contract=None):
 # 管道版本号：影响 wiki/图边输出的建设变更才 bump。
 # 纯改名/重构不 bump；skeleton 模板/建边逻辑/prompt 调整等影响已入库内容的 bump。
 # re_ingest --outdated 据此判断哪些论文需重新摄入。
-CURRENT_PIPELINE_VERSION = 19
+CURRENT_PIPELINE_VERSION = 20
 
 RAW_DOCUMENT_SUFFIXES = {
     ".md", ".txt", ".pdf", ".doc", ".docx", ".ppt", ".pptx",
@@ -991,6 +991,12 @@ def decompose_name_to_aliases(name):
     使 resolver 输入任一形态（缩写/英文全称/中文）都能命中同一节点。
     """
     s = name.strip()
+    # 非缩写括号可能限定模型、版本或适用范围；丢弃它会把专名降成通用概念。
+    # 只保留既有显式缩写语法，其他括号名称由完整名称或经确认的 alias 对齐。
+    parentheticals = re.findall(r'[(（]([^()（）]*)[)）]', s)
+    if any(not re.fullmatch(r'[A-Z]{2,}[A-Za-z0-9\-]*', part)
+           for part in parentheticals):
+        return []
     out = []
     # 缩写：括号内 ≥2 连续大写字母
     m = re.search(r'[(（]([A-Z]{2,}[A-Za-z0-9\-]*)[)）]', s)

@@ -1,173 +1,183 @@
 {
-  "manifest_sha256": "475e0f2901a84df7c78ad1bd594e79be5222b03a783598535b84bf29a8a9b198",
-  "payload_sha256": "5b4e87061a57dd945dd52b44033107a1bae686735f13e904e204062106ecaecf",
+  "manifest_sha256": "d16cad2396b5ba1c3f8dec8ddcef04431460a3e481aa932d32818e70c1a0da9e",
+  "payload_sha256": "44b2fe0fd83c9ebd3a8b15ac5527f6fd0666661e6351b0106bbda10a91cfd2f7",
   "pdf_render_health": {
     "docs/introduction/ASKS-Chinese-Introduction-2026-09-03.pdf": {
-      "page_count": 31,
+      "page_count": 33,
       "pages": [
         {
-          "ink_pixels": 19896,
+          "ink_pixels": 20982,
           "page": 1,
-          "text_chars": 594
+          "text_chars": 593
         },
         {
-          "ink_pixels": 21428,
+          "ink_pixels": 23312,
           "page": 2,
-          "text_chars": 948
+          "text_chars": 946
         },
         {
-          "ink_pixels": 19362,
+          "ink_pixels": 21699,
           "page": 3,
           "text_chars": 811
         },
         {
-          "ink_pixels": 21449,
+          "ink_pixels": 19013,
           "page": 4,
-          "text_chars": 862
+          "text_chars": 710
         },
         {
-          "ink_pixels": 22543,
+          "ink_pixels": 24895,
           "page": 5,
-          "text_chars": 981
+          "text_chars": 963
         },
         {
-          "ink_pixels": 21794,
+          "ink_pixels": 24070,
           "page": 6,
-          "text_chars": 966
+          "text_chars": 952
         },
         {
-          "ink_pixels": 19894,
+          "ink_pixels": 21415,
           "page": 7,
-          "text_chars": 859
+          "text_chars": 852
         },
         {
-          "ink_pixels": 23098,
+          "ink_pixels": 23280,
           "page": 8,
-          "text_chars": 739
+          "text_chars": 901
         },
         {
-          "ink_pixels": 24641,
+          "ink_pixels": 20298,
           "page": 9,
-          "text_chars": 1076
+          "text_chars": 801
         },
         {
-          "ink_pixels": 25397,
+          "ink_pixels": 23451,
           "page": 10,
-          "text_chars": 1226
+          "text_chars": 757
         },
         {
-          "ink_pixels": 17493,
+          "ink_pixels": 28475,
           "page": 11,
-          "text_chars": 947
+          "text_chars": 778
         },
         {
-          "ink_pixels": 21476,
+          "ink_pixels": 18958,
           "page": 12,
-          "text_chars": 1010
+          "text_chars": 1368
         },
         {
-          "ink_pixels": 20682,
+          "ink_pixels": 18213,
           "page": 13,
-          "text_chars": 1013
+          "text_chars": 749
         },
         {
-          "ink_pixels": 19380,
+          "ink_pixels": 22809,
           "page": 14,
-          "text_chars": 912
+          "text_chars": 953
         },
         {
-          "ink_pixels": 19089,
+          "ink_pixels": 23702,
           "page": 15,
+          "text_chars": 1064
+        },
+        {
+          "ink_pixels": 24506,
+          "page": 16,
+          "text_chars": 946
+        },
+        {
+          "ink_pixels": 23697,
+          "page": 17,
+          "text_chars": 1058
+        },
+        {
+          "ink_pixels": 20481,
+          "page": 18,
+          "text_chars": 849
+        },
+        {
+          "ink_pixels": 24158,
+          "page": 19,
+          "text_chars": 1119
+        },
+        {
+          "ink_pixels": 23542,
+          "page": 20,
+          "text_chars": 1009
+        },
+        {
+          "ink_pixels": 22672,
+          "page": 21,
+          "text_chars": 975
+        },
+        {
+          "ink_pixels": 24141,
+          "page": 22,
+          "text_chars": 1028
+        },
+        {
+          "ink_pixels": 22218,
+          "page": 23,
           "text_chars": 879
         },
         {
-          "ink_pixels": 19905,
-          "page": 16,
-          "text_chars": 981
-        },
-        {
-          "ink_pixels": 21457,
-          "page": 17,
-          "text_chars": 1073
-        },
-        {
-          "ink_pixels": 20511,
-          "page": 18,
-          "text_chars": 988
-        },
-        {
-          "ink_pixels": 23793,
-          "page": 19,
-          "text_chars": 1179
-        },
-        {
-          "ink_pixels": 22961,
-          "page": 20,
-          "text_chars": 1049
-        },
-        {
-          "ink_pixels": 20408,
-          "page": 21,
-          "text_chars": 929
-        },
-        {
-          "ink_pixels": 20169,
-          "page": 22,
-          "text_chars": 955
-        },
-        {
-          "ink_pixels": 20380,
-          "page": 23,
-          "text_chars": 920
-        },
-        {
-          "ink_pixels": 23083,
+          "ink_pixels": 22609,
           "page": 24,
-          "text_chars": 1015
+          "text_chars": 963
         },
         {
-          "ink_pixels": 23932,
+          "ink_pixels": 23150,
           "page": 25,
-          "text_chars": 1161
+          "text_chars": 907
         },
         {
-          "ink_pixels": 24703,
+          "ink_pixels": 21952,
           "page": 26,
+          "text_chars": 895
+        },
+        {
+          "ink_pixels": 26549,
+          "page": 27,
+          "text_chars": 1157
+        },
+        {
+          "ink_pixels": 27102,
+          "page": 28,
           "text_chars": 1099
         },
         {
-          "ink_pixels": 22905,
-          "page": 27,
-          "text_chars": 1026
-        },
-        {
-          "ink_pixels": 23222,
-          "page": 28,
-          "text_chars": 1054
-        },
-        {
-          "ink_pixels": 24081,
+          "ink_pixels": 25250,
           "page": 29,
-          "text_chars": 1072
+          "text_chars": 1022
         },
         {
-          "ink_pixels": 22165,
+          "ink_pixels": 23007,
           "page": 30,
-          "text_chars": 986
+          "text_chars": 952
         },
         {
-          "ink_pixels": 17416,
+          "ink_pixels": 25600,
           "page": 31,
-          "text_chars": 888
+          "text_chars": 1003
+        },
+        {
+          "ink_pixels": 24974,
+          "page": 32,
+          "text_chars": 1018
+        },
+        {
+          "ink_pixels": 23098,
+          "page": 33,
+          "text_chars": 1033
         }
       ]
     }
   },
   "schema": "wikigraph-public-release-provenance-v1",
   "source": {
-    "commit": "1fd807a9550e99a40581eb619aab935f63d4e143",
+    "commit": "bf6ffd3ade02df8679db0b8db868c5330d810d2b",
     "mode": "committed",
-    "tree": "ea2e9921081b0fecc8fab9c7b3d0e7ff98ffe207"
+    "tree": "cfa0d7507252c815ebc9990e751227f5e5fbc08d"
   },
-  "version": "0.29.0"
+  "version": "0.30.0"
 }

@@ -65,7 +65,7 @@
 
 维护摘要保留人物 `pending_total`、`auto_built` 的创建/跳过冲突/剩余计数，以及 Hub 的 `backlog_count`、`split_backlog_count`；`pending_total` 是本轮自动建页前的候选数，当前剩余以 `auto_built.remaining` 为准。`maintenance.status=completed` 只表示维护执行完成，不表示待审积压清零；交付时分别报告文件终态、维护终态与非零待审项，完整候选仍按报告/回执地址定向读取，不因积压覆盖文件成功状态。
 
-Hub 的 `backlog_count/split_backlog_count` 是未达到创建或稳定分裂门槛的观察候选数，不是等待 Agent 执行的任务数；只有达标候选及 `actions` 才是待审交接。`hubs.status=no_action` 时不能把观察计数表述为待审分裂，也不为清零而强行拆分；用户明确要求检查时，可按 `split-plan` 展示 `no_split` 及原因，保持原闸与成员不变。
+Hub 的 `backlog_count/split_backlog_count` 是未达到创建或稳定分裂门槛的观察候选数，不是等待 Agent 执行的任务数；紧凑回执以 `backlog_kind=observation_only` 明示该含义，并在 `no_action` 时将缺省的 `eligible_count/split_count/redistribution_count/route_review_count` 显示为 0；`error/deferred` 等其他状态不把未知计数补零。只有达标候选及 `actions` 才是待审交接。`hubs.status=no_action` 时不能把观察计数表述为待审分裂，也不为清零而强行拆分；用户明确要求检查时，可按 `split-plan` 展示 `no_split` 及原因，保持原闸与成员不变。
 
 首次摄入与直接 resume 使用共享报告发布入口，把维护回执及报告地址关联到本批所有已完成事务。历史报告缺少关联，或 Hub 分裂成功后回执尚未闭合时，运行 `python3 .scripts/ingest_inbox.py --reconcile-maintenance-report cross-domain/ingest-reports/<report>.json`：仅重建指定报告的关联、重放已有方向裁决，并只读核验分裂父 Hub 的 canonical 直接子 Hub、既有 split Scope history 与原候选成员迁移。每个原簇须完整迁入不同子 Hub，且不再保留父 membership，才标记对应 handoff 已应用并更新 split_count；已有子 Hub、手写 resolution 或数量变化本身不能证明完成。不重新摄入、不调用模型、不写 Raw 或图。 重分配待办通过当前 canonical 父/直接子 family、原候选子 Hub 仍存在及父成员数不超过配置上限核验后标记 `resolved/canonical_family_no_longer_overloaded`；它证明当前容量问题闭合，不冒充历史迁移执行回执。独立质量告警和其他待审动作继续保留，缺图或无可验证候选时保留待审。
 

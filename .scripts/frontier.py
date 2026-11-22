@@ -106,14 +106,33 @@ ENUMERATION_CUE = re.compile(
 )
 
 
-def explicit_question_units(text: str) -> list[str]:
+def _is_section_roadmap(text: str) -> bool:
+    """Recognize explicit section navigation, not substantive future proposals."""
+    section = r"(?:§\s*\d+|sections?\s+\d+(?:\.\d+)*)"
+    return bool(
+        re.search(section, text, re.I)
+        and re.match(
+            rf"^(?:we\s+(?:(?:then|finally)\s+)?conclude\b|"
+            rf"(?:in\s+)?{section}[,:]?\s+(?:we\s+)?"
+            r"(?:discuss(?:es)?|present(?:s)?|outline(?:s)?|summariz(?:e|es))\b)",
+            text, re.I,
+        )
+        and not re.search(
+            r"[?？]|\b(?:whether|why|how|conjecture|propose|investigate|determine)\b",
+            text, re.I,
+        )
+    )
+
+
+def explicit_question_units(text: str, *, question_list: bool = False) -> list[str]:
     """把一行 future-work/limitation 段确定性拆成独立问题单元。"""
     compact = re.sub(r"\s+", " ", text.strip())
     future_expectation = bool(AUTHOR_EXPECTATION_CUES.search(compact) and (
         FUTURE_CONTEXT_CUES.search(compact) or FUTURE_IMPROVEMENT_CUES.search(compact)
     ))
     if not (QUESTION_CUES.search(compact) or CONJECTURE_CUES.search(compact)
-            or RESEARCH_INTENT_CUES.search(compact) or future_expectation):
+            or RESEARCH_INTENT_CUES.search(compact) or future_expectation
+            or (question_list and re.search(r"[?？]", compact))):
         return []
     parts = re.split(
         r"(?<=[.!?。！？])\s+(?=[A-Z0-9一二三四五六七八九十])|"
@@ -127,6 +146,8 @@ def explicit_question_units(text: str) -> list[str]:
         part = part.strip()
         if not part:
             continue
+        if _is_section_roadmap(ENUMERATION_CUE.sub("", part).strip()):
+            continue
         if FUTURE_CONTEXT_CUES.search(part):
             in_future_scope = True
         if CURRENT_WORK_CUES.search(part) and (
@@ -136,7 +157,7 @@ def explicit_question_units(text: str) -> list[str]:
         future_expectation = bool(AUTHOR_EXPECTATION_CUES.search(part) and (
             in_future_scope or FUTURE_IMPROVEMENT_CUES.search(part)
         ))
-        has_cue = bool(QUESTION_CUES.search(part) or (
+        has_cue = bool((question_list and re.search(r"[?？]", part)) or QUESTION_CUES.search(part) or (
             (CONJECTURE_CUES.search(part) or (
                 RESEARCH_INTENT_CUES.search(part) and in_future_scope
             ) or future_expectation) and not RESOLVED_CONJECTURE_CUES.search(part)
@@ -1243,7 +1264,7 @@ def related_question_candidates(records: dict, page: str, page_text: str,
     }
 
 
-def paper_prose_lines(text: str) -> Iterator[tuple[int, str]]:
+def paper_prose_lines(text: str, *, include_headings: bool = False) -> Iterator[tuple[int, str]]:
     in_references = False
     for line_no, line in enumerate(text.splitlines(), 1):
         stripped = re.sub(r"\s+", " ", line.strip())
@@ -1252,6 +1273,8 @@ def paper_prose_lines(text: str) -> Iterator[tuple[int, str]]:
             stripped, re.I,
         ):
             in_references = True
+            if include_headings:
+                yield line_no, stripped
             continue
         if in_references and re.match(
             r"^(?:#{1,6}\s+|(?:end\s+matter|appendix|appendices|"
@@ -1259,10 +1282,57 @@ def paper_prose_lines(text: str) -> Iterator[tuple[int, str]]:
             stripped, re.I,
         ):
             in_references = False
+        # Headings delimit sections; they are not research-question statements.
+        # Apply this after the reference boundary transition so an Appendix
+        # heading can still restore prose capture without becoming a candidate.
+        if re.match(r"^#{1,6}(?:\s|$)", stripped):
+            if include_headings:
+                yield line_no, stripped
+            continue
         if re.match(r"^\[\d+\]\s+(?:[A-ZÀ-ÖØ-Þ]\.\s*){1,4}[A-ZÀ-ÖØ-Þ][\w’'´-]*", stripped):
             in_references = True
         if not in_references:
             yield line_no, stripped
+
+
+def paper_question_units(text: str) -> Iterator[tuple[int, str]]:
+    """Read explicit question lists within an unresolved/future section or intro."""
+    question_list = False
+    future_section = False
+    for line_no, line in paper_prose_lines(text, include_headings=True):
+        if re.fullmatch(
+            r"(?:#{1,6}\s+)?(?:references(?:\s+and\s+notes)?|bibliography|参考文献)\s*[:：]?",
+            line, re.I,
+        ):
+            question_list = future_section = False
+            continue
+        heading = re.match(r"^#{1,6}(?:\s|$)", line)
+        unresolved_intro = bool(re.search(
+            r"\b(?:left with (?:the )?following questions|"
+            r"following (?:open|unresolved|remaining) questions|"
+            r"(?:open|unresolved|remaining) (?:research )?questions)\b|"
+            r"尚未解决的问题|以下未解决问题|开放问题", line, re.I,
+        )) and not re.search(r"\b(?:answer|resolve|address)(?:s|d|ed)?\b|已解决", line, re.I)
+        if heading:
+            future_section = unresolved_intro or bool(re.search(
+                r"\bfuture (?:work|research|directions)\b|未来工作|未来研究|未来方向",
+                line, re.I,
+            ))
+            question_list = False
+            continue
+        if re.search(r"(?:questions|问题)\s*[:：]$", line, re.I):
+            question_list = unresolved_intro
+            continue
+        if not line or re.match(r"^!\[|^(?:Figure|Fig\.|Table)\s*\d+\b", line, re.I):
+            continue
+        marker = re.match(r"^(?:\\?[-*+]\s+|(?:\d+[.)]|\[\d+\])\s+)", line)
+        listed_question = bool((question_list or future_section) and marker and re.search(r"[?？]", line))
+        if not listed_question:
+            question_list = False
+        content = line[marker.end():] if listed_question else line
+        if 18 <= len(content) <= 4000:
+            for unit in explicit_question_units(content, question_list=listed_question):
+                yield line_no, unit
 
 
 def extract_paper_candidates(root: Path, page: str, limit: int = 3) -> dict:
@@ -1296,42 +1366,35 @@ def extract_paper_candidates(root: Path, page: str, limit: int = 3) -> dict:
         }, *(record.get("source_mentions") or [])]
     }
     captured, reused = [], []
-    reached_limit = False
-    for line_no, stripped_line in paper_prose_lines(raw_path.read_text(encoding="utf-8", errors="replace")):
-        if not 18 <= len(stripped_line) <= 4000:
+    for line_no, stripped in paper_question_units(raw_path.read_text(encoding="utf-8", errors="replace")):
+        locator = f"{raw_rel}#L{line_no}"
+        key = (page_rel, locator, normalize_text(stripped))
+        if key in existing_keys:
             continue
-        for stripped in explicit_question_units(stripped_line):
-            locator = f"{raw_rel}#L{line_no}"
-            key = (page_rel, locator, normalize_text(stripped))
-            if key in existing_keys:
-                continue
-            exact = [rec for rec, _, _ in existing.values()
-                     if rec.get("kind") in {"question", "intake", "thread"}
-                     and normalize_text(rec.get("question", "")) == normalize_text(stripped)]
-            if len(exact) == 1:
-                question = exact[0]
-                mention = {"text": stripped, "page": page_rel, "locator": locator}
-                if mention not in question.setdefault("source_mentions", []):
-                    question["source_mentions"].append(mention)
-                _merge_unique(question.setdefault("anchors", {}).setdefault("raw", []), [locator])
-                _merge_unique(question["anchors"].setdefault("wiki", []), [page_rel])
-                question["possibly_stale"] = True
-                question["updated_at"] = now_iso()
-                write_record(root, question)
-                reused.append(question["id"])
-                existing_keys.add(key)
-            else:
-                packet = {"anchors": {"raw": [locator], "wiki": [page_rel], "graph": []}, "candidates": [], "duplicate_candidates": [], "coverage": "论文作者明示候选；尚未评估当前科学状态。"}
-                question = new_question(stripped, "paper_explicit", packet, page_rel, locator)
-                question["value_reason"] = "论文作者明示的开放问题、局限或 future work，待审查其研究价值。"
-                write_record(root, question)
-                captured.append(question["id"])
-                existing[question["id"]] = (question, "", record_path(root, "question", question["id"]))
-                existing_keys.add(key)
-            if len(captured) + len(reused) >= max(1, min(limit, 5)):
-                reached_limit = True
-                break
-        if reached_limit:
+        exact = [rec for rec, _, _ in existing.values()
+                 if rec.get("kind") in {"question", "intake", "thread"}
+                 and normalize_text(rec.get("question", "")) == normalize_text(stripped)]
+        if len(exact) == 1:
+            question = exact[0]
+            mention = {"text": stripped, "page": page_rel, "locator": locator}
+            if mention not in question.setdefault("source_mentions", []):
+                question["source_mentions"].append(mention)
+            _merge_unique(question.setdefault("anchors", {}).setdefault("raw", []), [locator])
+            _merge_unique(question["anchors"].setdefault("wiki", []), [page_rel])
+            question["possibly_stale"] = True
+            question["updated_at"] = now_iso()
+            write_record(root, question)
+            reused.append(question["id"])
+            existing_keys.add(key)
+        else:
+            packet = {"anchors": {"raw": [locator], "wiki": [page_rel], "graph": []}, "candidates": [], "duplicate_candidates": [], "coverage": "论文作者明示候选；尚未评估当前科学状态。"}
+            question = new_question(stripped, "paper_explicit", packet, page_rel, locator)
+            question["value_reason"] = "论文作者明示的开放问题、局限或 future work，待审查其研究价值。"
+            write_record(root, question)
+            captured.append(question["id"])
+            existing[question["id"]] = (question, "", record_path(root, "question", question["id"]))
+            existing_keys.add(key)
+        if len(captured) + len(reused) >= max(1, min(limit, 5)):
             break
     targets = {page_rel, raw_rel}
     rel_text, _ = qa.graph_relations(page_rel)

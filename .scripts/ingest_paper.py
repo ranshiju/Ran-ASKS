@@ -103,7 +103,7 @@ BIBLIOGRAPHIC_VALIDATOR_VERSION = "bibliographic-review-validator-v4"
 WIKI_VALIDATOR_VERSION = "paper-wiki-validator-v2"
 SEMANTIC_VALIDATOR_VERSION = "paper-semantic-validator-v3"
 GRAPH_PREFLIGHT_VALIDATOR_VERSION = "graph-plan-preflight-v2"
-BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v11"
+BIBLIOGRAPHIC_CANDIDATE_PROVIDER_VERSION = "bibliographic-candidate-provider-v12"
 API_WORKSPACE_OPERATION = "ingest_paper_workspace"
 PAPER_CLAIM_QUALIFICATION_RULES = (
     "保留原文的作者归属、推测/预期/已证语气、否定和适用条件；来源明确的猜想与不确定结论有价值，按其原有贡献、限制或展望角色保留完整命题，不升级为已证事实。",
@@ -1786,7 +1786,14 @@ def _repeated_title_authors(md_text: str) -> list[str]:
                     r"\b(?:To cite this article|RECEIVED|REVISED|ACCEPTED|PUBLISHED)\b",
                     author_line, re.I):
                 break
-            author_line = re.sub(r"<sup\b[^>]*>.*?</sup>", "", author_line, flags=re.I)
+            # A merged author/affiliation row cannot establish a complete author
+            # list. Keep source-bound review responsible for that ambiguous row;
+            # do not turn institution fragments into mandatory person names.
+            if "@" in author_line or AFFILIATION_HINT_RE.search(author_line):
+                break
+            # Superscript markers also delimit names when extraction loses a
+            # comma or a line break. Erasing them would concatenate two people.
+            author_line = re.sub(r"<sup\b[^>]*>.*?</sup>", ", ", author_line, flags=re.I)
             authors = []
             for value in re.split(r",\s*|\s+and\s+", author_line):
                 value = " ".join(value.split()).strip(" ,")
@@ -2323,7 +2330,9 @@ def agent_bibliographic_decision_schema(value) -> bool:
     return not agent_bibliographic_schema_errors(value)
 
 
-def _direct_evidence_text(evidence: dict, evidence_sources: dict[str, str]) -> tuple[str, str]:
+def _direct_evidence_text(
+    evidence: dict, evidence_sources: dict[str, str], *, field: str = "",
+) -> tuple[str, str]:
     source = str(evidence.get("source") or "").strip()
     locator = str(evidence.get("locator") or "").strip()
     quote = str(evidence.get("quote") or "").strip()
@@ -2337,8 +2346,11 @@ def _direct_evidence_text(evidence: dict, evidence_sources: dict[str, str]) -> t
     start = int(match.group(1))
     end = int(match.group(2) or start)
     lines = evidence_sources[source].splitlines()
-    if start < 1 or end < start or end > len(lines) or end - start + 1 > 12:
-        raise ValueError(f"书目证据 locator 越界或超过 12 行: {source}#{locator}")
+    # PDF title pages often interleave each author with affiliation/email lines.
+    # Keep the complete list in one source-bound quote without relaxing other fields.
+    max_lines = 40 if field == "authors" else 12
+    if start < 1 or end < start or end > len(lines) or end - start + 1 > max_lines:
+        raise ValueError(f"书目证据 locator 越界或超过 {max_lines} 行: {source}#{locator}")
     window = "\n".join(lines[start - 1:end])
     if not quote or " ".join(quote.split()) not in " ".join(window.split()):
         raise ValueError(f"书目证据 quote 未逐字出现在 locator 窗口: {source}#{locator}")
@@ -2400,7 +2412,7 @@ def compile_agent_bibliographic_decision(
         item = decision["bibliographic"][field]
         value = item["value"]
         try:
-            locator, quote = _direct_evidence_text(item["evidence"], evidence_sources)
+            locator, quote = _direct_evidence_text(item["evidence"], evidence_sources, field=field)
         except ValueError as exc:
             errors.append(f"{field}: {exc}")
             continue
@@ -4101,6 +4113,9 @@ def step_extract(state: dict, *, reuse_verified_extraction: bool = False) -> tup
     extract_dir = TEMP_EXTRACT / txn
     extract_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = (REPO / state["source"]).resolve()
+    telemetry = state.setdefault("telemetry", {})
+    if "source_hash" not in telemetry:
+        telemetry["source_hash"] = _file_sha256(pdf_path)
     if reuse_verified_extraction:
         local_pdf = extract_dir / "paper.pdf"
         if (not pdf_path.is_file() or not local_pdf.is_file() or _file_sha256(pdf_path) != _file_sha256(local_pdf)
@@ -4110,6 +4125,9 @@ def step_extract(state: dict, *, reuse_verified_extraction: bool = False) -> tup
     def reusable_extraction() -> bool:
         if reuse_verified_extraction:
             return True
+        if (state.get("artifact_bundle_sha256")
+                and _current_artifact_bundle_sha256(extract_dir) != state["artifact_bundle_sha256"]):
+            raise ValueError("已锁定提取文档包发生变化，须核验暂存包")
         paper_md_path = extract_dir / "paper.md"
         local_pdf = extract_dir / "paper.pdf"
         meta_path = extract_dir / "parse_meta.yaml"
@@ -4120,7 +4138,7 @@ def step_extract(state: dict, *, reuse_verified_extraction: bool = False) -> tup
             from paddleocr_api import is_official_paddleocr_record
             preferred = meta.get("preferred")
             record = ((meta.get("engines") or {}).get(preferred) or {})
-            return (
+            matches = (
                 (preferred == "mineru" or (
                     preferred == "paddleocr" and is_official_paddleocr_record(record)))
                 and record.get("input_sha256") == _file_sha256(pdf_path)
@@ -4128,6 +4146,14 @@ def step_extract(state: dict, *, reuse_verified_extraction: bool = False) -> tup
             )
         except (OSError, ValueError, TypeError, yaml.YAMLError):
             return False
+        if matches:
+            # Do not silently discard or bless a damaged completed bundle on resume.
+            from extractor import _referenced_document_images
+            _referenced_document_images(paper_md_path.read_text(encoding="utf-8"), extract_dir)
+            sidecar = extract_dir / sl.companion_sidecar_name(local_pdf.name)
+            if sidecar.exists() and sl.companion_binding_status(local_pdf, paper_md_path)["status"] != "valid":
+                raise ValueError("提取缓存的 companion binding 已变化，须核验暂存包")
+        return matches
 
     with ic.ingest_span(state, "pdf_extraction") as extraction_span:
         extraction_span["cache_hit"] = reusable_extraction()
@@ -4143,7 +4169,15 @@ def step_extract(state: dict, *, reuse_verified_extraction: bool = False) -> tup
                        "--paper", txn, "--papers-dir", "temp/inbox-extract"]
             if not pdf_path.is_relative_to((REPO / "private").resolve()):
                 command.append("--allow-paddleocr")
-            run(command)
+            try:
+                run(command)
+            except (RuntimeError, OSError):
+                state["resume_from"] = "extract"
+                state["next_action"] = "inspect_extraction_then_resume"
+                raise
+    if state.get("resume_from") == "extract":
+        state.pop("resume_from", None)
+        state.pop("next_action", None)
     paper_md = extract_dir / "paper.md"
     if not paper_md.is_file():
         return False, "提取未生成 paper.md"
@@ -7661,6 +7695,57 @@ def step_finalize_tail(state: dict) -> tuple[bool, str]:
 
 # ===== 主编排循环 =====
 
+def _resume_failed_extraction(state: dict) -> bool:
+    """Reopen only an uncommitted extraction failure for the same inbox bytes."""
+    if state.get("status") != "failed":
+        return False
+    telemetry = state.get("telemetry") or {}
+    events = telemetry.get("events") or []
+    spans = telemetry.get("step_spans") or []
+    legacy_failure = (
+        not state.get("resume_from")
+        and bool(events) and events[-1].get("from") == "extract"
+        and events[-1].get("to") == "failed"
+        and len(spans) >= 2
+        and [s.get("name") for s in spans[-2:]] == ["pdf_extraction", "step_extract"]
+        and all(s.get("outcome") == "exception" for s in spans[-2:])
+    )
+    if state.get("resume_from") != "extract" and not legacy_failure:
+        return False
+    state["resume_from"] = "extract"  # Retain recognized legacy stage across a blocked retry.
+    try:
+        if any(state.get(key) for key in (
+                "from_raw", "reingest", "raw_dir", "receipt_path", "graph_report",
+                "agent_workspace", "committed")):
+            raise ValueError("事务已有下游产物或提交状态，不能重开提取")
+        txn = str(state.get("transaction_id") or "")
+        if not txn or Path(txn).name != txn:
+            raise ValueError("提取恢复事务 ID 非法")
+        source = REPO / str(state.get("source") or "")
+        resolved = source.resolve()
+        if (source.is_symlink() or not resolved.is_relative_to(REPO.resolve() / "inbox")
+                or not resolved.is_file() or resolved.suffix.lower() != ".pdf"):
+            raise ValueError("提取恢复需要原公开 inbox PDF，来源缺失或越界")
+        expected = telemetry.get("source_hash")
+        if not expected or _file_sha256(resolved) != expected:
+            raise ValueError("提取恢复前原件哈希缺失或变化，须核验来源")
+        extract_dir = TEMP_EXTRACT / txn
+        if extract_dir.is_symlink() or not extract_dir.resolve().is_relative_to(TEMP_EXTRACT.resolve()):
+            raise ValueError("提取恢复目录越界")
+    except (OSError, ValueError) as exc:
+        state["resume_blocked"] = "extraction_source_or_stage_changed"
+        state["next_action"] = "inspect_extraction_source_and_state"
+        state["errors"] = [str(exc)]
+        inbox_state.save(state["transaction_id"], state)
+        return False
+    inbox_state.transition(state, "extract", reason="same_source_extraction_resume")
+    state["errors"] = []
+    for key in ("resume_blocked", "retryable", "next_action"):
+        state.pop(key, None)
+    inbox_state.save(state["transaction_id"], state)
+    return True
+
+
 def run_prepare(state: dict) -> dict:
     """Phase 1：3.1→3.6b→落位→graph_ready。不写图。
 
@@ -7670,6 +7755,8 @@ def run_prepare(state: dict) -> dict:
     """
     rp.ensure_state(state, PAPER_RECOVERY_LIMITS)
     state.setdefault("pipeline_script", "ingest_paper.py")
+    if state.get("status") == "failed" and not _resume_failed_extraction(state):
+        return state
     bibliography = state.get("bibliographic_meta") or {}
     local_receipt = bibliography.get("local_lookup_receipt") or {}
     resume_local = (

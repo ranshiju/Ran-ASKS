@@ -814,6 +814,17 @@ def cmd_science_exhibit(args):
                     error=result.get("error", error.strip())[:500] if failed else "")
 
 
+def cmd_author_works(args):
+    code, output, error = run_script([sys.executable, str(SCRIPTS / "author_works.py"), *args.author_args])
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        return envelope("author-works", None, status="error", error=(error or output).strip()[:500])
+    failed = code != 0 or not result.get("ok", False)
+    return envelope("author-works", result, status="error" if failed else "ok", ok=not failed,
+                    error=result.get("error", error.strip())[:500] if failed else "")
+
+
 def cmd_citing_papers(args):
     code, output, error = run_script([sys.executable, str(SCRIPTS / "citing_papers.py"), *args.citing_args])
     try:
@@ -1050,6 +1061,9 @@ def build_parser():
     p = sub.add_parser("science-exhibit", help="论文到公众科普展板：源绑定创作、局部修订与本地草稿导出")
     p.add_argument("exhibit_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_science_exhibit)
+    p = sub.add_parser("author-works", help="按作者完整枚举库内成果候选、Raw证据、重复组和分类统计")
+    p.add_argument("author_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_author_works)
     p = sub.add_parser("citing-papers", help="独立获取、保存、更新和导出指定论文的施引文献题录")
     p.add_argument("citing_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_citing_papers)

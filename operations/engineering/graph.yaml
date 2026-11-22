@@ -37,6 +37,22 @@ nodes:
     path: .scripts/citing_papers.py
     kind: script
     role: shared-reusable-citing-literature-discovery-collection-deduplication-and-provenance-export-without-semantic-models
+  author_works:
+    path: .scripts/author_works.py
+    kind: script
+    role: shared-read-only-author-work-inventory-evidence-and-explicit-coverage-statistics
+  author_works_ops:
+    path: operations/AUTHOR_WORKS.md
+    kind: spec
+    role: author-discovery-deduplication-statistics-and-raw-review-contract
+  author_works_plan:
+    path: operations/engineering/author-works-plan.md
+    kind: spec
+    role: author-statistics-implementation-and-validation-plan
+  author_works_test:
+    path: .scripts/test_author_works.py
+    kind: script
+    role: isolated-author-identity-scope-evidence-and-counting-regression
   citing_papers_ops:
     path: operations/CITING_PAPERS.md
     kind: spec
@@ -480,7 +496,7 @@ nodes:
   presentation_ops:
     path: operations/PRESENTATION.md
     kind: spec
-    role: agent-first-user-selected-paper-presentation-modes-title-page-workflow-academic-narrative-native-delivery-and-explicit-scoped-assistance-contract
+    role: agent-first-presentation-source-template-adaptation-user-file-resumption-font-intent-and-native-delivery-contract
   presentation_artwork:
     path: .scripts/presentation_artwork.py
     kind: script
@@ -520,7 +536,7 @@ nodes:
   presentation_state:
     path: .scripts/presentation_state.py
     kind: implementation
-    role: shared-presentation-versioned-state-transactions-source-snapshots-approval-lock-and-agent-task-cli
+    role: shared-presentation-versioned-state-transactions-explicit-layout-selection-source-snapshots-approval-lock-and-agent-task-cli
   presentation_render:
     path: .scripts/presentation_render.py
     kind: implementation
@@ -1297,7 +1313,7 @@ nodes:
   ingest_paper:
     path: .scripts/ingest_paper.py
     kind: implementation
-    role: weak-llm-efficient-academic-pdf-ingest-with-shared-agent-api-workspace-cross-provider-bibliography-gate-and-artifact-scoped-recovery
+    role: weak-llm-efficient-academic-pdf-ingest-with-shared-agent-api-workspace-cross-provider-bibliography-gate-and-hash-guarded-extraction-and-artifact-scoped-recovery
   ingest_paper_test:
     path: .scripts/test_ingest_paper.py
     kind: test
@@ -1505,7 +1521,7 @@ nodes:
   inbox_state:
     path: .scripts/inbox_state.py
     kind: implementation
-    role: inbox-transaction-state-persistence-with-declarative-transition-graph-hash-bound-final-receipts-read-only-operation-view-and-agent-telemetry
+    role: inbox-transaction-state-persistence-with-declared-extraction-resume-transition-hash-bound-final-receipts-read-only-operation-view-and-agent-telemetry
   source_locator:
     path: .scripts/source_locator.py
     kind: implementation
@@ -1683,6 +1699,36 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - author_works
+  - uses
+  - graph_lib
+- - author_works
+  - uses
+  - source_locator
+- - author_works
+  - uses
+  - source_ingest
+- - author_works_ops
+  - governs
+  - author_works
+- - author_works_plan
+  - documents
+  - author_works
+- - author_works
+  - tested_by
+  - author_works_test
+- - wg
+  - uses
+  - author_works
+- - function_registry_spec
+  - governs
+  - author_works
+- - query
+  - uses
+  - author_works_ops
+- - guidance
+  - documents
+  - author_works
 - - extract_abbreviations
   - uses
   - graph_lib
@@ -4437,6 +4483,12 @@ edges:
 - - presentation_ops
   - uses
   - presentation_asset_ops
+- - presentation_ops
+  - uses
+  - slide_library_ops
+- - presentation_ops
+  - uses
+  - illustration_ops
 - - wg
   - uses
   - presentation_asset
@@ -4968,6 +5020,8 @@ capabilities:
     - presentation_ops
     optional:
     - presentation_artwork
+    - illustration_ops
+    - illustration
     - presentation_runtime
     - presentation_state
     - presentation_render
@@ -4982,11 +5036,17 @@ capabilities:
     - pptx_visual
     - slide_library
     - slide_reuse
+    - slide_library_ops
     forbidden: []
     guardrails:
     - presentation/create 是当前工作上下文内按需加载的创作能力，不切换 research 等持续工作；阶段0提供运行时探测，阶段1A提供持久状态与三个受限版式的单页闭环；阶段1B提供整套原生组装和三个独立按需辅助入口；真实人机验收仍待完成。
-    - 宿主 Agent 负责语义规划、设计和用户交互；shared 程序只做机械工作，Agent 路径不导入 DSH 或隐式调用远程模型。
+    - Agent按表达任务主动考虑图文结合，先确定图要解释的关系和图文分工，再选择示意图、框图、原图等形式及素材复用、原生绘制或既有API作图路径。先查模板库，候选不足时沿已摄入PPT来源查原页；分类模板用use，Raw原页用extract后适配，保留来源。图型与工具由内容和质量效率决定，API沿已有选择/授权及公开输入边界；不以配图数量或API通过代替表达设计与用户验收。
+    - 创作接续先核对当前落盘文件和历史回执哈希，保留用户修订并比较真实段落、几何和字体；旧预览不代表新文件。按用户字体约定写入中西文字体槽并区分请求字体与实际渲染，具体字号/位置不自动推广为通用规则；不新增默认审核或批准阶段。
+    - 封面先确定一个核心记忆点及图中对象/位置/连接的科学含义，再选原图、原生示意或API位图。真实生图按需组合illustration的raster路径，有限图元API与位图生成分别说明；文字和精确关系优先原生控制。复用用户最新文件与已选素材，局部位置修订优先重排，按实际缺陷决定重生成；制作期检查核对语义与整页效果，不以API通过替代科学判断或用户接受。
+    - shared的design prepare新页保持layout_id未选择并指向创作规范，沿原validator拒绝空布局；已有设计原样接续，不自动选择模板、不新增语义判分或远程调用。
+    - 宿主 Agent 负责语义规划、设计和用户交互；思路讨论或全自动规划时，按实际内容确定重要科学问题在一页或多页的引入位置，不固定页码或顺序。学术背景建立动机与重要性，每页选定主职责；经典背景与本文结果按阅读依赖分工，核心结果先行、重复内容合并，总结回扣贡献与收益。关键文献和原图就近支撑论点，影响力指标按需核验并标来源日期，强主张明确行为与基准；准确归属相关研究，按方法实际构造概括对照，用受众熟悉概念解释本文具体推进，区分等价与结构借鉴。核心信息置于视觉主位，影响理解的条件就近说明，其余细节留备注或相关页；交付前自主修正已能判断的问题，沿用户所选制作方式推进。shared 程序只做机械工作，Agent 路径不导入 DSH 或隐式调用远程模型。
     - 单篇论文制作开始时说明并选择全自动、讨论后整套生成、讨论后逐页生成；宿主记录模式与真实授权，按所选方式推进。逐页模式一步一页并待用户接受后继续；整套模式保留制作期校验并导出待用户验收成品，生成授权与预览接受分别记录。
+    - presentation/create 从论文制作报告时，宿主先读原文并优先沿用论文论证链，再按受众和时长转为页序；提纲保留来源与必要重组理由。按页面需要优先从原论文引文定位知识库原文，关键缺口主动提示摄入；复用已有授权和受管入口，回溯 Raw 后接续原页。入库、阅读与支持状态分开记录，普通背景不阻塞，无新增 API 或自动证据核查。
     - 最终检查以用户为主；PPT形式检查、PPT引用脱敏仅用户明确指令触发，可提醒但不自动执行；PPT证据核查仅用户对具体内容有疑问时按范围执行。三项独立、默认不执行，不作为默认交付门禁；基本机械校验、来源记录与隐私边界保持。
     - 创作记录是项目派生状态，科学事实回溯 Raw；源敏感性沿派生产物继承，不因输出路径改变而放开上传。
   research:
@@ -5115,6 +5175,12 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  author_works:
+  - python3 .scripts/test_author_works.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/function_registry.py validate --runtime
+  - python3 .scripts/engineering_graph.py validate
   local_extension:
   - python3 .scripts/test_local_extension.py
   - python3 .scripts/test_wg.py
@@ -5603,6 +5669,16 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  author_works:
+    preconditions:
+    - 作者姓名或别名须唯一解析；rg预筛后核对作者字段，图边补充召回，显式source仅补已知缺口。
+    - 只读候选Raw受管文本并校验绑定；检索命中、分类提示和身份组不是发表数量。
+    writes: []
+    forbidden:
+    - 自动写Raw/Wiki/Graph、默认扫描全部Raw、调用模型、将无解析或截断隐作完整集合、按相似标题自动合并版本。
+    verify:
+    - python3 .scripts/test_author_works.py
+    - python3 .scripts/engineering_graph.py validate
   local_extension:
     preconditions:
     - shared deterministic discovery reads only explicitly installed private/extensions/<id>/extension.json; no code import during list/show and no auto installation or API controller.
@@ -6447,7 +6523,7 @@ script_contracts:
     - 单个 --file 可用 --document-type 显式选择 academic 通用文档类型；该选择覆盖基础 paper/document 初判并保留 program_file_type 与 explicit 来源审计，批量或非 academic 调用拒绝该参数
     - 全库缩写/人物/Hub 收尾只在本次至少一个文件 completed 时执行；全 classification_required/全失败/仅精确重复直接返回紧凑终态
     - 直接 paper/meeting/document resume 成功必须调用同一 maintenance 入口；DSH 在文件 completed 时仍须保留 actionable maintenance handoff
-    - maintenance 紧凑摘要保留人物 pending_total、自动建页结果计数及 Hub backlog_count/split_backlog_count；人物当前待审以 auto_built.remaining 为准，Hub backlog 是未达门槛的观察计数，待审分裂以达标候选及 actions 为准；completed 只表示维护执行完成，不表示观察候选清零；完整候选仍留在受管报告，不改变文件终态
+    - maintenance 紧凑摘要保留人物 pending_total、自动建页结果计数及 Hub backlog_count/split_backlog_count；Hub backlog 字段附 backlog_kind=observation_only，no_action 缺省的 eligible/split/redistribution/route_review_count 明示为0，其他状态不将未知计数补零；人物当前待审以 auto_built.remaining 为准，待审分裂以达标候选及 actions 为准；completed 只表示维护执行完成，不表示观察候选清零；完整候选仍留在受管报告，不改变文件终态
     - 直接 resume 成功但 inbox 仍有待处理业务文件时只返回 maintenance deferred；最后一个文件完成后才运行一次全局 maintenance
     - 缩写 resolver 只读 abbreviation backlog 限定的 token/page，以 JSON 返回自动消解与类型化 Agent 候选；occurrence 按 field 绑定 subject/object 真实端点，canonical page path subject 不进入待办，待办按 page/field/端点/token/locator 去重并原子替换
     - 缩写 review 必须在后置轻量 alias 同步完成后与当前 abbreviation-todo token 求交集，已由同步移除的 stale token 不得进入要求全覆盖的 Agent 决策批次
@@ -7438,7 +7514,7 @@ script_contracts:
     - shared 论文可靠性：机构语境不作为期刊候选；局部修复中锁定书目改变须显式拒绝；已落位workspace交接原事务resume及既有更新入口，禁止重跑归档
     - shared completed质量刷新只读当前图边界并与历史探测分开；图不可用保留原告警并明示；当前书目取受管Source，历史裁决不覆盖独立更新
     - shared unsubmitted local bibliography conflicts can resume in the same transaction after source text, PDF and staged bundle hashes are reverified; corrected sidecars clear only obsolete local conflict flags and reuse verified extraction, frozen external receipts and workspace states are not reopened by this path
-    - shared bibliographic-candidate-provider-v11 排除 References and Notes、作者形态数字引文及明确他引 arXiv，逐条留存 excluded_identifiers 原因与来源行；保留本篇 header、无原文反证元数据及原 workspace 版本刷新规则；外部回执恢复遥测分开本次 execution 与原始 source_fetch
+    - shared bibliographic-candidate-provider-v12 延续他引标识过滤；纯作者行保留sup分隔，机构/邮箱混排整行不作为机械完整作者名单，仍走逐人原文证据裁决；Agent已有输出沿agent-refresh归档刷新目录，API接管保持冻结目录及原backend并经当前validator复核；干净作者块缺人门及证据校验保持；外部回执恢复遥测分开本次execution与原始source_fetch
     - shared 新 PDF 事务先经 external_bibliography 免费正式发表查询；成功使用独立可离线复验回执并跳过两种 backend 的书目生成，未决才进入下述本地证据协议；旧在途事务和无已归档回执的 re-ingest 不隐式联网
     - shared Markdown 年份候选仅取前部发表语境、有效 arXiv 月份，拒绝正文任意四位数字；API 作者目录按完全相同姓名分组展示全部候选 ID 与证据，不据此断言人物同一或放宽 proposed 冲突门
     - api-only 校验历史绑定实际 workspace 与 Wiki/slots 内容哈希，首产物校验与各阶段首次校验分列；旧历史不追填未知哈希，不把修复后通过冒充初稿通过
@@ -7764,6 +7840,7 @@ script_contracts:
     - capture-paper 的幂等键同时覆盖既有 question 与 source_mentions 中绑定同一 page/Raw locator 的原文单元；规范化标题或补齐来源上下文不得重复捕获同一已登记单元
     - shared 论文候选识别作者显式 conjecture、未证明猜想及未来研究意向；已证明、已解决、否定或仅转述历史猜想的陈述不因包含 conjecture 自动捕获，保留原文单元与 Raw locator，不增加模型调用
     - shared 论文候选跳过有标题或作者式编号条目引出的参考文献区，End Matter/附录等正文标题后恢复；正文编号问题不当作书目。作者 expect/anticipate 须有同段未来上下文或同句进一步工程改进语境，不捕获当前工作或普通数值预期
+    - shared paper_prose_lines 先用标题更新参考文献/正文边界；paper_question_units 在未解决问题/未来方向章节内或显式未解决问题引导句后的连续列表识别问句；新章节重置，普通正文结束引导句语境，图像/题注只跳过；标题和明确章节导读不进入候选，Raw 行号、参考文献边界、原文单元及额度保持，不认证科学价值
     - api-only assessment/answer 请求传递调用方 transaction_id；独立问题使用稳定 frontier ID，摄入后置回答复用原摄入 ID，使 canonical ExecutionEvent 可按事务归集
     - 相关旧问题召回属于 shared 只读导航，以新页 title/Navigation 对已登记问题及当前回答作有界词汇匹配；返回命中词、截断信息和 Raw 核验要求，不能当作语义影响判断
     writes:

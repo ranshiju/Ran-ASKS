@@ -282,7 +282,7 @@ CAPABILITY_ROUTES = {
     },
     "presentation": {
         "create": [
-            ("operations/PRESENTATION.md", ["入口与成熟度", "单篇论文制作方式选择", "当前可执行动作", "创作边界", "局部素材按需制作与复用", "逐页制作与确认纪律", "学术论文报告的叙事与风格", "第一页（标题页）制作流程"]),
+            ("operations/PRESENTATION.md", ["入口与成熟度", "单篇论文制作方式选择", "当前可执行动作", "模板发现与页面设计选择", "创作边界", "局部素材按需制作与复用", "逐页制作与确认纪律", "学术论文报告的叙事与风格", "第一页（标题页）制作流程"]),
         ],
         "form-check": [("operations/PRESENTATION.md", ["PPT形式检查入口"])],
         "evidence-check": [("operations/PRESENTATION.md", ["PPT证据核查入口"])],

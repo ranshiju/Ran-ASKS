@@ -296,6 +296,21 @@ functions:
         manuscript-evaluation: [general]
       executor: host_agent
 
+  academic.author_works:
+    title: 作者成果检索与统计
+    summary: 离线联合作者关联、规范化姓名及Raw来源前置信息，返回有覆盖说明的成果候选、证据定位、重复组和分类计数；发表总数须核对Raw。
+    kind: function
+    audience: [user, agent]
+    control_owners: [code]
+    allowed_callers: [main_agent, sub_agent, api_controller, pipeline]
+    backends: [agent, api]
+    effects: [read]
+    maturity: preview
+    bindings:
+      wg: [author-works]
+      cli: [.scripts/author_works.py]
+    protocols: [author-works-v1]
+
   academic.citing_papers:
     title: 指定论文施引文献获取
     summary: 独立获取并保存引用指定论文的文献题录，记录检索时间、来源、增量与覆盖范围，导出供评价和文献调研离线复用。

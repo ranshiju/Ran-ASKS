@@ -3,6 +3,7 @@
   "site_url": "https://ranshiju.github.io/Ran-ASKS/",
   "featured": "mpe-science-poster",
   "works": [
+    "mixt-academic-talk",
     "mpe-science-poster",
     "mpe-academic-talk",
     "layer-edelstein-academic-talk",
@@ -74,6 +75,12 @@
       "label": "PPT 素材制作与复用",
       "description": "制作和收藏局部图形，按语义角色换色，输出可编辑素材并复用于演示文稿。",
       "doc": "operations/PRESENTATION_ASSET.md"
+    },
+    {
+      "id": "slide-library",
+      "label": "幻灯片模板复用",
+      "description": "检索既有报告与单页组件，适配版式并收藏可复用内容或带替换槽的模板。",
+      "doc": "operations/SLIDE_LIBRARY.md"
     }
   ]
 }

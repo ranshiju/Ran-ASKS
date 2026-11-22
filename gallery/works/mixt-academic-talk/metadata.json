@@ -1,0 +1,115 @@
+{
+  "schema": "gallery-work-v1",
+  "id": "mixt-academic-talk",
+  "title": "MixT学术报告：面向高效大语言模型的通用张量结构压缩方法",
+  "kind": "academic-talk",
+  "language": "zh-CN",
+  "edition": 1,
+  "selected_on": "2026-11-22",
+  "slide_count": 24,
+  "canvas_mm": [
+    338.6667,
+    190.5
+  ],
+  "capabilities": [
+    "presentation",
+    "slide-library",
+    "illustration",
+    "visual-qa"
+  ],
+  "references": [
+    {
+      "url": "https://arxiv.org/abs/2605.25344"
+    },
+    {
+      "url": "https://arxiv.org/abs/2001.08361"
+    }
+  ],
+  "rights": "../../RIGHTS.md",
+  "files": {
+    "README.md": "5b0e243fed6b44c2f75777f8d1e9e4dac61e6725cdd5a23f2a52df663cca5464",
+    "cover.webp": "a87fa21424867beddbc27c99d1f85b29503f9c110512d73ef04af37c0a7f61f7",
+    "preview-01.webp": "fda394b4699a88e3ebe6e7fa602052b381b4ed4ee6eefdd26bc3094f8a0a34ab",
+    "preview-05.webp": "2c6b0fb1060eb0d5db8a271ab5c413ff9e5c67c6534dbd32589e12bd7f51bb31",
+    "preview-09.webp": "d19e7dfe1532b2dd66ebfc73e0c2485d494582f39140ee36bdf625712101e837",
+    "preview-16.webp": "ed5583a7b72357f3491327fe30b32c66fd51fc1be26f2a13e7186da23e51a90a",
+    "preview-23.webp": "17417390842492a31bb418845999b4cbe6aac985ee4f8bbf0315fdb1f73bd79f",
+    "preview-24.webp": "8c13be5e2778cd137a4b22057310fcbd1c6d95ba7ef341e67ab66e9f987dad50",
+    "talk.pdf": "5e8607c2e253208b03a84ab668b55021b91ffbbd7ee990d7eb0597e75eabf6f0",
+    "talk.pptx": "26e2d655297a187cbe6fed8eef1a4e61f1465b8a70a85bcfbd7cbcb916a2dd10"
+  },
+  "presentation": {
+    "name": "MixT 学术报告",
+    "name_en": "MixT: Tensor-Structured Compression for Efficient LLMs",
+    "summary": "用24页中文报告展示局域算子求和如何重组稠密映射，以及大模型压缩的资源收益、功能转变和经验标度行为。",
+    "type_label": "学术报告",
+    "format_label": "24页 · 中文 · 16:9 · PPTX / PDF",
+    "audience": "量子信息与机器学习背景的专业听众",
+    "cover": "cover.webp",
+    "preview": "preview-01.webp",
+    "previews": [
+      {
+        "file": "preview-01.webp",
+        "label": "第1页 · 报告封面与局域项求和主视觉",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-05.webp",
+        "label": "第5页 · 重要科学问题与四类压缩路线",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-09.webp",
+        "label": "第9页 · 4096维投影的MixT构造实例",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-16.webp",
+        "label": "第16页 · 代表性工作点的资源收益",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-23.webp",
+        "label": "第23页 · 稠密模型经验标度行为的偏离",
+        "document": "talk.pdf"
+      },
+      {
+        "file": "preview-24.webp",
+        "label": "第24页 · 总结与展望",
+        "document": "talk.pdf"
+      }
+    ],
+    "downloads": [
+      {
+        "file": "talk.pdf",
+        "label": "完整报告PDF · 24页"
+      },
+      {
+        "file": "talk.pptx",
+        "label": "下载PowerPoint"
+      }
+    ],
+    "capability_uses": [
+      {
+        "id": "presentation",
+        "text": "从论文主线出发，面向量子信息听众逐页组织背景、科学问题、局域算子公式、具体实例和实验结果；保留原生文字、数学符号与可编辑示意图。"
+      },
+      {
+        "id": "slide-library",
+        "text": "检索并适配知识库已有报告版式，在同一设计体系中调整布局；成稿后将五个代表页收藏为内容组件或带替换槽的模板，支持后续复用。"
+      },
+      {
+        "id": "illustration",
+        "text": "通过生图API制作玻璃质感的封面概念素材，并将局域作用块分布在不同指标位置，用可编辑连接与加号表达局域项求和。"
+      },
+      {
+        "id": "visual-qa",
+        "text": "检查实际页面与局部布局，统一字体、引文和分隔线；为Gallery导出同源PDF和代表页预览，核对24页文字与尺寸。"
+      }
+    ],
+    "prompt": "请根据这篇论文制作一份中文学术报告PPT，面向量子信息背景的专业听众，报告控制在一小时以内。先讨论论文主线、重要科学问题和所需关键文献，再逐页制作。优先复用知识库中的报告与slide library，结合原生示意图、公式、具体构造例及论文数据图；为封面设计能直观表达核心方法的概念主视觉。保留来源与适用范围，输出可编辑PPTX及完整PDF。",
+    "source_note": "Lu et al., A general tensor-structured compression scheme for efficient large language models, arXiv:2605.25344v1；标度律背景引用Kaplan et al. (2020), arXiv:2001.08361。报告中的科学主张以论文及其测试条件为准。",
+    "credit": "冉仕举 · 首都师范大学物理与光电工程学院；用户与ASKS协作制作。",
+    "boundary": "代表页预览为第1、5、9、16、23、24页，完整报告24页。文字和多数示意图可编辑，论文数据图为图片。封面是AI生成素材组成的概念图；“打破”指所测区间对稠密经验趋势的偏离，不表示幂律形式失效。"
+  }
+}

@@ -32,7 +32,7 @@ KNOWN_STATUSES = frozenset({
     "superseded",
 })
 RESUME_TRANSITIONS = {
-    "failed": frozenset({"write_wiki", "finalize", "graph_ready", "validate_graph", "post_commit_projection"}),
+    "failed": frozenset({"extract", "write_wiki", "finalize", "graph_ready", "validate_graph", "post_commit_projection"}),
     "agent_required": frozenset({
         "write_wiki", "write_slots", "finalize", "propositions", "graph_ready",
         "update_graph", "validate_graph", "post_commit_projection", "finalize_tail", "bibliographic_review_required",
@@ -271,7 +271,12 @@ def classify_failure(state: dict) -> dict | None:
     next_action = "inspect_transaction"
     retryable = False
     owner = "program"
-    if status == "bibliographic_review_required":
+    if status == "failed" and state.get("resume_from") == "extract":
+        category, domain, disposition, owner, next_action = (
+            "extraction_failure", "extraction", "inspect_extraction", "program",
+            str(state.get("next_action") or "inspect_extraction_then_resume"),
+        )
+    elif status == "bibliographic_review_required":
         category, domain, disposition, owner, next_action = (
             "human_policy_decision", "policy", "human_decision", "human",
             "complete_bibliographic_review",

@@ -1083,6 +1083,46 @@ RECEIVED 17 October 2019
     assert all(author in candidates["authors"] for author in expected)
 
 
+def test_title_author_superscripts_preserve_missing_comma_boundaries():
+    md = ("# Example paper\n\nAlice Example<sup>1,2</sup> "
+          "Bob Builder<sup>2</sup> and Carol Researcher<sup>3</sup>\n")
+    expected = ["Alice Example", "Bob Builder", "Carol Researcher"]
+    assert module._repeated_title_authors(md) == expected
+    warnings = module.bibliographic_quality_warnings(
+        {"title": "Example paper", "authors": expected[:2]}, md)
+    assert any(w["issue"] == "bibliographic_authors_incomplete" for w in warnings)
+
+
+def test_mixed_author_affiliation_row_uses_source_bound_review():
+    for tail in (
+        "<sup>1</sup>Example University, Singapore Research Group",
+        "<sup>1</sup>Singapore Research Group alice@example.org",
+    ):
+        md = ("# Example paper\n\nAlice Example<sup>1</sup> "
+              "Bob Builder<sup>2</sup>, Carol Researcher<sup>3</sup> " + tail + "\n")
+        assert module._repeated_title_authors(md) == []
+        candidates = module.build_bibliographic_candidates({}, md)
+        catalog = module.build_bibliographic_candidate_catalog(candidates, {}, md)
+        decision = module.api_bibliographic_decision_template()
+        decision["review_status"] = "corrected"
+        decision["selections"]["title"] = {"candidate_id": "title-01", "status": "confirmed"}
+        decision["selections"]["authors"] = {
+            "accepted_ids": [], "rejected_ids": [], "status": "corrected",
+            "proposed": [{"value": name, "evidence": "paper.md#L3"} for name in
+                         ["Alice Example", "Bob Builder", "Carol Researcher"]],
+        }
+        review = module.compile_bibliographic_decision(decision, catalog, md)
+        assert module.validate_bibliographic_review(review, candidates, md) == []
+        decision["selections"]["authors"]["proposed"].append(
+            {"value": "Invented Person", "evidence": "paper.md#L3"})
+        try:
+            module.compile_bibliographic_decision(decision, catalog, md)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("source-unsupported author must still be rejected")
+
+
 def test_bibliographic_author_coverage_ignores_trailing_affiliation_acronym():
     md = """# Area-Law Entangled Eigenstates from Nullspaces of Local Hamiltonians
 
@@ -2421,6 +2461,36 @@ def test_agent_bibliography_rejects_quote_outside_declared_locator():
         assert "quote" in str(exc)
     else:
         raise AssertionError("forged evidence quote must be rejected")
+
+
+def test_agent_bibliography_complete_author_block_keeps_bounded_source_checks():
+    decision = _direct_bibliographic_decision()
+    md = decision["bibliographic"]["title"]["evidence"]["quote"]
+    names = ["Alice Example", "Bob Builder", "Carol Reader", "David Writer", "Eva Scholar"]
+    lines = [line for name in names for line in (name, "Example University", "contact@example.org")]
+    quote = "\n".join(lines)
+    sources = {"paper.md": md, "first-two-pages.txt": quote}
+    decision["bibliographic"]["authors"].update({
+        "value": names,
+        "evidence": {"source": "first-two-pages.txt", "locator": "L1-L15", "quote": quote},
+    })
+    review = module.compile_agent_bibliographic_decision(decision, sources)
+    assert review["bibliographic"]["authors"]["value"] == names
+    for field, locator, test_quote in (
+        ("title", "L1-L15", quote),
+        ("authors", "L1-L41", "\n".join(["Alice Example"] * 41)),
+        ("authors", "L1-L15", quote + " Invented Author"),
+    ):
+        evidence = {"source": "first-two-pages.txt", "locator": locator, "quote": test_quote}
+        try:
+            module._direct_evidence_text(
+                evidence, {"first-two-pages.txt": quote + "\n" + "\n".join(["Alice Example"] * 26)},
+                field=field,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid {field} evidence must remain rejected")
 
 
 def test_agent_bibliography_preserves_complete_title_across_pdf_line_breaks():
@@ -6440,6 +6510,222 @@ def test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor(
 
 def test_step_extract_reuses_official_paddleocr_bundle_without_rerunning_extractor():
     test_step_extract_reuses_complete_mineru_bundle_without_rerunning_extractor("paddleocr")
+
+
+def _extraction_recovery_roundtrip(*, failure="poll", backend="agent", legacy=False, baseline=False):
+    """Exercise real checkpoint and bundle code with offline provider transport."""
+    from contextlib import ExitStack
+    import shutil
+    import zipfile
+    import mineru_api as ma
+    import extractor as ex
+
+    with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+        root = Path(directory)
+        source = root / "inbox/demo.pdf"
+        source.parent.mkdir()
+        source.write_bytes(b"%PDF-1.4 offline test")
+        extract = root / "temp/inbox-extract/txn"
+        calls = dict(reserve=0, upload=0, poll=0, download=0, extractor=0, handoff=0)
+        for obj, key, value in (
+            (module, "REPO", root), (module.inbox_state, "REPO", root),
+            (module, "TEMP_EXTRACT", root / "temp/inbox-extract"),
+            (module, "ingest_mode", lambda: backend),
+            (module, "prepare_external_bibliography", lambda *args: None),
+            (module, "review_bibliographic_metadata", lambda *args, **kwargs: {"status": "prepared"}),
+        ):
+            stack.enter_context(patch.object(obj, key, value))
+
+        def reserve(*args, **kwargs):
+            calls["reserve"] += 1
+            return "one-batch", "https://upload.invalid/one"
+
+        def upload(*args, **kwargs):
+            calls["upload"] += 1
+
+        def poll(*args, **kwargs):
+            calls["poll"] += 1
+            assert args[1] == "one-batch"
+            if failure == "poll" and calls["poll"] == 1:
+                raise ma.MinerUTransientError("local poll timeout; remote pending", retryable=True)
+            return {"state": "done", "full_zip_url": "https://download.invalid/one"}
+
+        def download(url, target, *args, **kwargs):
+            calls["download"] += 1
+            if failure == "download" and calls["download"] == 1:
+                raise ma.MinerUTransientError("download interrupted", retryable=True)
+            with zipfile.ZipFile(target, "w") as archive:
+                archive.writestr("full.md", "# Example\n\n![](images/a.png)\n")
+                archive.writestr("images/a.png", b"image")
+                archive.writestr("layout.json", "{}")
+
+        for key, value in (("apply_upload_url", reserve), ("upload_file", upload),
+                           ("poll_result", poll), ("download_file", download)):
+            stack.enter_context(patch.object(ma, key, value))
+        stack.enter_context(patch.object(ma.requests, "request", side_effect=AssertionError("no network")))
+
+        def extract_command(command):
+            calls["extractor"] += 1
+            assert str(extract.name) == command[command.index("--paper") + 1]
+            shutil.copyfile(source, extract / "paper.pdf")
+            try:
+                bundle = ma.extract_pdf_bundle_with_mineru(
+                    extract / "paper.pdf", "offline-token", work_dir=extract / ".mineru")
+            except ma.MinerUError as error:
+                raise RuntimeError("extractor exited: " + str(error)) from error
+            installed = ex._commit_document_bundle(extract, extract / "paper.md", ex.ExtractionContent(
+                bundle.markdown, metadata=bundle.meta, mineru_bundle=bundle))
+            (extract / "parse_meta.yaml").write_text(module.yaml.safe_dump({
+                "preferred": "mineru", "engines": {"mineru": installed},
+            }))
+            shutil.rmtree(extract / ".mineru")
+            return ""
+
+        def handoff(state, *args):
+            calls["handoff"] += 1
+            state.update(status="prepared", agent_task={"schema": "agent-task-v1"},
+                         agent_workspace={"protocol_version": module.AGENT_WORKSPACE_PROTOCOL,
+                                          "status": "awaiting_output", "execution_backend": backend})
+            return False, "prepared"
+
+        stack.enter_context(patch.object(module, "run", extract_command))
+        stack.enter_context(patch.object(module, "prepare_agent_workspace_handoff", handoff))
+        stack.enter_context(patch.object(module, "execute_api_paper_workspace", handoff))
+        state = {"transaction_id": "txn", "status": "extract", "source": "inbox/demo.pdf",
+                 "execution_backend": backend, "bibliographic_meta": {}, "errors": []}
+        module.inbox_state.save("txn", state)
+        module.run_one(state, True)
+        if failure:
+            assert state["status"] == "failed", state
+            assert state["resume_from"] == "extract"
+            assert module.inbox_state.classify_failure(state)["domain"] == "extraction"
+            checkpoint = json.loads((extract / ".mineru/MinerU_paper/mineru-job-v1.json").read_text())
+            assert checkpoint["batch_id"] == "one-batch" and checkpoint["uploaded"]
+            if legacy:
+                state.pop("resume_from")
+                state.pop("next_action")
+                # Old failure had the same stage spans, but no explicit resume pointer.
+                assert state["telemetry"]["events"][-1]["from"] == "extract"
+            if baseline:
+                with patch.object(module, "_resume_failed_extraction", return_value=False):
+                    module.run_one(state, True)
+                assert state["status"] == "failed" and calls["handoff"] == 0
+                return calls
+            module.run_one(state, True)
+        assert state["status"] == "prepared", state
+        assert state["execution_backend"] == backend
+        assert "resume_from" not in state
+        assert (extract / "images/a.png").read_bytes() == b"image"
+        assert calls["reserve"] == calls["upload"] == calls["handoff"] == 1
+        assert calls["extractor"] == (2 if failure else 1)
+        # Waiting for semantic work does not restart extraction on another resume.
+        with patch.object(module, "refresh_agent_workspace_handoff", return_value=False), \
+                patch.object(module, "resume_agent_workspace", return_value=False):
+            module.run_one(state, True)
+        assert calls["extractor"] == (2 if failure else 1)
+        # An already-installed bundle is reusable without the provider checkpoint.
+        before = dict(calls)
+        module.step_extract(state)
+        assert {k:v for k,v in calls.items() if k != "handoff"} == {k:v for k,v in before.items() if k != "handoff"}
+        if failure:
+            assert any(e.get("transition", {}).get("reason") == "same_source_extraction_resume"
+                       for e in state["telemetry"]["events"])
+        return before
+
+
+def test_extraction_timeout_resume_preserves_one_remote_job_both_backends():
+    for backend in ("agent", "api"):
+        counts = _extraction_recovery_roundtrip(backend=backend)
+        assert counts == dict(reserve=1, upload=1, poll=2, download=1, extractor=2, handoff=1)
+
+
+def test_extraction_download_resume_preserves_remote_result():
+    counts = _extraction_recovery_roundtrip(failure="download")
+    assert counts == dict(reserve=1, upload=1, poll=1, download=2, extractor=2, handoff=1)
+
+
+def test_extraction_legacy_failure_recovery_and_old_dispatch_counterfactual():
+    baseline = _extraction_recovery_roundtrip(legacy=True, baseline=True)
+    improved = _extraction_recovery_roundtrip(legacy=True)
+    assert baseline["handoff"] == 0 and improved["handoff"] == 1
+    assert baseline["reserve"] == improved["reserve"] == 1
+
+
+def test_extraction_success_path_needs_no_extra_invocation():
+    counts = _extraction_recovery_roundtrip(failure="")
+    assert counts == dict(reserve=1, upload=1, poll=1, download=1, extractor=1, handoff=1)
+
+
+def test_extraction_resume_rejects_changed_source_and_downstream_states():
+    from copy import deepcopy
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "inbox/demo.pdf"
+        source.parent.mkdir()
+        source.write_bytes(b"pdf")
+        base = {"transaction_id": "txn", "status": "failed", "source": "inbox/demo.pdf",
+                "resume_from": "extract", "telemetry": {"source_hash": module._file_sha256(source)}}
+        with patch.object(module, "REPO", root), patch.object(module.inbox_state, "REPO", root), \
+                patch.object(module, "TEMP_EXTRACT", root / "temp/inbox-extract"):
+            cases = [{"telemetry": {}}, {"source": "inbox/missing.pdf"},
+                     {"source": "../demo.pdf"}, {"raw_dir": "academic/raw/references/demo"},
+                     {"agent_workspace": {"status": "awaiting_output"}}, {"committed": True},
+                     {"receipt_path": "receipt.json"}, {"graph_report": {"edges_added": 1}}]
+            for change in cases:
+                state = {**deepcopy(base), **change}
+                assert not module._resume_failed_extraction(state)
+                assert state["status"] == "failed"
+                assert state["resume_blocked"] == "extraction_source_or_stage_changed"
+            source.write_bytes(b"different")
+            state = deepcopy(base)
+            assert not module._resume_failed_extraction(state)
+            assert "哈希" in state["errors"][0]
+            source.write_bytes(b"pdf")
+            assert module._resume_failed_extraction(state) and state["status"] == "extract"
+            for status in ("completed", "prepared", "graph_ready"):
+                state = {**deepcopy(base), "status": status}
+                assert not module._resume_failed_extraction(state) and state["status"] == status
+            # A bibliography/code failure in the same broad stage is not a legacy parser failure.
+            state = deepcopy(base)
+            state.pop("resume_from")
+            state["telemetry"].update(events=[{"from": "extract", "to": "failed"}],
+                                     step_spans=[{"name": "bibliographic_evidence", "outcome": "exception"},
+                                                 {"name": "step_extract", "outcome": "exception"}])
+            assert not module._resume_failed_extraction(state)
+            assert "resume_blocked" not in state
+
+
+def test_extraction_completed_cache_rejects_missing_images_and_locked_drift():
+    import extractor as ex
+    for failure in ("missing_image", "modified_image", "modified_text"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "inbox/demo.pdf"
+            source.parent.mkdir()
+            source.write_bytes(b"pdf")
+            extract = root / "temp/inbox-extract/txn"
+            (extract / "images").mkdir(parents=True)
+            (extract / "paper.pdf").write_bytes(b"pdf")
+            (extract / "paper.md").write_text("# Demo\n![](images/a.png)")
+            (extract / "images/a.png").write_bytes(b"image")
+            (extract / "parse_meta.yaml").write_text(module.yaml.safe_dump({
+                "preferred": "mineru", "engines": {"mineru": {"input_sha256": module._file_sha256(source)}}}))
+            state = {"transaction_id": "txn", "source": "inbox/demo.pdf"}
+            module._write_paper_artifact_manifest(state, extract)
+            if failure == "missing_image":
+                (extract / "images/a.png").unlink()
+            elif failure == "modified_image":
+                (extract / "images/a.png").write_bytes(b"changed")
+            else:
+                (extract / "paper.md").write_text("changed")
+            with patch.object(module, "REPO", root), patch.object(module, "TEMP_EXTRACT", root / "temp/inbox-extract"), \
+                    patch.object(module, "run", side_effect=AssertionError("must not discard/reparse damaged bundle")):
+                try:
+                    module.step_extract(state)
+                except (ValueError, ex.MinerUError):
+                    pass
+                else:
+                    raise AssertionError("damaged cache must be rejected: " + failure)
 
 
 def test_step_extract_preserves_only_mineru_checkpoint_before_retry():

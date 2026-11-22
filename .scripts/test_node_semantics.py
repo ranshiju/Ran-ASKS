@@ -268,6 +268,42 @@ def test_pure_english_venue_does_not_decompose_to_stopword():
     assert result["decision"] == "unmatched"
 
 
+def test_parenthetical_qualifiers_do_not_create_generic_aliases():
+    names = (
+        "树Transformer(Pythia)",
+        "变换器Transformer（Pythia）",
+        "编码器Transformer(encoder-only)",
+        "矩阵乘积态matrix product state(MPS)(finite size)",
+        "量子线路quantum circuit（含噪声）",
+    )
+    conn = make_db()
+    for index, name in enumerate(names):
+        assert gl.decompose_name_to_aliases(name) == [], name
+        assert gl.extract_keyword_id(name) == name, name
+        add_node(conn, f"qualified-{index}", name)
+        gl.insert_aliases(conn, f"qualified-{index}", [name, *gl.decompose_name_to_aliases(name)])
+    add_node(conn, "Transformer")
+    result = ns.resolve_node(conn, "Transformer", node_types=["entity"])
+    assert result["decision"] == "resolved", result
+    assert result["node_id"] == "Transformer", result
+    assert [row[0] for row in conn.execute(
+        "SELECT node_path FROM aliases WHERE alias='Transformer'"
+    )] == []
+
+
+def test_standard_bilingual_acronyms_and_explicit_ambiguity_survive():
+    for name in ("矩阵乘积态matrix product state(MPS)", "矩阵乘积态matrix product state（MPS）"):
+        assert gl.decompose_name_to_aliases(name) == ["MPS", "矩阵乘积态", "matrix product state"]
+        assert gl.extract_keyword_id(name) == "MPS"
+    conn = make_db()
+    for path in ("model-one", "model-two"):
+        add_node(conn, path)
+        gl.insert_aliases(conn, path, ["SharedModel"])
+    result = ns.resolve_node(conn, "SharedModel", node_types=["entity"])
+    assert result["decision"] == "ambiguous", result
+    assert {item["node_id"] for item in result["candidates"]} == {"model-one", "model-two"}
+
+
 def test_bilingual_name_component_conflict_is_ambiguous():
     conn = make_db()
     add_node(conn, "rag-cn", "检索增强生成")

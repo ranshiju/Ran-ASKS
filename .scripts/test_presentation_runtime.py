@@ -51,11 +51,50 @@ class CapabilityTests(unittest.TestCase):
                      ("--task", "research", "--capability", "presentation", "--capability-profile", "create")):
             self.assertNotEqual(route(*args).returncode, 0)
 
+    def test_literature_resumption_is_delivered_only_with_creation_guidance(self):
+        # Exercise the real route/Markdown section selection: keeping a rule in
+        # the source document is insufficient if the creator never receives it.
+        result = route("--capability", "presentation", "--capability-profile", "create")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        start = result.stdout.index("### 关键文献缺口与摄入接续")
+        end = result.stdout.index("### 减少重复返工的页内工作法", start)
+        guidance = result.stdout[start:end]
+        for action in ("按论证需求查库", "关键缺口主动提示摄入", "复用授权，调用受管入口",
+                       "在原工作上下文保留接续位置", "摄入后回溯并接续", "按证据依赖限定暂停范围"):
+            self.assertIn(action, guidance)
+        for boundary in ("一次关键词未命中不能证明全库不存在", "报告制作授权不自动包含写库授权",
+                         "入库成功不等于已读或论证充分", "普通背景缺失不阻断整份报告",
+                         "不重新询问未变化的要求", "不自动触发“PPT证据核查”"):
+            self.assertIn(boundary, guidance)
+        for profile in ("form-check", "evidence-check", "citation-redact"):
+            with self.subTest(profile=profile):
+                auxiliary = route("--capability", "presentation", "--capability-profile", profile)
+                self.assertEqual(auxiliary.returncode, 0, auxiliary.stderr)
+                self.assertNotIn("### 关键文献缺口与摄入接续", auxiliary.stdout)
+
     def test_plain_write_is_still_available(self):
         result = route("--capability", "write")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("起草工作流", result.stdout)
         self.assertIn("--capability presentation --capability-profile create", result.stdout)
+
+    def test_design_selection_reaches_creator_without_enabling_optional_checks(self):
+        result = route("--capability", "presentation", "--capability-profile", "create")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        start = result.stdout.index("## 模板发现与页面设计选择")
+        end = result.stdout.index("## 创作边界", start)
+        guidance = result.stdout[start:end]
+        for action in ("先定表达任务，再选实现", "slide-library search", "slide-library show",
+                       "use --template", "保存简短选择依据", "先检查代表页，再扩展同类页"):
+            self.assertIn(action, guidance)
+        for boundary in ("沿用有效选择不逐页重复检索", "无合适模板时可原创", "无需新增用户确认",
+                         "pagewise仍按原页序", "不自动触发最终三项辅助检查",
+                         "不接受这些单页PPTX", "不用机械通过覆盖反馈"):
+            self.assertIn(boundary, guidance)
+        for profile in ("form-check", "evidence-check", "citation-redact"):
+            auxiliary = route("--capability", "presentation", "--capability-profile", profile)
+            self.assertEqual(auxiliary.returncode, 0, auxiliary.stderr)
+            self.assertNotIn("## 模板发现与页面设计选择", auxiliary.stdout)
 
 
 class RuntimeTests(unittest.TestCase):

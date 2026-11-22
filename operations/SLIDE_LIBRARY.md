@@ -26,7 +26,9 @@ python3 .scripts/wg.py slide-library use --template slide-library/templates/<套
 
 `show` 验证组件文件/哈希，返回来源、原页码、源哈希、模板回执哈希、用途、限制、槽位及容量。`search` 用设计说明关键词排序，最多返回30条，可按类型筛选。
 
-`use` 按类型自动选择原样复制或填充；`fill` 仍可直接调用。项目输出要求祖先目录含 `workspace.yaml`，目标位于其 `drafts/` 下的新单页子目录且组件确为一页；临时实验可写新 `temp/` 目录。成功输出 `component.pptx`、结构信息、预览与 `instance.json`，保存模板版本和输入来源。修改在该单页目录开展，整套组装由演示文稿交付流程承担。
+检索同时考虑页面用途与报告主题；类型/用途标签未命中不证明已摄入PPT没有合适页面。库内候选不足时按query契约定位相关报告来源，查看目标页、相邻页与母版，取得满足当前内容的候选后停止，不全库枚举。已知适用组件直接show/use，不每页重复发现。已归档公共域Raw原页可用下述extract保存原生组件与回执，再在独立项目副本上修改；无需先收藏成公共模板，也不能将其称为已分类adaptable实例。用户文件与Raw保持完整，旧会议、署名和结论不因复用版式自动继承。具体设计、字体与用户落盘接续规则见[PRESENTATION](PRESENTATION.md#既有模板适配与用户修订复盘)。
+
+`use` 按类型自动选择原样复制或填充；`fill` 仍可直接调用。项目输出要求祖先目录含 `workspace.yaml`，目标位于其 `drafts/` 下的新单页子目录且组件确为一页；临时实验可写新 `temp/` 目录。成功输出 `component.pptx`、结构信息、预览与 `instance.json`，保存模板版本和输入来源。修改在该单页目录开展。原生单页实例化不等于整套组装：当前 `presentation_delivery export` 只从固定IR重建，不导入这些实例；创作前按 [PRESENTATION的设计选择](PRESENTATION.md#模板发现与页面设计选择)核对可用汇总路径，不能把内容抄回固定版式后声称模板外观已保留。
 
 ## 提取与收藏
 

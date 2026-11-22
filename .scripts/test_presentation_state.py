@@ -359,6 +359,30 @@ class StateTests(unittest.TestCase):
             self.assertNotIn('llm_structured', source)
             self.assertNotIn('load_visual_env(', source)
 
+    def test_design_prepare_requires_explicit_layout_and_preserves_existing_design(self):
+        self.apply('set-content', payload=content())
+        self.apply('approve-content', payload=approval(self.store, 's1', 'content'))
+        baseline = (self.store.root / 'current.json').read_bytes()
+        task = self.store.prepare('s1', 'design')
+        req = ps.load_json(self.repo / task['outputs'][0]['path'])
+        self.assertEqual(req['payload']['layout_id'], '')
+        self.assertEqual(task['protocol']['design_guidance']['section'], '模板发现与页面设计选择')
+        self.assertTrue(any('Layout not selected' in x['message'] for x in task['issues']))
+        # Both entry points must reject an untouched placeholder without advancing state.
+        for dry_run in (True, False):
+            with self.assertRaises(ps.StateError):
+                self.store.apply(req, dry_run=dry_run)
+            self.assertEqual((self.store.root / 'current.json').read_bytes(), baseline)
+        req['payload'] = design(layout='flow')
+        self.assertEqual(self.store.apply(req, dry_run=True)['status'], 'valid')
+        self.store.apply(req)
+        revision = (self.store.root / 'current.json').read_bytes()
+        resumed = self.store.prepare('s1', 'design')
+        current = ps.load_json(self.repo / resumed['outputs'][0]['path'])
+        self.assertEqual(current['payload'], req['payload'])
+        self.assertFalse(any('Layout not selected' in x['message'] for x in resumed['issues']))
+        self.assertEqual((self.store.root / 'current.json').read_bytes(), revision)
+
     def test_symlink_external_store_sources_assets_and_cache_are_rejected(self):
         outside = self.repo / 'outside'
         outside.mkdir()

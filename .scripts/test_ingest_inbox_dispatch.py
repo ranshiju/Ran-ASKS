@@ -1492,9 +1492,32 @@ def test_compact_maintenance_preserves_backlog_without_overriding_file_status():
         }
         assert components["hubs"]["backlog_count"] == remaining
         assert components["hubs"]["split_backlog_count"] == split_backlog
+        assert components["hubs"]["backlog_kind"] == "observation_only"
+        assert all(components["hubs"][key] == 0 for key in (
+            "eligible_count", "split_count", "redistribution_count", "route_review_count"))
         assert "candidates" not in components["people"]
         assert "candidates" not in components["hubs"]
         assert "details" not in components["people"]["auto_built"]
+
+
+def test_compact_hub_backlog_does_not_hide_actions_or_unknown_counts():
+    for status in ("agent_required", "deferred", "error"):
+        envelope = {
+            "status": status, "actions": [{"type": "hub_review"}],
+            "components": {"hubs": {
+                "status": status, "split_count": 2, "split_backlog_count": 4,
+                "next_action": "agent_review_hub_routes_and_maintenance",
+            }},
+        }
+        compact = module.compact_maintenance(envelope)
+        hubs = compact["components"]["hubs"]
+        assert hubs["split_count"] == 2
+        assert hubs["split_backlog_count"] == 4
+        assert hubs["backlog_kind"] == "observation_only"
+        assert "eligible_count" not in hubs
+        assert hubs["next_action"] == envelope["components"]["hubs"]["next_action"]
+        assert compact["actions"] == envelope["actions"]
+        assert module.compact_maintenance(compact) == compact
 
 
 def test_people_maintenance_validates_created_and_relinked_pages():
@@ -2370,6 +2393,7 @@ def main():
     test_zero_success_skips_global_post_ingest_scans()
     test_maintenance_error_does_not_override_completed_file_status()
     test_compact_maintenance_preserves_backlog_without_overriding_file_status()
+    test_compact_hub_backlog_does_not_hide_actions_or_unknown_counts()
     test_people_maintenance_validates_created_and_relinked_pages()
     test_people_maintenance_surfaces_validation_failure()
     test_maintenance_rejects_incomplete_completed_result_envelope()

@@ -463,6 +463,130 @@ def test_future_work_paragraph_splits_into_question_pages():
     ]
 
 
+def test_capture_headings_do_not_consume_question_budget():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki = setup_paper_source()
+        try:
+            raw = TEMP_REPO_AREA / "raw" / "paper.md"
+            question = "We conjecture that the stronger bound holds."
+            raw.write_text(
+                "# Paper\n## 5. Conclusion and Future Work\n"
+                "### Limitations and Future Research\n"
+                "## 未来工作与尚未解决的问题\n"
+                + question + "\n## References\n"
+                "Future work in a cited paper remains challenging.\n"
+                "## Appendix A: Open questions\n"
+                "[1] We conjecture that the extension is possible.\n",
+                encoding="utf-8",
+            )
+            result = frontier.extract_paper_candidates(root, str(wiki), limit=1)
+            records = frontier.load_records(root)
+            assert result["count"] == len(records) == 1
+            record = next(iter(records.values()))[0]
+            assert record["question"] == question
+            assert record["source_locator"].endswith("#L5")
+            prose = list(frontier.paper_prose_lines(raw.read_text()))
+            assert not any(line.startswith("#") for _, line in prose)
+            assert (9, "[1] We conjecture that the extension is possible.") in prose
+            assert not any("cited paper" in line for _, line in prose)
+        finally:
+            if TEMP_REPO_AREA.exists():
+                shutil.rmtree(TEMP_REPO_AREA)
+
+
+def test_section_roadmaps_do_not_hide_substantive_future_proposals():
+    roadmaps = [
+        "we conclude in §5 by exploring tasks beyond QA benchmarks and highlighting directions of future work.",
+        "Section 6 discusses limitations and future work.",
+        "In Section 7, we outline future research.",
+    ]
+    for sentence in roadmaps:
+        assert frontier.explicit_question_units(sentence) == [], sentence
+    proposal = "In future work, we will investigate whether layer pruning preserves reasoning."
+    assert frontier.explicit_question_units(roadmaps[0] + " " + proposal) == [proposal]
+    specific = "Section 6 presents the open question of whether the bound is tight."
+    assert frontier.explicit_question_units(specific) == [specific]
+
+
+def test_unresolved_question_lists_respect_layout_sections_and_references():
+    text = (
+        "We are left with the following questions:\n\n"
+        "![](plot.png)\nFigure 6: Benchmark results.\n"
+        "\\- Why does healing preserve knowledge?\n"
+        "2. Can pruning preserve reasoning performance?\n"
+        "We now describe the experimental results.\n"
+        "- Does the baseline outperform all alternatives?\n"
+        "## Open questions\n"
+        "- Which layers store task-specific knowledge?\n"
+        "## Results\n"
+        "- Does this method outperform the baseline?\n"
+        "We address the following open questions:\n"
+        "- Can the proposed algorithm solve the problem?\n"
+        "## References\n"
+        "Open questions:\n- Why does this cited algorithm converge?\n"
+        "## Appendix: Remaining questions\n"
+        "- How can we reduce the memory overhead?\n"
+    )
+    assert list(frontier.paper_question_units(text)) == [
+        (5, "Why does healing preserve knowledge?"),
+        (6, "Can pruning preserve reasoning performance?"),
+        (10, "Which layers store task-specific knowledge?"),
+        (19, "How can we reduce the memory overhead?"),
+    ]
+
+
+def test_question_list_capture_keeps_source_and_budget_without_roadmap():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        wiki = setup_paper_source()
+        try:
+            raw = TEMP_REPO_AREA / "raw" / "paper.md"
+            raw.write_text(
+                "Section 5 discusses future work.\n"
+                "We are left with the following questions:\n"
+                "\\- Why does healing preserve knowledge?\n"
+                "- Can pruning preserve reasoning performance?\n",
+                encoding="utf-8",
+            )
+            result = frontier.extract_paper_candidates(root, str(wiki), limit=1)
+            record = frontier.load_records(root)[result["captured"][0]][0]
+            assert result["count"] == 1
+            assert record["question"] == "Why does healing preserve knowledge?"
+            assert record["source_locator"].endswith("#L3")
+            assert record["kb_state"] == "unassessed"
+            second = frontier.extract_paper_candidates(root, str(wiki), limit=1)
+            assert second["count"] == 1
+            assert frontier.extract_paper_candidates(root, str(wiki))["count"] == 0
+            assert len(frontier.load_records(root)) == 2
+        finally:
+            if TEMP_REPO_AREA.exists():
+                shutil.rmtree(TEMP_REPO_AREA)
+
+
+def test_future_section_question_lists_survive_figure_layout_but_not_new_sections():
+    text = (
+        "## Discussion and Future Directions\n"
+        "We first discuss the measured results.\n"
+        "![](first.png)\nModel A ---- Baseline ---- Random\n![](second.png)\n"
+        "Figure 6: Results of pruning.\n"
+        "\\- What are better pruning strategies? What are better approaches to healing?\n"
+        "## Experiments\n"
+        "- Which method gives the best accuracy?\n"
+    )
+    assert list(frontier.paper_question_units(text)) == [
+        (7, "What are better pruning strategies?"),
+        (7, "What are better approaches to healing?"),
+    ]
+    tail = (
+        "## Future Work\nReferences\n"
+        "We are left with the following questions:\n"
+        "- Why does the cited approach fail?\n"
+        "Appendix A\n- Does the baseline perform well enough?\n"
+    )
+    assert list(frontier.paper_question_units(tail)) == []
+
+
 def test_interesting_future_study_is_an_explicit_question_unit():
     sentence = (
         "It is an interesting future study to investigate how the universal corner "
