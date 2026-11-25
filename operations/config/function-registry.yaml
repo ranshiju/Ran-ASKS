@@ -43,6 +43,20 @@ states:
     route_tasks: [frontier]
 
 functions:
+  system.workspace_checkpoint:
+    title: 工作区检查点与换机接续
+    summary: 静止窗口保存完整工作状态到私有 restic 仓库，按哈希校验恢复到新目录；保留 Git 与在途任务，拒绝旧起点覆盖。
+    kind: tool
+    audience: [user, agent]
+    control_owners: [code]
+    allowed_callers: [main_agent, api_controller]
+    backends: [agent, api]
+    effects: [read, temp, project, state, remote]
+    maturity: preview
+    bindings:
+      wg: [checkpoint]
+      cli: [.scripts/workspace_checkpoint.py]
+
   system.local_extension:
     title: 本地扩展
     summary: 静态发现已安装的私人功能及规范，按用户任务显式调用其入口；不安装或导入来源内容。

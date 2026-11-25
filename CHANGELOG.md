@@ -7,6 +7,23 @@ manifests and checksums.
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-25
+
+### Version decision / 版本判断
+
+- MINOR: Add compatible workspace layouts and cloud upgrade workflows
+- MINOR（中文）：兼容新增工作区布局选择和云盘升级流程
+
+### Highlights
+
+- Set up a local clone, a directly synchronized workspace or a checkpoint handoff. A local clone keeps its intermediate files in the workspace.
+- Fast-forward a migrated cloud workspace on its updating computer, preserving local edits when an update conflicts. Receiving computers can rebuild their local entries.
+
+### 主要更新
+
+- 首次设置可选择单目录、云盘内直同步或云盘外交接包，普通 clone 的中间文件可留在工作区。
+- 已迁移的直同步工作区由一台电脑快进升级。遇到覆盖本地修改的冲突时停止，其他电脑下载完成后重建入口。
+
 ## [0.30.0] - 2026-11-22
 
 ### Version decision / 版本判断
@@ -983,5 +1000,7 @@ manifests and checksums.
 
 [0.29.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.29.0
 
-[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.30.0...HEAD
 [0.30.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.30.0
+
+[Unreleased]: https://github.com/ranshiju/Ran-ASKS/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/ranshiju/Ran-ASKS/releases/tag/v0.31.0

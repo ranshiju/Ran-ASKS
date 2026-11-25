@@ -158,7 +158,8 @@ def validate_project(args: argparse.Namespace) -> int:
         path = target / rel
         if not path.is_dir():
             errors.append(f"缺少必需目录: {rel}/")
-    if not (target / ".workspace").is_dir() and not (target / ".research-memory").is_dir():
+    if not any((target / name).is_dir() for name in (".workspace", ".research-memory",
+                                                       "workspace-state", "research-memory")):
         errors.append("缺少状态记忆目录: .workspace/ 或兼容的 .research-memory/")
     if (target / "workspace.yaml").is_file():
         workspace_state.REPO = REPO
@@ -199,7 +200,7 @@ def validate_project(args: argparse.Namespace) -> int:
             rel = path.relative_to(target).as_posix()
             if path.suffix.lower() not in GENERATED_SUFFIXES:
                 continue
-            if rel.startswith("outputs/") or rel.startswith(".research-memory/") or rel.startswith(".workspace/"):
+            if rel.startswith(("outputs/", ".research-memory/", ".workspace/", "research-memory/", "workspace-state/")):
                 continue
             if rel.startswith("codes/formulas/") or rel.startswith("codes/docs/") or rel.startswith("codes/experiments/") or rel.startswith("codes/analysis/") or rel.startswith("codes/tests/"):
                 continue

@@ -194,6 +194,8 @@ def relative_protocol_path(value):
 
 def python_env(env=None):
     result = dict(os.environ if env is None else env)
+    if Path(__file__).resolve().parent.name == "system-tools":
+        result.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     result["PYTHONIOENCODING"] = "utf-8:strict"
     result["PYTHONUTF8"] = "1"
     return result

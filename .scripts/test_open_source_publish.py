@@ -48,6 +48,11 @@ def test_dirty_release_input_boundary() -> None:
         )
         assert dirty == {"public.txt", "new-public.txt"}, dirty
 
+        filename = "目录/本机修改.txt"
+        (repository / filename).parent.mkdir()
+        (repository / filename).touch()
+        assert publish.dirty_release_inputs(repository, commit, {filename}) == {filename}
+
 
 def test_destination_remote_and_divergence_guards() -> None:
     with tempfile.TemporaryDirectory() as temporary:

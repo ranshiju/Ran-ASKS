@@ -620,6 +620,21 @@ def cmd_oral(args):
     return envelope("oral", result, status="ok" if result.get("ok") else "error", ok=result.get("ok", True))
 
 
+def cmd_checkpoint(args):
+    """Shared storage CLI; preserve its nonzero failure status."""
+    config_args = ["--config", args.checkpoint_config] if args.checkpoint_config else []
+    rc, out, err = run_script([sys.executable, str(SCRIPTS / "workspace_checkpoint.py"),
+                               *config_args, *args.checkpoint_args])
+    try:
+        result = json.loads(out)
+    except json.JSONDecodeError:
+        result = {"ok": rc == 0, "text": out, "error": err.strip()}
+    ok = rc == 0 and result.get("ok", True)
+    envelope("checkpoint", result, status="ok" if ok else "error", ok=ok,
+             error="" if ok else result.get("error", err.strip()))
+    return 0 if ok else 1
+
+
 def cmd_workspace(args):
     """Generic workspace-state thin wrapper; the target script owns its schema."""
     command = [sys.executable, str(SCRIPTS / "workspace_state.py"), *args.workspace_args]
@@ -996,6 +1011,11 @@ def build_parser():
     p.add_argument("--stdin", action="store_true")
     p.add_argument("--tags", default="")
     p.set_defaults(func=cmd_remember)
+
+    p = sub.add_parser("checkpoint", help="群晖外工作副本：保存检查点与校验恢复")
+    p.add_argument("--config", dest="checkpoint_config")
+    p.add_argument("checkpoint_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_checkpoint)
 
     p = sub.add_parser("workspace", help="通用持续工作区：事项、记忆与投影")
     p.add_argument("workspace_args", nargs=argparse.REMAINDER,

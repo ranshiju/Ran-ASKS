@@ -8,6 +8,8 @@ import importlib
 import json
 import os
 from pathlib import Path
+
+from workspace_setup import scratch_root
 import sys
 import tempfile
 import zipfile
@@ -80,7 +82,7 @@ def doctor() -> dict:
 
 
 def _new_run() -> Path:
-    root = REPO / "temp" / "presentation-runtime"
+    root = scratch_root(REPO, "presentation-runtime")
     # A fixed output root still needs to reject links in its ancestry.
     if root.resolve() != root:
         raise RuntimeProbeError("presentation runtime cache root/parents must not be symlinks")

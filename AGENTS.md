@@ -37,6 +37,8 @@ python3 .scripts/playbook_dispatch.py '指令关键词'
 - `ingest` 显式给出 `--subproject academic|admin|teaching|business|private`、`--mode create|update|batch`、`--content paper|other` 和 `--source-kind ordinary|meeting`；`create` 再给单个 `--stage 1|2|3`。首次预热后直接调用受管功能入口；仅手动旧流程或程序任务明确要求时再加载完整当前 stage 卡。`source-kind` 由内容语义决定，扩展名不构成会议来源判据。
 - `research` 等 task 只路由对应持续工作的规范，不代替工作上下文；实际落笔按需加载 `write` capability，不切换研究工作上下文。`wg.py` 暴露可组合的结构化执行工具。
 
+群晖直同步工作区首次下载后，若已有 `system-tools/` 且尚无本机兼容入口，先从根运行 `python3 -m ran_asks.drive_layout`。首次部署、迁移或换机时，先在当前工作区运行 `python3 -m ran_asks setup --status`。沿用已登记的设置；用户已明确的选择直接登记，仅询问仍缺的部署方式或目录。单目录与群晖交接的操作见 `operations/WORKSPACE_CHECKPOINT.md`。
+
 ## 使用任务
 
 - **正常使用与系统优化分开**：正常任务按已有协议完成必要补读、知识反哺、纠错与受管维护，服务本次交付和知识积累；系统调参、对照实验、代码或流程优化仅在用户明确要求优化/建设时开展。使用中发现的系统改进线索可简要记录，不自动扩展为优化任务，也不为收集评测数据增加调用或延迟交付。

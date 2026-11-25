@@ -12,7 +12,13 @@ text coverage and rendering. Earlier releases retained the original Word layout
 and appended updates; those statements below describe their historical editions.
 The repository does not rely on GitHub's PDF previewer.
 
-## Current edition: v0.30.0 / 当前版本
+## Current edition: v0.31.0 / 当前版本
+
+The November 25 edition explains local clones, fully downloaded synchronized workspaces and checkpoint handoff, including how each receives system updates.
+
+2026 年 11 月 25 日版补充单目录、云盘内直同步与云盘外交接的选择和升级方法，说明单个项目本机中间文件的接续边界。
+
+## Previous edition: v0.30.0 / 历史版本
 
 The 2026-11-22 compatible MINOR release adds offline author-work inventory and
 reviewed recounting, strengthens paper-to-PPT narrative, citation and cover design,

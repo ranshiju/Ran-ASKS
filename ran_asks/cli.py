@@ -8,14 +8,23 @@ from pathlib import Path
 
 
 FOUNDATION_COMMANDS = {
+    "setup": "workspace_setup.py",
     "doctor": "workspace_doctor.py",
     "demo": "foundation_demo.py",
     "test": "test_suite.py",
 }
 
 
+def tools_directory(path: Path) -> Path:
+    visible = path / "system-tools"
+    legacy = path / ".scripts"
+    if visible.is_dir() and legacy.exists() and not visible.samefile(legacy):
+        raise ValueError(f"Reconcile both script directories before running commands: {visible} / {legacy}")
+    return visible if visible.is_dir() else legacy
+
+
 def is_workspace(path: Path) -> bool:
-    return (path / "AGENTS.md").is_file() and (path / ".scripts" / "wg.py").is_file()
+    return (path / "AGENTS.md").is_file() and (tools_directory(path) / "wg.py").is_file()
 
 
 def find_workspace(explicit: str | Path | None = None, *, cwd: Path | None = None) -> Path:
@@ -51,6 +60,7 @@ def help_text() -> str:
     return """usage: ran-asks [--workspace PATH] <command> [args]
 
 Foundation commands:
+  setup    Set or reuse this workspace's local or Synology Drive layout
   doctor   Check the local environment without network calls or writes
   demo     Run the offline source -> Wiki -> Graph -> Raw evidence tour
   test     Run a named deterministic regression profile
@@ -77,10 +87,10 @@ def main(argv: list[str] | None = None) -> int:
     script_name = FOUNDATION_COMMANDS.get(command, "wg.py")
     forwarded = args[1:] if command in FOUNDATION_COMMANDS else args
     # Workspace owns the protocol implementation; the installed shim locates it.
-    sys.path.insert(0, str(workspace / ".scripts"))
+    sys.path.insert(0, str(tools_directory(workspace)))
     from platform_compat import python_env
     completed = subprocess.run(
-        [sys.executable, str(workspace / ".scripts" / script_name), *forwarded],
+        [sys.executable, str(tools_directory(workspace) / script_name), *forwarded],
         cwd=workspace, env=python_env(),
     )
     return completed.returncode

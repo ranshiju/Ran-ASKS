@@ -22,8 +22,12 @@ api_endpoint = env_config.join_api_url(
     api_base, _ENV.get("EMBED_API_PATH", "") or "/v1/embeddings"
 ) if api_base else ""
 EMBED_MODEL = _ENV.get("EMBED_MODEL", "") or "embedding-3"
-CACHE_DIR = REPO / ".scripts" / "embed_cache"
-CACHE_DIR.mkdir(exist_ok=True)
+if (REPO / "system-tools").is_dir():
+    from workspace_setup import scratch_root
+    CACHE_DIR = scratch_root(REPO, "baseline-vector-cache")
+else:
+    CACHE_DIR = REPO / ".scripts" / "embed_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def tokenize_bm25(text):
     return re.findall(r'[a-zA-Z0-9]+|[\u4e00-\u9fff]', text.lower())

@@ -177,6 +177,16 @@ def checked_release_path(relative: str) -> Path:
 
 def checked_release_source(relative: str) -> Path:
     path = REPO / checked_release_path(relative)
+    # A direct-Drive installation keeps these sources at fixed visible siblings.
+    # Check every component of the physical path under the usual isolation rules.
+    if (REPO / "system-tools").is_dir():
+        if str(REPO) not in sys.path:
+            sys.path.insert(0, str(REPO))
+        from ran_asks.drive_layout import ROOT_NAMES
+        first, *tail = Path(relative).parts
+        name = ROOT_NAMES.get(first)
+        if name and (REPO / first).is_symlink() and os.readlink(REPO / first) == name:
+            path = REPO.joinpath(name, *tail)
     resolved = path.resolve()
     if not resolved.is_relative_to(REPO.resolve()):
         raise ValueError(f"release source escapes repository: {relative}")
@@ -212,9 +222,11 @@ def selected_files(manifest: dict) -> set[str]:
         root = REPO / prefix
         candidates = root.rglob("*") if "**" in pattern else (root,)
         for candidate in candidates:
-            if not candidate.is_file() or candidate.is_symlink():
+            if not candidate.is_file():
                 continue
             relative = candidate.relative_to(REPO).as_posix()
+            if candidate.is_symlink() and candidate.parent != REPO:
+                continue
             if matches(relative, pattern) and not any(matches(relative, excluded) for excluded in excludes):
                 checked_release_source(relative)
                 files.add(relative)

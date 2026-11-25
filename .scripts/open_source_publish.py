@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -46,12 +47,20 @@ def release_input_paths() -> set[str]:
     paths.update(manifest.get("public_assets", {}).values())
     paths.update({"VERSION", MANIFEST_RELATIVE, ".scripts/open_source_release.py",
                   ".scripts/open_source_publish.py"})
-    return paths
+    physical = {release.checked_release_source(path).relative_to(REPO).as_posix()
+                for path in paths}
+    # Track the compatibility entry itself as well as the bytes Git stores.
+    aliases = {Path(path).parts[0] for path in paths if (REPO / Path(path).parts[0]).is_symlink()}
+    return paths | physical | aliases
 
 
 def dirty_release_inputs(repository: Path, source_commit: str, selected: set[str]) -> set[str]:
-    tracked = set(git(repository, "diff", "--name-only", source_commit, "--").splitlines())
-    untracked = set(git(repository, "ls-files", "--others", "--exclude-standard").splitlines())
+    def names(*args):
+        output = subprocess.check_output(["git", *args], cwd=repository)
+        return {os.fsdecode(path) for path in output.split(b"\0") if path}
+
+    tracked = names("diff", "--no-renames", "--name-only", "-z", source_commit, "--")
+    untracked = names("ls-files", "--others", "--exclude-standard", "-z")
     return {path for path in tracked | untracked if path in selected}
 
 
@@ -203,6 +212,12 @@ def publish(*, destination: Path, source_ref: str, remote: str, branch: str,
     with tempfile.TemporaryDirectory(prefix="wikigraph-publish-") as temporary:
         staging = Path(temporary) / "release"
         build_committed_release(REPO, source_commit, source_tree, staging)
+        # A removed or ignored input may be absent from Git's working-tree diff.
+        # Compare the actual deliverable from both trees before touching the public clone.
+        preview = Path(temporary) / "working-preview"
+        release.build(preview, clean=False, force=False)
+        if release.release_payload_sha256(preview) != release.release_payload_sha256(staging):
+            raise PublishError("Committed release payload differs from the current workspace")
         changed = assert_release_diff(destination, staging)
         plan = {
             "status": "planned" if dry_run else "committed",

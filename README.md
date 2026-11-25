@@ -1,5 +1,5 @@
 # Ran-ASKS: Agent-Native Scientific Knowledge System
-> Current main version: v0.30.0
+> Current main version: v0.31.0
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -375,9 +375,14 @@ call:
 git clone https://github.com/ranshiju/Ran-ASKS.git
 cd Ran-ASKS
 uv sync --frozen
+uv run ran-asks setup
 uv run ran-asks doctor
 uv run ran-asks demo
 ```
+
+Choose the layout by workspace location. Press Enter for a local clone, including on computers with a cloud client installed. Git, projects and intermediate files can stay together. Update with `git pull --ff-only`.
+
+For a fully downloaded workspace inside a sync folder, choose direct sync if the client supports machine-specific exclusions. Pause sync on the updating computer, run `python3 -m ran_asks.drive_layout --upgrade` in the migrated workspace, then resume sync. Receiving computers rebuild compatibility links after download. To keep the working clone outside the cloud and transfer snapshots, choose checkpoint handoff. Setup reuses the choices on each machine. [Setup, migration and upgrade commands](operations/WORKSPACE_CHECKPOINT.md).
 
 The synthetic demo walks from a temporary Graph navigation edge to a Wiki
 interpretation and then to an exact Raw excerpt. It makes no production write.

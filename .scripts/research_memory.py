@@ -57,7 +57,10 @@ def project_root(project: str) -> Path:
 
 
 def memory_dir(project: str) -> Path:
-    return project_root(project) / ".research-memory"
+    root = project_root(project)
+    if (REPO / "system-tools").is_dir() or (root / "research-memory").is_dir():
+        return root / "research-memory"
+    return root / ".research-memory"
 
 
 def ensure_memory_dir(project: str) -> Path:
@@ -103,7 +106,7 @@ def save_profile(project: str, profile: dict) -> None:
 
 def collect_project_text(project: str) -> str:
     return workspace.collect_bounded_text(
-        project_root(project), excluded_managed={".research-memory"}, max_chars=20_000,
+        project_root(project), excluded_managed={".research-memory", "research-memory"}, max_chars=20_000,
     )
 
 

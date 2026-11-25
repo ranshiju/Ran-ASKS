@@ -17,7 +17,8 @@ def _location(repo: Path, source: Path) -> tuple[Path, str] | None:
         relative = source.relative_to(repo / "inbox").as_posix()
     except ValueError:
         return None
-    directory = repo / "inbox" / ".source-retention"
+    name = "source-retention" if (repo / "system-tools").is_dir() else ".source-retention"
+    directory = repo / "inbox" / name
     if directory.is_symlink():
         raise ValueError("source retention directory must not be a symlink")
     key = hashlib.sha256(relative.encode("utf-8")).hexdigest()

@@ -297,9 +297,14 @@ ASKS 不替代检索，而是治理检索前后的知识生命周期：保存证
 git clone https://github.com/ranshiju/Ran-ASKS.git
 cd Ran-ASKS
 uv sync --frozen
+uv run ran-asks setup
 uv run ran-asks doctor
 uv run ran-asks demo
 ```
+
+按工作区的位置选择布局。普通本地 clone 首次回车即可使用单目录，已安装云盘但工作区在云盘外也适用。Git、项目和中间材料可留在原处，升级使用 `git pull --ff-only`。
+
+如果主目录在云盘内、文件已完整下载且客户端可以排除本机专用文件，可选直同步。在关联上游的电脑暂停同步，从已迁移的工作区运行 `python3 -m ran_asks.drive_layout --upgrade`，完成后恢复同步。接收机下载完成后重建兼容入口。需要在云盘外工作、只传快照时选择交接包。设置按机器复用。[首次设置、迁移与升级](operations/WORKSPACE_CHECKPOINT.md)。
 
 synthetic demo 从临时 Graph 导航边进入 Wiki 解释，再回到精确 Raw 摘录，不写生产
 知识库。参与开发时使用 `uv sync --frozen --extra release` 和

@@ -1,6 +1,58 @@
 version: 1
 purpose: WikiRan 工程元图：用于任务上下文和建设影响面，不存业务知识关系。
 nodes:
+  drive_layout:
+    path: ran_asks/drive_layout.py
+    kind: implementation
+    role: shared-visible-drive-directory-migration-local-link-recovery-and-fast-forward-public-upgrade
+  workspace_setup:
+    path: .scripts/workspace_setup.py
+    kind: implementation
+    role: shared-local-checkpoint-or-direct-drive-workspace-preference-with-machine-local-git-history
+  local_environments:
+    path: .scripts/local_environments.py
+    kind: implementation
+    role: shared-macos-atomic-external-python-environment-placement-portable-locks-and-new-machine-rebuild
+  local_environments_ops:
+    path: operations/LOCAL_ENVIRONMENTS.md
+    kind: spec
+    role: machine-local-runtime-externalization-rollback-and-portable-dependency-reconstruction
+  local_environments_test:
+    path: .scripts/test_local_environments.py
+    kind: test
+    role: real-environment-atomic-swap-shebang-rollback-rebuild-and-checkpoint-link-exclusion
+  temp_archive:
+    path: .scripts/temp_archive.py
+    kind: implementation
+    role: shared-explicit-closed-temp-bundle-archival-with-byte-verification-reference-preserving-stubs-and-external-quarantine
+  temp_archive_ops:
+    path: operations/TEMP_RETENTION.md
+    kind: spec
+    role: cross-machine-necessary-state-closed-experiment-archives-and-local-disposable-artifact-boundary
+  temp_archive_test:
+    path: .scripts/test_temp_archive.py
+    kind: test
+    role: archive-roundtrip-reference-preservation-source-drift-tampering-and-no-overwrite-regression
+  checkpoint_transfer:
+    path: .scripts/checkpoint_transfer.py
+    kind: implementation
+    role: shared-immutable-restic-object-pack-transfer-through-asynchronous-drive-with-hash-chain-import-and-conflict-refusal
+  checkpoint_transfer_test:
+    path: .scripts/test_checkpoint_transfer.py
+    kind: test
+    role: sealed-pack-two-machine-roundtrip-truncation-branch-and-path-safety-regression
+  workspace_checkpoint:
+    path: .scripts/workspace_checkpoint.py
+    kind: implementation
+    role: shared-quiescent-byte-preserving-workspace-restic-checkpoints-sealed-incremental-transfer-packs-and-new-directory-restore
+  workspace_checkpoint_ops:
+    path: operations/WORKSPACE_CHECKPOINT.md
+    kind: spec
+    role: local-working-copy-nas-checkpoint-portability-exclusions-consistency-and-cutover-contract
+  workspace_checkpoint_test:
+    path: .scripts/test_workspace_checkpoint.py
+    kind: test
+    role: checkpoint-real-restic-roundtrip-wal-git-drift-lineage-and-no-overwrite-regression
   local_extension:
     path: .scripts/local_extension.py
     kind: implementation
@@ -1699,6 +1751,54 @@ nodes:
     kind: test
     role: symlink-relativize-regression
 edges:
+- - workspace_checkpoint
+  - uses
+  - local_environments
+- - local_environments
+  - specified_by
+  - local_environments_ops
+- - local_environments
+  - tested_by
+  - local_environments_test
+- - workspace_checkpoint
+  - uses
+  - temp_archive
+- - temp_archive_ops
+  - governs
+  - temp_archive
+- - temp_archive
+  - uses
+  - platform_compat
+- - temp_archive
+  - tested_by
+  - temp_archive_test
+- - workspace_checkpoint
+  - uses
+  - checkpoint_transfer
+- - workspace_checkpoint_ops
+  - governs
+  - checkpoint_transfer
+- - checkpoint_transfer
+  - tested_by
+  - checkpoint_transfer_test
+- - wg
+  - uses
+  - workspace_checkpoint
+- - workspace_checkpoint
+  - uses
+  - graph_lib
+- - workspace_checkpoint
+  - uses
+  - platform_compat
+- - workspace_checkpoint_ops
+  - governs
+  - workspace_checkpoint
+- - function_registry_spec
+  - governs
+  - workspace_checkpoint
+- - workspace_checkpoint
+  - tested_by
+  - workspace_checkpoint_test
 - - author_works
   - uses
   - graph_lib
@@ -1751,6 +1851,30 @@ edges:
   - uses
   - platform_compat
 - - inbox_state
+  - uses
+  - platform_compat
+- - workspace_checkpoint_ops
+  - governs
+  - drive_layout
+- - workspace_state
+  - uses
+  - drive_layout
+- - open_source_release
+  - uses
+  - drive_layout
+- - drive_layout
+  - tested_by
+  - cli_package_test
+- - cli_package
+  - uses
+  - workspace_setup
+- - workspace_checkpoint_ops
+  - governs
+  - workspace_setup
+- - workspace_setup
+  - tested_by
+  - cli_package_test
+- - workspace_setup
   - uses
   - platform_compat
 - - cli_package
@@ -5175,6 +5299,23 @@ contracts:
   checks:
   - workspace_state_authority
 verification:
+  local_environments:
+  - python3 .scripts/test_local_environments.py
+  - python3 .scripts/test_workspace_checkpoint.py
+  - python3 .scripts/engineering_graph.py validate
+  temp_archive:
+  - python3 .scripts/test_temp_archive.py
+  - python3 .scripts/test_workspace_checkpoint.py
+  - python3 .scripts/engineering_graph.py validate
+  checkpoint_transfer:
+  - python3 .scripts/test_checkpoint_transfer.py
+  - python3 .scripts/engineering_graph.py validate
+  workspace_checkpoint:
+  - python3 .scripts/test_workspace_checkpoint.py
+  - python3 .scripts/test_wg.py
+  - python3 .scripts/test_function_registry.py
+  - python3 .scripts/function_registry.py validate --runtime
+  - python3 .scripts/engineering_graph.py validate
   author_works:
   - python3 .scripts/test_author_works.py
   - python3 .scripts/test_wg.py
@@ -5274,6 +5415,8 @@ verification:
   project_metadata:
   - python3 .scripts/test_cli_package.py
   - python3 .scripts/test_workspace_doctor.py
+  workspace_setup:
+  - python3 .scripts/test_cli_package.py
   cli_package:
   - python3 .scripts/test_cli_package.py
   dependency_lock:
@@ -5669,6 +5812,34 @@ verification:
   - python3 .scripts/test_visual_qa.py
   - python3 .scripts/engineering_graph.py validate
 script_contracts:
+  local_environments:
+    preconditions:
+    - Explicit named root Python runtime, verified pyvenv.cfg, untracked source and disjoint non-symlink external store; macOS same-filesystem atomic swap only. Portable dependency manifests contain no absolute host paths.
+    writes:
+    - Repository-local portable runtime manifest and machine-local environment placement/link; new-machine prepare installs declared packages into a new external environment before exposing its entry. Reverse swap restores in-tree placement.
+    forbidden:
+    - Raw/Wiki/Graph writes, existing target overwrite, fallback copy-and-delete, deleting runtime contents, serial source removal/link creation, or following runtime links during checkpoint capture.
+    verify:
+    - python3 .scripts/test_local_environments.py
+  temp_archive:
+    preconditions:
+    - Host identifies a closed historical top-level temp bundle and supplies a retained project completion record and reason; directory age and nested fixture transaction statuses are not semantic closure decisions.
+    - Code references block archival unless the referencing script belongs to a prior archive with matching source identity, local and adjacent receipts, archive SHA-256, and original script SHA-256. Changed or unverified scripts remain blockers; historical experiment dependencies require restoration together.
+    writes:
+    - Portable archive and hash manifest, original-path index with preserved direct references, and original directory moved intact to an external quarantine. Restoration uses absent destinations only.
+    forbidden:
+    - Root Raw/Wiki/Graph mutation, blanket temp exclusion, source deletion before roundtrip validation, following links, extraction path escape, or overwriting a working directory.
+    verify:
+    - python3 .scripts/test_temp_archive.py
+  workspace_checkpoint:
+    preconditions:
+    - Shared deterministic Agent/API CLI; restic and a private external config are required for backup. Caller stops application and Git writers before save; this tool does not fence other machines.
+    writes:
+    - External staging, encrypted restic repository, machine-local lineage, previously absent restore targets, and immutable transfer packs in an explicitly selected sync directory. Source Raw/Wiki/Git are read-only; temp resumable state is retained.
+    forbidden:
+    - Overlay restore, automatic source deletion, auto merge, shell execution of source content, following symlinks, or treating restic locks as application transactions.
+    verify:
+    - python3 .scripts/test_workspace_checkpoint.py
   author_works:
     preconditions:
     - 作者姓名或别名须唯一解析；rg预筛后核对作者字段，图边补充召回，显式source仅补已知缺口。

@@ -117,6 +117,9 @@ def require_workspace(value: str | Path) -> Path:
 
 
 def store_dir(root: Path) -> Path:
+    if (root / "workspace-state").is_dir() or (root.is_relative_to(REPO / "projects")
+            and (REPO / "system-tools").is_dir() and not (root / STORE_NAME).exists()):
+        return root / "workspace-state"
     return root / STORE_NAME
 
 
@@ -1184,7 +1187,7 @@ def save_profile(root: Path, value: dict) -> None:
 def collect_bounded_text(root: Path, *, excluded_managed: set[str] | None = None,
                          max_chars: int = 20_000, per_file: int = 3_000) -> str:
     """Collect a bounded snapshot without crossing nested workspace boundaries."""
-    excluded = {STORE_NAME, ".research-memory", ".git", "archive", "node_modules", "__pycache__"}
+    excluded = {STORE_NAME, "workspace-state", "research-memory", ".research-memory", ".git", "archive", "node_modules", "__pycache__"}
     excluded.update(excluded_managed or set())
     binary = {".pdf", ".doc", ".docx", ".zip", ".gz", ".png", ".jpg", ".jpeg",
               ".sqlite", ".db", ".ppt", ".pptx", ".xls", ".xlsx", ".dvi"}

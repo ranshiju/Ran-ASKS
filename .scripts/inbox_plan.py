@@ -26,7 +26,9 @@ IGNORED_ENTRY_NAMES = frozenset({".gitkeep", ".DS_Store"})
 
 def is_ignored_entry(path: Path) -> bool:
     """Return whether an inbox entry is control/system metadata, not user content."""
-    return path.name in IGNORED_ENTRY_NAMES or path.name.startswith(".")
+    return (path.name in IGNORED_ENTRY_NAMES or path.name.startswith(".")
+            or (path.name == "source-retention" and path.is_dir()
+                and (path.parent.parent / "system-tools").is_dir()))
 
 
 def slugify(value: str) -> str:

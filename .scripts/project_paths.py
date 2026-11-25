@@ -31,7 +31,8 @@ def project_path(projects, relative):
     rel = Path(relative)
     if rel.is_absolute() or '..' in rel.parts or '\\' in str(relative):
         raise ValueError('Project path must remain relative to projects')
-    config = base / '.path-migrations.json'
+    name = 'path-migrations.json' if (base.parent / 'system-tools').is_dir() else '.path-migrations.json'
+    config = base / name
     if not config.exists() and not config.is_symlink():
         return base / rel
     if config.is_symlink() or config.stat().st_size > 65536:

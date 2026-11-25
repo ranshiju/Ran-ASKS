@@ -28,6 +28,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
+from workspace_setup import scratch_root
 from typing import Any, Callable
 
 from platform_compat import configure_stdio
@@ -45,7 +47,7 @@ except ImportError:  # pragma: no cover - reported at use site
 
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_RECEIPT_ROOT = REPO / "temp" / "visual-qa"
+DEFAULT_RECEIPT_ROOT = scratch_root(REPO, "visual-qa")
 MODEL_CATALOG = REPO / "operations" / "config" / "llm-models.yaml"
 DEFAULT_MODEL = "GLM-5.3-FlashX"
 DEFAULT_FALLBACK_MODEL = "GLM-4.6V"
